@@ -1,14 +1,60 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.5
-Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon)**
+Versjon: 0.6
+Dato: 2026-07-11
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · **Runtimeflyten (staged page-generation queues, commit b6ccd87) er teknisk verifisert og genererer article/summary/concept/entity, men Karpathy Wiki-konseptet er ikke levert før Fase 8I (inline linking, backlinks, graph edges, inkrementelt vedlikehold) er fullført — se arkitekturnotatet under**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
 > **Målbildekorrigering (v0.3):** Enterprise Wiki skal ikke være en claim-liste. Den skal være en Markdown-first LLM Wiki: raw sources inn, lesbare wikiartikler ut. Claims, excerpts, source references, lint og helsekontroll er verifikasjonsgrunnmur rundt artikkelen — ikke selve sluttproduktet.
 >
 > **Karpathy-korrigering (v0.5):** Enterprise Wiki skal ligge tettest mulig på Karpathy Wiki-modellen: `raw source → compile/maintainer → article per source + summary per source + dedupliserte concept/entity pages → index/log/backlinks/lint`. Tidligere v0.4-formuleringer som antydet at `article per source` i seg selv er feil, er korrigert. Feilen er ikke at en kilde får en artikkel; feilen er å stoppe der. Én kilde skal normalt få source article og source summary, og samtidig kunne oppdatere flere felles concept/entity-sider. Filnavn er fortsatt kildemetadata, ikke automatisk wiki-identitet.
+>
+> **Lenkekorrigering (v0.6, 2026-07-11):** Runtimeflyten kan nå faktisk gjennomføres og generere article, summary, concept og entity (Responses API-herding `fa01995` + staged page-generation queues `b6ccd87`). Men genererte sider er i dag isolerte artikler uten inline `[[wikilinks]]` i brødteksten. `EnterpriseWikiPageLink` (Fase 8E-16) bygges i dag som en mekanisk kombinasjon av alle page-type-par i en run — ikke avledet fra faktiske lenker i innholdet — og grafen (8E-19/8E-20) viser derfor nodes uten reelle kanter. Dette er et brudd på Karpathy Wiki-premisset: Wikien vedlikeholdes ikke som et sammenhengende kunnskapsnettverk. **Sidegenerering alene er ikke det samme som en Wiki.** Se det dedikerte arkitekturnotatet rett under, §4.10–4.11 og Fase 8I for korrigert modell og videre arbeid.
+
+## Arkitekturnotat — v0.6 kurskorrigering: Karpathy-lenking og inkrementelt vedlikehold
+
+Dette notatet oppsummerer kurskorrigeringen datert 2026-07-11. Det er et tillegg, ikke en sletting: alle tidligere faser, commits, tester og implementerte komponenter beskrevet lenger ned i dette dokumentet **står ved lag** som historisk og teknisk grunnlag. Det som korrigeres er hvilken konklusjon som kan trekkes av dem.
+
+**Hva som er bekreftet fungerende (runtimeflyt):**
+
+- Enterprise Wiki kan nå kjøre hele dokumentflyten uten å velte på ett tregt OpenAI-kall (Responses API-herding `fa01995`, staged page-generation queues `b6ccd87`, to-pass rekkefølge article+summary → concept+entity → claims/verifisering/QA).
+- Systemet genererer faktisk `article`, `summary`, `concept` og `entity`-sider med lagret `content_markdown`.
+
+**Hva som mangler, og hvorfor det er alvorlig:**
+
+- Genererte sider er isolerte artikler. Det finnes ingen semantiske inline `[[wikilinks]]` i selve brødteksten.
+- `EnterpriseWikiPageLink` (Fase 8E-16) er i dag en **mekanisk kombinatorikk** av page-type-par innenfor én run (alle article↔summary, article↔concept, osv.) — ikke en projeksjon av faktiske lenker i innholdet.
+- Grafen (Fase 8E-19/8E-20) viser derfor nodes med kanter som ikke reflekterer noe reelt semantisk forhold — «edges uten mening» snarere enn «nodes uten edges».
+- Ord og begreper i teksten peker ikke til andre wiki-sider. Systemet vedlikeholder ikke Wikien som et sammenhengende kunnskapsnettverk.
+- Dette er et brudd på Karpathy Wiki-konseptet, som har vært premisset for Enterprise Wiki siden v0.5.
+
+**Prinsipiell korreksjon (bindende fra v0.6):**
+
+1. Enterprise Wiki er **ikke ferdig** når sider bare er generert.
+2. En wiki-side må inneholde semantiske inline wiki-lenker i selve brødteksten. Kanonisk format: `[[target-slug]]`, og ved behov `[[target-slug|synlig tekst]]` (eks.: `[[business-case]]`, `[[prosjekteier|prosjekteieren]]`, `[[prosjektstyring#roller]]`).
+3. `EnterpriseWikiPageVersion.content_markdown` er og blir den kanoniske innholdskilden.
+4. Inline wikilinks i current page version er den kanoniske kilden til relasjoner mellom sider.
+5. `EnterpriseWikiPageLink` skal være en **databaseprojeksjon** av faktiske wikilinks i sideinnholdet — ikke en separat AI-generert relasjonssannhet.
+6. Backlinks avledes deterministisk fra wikilinkene. Graph edges avledes fra de samme relasjonene.
+7. Markdown, backlinks og graf skal **aldri** ha tre separate sannheter — kun én kilde (innholdet) og to deriverte projeksjoner (backlinks, graf).
+8. LLM-maintainer/compiler skal lese den eksisterende kundewikien når ny informasjon integreres, og skal kunne legge inn nye inline-lenker i eksisterende sider der et begrep allerede omtales.
+9. Linking er en del av selve wiki-kompileringen og -vedlikeholdet — ikke et etterfølgende, frikoblet graph-steg.
+
+**Referansemodell (Karpathy-kompatibel):**
+
+```text
+raw source
+→ compiler/maintainer leser eksisterende Wiki
+→ oppretter eller oppdaterer article, summary og concepts
+→ skriver inline [[wiki-links]] i Markdown
+→ parser/scanner validerer lenkene
+→ backlinks og graph avledes fra de faktiske wikilinkene
+→ linter finner broken links, orphans og manglende koblinger
+→ senere kilder kan føre til relinking og oppdatering av eksisterende sider
+```
+
+**Konsekvens:** Dette er den nye hovedblockeren, se Fase 8I. Den skal prioriteres foran videre graph-visualisering, generell resume-arkitektur eller andre utvidelser.
 
 ## 1. Formål
 
@@ -68,6 +114,12 @@ Konsekvens av v0.5-korrigeringen:
 - Dagens `source → one page → article`-flyt er for smal, men `article per source` er fortsatt riktig som ett av flere output-lag.
 - Neste hovedspor er **Karpathy-alignment: page types, schema, index, log, backlinks og compile decision**.
 
+Konsekvens av v0.6-korrigeringen (se arkitekturnotatet foran §1):
+
+- Sidegenerering (article/summary/concept/entity) beholdes uendret som teknisk grunnlag — runtimeflyten fungerer.
+- `EnterpriseWikiPageLink`, graph-endepunktet (8E-19) og graph-UI (8E-20) beholdes som modell/infrastruktur, men lenkebyggingen (`EnterpriseWikiBuildPageLinksService`) må korrigeres fra mekanisk kombinatorikk til deterministisk parsing av inline `[[wikilinks]]`.
+- Neste hovedspor er **ikke** graph-visualisering, generell resume-arkitektur eller andre utvidelser. Neste hovedspor er Fase 8I: inline wiki-lenker, deterministisk parsing, materialiserte relasjoner, backlinks og inkrementelt vedlikehold av eksisterende sider.
+
 ## 2. Ikke-rør-grenser
 
 Følgende eksisterende komponenter skal ikke endres, berøres eller avhenge av dette systemet i noen fase:
@@ -110,19 +162,23 @@ Ingen re-ekstraksjon av dokumenttekst i pilot. `extracted_text` er allerede pros
 
 Enterprise Wiki skal ha sin **egen** upload/import-flyt, fullstendig uavhengig av `KnowledgeItem`, `KnowledgeItemVersion` og `KnowledgeItemChunk`.
 
-Korrigert målarkitektur etter v0.5:
+Korrigert målarkitektur etter v0.6 (utvider v0.5 med eksplisitt lenking — se arkitekturnotatet foran §1):
 
 ```text
 Enterprise Wiki source upload/import
 → Enterprise Wiki extraction
 → immutable raw source
+→ read existing Wiki catalog and relevant current page versions
 → schema-guided compile decision
 → create/update source article page
 → create/update source summary page
 → create/update relevant shared concept/entity pages
-→ write new page versions with content_markdown
+→ write new page versions with content_markdown, including inline [[wikilinks]]
+→ deterministic parse and resolve of wikilinks
+→ materialize EnterpriseWikiPageLink from resolved wikilinks
+→ derive backlinks and graph edges from EnterpriseWikiPageLink
 → preserve claims/source references/lint as verification layer
-→ update index/log/backlinks/health state
+→ update index/log/health state
 → human review and approval
 ```
 
@@ -140,7 +196,7 @@ Viktig skille:
 - **Concept/entity-side** er delt tematisk kunnskap på tvers av kilder.
 - **Index** er systemvedlikeholdt katalog over article/summary/concept/entity-sider.
 - **Log** er append-only operasjonslogg.
-- **Backlinks** er systemgenerert lenkegraf.
+- **Backlinks** er en deterministisk avledet lenkegraf — projisert fra inline `[[wikilinks]]` i `content_markdown`, ikke en uavhengig AI-generert sannhet (v0.6, se §4.10).
 - **Artikkelinnhold** lagres som `content_markdown` på `enterprise_wiki_page_versions`.
 - **Claims** er verifikasjonsenheter som støtter artikkel, reviewer og lint.
 - **Source references** dokumenterer hvor claims og sentrale artikkelutsagn kommer fra.
@@ -366,6 +422,58 @@ v0.5 innfører en logisk modell som ligger tettest mulig på Karpathy Wiki. Før
 
 Fase 8E skal først forsøke å utnytte eksisterende tabeller. Ny databaseendring skal bare foreslås hvis audit viser at eksisterende `enterprise_wiki_*`-modeller ikke kan bære Karpathy-modellen.
 
+> **v0.6-status på `wiki/backlinks.md`-raden over:** Ikke lenger "mangler" i betydningen "ingen tabell finnes" — `enterprise_wiki_page_links` og `EnterpriseWikiPageLink` finnes (Fase 8E-16). Det som mangler er at raden **avledes fra faktiske inline wikilinks** i stedet for mekanisk kombinatorikk. Se §4.10.
+
+---
+
+### 4.10 Wiki-lenker: kanonisk kilde og projeksjon (v0.6-korrigering)
+
+Denne underseksjonen er bindende og korrigerer Fase 8E-16 (se også arkitekturnotatet foran §1).
+
+**Kanonisk kilde:**
+
+- `EnterpriseWikiPageVersion.content_markdown` er den kanoniske innholdskilden for en side.
+- Inline wikilinks i `content_markdown` for **current** version er den kanoniske kilden til relasjoner mellom sider — ikke en separat AI-generert relasjonsbeslutning.
+
+**Lenkesyntaks:**
+
+| Format | Betydning |
+|---|---|
+| `[[target-slug]]` | Lenke til side med gitt slug, synlig tekst = tittelen på målsiden |
+| `[[target-slug\|synlig tekst]]` | Lenke til side med gitt slug, med eksplisitt ankertekst |
+| `[[target-slug#section]]` | Valgfritt — kun hvis parser/renderer kan håndtere seksjonsanker trygt |
+
+Eksempler: `[[business-case]]`, `[[prosjekteier|prosjekteieren]]`, `[[prosjektstyring#roller]]`.
+
+**Projeksjon, ikke egen sannhet:**
+
+- `EnterpriseWikiPageLink` skal være en **databaseprojeksjon** av de faktiske wikilinkene i sideinnholdet — raden eksisterer *fordi* teksten inneholder en lenke, ikke fordi en AI eller en kombinatorisk regel har besluttet at to sider "bør" henge sammen.
+- Backlinks skal avledes deterministisk fra de samme wikilinkene (invers retning av samme projeksjon).
+- Graph edges skal avledes fra de samme relasjonene som backlinks — samme datasett, to visninger.
+- Konsekvens: `content_markdown`, backlinks og graf skal **aldri** representere tre uavhengige sannheter. Det finnes én kilde (innholdet) og to deterministisk avledede projeksjoner.
+
+**Hva dette endrer i praksis for `EnterpriseWikiBuildPageLinksService` (Fase 8E-16):**
+
+- I dag: bygger alle kombinasjoner av page-type-par innenfor én run sine pivot-rader (mekanisk full mesh mellom article/summary/concept/entity).
+- Etter v0.6: skal parse `content_markdown` for `[[wikilinks]]`, resolve til `to_page_id` scoped til kunde, og kun materialisere `EnterpriseWikiPageLink`-rader for lenker som faktisk finnes i teksten.
+- Modellen `EnterpriseWikiPageLink`, migrasjonen, graph-endepunktet (8E-19) og graph-UI (8E-20) beholdes uendret som infrastruktur — det er kun *kilden* til radene i tabellen som korrigeres.
+
+Se Fase 8I for full implementeringsplan.
+
+### 4.11 Karpathy-kompatibel komponentmapping (v0.6)
+
+| Karpathy Wiki | Procynia |
+|---|---|
+| Markdown page | `EnterpriseWikiPageVersion.content_markdown` |
+| WikiCompilerAgent | Enterprise Wiki maintainer/compiler-flyt (`EnterpriseWikiMaintainerDecisionService` + generatorene) |
+| `[[wikilinks]]` | `[[slug]]` / `[[slug\|anchor]]` i `content_markdown` |
+| WikiScanner | Deterministisk wiki-lenke-parser (Fase 8I, del C) |
+| WikiLinterAgent | Enterprise Wiki lint + semantisk vedlikehold (`EnterpriseWikiAppliedRunLintService`, semantic QA) |
+| `backlinks.md` | Databaseavledede backlinks (Fase 8I, del F) |
+| filesystem graph | `EnterpriseWikiPageLink` + graph-endepunkt (8E-19/8E-20), nå avledet fra faktiske wikilinks |
+
+Databasebruk i stedet for flate filer er en **implementasjonsforskjell**, ikke en endring av Karpathy-konseptet. Alle syv radene over representerer samme logiske lag som i referansemodellen.
+
 ---
 
 ## 5. Enterprise-krav
@@ -562,27 +670,32 @@ Konsekvenser:
    └─ Ekstraherer claims, excerpts og conflict_note
    └─ Lagrer enterprise_wiki_claims og enterprise_wiki_source_references
 
-8. Page writing/update
+8. Page writing/update (v0.6: inkluderer inline wikilinks)
    └─ Oppretter/oppdaterer article-side for kilden
    └─ Oppretter/oppdaterer summary-side for kilden
-   └─ Oppretter/oppdaterer relevante concept/entity-sider
+   └─ Oppretter/oppdaterer relevante concept/entity-sider, med kontekst om relevante eksisterende sider (index lookup)
    └─ For hver berørt side opprettes ny EnterpriseWikiPageVersion
-   └─ content_markdown skrives som lesbar Markdown
+   └─ content_markdown skrives som lesbar Markdown, **med semantiske inline `[[wikilinks]]` i brødteksten** der begreper allerede omtales andre steder i Wikien
    └─ Claims/source references knyttes til riktig sideversjon der de brukes som verifikasjon
 
-9. Log/index/backlinks/lint
+9. Deterministisk lenkeparsing og materialisering (v0.6 — nytt steg, se Fase 8I)
+   └─ Parser `content_markdown` for `[[wikilinks]]` per oppdatert/opprettet side
+   └─ Resolver slugs scoped til kunde, rapporterer broken links
+   └─ Materialiserer `EnterpriseWikiPageLink`-rader fra de resolvede lenkene (projeksjon, ikke egen AI-beslutning)
+   └─ Bygger backlinks og graph edges fra samme materialiserte relasjoner
+
+10. Log/index/lint
    └─ Run-logg dokumenterer hvilke sider kilden endret eller foreslo
    └─ Index/sideoversikt oppdateres
-   └─ Backlinks/lenkegraf bygges eller oppdateres
-   └─ Lint sjekker manglende kilder, konflikter, stale claims, orphan pages, broken links, stub pages og missing cross-references
+   └─ Lint sjekker manglende kilder, konflikter, stale claims, orphan pages, broken wikilinks, stub pages og manglende inline-koblinger til relevante concepts/entities
 
-10. Review
-   └─ Brukeren leser article/summary/concept/entity-sider
+11. Review
+   └─ Brukeren leser article/summary/concept/entity-sider, med klikkbare inline-lenker
    └─ Brukeren kontrollerer claims/kilder/lint
    └─ System Owner godkjenner eller avviser
 ```
 
-**Viktig prinsipp etter v0.5:** AI kan returnere strukturert JSON som inneholder compile-beslutning, Markdown-innhold og verifikasjonsgrunnlag. `content_markdown` er fortsatt hovedinnholdet på en wiki-side, men output må deles i Karpathy-lag: `article`, `summary`, `concept/entity`, `index`, `log` og `backlinks`.
+**Viktig prinsipp etter v0.6:** AI kan returnere strukturert JSON som inneholder compile-beslutning, Markdown-innhold (med inline wikilinks) og verifikasjonsgrunnlag. `content_markdown` er hovedinnholdet på en wiki-side og den kanoniske kilden til relasjoner. Output deles i Karpathy-lag: `article`, `summary`, `concept/entity`, `index`, `log`. Backlinks og graf er **ikke** egne AI-output-lag lenger — de avledes deterministisk av wikilinkene i `content_markdown` (se §4.10).
 
 ## 8. Queue-mønster
 
@@ -631,6 +744,8 @@ Planlagte lint-kontroller som kan kjøres on-demand eller som scheduled job:
 | `missing_topics` | info | Siden har ingen `enterprise_wiki_page_topics`-rader |
 
 Lint-resultater lagres i `enterprise_wiki_lint_findings`. UI viser helseindikator per side.
+
+> **v0.6-presisering:** `broken_wiki_link` og `missing_backlinks` forutsetter den korrigerte modellen i §4.10 — de skal sjekke faktiske inline `[[wikilinks]]` i `content_markdown` mot materialiserte `EnterpriseWikiPageLink`-rader, ikke mot en mekanisk kombinatorikk av page types. Fase 8E-17s lenke-relaterte sjekker (`page_without_outgoing_links`, `orphan_concept_page`, `orphan_entity_page`, `article_without_concept_or_entity_links`, m.fl.) må oppdateres til å reflektere dette når Fase 8I er implementert — se der.
 
 ## 10. Første pilotfase og rebaselining
 
@@ -687,7 +802,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 
 7. **Logg over operasjoner** — Holder `enterprise_wiki_ingest_runs` alene, eller trengs en append-only operation log som speiler `wiki/log.md`?
 
-8. **Backlinks** — Skal backlinks lagres som egen tabell, genereres fra `[[wikilinks]]` ved lint, eller vises som lint-/index-output?
+8. **Backlinks** — ~~Skal backlinks lagres som egen tabell, genereres fra `[[wikilinks]]` ved lint, eller vises som lint-/index-output?~~ **Avklart i v0.6:** Backlinks lagres via den eksisterende `EnterpriseWikiPageLink`-tabellen, men materialiseres deterministisk fra faktiske `[[wikilinks]]` i `content_markdown` — verken ved lint alene eller som ren visning uten lagret projeksjon. Se §4.10 og Fase 8I.
 
 9. **Compile decision JSON** — Hvilket strict JSON-format skal styre `source_article`, `source_summary`, `update_existing_pages[]`, `create_new_pages[]`, warnings og no-op?
 
@@ -732,11 +847,13 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8B | Artikkelgenerering-spesifikasjon | Fullført som article-writer-byggestein, men mangler summary/concepts/index/log/backlinks |
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
-| Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
+| Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Teknisk implementert (8E-10–8E-20), men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er konseptuelt korrigert i v0.6** — se Fase 8I |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
 | Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-7 fullført |
 | Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 + 2 fullført** (kildemonitoring, intelligent retry, dyp reparasjon av claims/refs/lenker) · **8H-utvidelse fullført** (snapshot-basert terskelreparasjon og regresjonsdeteksjon) |
-| Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
+| Runtimeflyt (queue-splitting) | Staged page-generation queues (article+summary → concept+entity → verifisering) | **Fullført** (commit `b6ccd87`) — teknisk grunnmur for at sidegenerering faktisk fullfører |
+| **Fase 8I** | **Karpathy Wiki linking and incremental maintenance** | **Neste blocker — ikke påbegynt.** Prioriteres foran graph-visualisering, resume-arkitektur og andre utvidelser. Se egen seksjon under. |
+| Produksjonsaktivering | Kontrollert aktivering — etter 8G, 8H **og 8I** | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
 
@@ -1456,6 +1573,8 @@ Implementert:
 **Design: `EnterpriseWikiPageLink` er en kanonisk customer-scoped sidegraf — ikke per-run historikk.**  
 Den unikke indeksen sikrer at det kun finnes én kant av hver type mellom to sider per kunde, uavhengig av hvor mange runs som har blitt kjørt. `enterprise_wiki_ingest_run_id` er nullable og viser kun hvilken run som _først_ opprettet linken — det er ikke et eierskap og betyr ikke at linken slettes eller endres ved en ny run. Grafen er kumulativ: kanter akkumuleres over tid, duplikater hoppes over med `wasRecentlyCreated = false`. Dette skiller modellen fra pivot-tabellen `enterprise_wiki_ingest_run_pages`, som er per-run historikk.
 
+> **v0.6-korrigering (2026-07-11):** Migrasjonen, modellen, `EnterpriseWikiPageTraversalService` og de 37 testene over står ved lag som teknisk grunnlag — de er ikke feil i seg selv. Men `EnterpriseWikiBuildPageLinksService`s **kilde til rader** er feil konsept: "bygger alle kombinasjoner i begge retninger" betyr at enhver article i en run lenkes mekanisk til enhver summary/concept/entity i samme run, uavhengig av om noe faktisk henger sammen semantisk. Dette er full-mesh-kobling, ikke en wiki-lenkegraf, og det strider mot v0.6-prinsippet i §4.10 om at `EnterpriseWikiPageLink` skal være en projeksjon av faktiske inline `[[wikilinks]]`. Fase 8I erstatter kombinatorikk-logikken i denne servicen med deterministisk parsing av `content_markdown`. Link type-konstantene, unik-indeksen og traversal-servicen forventes gjenbrukt uendret.
+
 #### Fase 8E-17 — Enterprise Wiki lint / quality checks for applied runs — Fullført
 
 **Commit:** (se nedenfor)
@@ -1501,6 +1620,8 @@ Implementert:
 - Upsert-nøkkel: `{customer_id, enterprise_wiki_ingest_run_id, enterprise_wiki_page_id, enterprise_wiki_page_version_id, enterprise_wiki_claim_id, code}` — manuell query (ingen DB unique constraint, håndterer NULL-felt). Allerede åpen finding teller som skipped; resolved finding gjenåpnes og teller som created.
 - Stale resolution: etter lint-passet lukkes alle åpne findings for denne run-id som ikke ble rørt i denne kjøringen. Findings fra `wiki:lint` (run_id = NULL) røres aldri.
 
+> **v0.6-korrigering:** Run-, side-, claims- og source reference-sjekkene over er upåvirket og gyldige som de er. De 8 **lenke**-sjekkene (`page_without_outgoing_links`, `article_without_summary_link`, `orphan_concept_page`, `missing_reverse_link` m.fl.) leser i dag `EnterpriseWikiPageLink`-rader bygget av 8E-16s kombinatorikk, og gir derfor falske "OK"-resultater: en side kan se ut som lenket selv om ingen inline `[[wikilink]]` faktisk peker til den. Selve `EnterpriseWikiAppliedRunLintService`-koden for disse 8 sjekkene forventes gjenbrukt, men vil først måle noe reelt når Fase 8I korrigerer datakilden. Se §9 for tilsvarende presisering av de generelle lint-kodene.
+
 #### Fase 8E-18 — Read-only Enterprise Wiki traversal UI — Fullført
 
 **Commit:** `865ab24`
@@ -1523,12 +1644,14 @@ Implementert:
 - concept/entity → relaterte artikler (`related_articles`)
 - alle → baklenker (`incoming_links`)
 
+> **v0.6-korrigering:** `WikiController::show()`, `WikiShow.jsx` og `EnterpriseWikiPageTraversalService` er teknisk korrekte og krever ingen kodeendring. Men fordi de leser `EnterpriseWikiPageLink` som i dag kommer fra 8E-16s kombinatorikk, viser Navigasjon-seksjonen i praksis relasjoner som ikke reflekterer noe faktisk lenket innhold — en article kan vises med "relaterte konsepter" den aldri nevner. Dette retter seg selv når Fase 8I korrigerer datakilden; UI-koden endres ikke.
+
 #### Fase 8E-19 — Enterprise Wiki graph data foundation — Fullført
 
 **Implementeringscommit:** `1486007` — Add Enterprise Wiki graph data foundation (Phase 8E-19)
 
 Implementert:
-- `EnterpriseWikiGraphDataService` (`app/Services/EnterpriseWiki/`) — bygger stabilt grafpayload (nodes, edges, summary, scope) fra det kanoniske `EnterpriseWikiPageLink`-grafen. Tre scope-varianter:
+- `EnterpriseWikiGraphDataService` (`app/Services/EnterpriseWiki/`) — bygger stabilt grafpayload (nodes, edges, summary, scope) fra `EnterpriseWikiPageLink`-tabellen (se v0.6-korrigering under for hva denne tabellen faktisk inneholder i dag). Tre scope-varianter:
   - **customer-wide** — alle sider og kanter for kunden (ingen parametre)
   - **run-scoped** — sider fra `enterprise_wiki_ingest_run_pages`-pivot for én applied run; kanter kun der begge endepunkter er i scope (`?run_id=`)
   - **neighborhood** — valgt side + direkte naboer (inn og ut); kanter mellom alle i dette settet (`?page_id=`, vinner over `run_id` ved konflikt)
@@ -1548,6 +1671,8 @@ Implementert:
 - Ingen frontend-biblioteker ble lagt til (ikke sigma, graphology, d3, cytoscape, react-force-graph)
 - Ingen layout-algoritme i backend
 - Graph-UI er et bevisst utsatt neste steg
+
+> **v0.6-korrigering:** Servicen, endepunktet, JSON-kontrakten og de 39 testene er teknisk korrekte og beholdes uendret. Men fordi edge-datasettet (`EnterpriseWikiPageLink`) i dag kommer fra 8E-16s kombinatorikk, er edges i grafen i praksis uten semantisk mening — grafen viser derfor **nodes med kanter som ikke reflekterer noe reelt forhold**, ikke "nodes uten edges". Endepunktet trenger ingen kodeendring når Fase 8I korrigerer kilden til `EnterpriseWikiPageLink` — det er allerede bygget for å konsumere denne tabellen som eneste sannhet.
 
 #### Fase 8E-20 — Read-only Enterprise Wiki Graph View UI — Fullført
 
@@ -1586,6 +1711,8 @@ Implementert:
 - Ingen 3D-graf — 2D ForceAtlas2 i browser
 - Ingen backend layout-algoritme
 - `GET /app/wiki/graph-data` er fortsatt den eneste datakilden for grafen
+
+> **v0.6-korrigering:** UI-komponenten beholdes uendret — den er en ren visning av 8E-19s JSON-kontrakt og trenger ingen endring. Det som var visuelt misvisende er datagrunnlaget, ikke visningen: en graf bygget på 8E-16s kombinatorikk vil vise et tett, sammenkoblet nettverk selv om ingen sider faktisk er lenket i innholdet. Grafvisningen blir først meningsfull når Fase 8I er implementert.
 
 ### Fase 8F — Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold
 
@@ -2298,6 +2425,8 @@ Alle tre tjenester er idempotente — de fyller kun inn det som mangler.
 - `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php` — kaller `deepRepairService->attempt()` hvis run fortsatt er `escalated` etter intelligent retry
 - `app/Models/EnterpriseWikiIngestRun.php` — tre nye felt i `$fillable` og `$casts`
 
+> **v0.6-korrigering:** Diagnose- og reparasjonslogikken for claims og source references er upåvirket. "Page links: sider uten outbound-lenker → kaller `EnterpriseWikiBuildPageLinksService::build()`" fyller i dag inn manglende lenker via 8E-16s kombinatorikk — det reparerer altså at en side *mangler rader i tabellen*, ikke at siden faktisk *mangler en semantisk lenke i innholdet*. `EnterpriseWikiDeepRepairService` selv trenger ingen endring: når Fase 8I korrigerer `EnterpriseWikiBuildPageLinksService`, reparerer dette kallet automatisk de riktige lenkene i stedet for kombinatorikk-lenker.
+
 #### 8H-utvidelse *(avhenger av 8G-6) — fullført:*
 
 Implementert snapshot-basert threshold maintenance for QA-regresjoner:
@@ -2323,11 +2452,87 @@ Oppdaterte filer:
 - `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php` — kaller snapshot-regresjonsskann etter source-change retry
 - `app/Console/Commands/EnterpriseWikiMaintenanceCycle.php` — beskriver snapshot-regresjoner i command help
 
-Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H-kjerne delfase 1 (fullført) → 8H-kjerne delfase 2 (fullført) → 8H-utvidelse (fullført).
+Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H-kjerne delfase 1 (fullført) → 8H-kjerne delfase 2 (fullført) → 8H-utvidelse (fullført) → **Fase 8I (neste blocker, ikke påbegynt)**.
 
-### Produksjonsaktivering — Etter 8G og 8H
+### Fase 8I — Karpathy Wiki linking and incremental maintenance
 
-> **Ikke aktiv fase.** Produksjonsaktivering skjer etter at coverage/eval (8G) og continuous maintainer loop (8H) er implementert og verifisert. Eksisterende runbook fra Fase 7 brukes som teknisk grunnlag.
+> **Status: neste blocker, ikke påbegynt.** Innført i v0.6 (2026-07-11) som direkte konsekvens av at genererte wiki-sider i dag er isolerte artikler uten inline lenker (se arkitekturnotatet foran §1 og §4.10). Enterprise Wiki-runtimeflyten fungerer teknisk (Responses API-herding `fa01995`, staged page-generation queues `b6ccd87`), men Karpathy Wiki-konseptet er **ikke levert** før denne fasen er fullført. Prioriteres foran videre graph-visualisering, generell resume-arkitektur eller andre utvidelser.
+
+**Mål:** Sider skal inneholde semantiske inline `[[wikilinks]]` i brødteksten, lenkene skal parses deterministisk og materialiseres som `EnterpriseWikiPageLink`, og backlinks/graf skal avledes fra samme datasett. Når en ny concept/entity-side opprettes, skal maintainer/compiler kunne relinke eksisterende sider som allerede omtaler begrepet.
+
+Claims og source references forblir verifikasjonslaget — de er ikke hovedinnholdet og erstatter ikke wikilinking (uendret prinsipp fra v0.3/v0.5).
+
+**A. Wiki-link syntax**
+- Støtt `[[slug]]`.
+- Støtt `[[slug|anchor text]]`.
+- Vurder `[[slug#section]]` kun dersom renderer og parser kan håndtere det trygt.
+- Ingen lenker til ukjente slugs.
+- Ingen self-links.
+
+**B. Wiki-aware generation**
+- Hver page-generator (article/summary/concept/entity) får en katalog over relevante eksisterende pages: minst `title`, `slug`, `page_type`.
+- Article/summary skal lenke relevante concepts/entities i brødteksten.
+- Concept/entity skal lenke relevante articles, concepts og entities.
+- Ikke lenk alle ord mekanisk — lenk semantisk relevante forekomster.
+
+**C. Deterministic parser**
+- Parse wikilinks fra `content_markdown`.
+- Resolve slugs scoped til customer.
+- Rapporter broken links.
+- Dedupliser logiske page-relasjoner.
+- Behold lenker i teksten som kanonisk kilde (ikke en side-tabell med duplikat sannhet).
+
+**D. Materialized relations**
+- `EnterpriseWikiPageLink` avledes fra current page versions (erstatter 8E-16s kombinatorikk-logikk i `EnterpriseWikiBuildPageLinksService`, se §4.10).
+- Version-ID-er kan lagres som provenance.
+- Logisk page-to-page-relasjon skal være stabil.
+- Graph edges (8E-19/8E-20) bruker samme `EnterpriseWikiPageLink` uendret.
+
+**E. Renderer**
+- `ReactMarkdown` eller et preprocess-lag må rendre `[[wikilinks]]` som klikkbare interne lenker.
+- Bruk `/app/wiki/{slug}`.
+- Behold ankertekst.
+- Ukjent slug skal ikke gi en ugyldig intern lenke.
+
+**F. Backlinks**
+- Detaljsiden viser inkommende lenker.
+- Backlinks avledes fra samme relasjoner som graph edges.
+- Ingen separat AI-generert backlink-liste.
+
+**G. Incremental relinking**
+- Når en ny concept/entity-side opprettes: finn relevante eksisterende pages som omtaler begrepet.
+- La maintainer/compiler vurdere om de skal revideres.
+- Opprett nye page versions kun ved faktisk endring.
+- Parse og bygg relasjoner på nytt for berørte sider.
+- Unngå full rewrite av hele Wikien uten grunn.
+
+**H. Lint**
+- Broken wikilinks.
+- Self-links.
+- Cross-customer links.
+- Orphan concept/entity.
+- Article med concepts/entities, men uten relevante inline links.
+- Page-relasjon som ikke samsvarer med current markdown.
+- Graph node uten relasjoner der relasjoner burde finnes.
+
+**I. QA**
+- Semantisk QA skal vurdere om sentrale concepts/entities er lenket.
+- Repair kan legge til, endre eller fjerne wikilinks.
+- Ny current version skal alltid føre til ny parsing av relasjoner.
+
+**Viktige grenser (bindende for Fase 8I):**
+- En separat graph-AI skal ikke bestemme relasjoner.
+- Maintainer decision alene skal ikke bli canonical graph.
+- Claims skal ikke bli wiki-lenker.
+- Backlinks skal ikke lagres som manuelt generert tekst.
+- Frontend skal ikke bygge graph fra heuristikk.
+- Det skal ikke opprettes full mesh mellom alle pages (dette er nettopp feilen 8I retter opp).
+- Kunnskapsbase/RAG skal ikke blandes inn.
+- `KnowledgeItem`, `KnowledgeItemVersion`, `KnowledgeItemChunk`, dagens Kunnskapsbase/RAG, billing, Filament/admin, AI workspace og legacy `ProcessEnterpriseWikiIngest` røres ikke.
+
+### Produksjonsaktivering — Etter 8G, 8H og 8I
+
+> **Ikke aktiv fase.** Produksjonsaktivering skjer etter at coverage/eval (8G), continuous maintainer loop (8H) **og Karpathy-lenking/inkrementelt vedlikehold (8I)** er implementert og verifisert. Eksisterende runbook fra Fase 7 brukes som teknisk grunnlag. 8I er lagt til i v0.6 fordi produksjonsaktivering av en wiki uten fungerende inline-lenker ville aktivert et system som ikke oppfyller Karpathy-premisset.
 
 Krav (uendret fra Fase 7-runbook):
 - `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres kontrollert
@@ -2452,9 +2657,7 @@ Eksempel på ønsket output per sideversjon:
     "page_type": "article",
     "title": "Menneskelig sidetittel",
     "summary": "Kort sammendrag av hva siden dekker.",
-    "markdown": "## Oversikt\n\nSammenhengende wikiartikkel...",
-    "concepts": ["hms", "referanseprosjekter"],
-    "links": ["[[hms]]", "[[referanseprosjekter]]"]
+    "markdown": "## Oversikt\n\nSammenhengende wikiartikkel som nevner [[hms]] og [[referanseprosjekter]] der de er semantisk relevante..."
   },
   "claims": [
     {
@@ -2475,6 +2678,8 @@ Eksempel på ønsket output per sideversjon:
 }
 ```
 
+> **v0.6-korrigering:** Tidligere versjoner av dette eksempelet hadde separate `concepts`/`links`-array-felter ved siden av `markdown`. Det er fjernet — wikilinks skal kun uttrykkes inline i `markdown`-strengen (`[[slug]]` / `[[slug|anchor]]`), aldri som et parallelt strukturert felt. `content_markdown` skal være den eneste kilden en deterministisk parser leser lenker fra (se §4.10); et separat `links`-felt ville skapt nøyaktig den doble sannheten v0.6 forbyr.
+
 ### B.4 Page-regler
 
 Alle sider skal:
@@ -2482,7 +2687,7 @@ Alle sider skal:
 - skrives på kundens språk
 - være Markdown
 - ha tydelige overskrifter
-- bruke `[[wikilinks]]` bare til sider som finnes eller opprettes i samme compile-run
+- bruke `[[wikilinks]]` semantisk relevant til sider som finnes i wikien fra før, opprettes i samme compile-run, eller identifiseres via index lookup som del av compile decision — ikke bare til sider i samme run (v0.6, se Fase 8I del B og G)
 - ha sammenhengende brødtekst der page type krever det
 - syntetisere overlappende kildetekst
 - ikke inneholde fakta som ikke støttes av kildene
@@ -2537,3 +2742,16 @@ Tester skal dekke:
 - backlinks kan bygges/rebygges
 - ingen ekte nettverkskall i tester
 - Kunnskapsbase/RAG-tabeller røres ikke
+
+**v0.6-tillegg (Fase 8I):**
+
+- deterministisk parser finner alle `[[slug]]`- og `[[slug|anchor]]`-forekomster i `content_markdown`
+- parser rapporterer broken link for slug som ikke finnes hos kunden
+- parser ignorerer self-links (side som lenker til seg selv)
+- `EnterpriseWikiPageLink` materialiseres kun for lenker som faktisk finnes i teksten — ingen kombinatorikk-rader
+- ny current version trigger ny parsing og oppdaterte relasjoner for den siden
+- backlinks og graph edges leser samme materialiserte relasjoner (ingen avvik mellom de to)
+- concept/entity-generering mottar katalog over relevante eksisterende sider og kan lenke dem
+- incremental relinking: ny concept/entity-side kan foreslå oppdatering av en eksisterende side som allerede omtaler begrepet, uten å røre urelaterte sider
+- renderer gjør `[[wikilinks]]` til klikkbare interne lenker til `/app/wiki/{slug}` med bevart ankertekst
+- ukjent slug i renderer gir ikke en ugyldig/knekt intern lenke
