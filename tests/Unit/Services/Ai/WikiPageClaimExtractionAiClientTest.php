@@ -20,7 +20,7 @@ class WikiPageClaimExtractionAiClientTest extends TestCase
         $payload = $this->capturePayload();
 
         $this->assertSame('gpt-4.1-mini', $payload['model']);
-        $this->assertSame(2000, $payload['max_output_tokens']);
+        $this->assertSame(4000, $payload['max_output_tokens']);
         $this->assertFalse($payload['store']);
         $this->assertArrayNotHasKey('reasoning', $payload);
         $this->assertSame('json_schema', data_get($payload, 'text.format.type'));

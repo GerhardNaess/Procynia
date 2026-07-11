@@ -26,7 +26,7 @@ class WikiPageClaimExtractionAiClient
 
     private const TEMPERATURE = 0;
 
-    private const MAX_OUTPUT_TOKENS = 2000;
+    private const MAX_OUTPUT_TOKENS = 4000;
 
     private const MAX_INPUT_CHARS = 6000;
 
