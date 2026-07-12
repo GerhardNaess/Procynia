@@ -9,32 +9,52 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiQaSnapshot;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Narrow, single-purpose recovery for one known incident class: a run stuck at
- * status=failed with error_message="Post-ingest QA did not claim run [id]." — the run-24
- * race between ContinueEnterpriseWikiDocumentFlowAfterPages and the scheduled post-ingest QA
- * sweep, where the run's execution status was marked failed but its semantic QA result had
- * already legitimately passed (with a recorded snapshot) before the exception occurred.
+ * Recovers a run stuck at status=failed by computing a deterministic resume plan from
+ * existing checkpoints and artifacts, rather than always restarting the pipeline from
+ * verification_linking.
+ *
+ * Run execution status (`status`) and semantic QA result (`qa_status`) are two distinct,
+ * orthogonal states — a technical exception anywhere in continueAfterPagesGenerated() sets
+ * status=failed, but qa_status may already hold a legitimate terminal verdict (passed,
+ * escalated, or failed) recorded by a QA attempt that completed before the exception. This
+ * command tells those two cases apart and picks exactly one of two safe outcomes:
+ *
+ *   - direct_finalize: qa_status is already terminal and its snapshot + required artifacts
+ *     validate — finalize straight from that recorded result (no stage re-execution, no AI
+ *     calls, no dispatch).
+ *   - resume_continuation: qa_status never reached a terminal state (the failure happened
+ *     during or before QA) — restore the run to verification_linking and dispatch a fresh
+ *     continuation job. Every stage in continueAfterPagesGenerated() is independently safe to
+ *     re-run against work it already finished (see the per-stage service class docs), so
+ *     resuming from the top never repeats completed work or duplicates artifacts.
  *
  * This is deliberately NOT a general-purpose "set run status" command — every guard below
- * must pass, using the QA snapshot as the source of truth, or the command refuses outright.
+ * must pass, using QA snapshots and existing artifacts as the source of truth, or the command
+ * refuses outright.
  */
-#[\Illuminate\Console\Attribute\AsCommand(name: 'wiki:recover-document-flow')]
+#[AsCommand(name: 'wiki:recover-document-flow')]
 class EnterpriseWikiRecoverDocumentFlow extends Command
 {
     protected $signature = 'wiki:recover-document-flow
                             {--run-id= : The ingest run to recover}
-                            {--dry-run : Report whether every recovery guard passes without changing anything}';
+                            {--dry-run : Report the observed checkpoints and resume plan without changing anything}';
 
-    protected $description = 'Recover an Enterprise Wiki ingest run stuck by the known post-ingest QA claim race (run 24 class of incident) — refuses unless every guard confirms it is safe.';
+    protected $description = 'Recover an Enterprise Wiki ingest run stuck at status=failed by resuming or finalizing from its already-recorded checkpoints.';
 
-    private const KNOWN_ERROR_PATTERN = '/Post-ingest QA did not claim run \[\d+\]\.?/';
+    private const QA_TERMINAL_STATUSES = [
+        EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+        EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+        EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+    ];
 
-    public function handle(): int
+    public function handle(EnterpriseWikiDocumentFlowService $flowService): int
     {
         $runIdOption = $this->option('run-id');
 
@@ -55,8 +75,8 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             return self::FAILURE;
         }
 
-        if ($run->status === EnterpriseWikiIngestRun::STATUS_COMPLETED) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] is already completed — nothing to recover.");
+        if (in_array($run->status, [EnterpriseWikiIngestRun::STATUS_COMPLETED, EnterpriseWikiIngestRun::STATUS_ESCALATED], true)) {
+            $this->error("[WIKI_RECOVERY] Run [{$runId}] has status [{$run->status}] — already terminal, nothing to recover.");
 
             return self::FAILURE;
         }
@@ -67,111 +87,214 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             return self::FAILURE;
         }
 
-        if (! preg_match(self::KNOWN_ERROR_PATTERN, (string) $run->error_message)) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] error_message does not match the known post-ingest QA claim race — refusing recovery.");
-            $this->line("[WIKI_RECOVERY] error_message: {$run->error_message}");
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            $this->error("[WIKI_RECOVERY] Run [{$runId}] has maintainer_decision_status [{$run->maintainer_decision_status}], expected [applied] — refusing recovery.");
 
             return self::FAILURE;
         }
 
-        $snapshot = EnterpriseWikiQaSnapshot::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->where('qa_attempt_count', $run->qa_attempt_count)
-            ->first();
+        $observed = $this->observe($run);
 
-        if ($snapshot === null) {
-            $this->error("[WIKI_RECOVERY] No QA snapshot found for run [{$runId}] attempt [{$run->qa_attempt_count}] — refusing recovery.");
+        $this->printObserved($runId, $observed);
 
-            return self::FAILURE;
-        }
+        $plan = $this->computePlan($run, $observed);
 
-        if ($snapshot->qa_status !== EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
-            $this->error("[WIKI_RECOVERY] Snapshot for run [{$runId}] has qa_status [{$snapshot->qa_status}], expected [passed] — refusing recovery.");
+        $this->printPlan($plan);
+
+        if ($plan['outcome'] === 'refused') {
+            $this->error("[WIKI_RECOVERY] {$plan['reason']}");
 
             return self::FAILURE;
         }
 
-        if ((int) $snapshot->customer_id !== (int) $run->customer_id) {
-            $this->error("[WIKI_RECOVERY] Snapshot customer_id [{$snapshot->customer_id}] does not match run customer_id [{$run->customer_id}] — refusing recovery.");
+        if ($dryRun) {
+            $this->info('[WIKI_RECOVERY] --dry-run: no changes made, no job dispatched.');
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
+        if ($plan['outcome'] === 'direct_finalize') {
+            $this->executeDirectFinalize($run, $flowService, $observed);
+        } else {
+            $this->executeResumeContinuation($run, $observed);
+        }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @return array{
+     *     pages_count: int,
+     *     has_current_versions: bool,
+     *     has_links: bool,
+     *     has_claims: bool,
+     *     snapshot: ?EnterpriseWikiQaSnapshot,
+     *     snapshot_matches: bool,
+     * }
+     */
+    private function observe(EnterpriseWikiIngestRun $run): array
+    {
         $pivotPageIds = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->pluck('enterprise_wiki_page_id');
 
-        if ($pivotPageIds->isEmpty()) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] has no applied pages — refusing recovery.");
-
-            return self::FAILURE;
-        }
-
-        $hasCurrentVersions = EnterpriseWikiPageVersion::query()
+        $hasCurrentVersions = $pivotPageIds->isNotEmpty() && EnterpriseWikiPageVersion::query()
             ->whereIn('enterprise_wiki_page_id', $pivotPageIds)
             ->where('is_current', true)
             ->exists();
 
-        if (! $hasCurrentVersions) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] pages have no current page version — refusing recovery.");
-
-            return self::FAILURE;
-        }
-
-        $hasLinks = EnterpriseWikiPageLink::query()
+        $hasLinks = $pivotPageIds->isNotEmpty() && EnterpriseWikiPageLink::query()
             ->where('customer_id', $run->customer_id)
             ->where(function ($q) use ($pivotPageIds): void {
                 $q->whereIn('from_page_id', $pivotPageIds)->orWhereIn('to_page_id', $pivotPageIds);
             })
             ->exists();
 
-        if (! $hasLinks) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] has no canonical page links — refusing recovery.");
-
-            return self::FAILURE;
-        }
-
-        $hasClaims = EnterpriseWikiClaim::query()
+        $hasClaims = $pivotPageIds->isNotEmpty() && EnterpriseWikiClaim::query()
             ->whereIn('enterprise_wiki_page_id', $pivotPageIds)
             ->exists();
 
-        if (! $hasClaims) {
-            $this->error("[WIKI_RECOVERY] Run [{$runId}] has no extracted claims — refusing recovery.");
+        $snapshot = EnterpriseWikiQaSnapshot::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('qa_attempt_count', $run->qa_attempt_count)
+            ->first();
 
-            return self::FAILURE;
+        $snapshotMatches = $snapshot !== null
+            && $snapshot->qa_status === $run->qa_status
+            && (int) $snapshot->customer_id === (int) $run->customer_id;
+
+        return [
+            'pages_count' => $pivotPageIds->count(),
+            'has_current_versions' => $hasCurrentVersions,
+            'has_links' => $hasLinks,
+            'has_claims' => $hasClaims,
+            'snapshot' => $snapshot,
+            'snapshot_matches' => $snapshotMatches,
+        ];
+    }
+
+    /**
+     * @return array{outcome: string, reason?: string, target_qa_status?: string}
+     */
+    private function computePlan(EnterpriseWikiIngestRun $run, array $observed): array
+    {
+        if ($observed['pages_count'] === 0) {
+            return ['outcome' => 'refused', 'reason' => "Run [{$run->id}] has no applied pages — refusing recovery."];
         }
 
-        $this->info("[WIKI_RECOVERY] All guards passed for run [{$runId}].");
-        $this->line("[WIKI_RECOVERY]   snapshot_id={$snapshot->id} qa_attempt_count={$snapshot->qa_attempt_count} qa_status={$snapshot->qa_status}");
-        $this->line('[WIKI_RECOVERY]   pages='.$pivotPageIds->count());
-
-        if ($dryRun) {
-            $this->info('[WIKI_RECOVERY] --dry-run: no changes made.');
-
-            return self::SUCCESS;
+        if (! in_array($run->qa_status, self::QA_TERMINAL_STATUSES, true)) {
+            // qa_status never reached a terminal state — the failure happened during or
+            // before QA. Safe to resume: every stage in continueAfterPagesGenerated() is
+            // independently idempotent against work it already finished.
+            return ['outcome' => 'resume_continuation'];
         }
 
-        DB::transaction(function () use ($run, $snapshot): void {
-            $run->update([
-                'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
-                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
-                'qa_attempt_count' => $snapshot->qa_attempt_count,
-                'finished_at' => null,
-                'error_message' => null,
-            ]);
-        });
+        if (! $observed['snapshot_matches']) {
+            $reason = $observed['snapshot'] === null
+                ? "No QA snapshot found for run [{$run->id}] attempt [{$run->qa_attempt_count}] — refusing recovery."
+                : "QA snapshot for run [{$run->id}] does not match the run's current qa_status/customer_id — refusing recovery.";
 
-        Log::info('[WIKI_RECOVERY] Run restored from known post-ingest QA claim race.', [
+            return ['outcome' => 'refused', 'reason' => $reason];
+        }
+
+        // A passed result additionally requires the artifacts a successful pipeline run
+        // produces — a snapshot alone is not proof the linking/claim stages actually
+        // completed. escalated/failed results do not require this: those outcomes can be
+        // legitimately reached with incomplete linking/claims, which is often exactly why
+        // QA did not pass.
+        if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
+            $missing = [];
+
+            if (! $observed['has_current_versions']) {
+                $missing[] = 'current page version';
+            }
+
+            if (! $observed['has_links']) {
+                $missing[] = 'canonical page links';
+            }
+
+            if (! $observed['has_claims']) {
+                $missing[] = 'extracted claims';
+            }
+
+            if ($missing !== []) {
+                return [
+                    'outcome' => 'refused',
+                    'reason' => "Run [{$run->id}] qa_status is passed but required artifact(s) are missing: ".implode(', ', $missing).' — refusing recovery.',
+                ];
+            }
+        }
+
+        return ['outcome' => 'direct_finalize', 'target_qa_status' => $run->qa_status];
+    }
+
+    private function executeDirectFinalize(EnterpriseWikiIngestRun $run, EnterpriseWikiDocumentFlowService $flowService, array $observed): void
+    {
+        $flowService->finalizeFromExistingQaResult($run);
+
+        Log::info('[WIKI_RECOVERY] Run finalized directly from existing QA result.', [
             'run_id' => $run->id,
             'customer_id' => $run->customer_id,
-            'snapshot_id' => $snapshot->id,
-            'qa_attempt_count' => $snapshot->qa_attempt_count,
+            'qa_status' => $run->qa_status,
+            'snapshot_id' => $observed['snapshot']?->id,
+            'qa_attempt_count' => $run->qa_attempt_count,
         ]);
+
+        $this->info("[WIKI_RECOVERY] Run [{$run->id}] finalized directly from qa_status=[{$run->qa_status}] — no stages re-run, no job dispatched.");
+    }
+
+    private function executeResumeContinuation(EnterpriseWikiIngestRun $run, array $observed): void
+    {
+        $wasStaleQaClaim = $run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_RUNNING;
+
+        DB::transaction(function () use ($run, $wasStaleQaClaim): void {
+            $updates = [
+                'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+                'finished_at' => null,
+                'error_message' => null,
+            ];
+
+            if ($wasStaleQaClaim) {
+                // qa_status=running with the owning run already marked failed means the
+                // worker that claimed QA died before it could reach a terminal state — that
+                // claim is stale and must be released so a fresh continuation can reclaim it.
+                $updates['qa_status'] = EnterpriseWikiIngestRun::QA_STATUS_PENDING;
+            }
+
+            $run->update($updates);
+        });
 
         ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id);
 
-        $this->info("[WIKI_RECOVERY] Run [{$runId}] restored to verification_linking/qa_status=passed and a fresh continuation job dispatched.");
+        Log::info('[WIKI_RECOVERY] Run restored to verification_linking and a fresh continuation job dispatched.', [
+            'run_id' => $run->id,
+            'customer_id' => $run->customer_id,
+            'stale_qa_claim_released' => $wasStaleQaClaim,
+            'pages_count' => $observed['pages_count'],
+        ]);
 
-        return self::SUCCESS;
+        $this->info("[WIKI_RECOVERY] Run [{$run->id}] restored to verification_linking".($wasStaleQaClaim ? ' (stale qa_status=running released to pending)' : '').' — fresh continuation job dispatched.');
+    }
+
+    private function printObserved(int $runId, array $observed): void
+    {
+        $run = EnterpriseWikiIngestRun::query()->find($runId);
+
+        $this->line("[WIKI_RECOVERY] Observed checkpoints for run [{$runId}]:");
+        $this->line("[WIKI_RECOVERY]   status={$run->status} qa_status=".($run->qa_status ?? 'null')." qa_attempt_count={$run->qa_attempt_count}");
+        $this->line('[WIKI_RECOVERY]   pages='.$observed['pages_count']
+            .' has_current_versions='.($observed['has_current_versions'] ? 'yes' : 'no')
+            .' has_links='.($observed['has_links'] ? 'yes' : 'no')
+            .' has_claims='.($observed['has_claims'] ? 'yes' : 'no'));
+
+        $snapshot = $observed['snapshot'];
+        $this->line('[WIKI_RECOVERY]   snapshot='.($snapshot !== null ? "id={$snapshot->id} qa_status={$snapshot->qa_status}" : 'none')
+            .' snapshot_matches='.($observed['snapshot_matches'] ? 'yes' : 'no'));
+    }
+
+    private function printPlan(array $plan): void
+    {
+        $this->line("[WIKI_RECOVERY] Chosen next step: {$plan['outcome']}");
+        $this->line('[WIKI_RECOVERY] Direct finalize allowed: '.($plan['outcome'] === 'direct_finalize' ? 'yes' : 'no'));
     }
 }

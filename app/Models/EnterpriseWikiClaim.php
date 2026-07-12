@@ -45,6 +45,7 @@ class EnterpriseWikiClaim extends Model
         'approval_status',
         'approved_by_user_id',
         'approved_at',
+        'verified_at',
     ];
 
     protected function casts(): array
@@ -53,7 +54,13 @@ class EnterpriseWikiClaim extends Model
             'position_order' => 'integer',
             'conflict_flag' => 'boolean',
             'approved_at' => 'datetime',
+            'verified_at' => 'datetime',
         ];
+    }
+
+    public function isVerified(): bool
+    {
+        return $this->verified_at !== null;
     }
 
     public function page(): BelongsTo

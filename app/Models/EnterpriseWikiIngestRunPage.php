@@ -40,6 +40,7 @@ class EnterpriseWikiIngestRunPage extends Model
         'generation_started_at',
         'generation_completed_at',
         'generation_error',
+        'claims_extracted_at',
     ];
 
     protected function casts(): array
@@ -47,6 +48,7 @@ class EnterpriseWikiIngestRunPage extends Model
         return [
             'generation_started_at' => 'datetime',
             'generation_completed_at' => 'datetime',
+            'claims_extracted_at' => 'datetime',
         ];
     }
 

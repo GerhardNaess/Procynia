@@ -145,19 +145,38 @@ class EnterpriseWikiDocumentFlowService
      * transitions the run out of generating_pages under its own row lock before dispatching
      * this continuation exactly once, so by the time this runs the run is already claimed.
      */
+    /**
+     * Every individual stage below is independently safe to re-run against a run that has
+     * already progressed past it — see the class-level docs on each stage's service for its
+     * own idempotency/checkpoint mechanism. This method itself does not need to compute which
+     * stage to resume from: stages that are already complete detect this internally (via an
+     * artifact-based check or an explicit checkpoint column) and skip without a new AI call,
+     * so simply re-running the full sequence from the top is always correct, whether this is
+     * the first attempt, a duplicate dispatch, a queue retry, or a resumption after a worker
+     * restart.
+     */
     public function continueAfterPagesGenerated(int $runId): void
     {
-        $run = EnterpriseWikiIngestRun::query()->find($runId);
+        // Brief row lock purely to make the terminal check race-free against a concurrent
+        // duplicate invocation finishing at almost the same instant — released immediately
+        // after, never held across a stage's AI calls below.
+        $run = DB::transaction(function () use ($runId): ?EnterpriseWikiIngestRun {
+            $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
-        if (! $run instanceof EnterpriseWikiIngestRun) {
-            Log::warning('[WIKI_DOCUMENT_FLOW] Run not found for page-generation continuation.', [
-                'run_id' => $runId,
-            ]);
+            if (! $locked instanceof EnterpriseWikiIngestRun) {
+                return null;
+            }
 
-            return;
-        }
+            return $locked->isTerminal() ? null : $locked;
+        });
 
-        if ($run->isTerminal()) {
+        if ($run === null) {
+            if (EnterpriseWikiIngestRun::query()->find($runId) === null) {
+                Log::warning('[WIKI_DOCUMENT_FLOW] Run not found for page-generation continuation.', [
+                    'run_id' => $runId,
+                ]);
+            }
+
             return;
         }
 
@@ -181,7 +200,16 @@ class EnterpriseWikiDocumentFlowService
             }
 
             $currentStage = 'finalizing';
-            $this->finalizeFromQaResult($run->fresh() ?? $run);
+
+            $fresh = $run->fresh() ?? $run;
+
+            // Defense in depth: a concurrent invocation may already have finalized this run
+            // between this run's own performPostIngestQa() call above and this point.
+            if ($fresh->isTerminal()) {
+                return;
+            }
+
+            $this->finalizeFromExistingQaResult($fresh);
         } catch (Throwable $e) {
             $this->markRunFailed($run->fresh() ?? $run, $e, $currentStage === EnterpriseWikiIngestRun::STATUS_QA, $currentStage);
 
@@ -404,7 +432,7 @@ class EnterpriseWikiDocumentFlowService
 
     /**
      * Runs (or recognizes the outcome of) post-ingest QA for this run's first, ordinary-flow
-     * attempt. Returns true when the flow may proceed to finalizeFromQaResult() — either
+     * attempt. Returns true when the flow may proceed to finalizeFromExistingQaResult() — either
      * because this call claimed and ran QA itself, or because QA was already terminally
      * completed by someone else (the scheduled QA sweep winning a race against this
      * continuation, in particular). Returns false when QA is busy/in-progress elsewhere and
@@ -487,7 +515,13 @@ class EnterpriseWikiDocumentFlowService
         return false;
     }
 
-    private function finalizeFromQaResult(EnterpriseWikiIngestRun $run): void
+    /**
+     * Finalize a run purely from its already-recorded terminal qa_status (passed/escalated/
+     * failed) — no stage re-execution, no AI calls. Used both by the ordinary continuation
+     * flow above and by wiki:recover-document-flow's direct-finalize path, which calls this
+     * after independently validating the QA snapshot and required artifacts still hold.
+     */
+    public function finalizeFromExistingQaResult(EnterpriseWikiIngestRun $run): void
     {
         $fresh = $run->fresh() ?? $run;
 
