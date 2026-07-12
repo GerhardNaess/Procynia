@@ -10,47 +10,18 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Services\Ai\Wiki\WikiPageContentAiClient;
-use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
+/**
+ * Post-ingest QA is now a deterministic end check with no AI calls (see
+ * EnterpriseWikiPostIngestQaService) — these tests exercise the console command's own
+ * plumbing (argument validation, --all-pending, --retry) against that deterministic service.
+ */
 class EnterpriseWikiPostIngestQaCommandTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // Semantic QA (8G-4) is required for 'passed'. Enable AI and provide a
-        // default passing result so command-level tests remain unaffected.
-        config(['services.enterprise_wiki.ai_enabled' => true]);
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn([
-                'pass'                      => true,
-                'quality_score'             => 0.9,
-                'coverage_score'            => 0.88,
-                'factual_consistency_score' => 0.95,
-                'unsupported_claims'        => [],
-                'missing_topics'            => [],
-                'missing_key_facts'         => [],
-                'critique'                  => 'Default passing result for command tests.',
-                'recommended_repair_action' => 'none',
-                'confidence'                => 0.92,
-                'model'                     => 'gpt-4.1-mini/1.0',
-                'prompt_version'            => '1.0',
-            ])
-            ->byDefault();
-
-        $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn("# Generated\n\nContent.")
-            ->byDefault();
-    }
 
     // =========================================================================
     // Argument validation
@@ -73,7 +44,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_fails_when_run_not_applied(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createPendingRun($customer);
+        $run = $this->createPendingRun($customer);
 
         $this->artisan('wiki:run-post-ingest-qa', ['--run-id' => $run->id])
             ->expectsOutputToContain("only 'applied'")
@@ -87,7 +58,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_exits_zero_for_run_that_passes(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
@@ -101,7 +72,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_reports_skipped_when_already_passed(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
         $this->artisan('wiki:run-post-ingest-qa', ['--run-id' => $run->id])
             ->expectsOutputToContain('skipped')
@@ -122,8 +93,8 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_all_pending_processes_multiple_runs(): void
     {
         $customer = $this->createCustomer();
-        $runA     = $this->createAppliedRun($customer);
-        $runB     = $this->createAppliedRun($customer);
+        $runA = $this->createAppliedRun($customer);
+        $runB = $this->createAppliedRun($customer);
 
         $this->createVersionedPage($customer, $runA, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'A Article');
         $this->createVersionedPage($customer, $runA, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'A Summary');
@@ -142,7 +113,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_all_pending_skips_already_passed_runs(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
         $this->artisan('wiki:run-post-ingest-qa --all-pending')
             ->expectsOutputToContain('No pending runs')
@@ -155,7 +126,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_all_pending_skips_failed_runs(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $this->artisan('wiki:run-post-ingest-qa --all-pending')
             ->expectsOutputToContain('No pending runs')
@@ -168,7 +139,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_all_pending_skips_escalated_runs(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
 
         $this->artisan('wiki:run-post-ingest-qa --all-pending')
             ->expectsOutputToContain('No pending runs')
@@ -185,7 +156,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_retry_flag_processes_failed_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
@@ -199,7 +170,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_retry_flag_processes_escalated_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
@@ -213,7 +184,7 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     public function test_all_pending_with_retry_processes_failed_runs(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
@@ -241,24 +212,24 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'source.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'extracted_text'    => 'Source text.',
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => 'Source text.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
@@ -267,16 +238,16 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => $qaStatus,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => $qaStatus,
         ]);
     }
 
@@ -285,13 +256,13 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
             'maintainer_decision_generated_at' => now(),
         ]);
     }
@@ -299,12 +270,12 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
     }
@@ -313,8 +284,13 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     {
         EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $page->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            // Marks page generation and claim extraction complete so QA can reach a real
+            // passed/failed verdict instead of escalating on "not finished yet" — these tests
+            // are about command plumbing, not the deterministic step-completeness checks.
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'claims_extracted_at' => now(),
         ]);
     }
 
@@ -329,10 +305,10 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
 
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
-            'version_number'          => 1,
-            'is_current'              => true,
-            'content_markdown'        => "# {$title}\n\nContent.",
-            'generated_by_model'      => 'gpt-5',
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# {$title}\n\nContent.",
+            'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;

@@ -3,58 +3,30 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Services\Ai\Wiki\WikiPageContentAiClient;
-use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
+/**
+ * Post-ingest QA (redesigned as a minimal, deterministic end check): no OpenAI calls, no
+ * content generation, no rewriting, no re-analysis. It only checks facts already recorded by
+ * the pipeline — see EnterpriseWikiPostIngestQaService's own class docs for the four checks and
+ * the passed/failed/escalated mapping.
+ */
 class EnterpriseWikiPostIngestQaServiceTest extends TestCase
 {
     use RefreshDatabase;
-
-    private const FAKE_MARKDOWN = "# Article\n\nGenerated content.";
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // Semantic QA (8G-4) is required for 'passed'. Enable AI and provide a
-        // default passing result so 8G-3 structural QA tests are unaffected.
-        config(['services.enterprise_wiki.ai_enabled' => true]);
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn([
-                'pass'                      => true,
-                'quality_score'             => 0.9,
-                'coverage_score'            => 0.88,
-                'factual_consistency_score' => 0.95,
-                'unsupported_claims'        => [],
-                'missing_topics'            => [],
-                'missing_key_facts'         => [],
-                'critique'                  => 'Default passing result for structural QA tests.',
-                'recommended_repair_action' => 'none',
-                'confidence'                => 0.92,
-                'model'                     => 'gpt-4.1-mini/1.0',
-                'prompt_version'            => '1.0',
-            ])
-            ->byDefault();
-
-        // Prevent any real AI calls during repair attempts.
-        $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn(self::FAKE_MARKDOWN)
-            ->byDefault();
-    }
 
     // =========================================================================
     // Guard: run must be applied
@@ -63,7 +35,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_throws_when_run_is_not_applied(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createRun($customer, maintainerStatus: EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING);
+        $run = $this->createRun($customer, maintainerStatus: EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING);
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessageMatches("/only 'applied'/");
@@ -78,7 +50,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_returns_null_when_already_passed(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
         $result = $this->service()->runForRun($run);
 
@@ -88,7 +60,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_returns_null_when_already_running(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
 
         $result = $this->service()->runForRun($run);
 
@@ -99,13 +71,14 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     // Happy path: passed
     // =========================================================================
 
-    public function test_sets_passed_when_article_and_summary_have_content(): void
+    public function test_sets_passed_when_article_and_summary_have_content_and_steps_are_complete(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
@@ -114,21 +87,24 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertTrue($result['checks']['summary_exists']);
         $this->assertTrue($result['checks']['article_has_content']);
         $this->assertTrue($result['checks']['summary_has_content']);
-        $this->assertFalse($result['repair_attempted']);
+        $this->assertSame([], $result['critical_defects']);
+        $this->assertSame([], $result['incomplete_steps']);
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
         $this->assertNotNull($run->qa_completed_at);
         $this->assertSame(1, $run->qa_attempt_count);
+        $this->assertNull($run->qa_last_error);
     }
 
     public function test_stores_qa_result_json(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $this->service()->runForRun($run);
 
@@ -138,101 +114,216 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertArrayHasKey('checks', $run->qa_result);
         $this->assertArrayHasKey('coverage_summary', $run->qa_result);
         $this->assertArrayHasKey('lint_summary', $run->qa_result);
+        $this->assertArrayHasKey('critical_defects', $run->qa_result);
+        $this->assertArrayHasKey('incomplete_steps', $run->qa_result);
+        $this->assertNull($run->qa_result['semantic_qa']);
+        $this->assertFalse($run->qa_result['repair_attempted']);
     }
 
     // =========================================================================
-    // Escalated: critical gap, repair fails to fix it
+    // Failed: a concrete, understood content defect
     // =========================================================================
 
-    public function test_escalated_when_article_page_missing(): void
+    public function test_failed_when_article_page_missing(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
-        // Only summary — no article page in run_pages.
+        // Only summary — no article page in run_pages at all.
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
         $this->assertNotNull($result);
         $this->assertFalse($result['checks']['article_exists']);
-        $this->assertTrue($result['repair_attempted']);
+        $this->assertContains('missing_article_or_summary', $result['critical_defects']);
 
         $run->refresh();
-        // Repair cannot create a new page in run_pages → still escalated.
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        $this->assertNotEmpty($run->qa_last_error);
     }
 
-    public function test_escalated_when_summary_page_missing(): void
+    public function test_failed_when_summary_page_missing(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         // No summary in run_pages.
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
         $this->assertFalse($result['checks']['summary_exists']);
-        $this->assertTrue($result['repair_attempted']);
+        $this->assertContains('missing_article_or_summary', $result['critical_defects']);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
-    public function test_escalated_when_article_has_empty_content(): void
+    public function test_failed_when_article_has_empty_content(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->addPageToRun($run, $article);
         // Version with empty content.
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $article->id,
-            'version_number'          => 1,
-            'is_current'              => true,
-            'content_markdown'        => '',
-            'generated_by_model'      => 'gpt-5',
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '',
+            'generated_by_model' => 'gpt-5',
         ]);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
         // Article page exists structurally, but content is empty.
         $this->assertTrue($result['checks']['article_exists']);
         $this->assertFalse($result['checks']['article_has_content']);
-        $this->assertTrue($result['repair_attempted']);
+        $this->assertNotEmpty($result['critical_defects']);
 
         $run->refresh();
-        // Generate service skips pages that already have a version → repair cannot fix this.
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+    }
+
+    public function test_failed_when_a_concept_page_has_no_current_version(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        // Concept page attached to the run, but no version was ever created for it.
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $this->addPageToRun($run, $concept);
+        $this->markStepsComplete($run);
+
+        $result = $this->service()->runForRun($run);
+
+        // Article/summary check alone would pass — the broader all-pages check must catch this.
+        $this->assertTrue($result['checks']['article_has_content']);
+        $this->assertTrue($result['checks']['summary_has_content']);
+        $this->assertContains('missing_or_empty_page_version', $result['critical_defects']);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
     // =========================================================================
-    // Repair succeeds: article missing, generate creates it, re-check passes
+    // Escalated: cannot be safely determined yet — continuation steps not finished
     // =========================================================================
 
-    public function test_passed_after_repair_fills_missing_version(): void
+    public function test_escalated_when_run_has_no_applied_pages(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
-        // Article page is in run_pages but has NO version (generate will create one).
-        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->addPageToRun($run, $article);
-
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        // After repair, article will have a version with content → should pass.
         $result = $this->service()->runForRun($run);
 
-        $this->assertTrue($result['repair_attempted']);
-        $this->assertTrue($result['repair_result']['success'] ?? false);
+        $this->assertNotNull($result);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+    }
+
+    public function test_escalated_when_page_generation_not_completed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->limit(1)
+            ->update(['generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING]);
+
+        $result = $this->service()->runForRun($run);
+
+        $this->assertContains('page_generation_incomplete', $result['incomplete_steps']);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+    }
+
+    public function test_escalated_when_claim_extraction_not_completed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->limit(1)
+            ->update(['claims_extracted_at' => null]);
+
+        $result = $this->service()->runForRun($run);
+
+        $this->assertContains('extraction_incomplete', $result['incomplete_steps']);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+    }
+
+    public function test_escalated_when_an_active_extraction_lease_is_held(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->limit(1)
+            ->update(['claims_claimed_at' => now(), 'claims_claim_token' => 'another-worker']);
+
+        $result = $this->service()->runForRun($run);
+
+        $this->assertContains('extraction_lease_active', $result['incomplete_steps']);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+    }
+
+    public function test_escalated_when_claim_verification_not_completed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        $version = $article->versions()->where('is_current', true)->first();
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Unverified claim.',
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            // verified_at intentionally left null.
+        ]);
+
+        $result = $this->service()->runForRun($run);
+
+        $this->assertContains('verification_incomplete', $result['incomplete_steps']);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
     }
 
     // =========================================================================
@@ -242,10 +333,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_increments_attempt_count_on_each_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $this->service()->runForRun($run);
 
@@ -267,6 +359,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
 
         $this->createVersionedPage($customerA, $runA, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'A Article');
         $this->createVersionedPage($customerA, $runA, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'A Summary');
+        $this->markStepsComplete($runA);
 
         $this->service()->runForRun($runA);
 
@@ -281,7 +374,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_pending_runs_returns_null_qa_runs(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: null);
+        $run = $this->createAppliedRun($customer, qaStatus: null);
 
         $pending = $this->service()->findPendingRuns();
 
@@ -291,7 +384,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_pending_runs_excludes_passed(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
         $pending = $this->service()->findPendingRuns();
 
@@ -301,7 +394,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_pending_runs_excludes_running(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
 
         $pending = $this->service()->findPendingRuns();
 
@@ -311,7 +404,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_pending_runs_excludes_failed(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $pending = $this->service()->findPendingRuns();
 
@@ -321,7 +414,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_pending_runs_excludes_escalated(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
 
         $pending = $this->service()->findPendingRuns();
 
@@ -335,10 +428,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_default_mode_skips_failed_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
@@ -350,10 +444,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_default_mode_skips_escalated_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run);
 
@@ -365,10 +460,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_retry_mode_can_run_failed_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run, retry: true);
 
@@ -380,10 +476,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_retry_mode_can_run_escalated_run(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
 
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->service()->runForRun($run, retry: true);
 
@@ -395,8 +492,8 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     public function test_find_retryable_runs_includes_failed_and_escalated(): void
     {
         $customer = $this->createCustomer();
-        $runF     = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
-        $runE     = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $runF = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $runE = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
 
         $retryable = $this->service()->findRetryableRuns();
 
@@ -405,73 +502,82 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     }
 
     // =========================================================================
-    // Lint errors block passed; warnings do not
+    // Lint errors are a critical (failed) defect; warnings do not block passed
     // =========================================================================
 
-    public function test_escalated_when_lint_error_blocks_passed(): void
+    public function test_failed_when_lint_error_blocks_passed(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         // Article with content + a claim whose source reference points to a non-existent document.
         // This produces a source_reference_without_document ERROR during lint.
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $version = $article->versions()->where('is_current', true)->first();
-        $claim   = \App\Models\EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id'         => $article->id,
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text'                      => 'Test claim.',
-            'position_order'                  => 1,
-            'confidence'                      => \App\Models\EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'approval_status'                 => \App\Models\EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'claim_text' => 'Test claim.',
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'verified_at' => now(),
         ]);
 
-        \App\Models\EnterpriseWikiSourceReference::query()->create([
+        EnterpriseWikiSourceReference::query()->create([
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type'              => \App\Models\EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                => 999999, // Non-existent document.
-            'source_label'             => 'Missing doc',
-            'excerpt'                  => 'some excerpt',
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 999999, // Non-existent document.
+            'source_label' => 'Missing doc',
+            'excerpt' => 'some excerpt',
         ]);
+
+        // Lint findings must already exist for QA to read — the continuation pipeline's own
+        // lint stage would normally have written these before QA runs.
+        app(EnterpriseWikiAppliedRunLintService::class)->lint($run->fresh());
 
         $result = $this->service()->runForRun($run);
 
-        // Content checks pass, but lint error blocks passed.
         $this->assertNotNull($result);
         $this->assertTrue($result['checks']['article_has_content']);
         $this->assertTrue($result['checks']['summary_has_content']);
-        $this->assertTrue($result['open_lint_errors']);
+        $this->assertContains('critical_lint_findings_or_broken_links', $result['critical_defects']);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
     public function test_passed_when_only_lint_warnings_exist(): void
     {
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
 
         // Article with content + a claim with no source reference → warning, not error.
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $version = $article->versions()->where('is_current', true)->first();
-        \App\Models\EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id'         => $article->id,
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text'                      => 'Test claim with no source.',
-            'position_order'                  => 1,
-            'confidence'                      => \App\Models\EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'approval_status'                 => \App\Models\EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'claim_text' => 'Test claim with no source.',
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'verified_at' => now(),
         ]);
         // No source references on the claim → claim_missing_source WARNING is created.
+
+        app(EnterpriseWikiAppliedRunLintService::class)->lint($run->fresh());
 
         $result = $this->service()->runForRun($run);
 
         $this->assertNotNull($result);
-        $this->assertFalse($result['open_lint_errors'], 'Warnings must not block passed.');
+        $this->assertSame([], $result['critical_defects'], 'Warnings must not block passed.');
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
@@ -487,9 +593,10 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $hash = md5_file($path);
 
         $customer = $this->createCustomer();
-        $run      = $this->createAppliedRun($customer);
+        $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'A');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'S');
+        $this->markStepsComplete($run);
 
         $this->service()->runForRun($run);
 
@@ -505,6 +612,33 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         return app(EnterpriseWikiPostIngestQaService::class);
     }
 
+    /**
+     * Marks every continuation step this run's pages depend on as complete — page generation,
+     * claim extraction, and claim verification — so QA can reach a real passed/failed verdict
+     * instead of escalating on "not finished yet". Call after all pages/claims for a test are
+     * set up.
+     */
+    private function markStepsComplete(EnterpriseWikiIngestRun $run): void
+    {
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->update([
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+                'claims_extracted_at' => now(),
+                'claims_claimed_at' => null,
+                'claims_claim_token' => null,
+            ]);
+
+        $pageIds = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->pluck('enterprise_wiki_page_id');
+
+        EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->whereNull('verified_at')
+            ->update(['verified_at' => now(), 'verification_claimed_at' => null, 'verification_claim_token' => null]);
+    }
+
     private function createCustomer(string $name = 'Test AS'): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -518,24 +652,24 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'source.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'extracted_text'    => 'Source document text for QA tests.',
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => 'Source document text for QA tests.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
@@ -544,13 +678,13 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => $maintainerStatus,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => $maintainerStatus,
             'maintainer_decision_generated_at' => now(),
         ]);
     }
@@ -560,28 +694,28 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => $qaStatus,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => $qaStatus,
         ]);
     }
 
     private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
     }
@@ -590,8 +724,8 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     {
         EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $page->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
         ]);
     }
 
@@ -606,10 +740,10 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
 
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
-            'version_number'          => 1,
-            'is_current'              => true,
-            'content_markdown'        => "# {$title}\n\nContent.",
-            'generated_by_model'      => 'gpt-5',
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# {$title}\n\nContent.",
+            'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;

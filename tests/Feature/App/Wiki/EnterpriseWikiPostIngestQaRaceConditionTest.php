@@ -277,11 +277,34 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $snapshotsBefore = EnterpriseWikiQaSnapshot::query()->count();
 
         // Step 3: the old race exception, thrown from inside performPostIngestQa()'s claim.
+        // The whole QA service is mocked here (this test is about the continuation/recovery
+        // race, not QA's own logic) — recovery's revalidate_and_finalize path also calls
+        // evaluate() (read-only prediction) and a second runForRun() (a no-op against a real
+        // service, since qa_status is already the terminal 'passed'), so both must be stubbed
+        // on the same mock instance alongside the original throwing expectation.
         $this->configureUpstreamMocks();
-        $this->mock(EnterpriseWikiPostIngestQaService::class)
-            ->shouldReceive('runForRun')
-            ->once()
-            ->andThrow(new RuntimeException("Post-ingest QA did not claim run [{$run->id}]."));
+        $this->mock(EnterpriseWikiPostIngestQaService::class, function ($mock) use ($run): void {
+            $mock->shouldReceive('runForRun')
+                ->once()
+                ->andThrow(new RuntimeException("Post-ingest QA did not claim run [{$run->id}]."));
+
+            $mock->shouldReceive('runForRun')
+                ->andReturnNull();
+
+            $mock->shouldReceive('evaluate')
+                ->andReturn([
+                    'verdict' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+                    'reason' => null,
+                    'incomplete_steps' => [],
+                    'critical_defects' => [],
+                    'checks' => [
+                        'article_exists' => true,
+                        'summary_exists' => true,
+                        'article_has_content' => true,
+                        'summary_has_content' => true,
+                    ],
+                ]);
+        });
 
         $job = new ContinueEnterpriseWikiDocumentFlowAfterPages($run->id);
 

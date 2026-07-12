@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -11,9 +12,6 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiQaSnapshot;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Services\Ai\Wiki\WikiPageContentAiClient;
-use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
-use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQaSnapshotService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -25,34 +23,26 @@ use Tests\TestCase;
  *
  * Verifies that immutable snapshots are created at terminal QA status transitions,
  * that idempotence is enforced, and that snapshot fields correctly reflect the
- * QA result. No external AI calls — all AI clients are mocked.
+ * QA result.
+ *
+ * Post-ingest QA (EnterpriseWikiPostIngestQaService) is now a minimal, fully deterministic
+ * end check: it never calls OpenAI and never runs semantic QA or semantic repair. As a result
+ * the semantic-QA and semantic-repair snapshot fields (semantic_qa_ran, semantic_pass,
+ * semantic_quality_score/coverage_score/factual_score, semantic_missing_*_count,
+ * semantic_repair_attempted, semantic_repair_success, semantic_post_repair_*, etc.) are always
+ * false/null now — there is no remaining code path that populates them with real values. Tests
+ * that used to assert specific non-trivial semantic values have been removed entirely; where a
+ * test's actual point survives (e.g. "a snapshot is created for a terminal verdict", "repeat
+ * attempts don't duplicate a snapshot"), the semantic-field assertions have been flipped to
+ * assert the permanent false/null state instead of deleting the whole test.
  */
 class EnterpriseWikiQaSnapshotServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const REVISED_MARKDOWN = "# Article\n\nRevised content.";
-
     protected function setUp(): void
     {
         parent::setUp();
-
-        config(['services.enterprise_wiki.ai_enabled' => true]);
-
-        $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn("# Generated\n\nContent.")
-            ->byDefault();
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult())
-            ->byDefault();
-
-        $this->mock(WikiSemanticReviserAiClient::class)
-            ->shouldReceive('revise')
-            ->andReturn(self::REVISED_MARKDOWN)
-            ->byDefault();
     }
 
     // =========================================================================
@@ -65,6 +55,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $this->orchestrator()->runForRun($run);
 
@@ -78,14 +69,12 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
 
     public function test_failed_creates_snapshot(): void
     {
-        config(['services.enterprise_wiki.ai_enabled' => false]);
-
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
+        // Only an article is produced — the missing summary is a critical defect
+        // (missing_article_or_summary), which is a concrete, understood content defect.
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)->shouldReceive('review')->never();
+        $this->markStepsComplete($run);
 
         $this->orchestrator()->runForRun($run);
 
@@ -100,10 +89,9 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->failingAiResult(action: 'escalate'));
+        // Continuation steps (generation status / claim extraction / claim verification) are
+        // deliberately left incomplete — evaluate() cannot safely judge the run yet and must
+        // escalate rather than guess.
 
         $this->orchestrator()->runForRun($run);
 
@@ -113,107 +101,25 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
     }
 
     // =========================================================================
-    // 4: repair_required is transient — only one snapshot per QA run
+    // 4: a run with no pages at all resolves to a single terminal snapshot
     // =========================================================================
 
     public function test_repair_required_does_not_create_extra_snapshot(): void
     {
-        // Level 1/2 repair temporarily sets repair_required, but the run resolves
-        // to a terminal status. Exactly one snapshot must be created.
+        // Repair no longer exists in the orchestrator at all. A run with no applied pages
+        // whatsoever goes straight to a terminal escalated verdict (evaluate() cannot judge a
+        // run with zero pages) — it must never be left sitting in the old repair_required
+        // status, and exactly one snapshot must be created for the attempt.
         $customer = $this->createCustomer();
-        // Create run with NO pages — will trigger level 1/2 repair_required → then generates pages
         $run = $this->createAppliedRun($customer);
-        // No pages: article/summary will be generated via level 1/2 repair
+        // No pages attached to the run at all.
 
         $this->orchestrator()->runForRun($run);
 
-        // After level 1/2 repair, run should have pages generated and reach a terminal status.
         $this->assertSame(1, EnterpriseWikiQaSnapshot::query()->count());
         $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
-    }
-
-    // =========================================================================
-    // 5: semantic QA result preserved in snapshot
-    // =========================================================================
-
-    public function test_semantic_qa_result_preserved_in_snapshot(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $articleVersion = EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $article->id)
-            ->where('is_current', true)
-            ->first();
-
-        $aiResult = $this->passingAiResult();
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($aiResult);
-
-        $this->orchestrator()->runForRun($run);
-
-        $snapshot = EnterpriseWikiQaSnapshot::query()->first();
-        $this->assertNotNull($snapshot);
-        $this->assertTrue((bool) $snapshot->semantic_qa_ran);
-        $this->assertTrue((bool) $snapshot->semantic_pass);
-        $this->assertEqualsWithDelta(0.92, $snapshot->semantic_quality_score, 0.01);
-        $this->assertEqualsWithDelta(0.90, $snapshot->semantic_coverage_score, 0.01);
-        $this->assertEqualsWithDelta(0.97, $snapshot->semantic_factual_score, 0.01);
-        $this->assertSame(0, (int) $snapshot->semantic_missing_topics_count);
-        $this->assertSame(0, (int) $snapshot->semantic_missing_key_facts_count);
-        $this->assertSame(0, (int) $snapshot->semantic_unsupported_claims_count);
-        $this->assertNotEmpty($snapshot->semantic_model);
-        $this->assertNotEmpty($snapshot->semantic_prompt_version);
-        $this->assertNotNull($snapshot->semantic_page_version_id);
-        $this->assertSame((int) $articleVersion->id, (int) $snapshot->semantic_page_version_id);
-    }
-
-    // =========================================================================
-    // 6: repair and post-repair result preserved in snapshot
-    // =========================================================================
-
-    public function test_repair_and_post_repair_preserved_in_snapshot(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $originalVersion = EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $article->id)
-            ->where('is_current', true)
-            ->first();
-
-        $this->mock(WikiSemanticReviserAiClient::class)
-            ->shouldReceive('revise')->once()->andReturn(self::REVISED_MARKDOWN);
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->twice()
-            ->andReturn($this->failingAiResult(action: 'targeted_revision'), $this->passingAiResult());
-
-        $this->orchestrator()->runForRun($run);
-
-        $snapshot = EnterpriseWikiQaSnapshot::query()->first();
-        $this->assertNotNull($snapshot);
-        $this->assertTrue((bool) $snapshot->semantic_repair_attempted);
-        $this->assertTrue((bool) $snapshot->semantic_repair_success);
-        $this->assertSame((int) $originalVersion->id, (int) $snapshot->semantic_repair_previous_version_id);
-        $this->assertNotNull($snapshot->semantic_repair_new_version_id);
-        $this->assertNotSame((int) $originalVersion->id, (int) $snapshot->semantic_repair_new_version_id);
-        $this->assertNotEmpty($snapshot->semantic_repair_model);
-
-        // Post-repair QA
-        $this->assertTrue((bool) $snapshot->semantic_post_repair_pass);
-        $this->assertNotNull($snapshot->semantic_post_repair_quality_score);
-        $this->assertNotNull($snapshot->semantic_post_repair_coverage_score);
-        $this->assertNotNull($snapshot->semantic_post_repair_factual_score);
-
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $snapshot->qa_status);
     }
 
     // =========================================================================
@@ -226,10 +132,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
+        $this->markStepsComplete($run);
 
         $this->orchestrator()->runForRun($run);
 
@@ -239,62 +142,13 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $this->assertTrue((bool) $snapshot->structural_qa_passed);
         $this->assertFalse((bool) $snapshot->open_lint_errors);
         $this->assertSame(0, (int) $snapshot->lint_error_count);
-        $this->assertEqualsWithDelta(0.92, $snapshot->semantic_quality_score, 0.01);
-        $this->assertEqualsWithDelta(0.90, $snapshot->semantic_coverage_score, 0.01);
-        $this->assertEqualsWithDelta(0.97, $snapshot->semantic_factual_score, 0.01);
-    }
 
-    public function test_missing_topics_and_claims_counts_stored(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticReviserAiClient::class)
-            ->shouldReceive('revise')->once()->andReturn(self::REVISED_MARKDOWN);
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->twice()
-            ->andReturn(
-                $this->failingAiResult(
-                    action: 'targeted_revision',
-                    missingTopics: ['Topic A', 'Topic B'],
-                    unsupportedClaims: ['Wrong claim'],
-                ),
-                $this->passingAiResult(),
-            );
-
-        $this->orchestrator()->runForRun($run);
-
-        $snapshot = EnterpriseWikiQaSnapshot::query()->first();
-        $this->assertSame(2, (int) $snapshot->semantic_missing_topics_count);
-        $this->assertSame(1, (int) $snapshot->semantic_unsupported_claims_count);
-    }
-
-    // =========================================================================
-    // 8: model, prompt_version, source_hash, page versions preserved
-    // =========================================================================
-
-    public function test_model_prompt_version_source_hash_preserved(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
-
-        $this->orchestrator()->runForRun($run);
-
-        $snapshot = EnterpriseWikiQaSnapshot::query()->first();
-        $this->assertSame('gpt-4.1-mini/1.0', $snapshot->semantic_model);
-        $this->assertSame('1.0', $snapshot->semantic_prompt_version);
-        $this->assertNotNull($snapshot->semantic_source_hash);
-        $this->assertSame(64, strlen($snapshot->semantic_source_hash));
+        // Semantic QA never runs post-ingest anymore — these fields are permanently empty.
+        $this->assertFalse((bool) $snapshot->semantic_qa_ran);
+        $this->assertNull($snapshot->semantic_pass);
+        $this->assertNull($snapshot->semantic_quality_score);
+        $this->assertNull($snapshot->semantic_coverage_score);
+        $this->assertNull($snapshot->semantic_factual_score);
     }
 
     // =========================================================================
@@ -308,19 +162,13 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
-        // First attempt: escalate
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->failingAiResult(action: 'escalate'));
-
+        // First attempt: continuation steps are incomplete -> escalated.
         $this->orchestrator()->runForRun($run);
         $this->assertSame(1, EnterpriseWikiQaSnapshot::query()->count());
 
-        // Second attempt via retry: passes
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
-
+        // Second attempt via retry: steps are now complete -> passes.
+        $run->refresh();
+        $this->markStepsComplete($run);
         $this->orchestrator()->runForRun($run, retry: true);
 
         $this->assertSame(2, EnterpriseWikiQaSnapshot::query()->count());
@@ -342,6 +190,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $this->orchestrator()->runForRun($run);
         $this->assertSame(1, EnterpriseWikiQaSnapshot::query()->count());
@@ -394,6 +243,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
         $result = $this->orchestrator()->runForRun($run);
 
@@ -436,16 +286,13 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
     // Snapshot failure handling (8G-6 rettelse)
     // =========================================================================
 
-    public function test_snapshot_failure_on_passing_qa_gives_failed_not_passed(): void
+    public function test_snapshot_failure_on_passing_qa_gives_escalated_not_passed(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
+        $this->markStepsComplete($run);
 
         $this->mock(EnterpriseWikiQaSnapshotService::class)
             ->shouldReceive('capture')
@@ -454,7 +301,9 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $this->orchestrator()->runForRun($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        // A snapshot write failure is a technical problem, not a content verdict — it is always
+        // escalated, never recorded as failed (failed is reserved for a genuine content defect).
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertSame(0, EnterpriseWikiQaSnapshot::query()->count());
     }
 
@@ -464,10 +313,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
+        $this->markStepsComplete($run);
 
         $this->mock(EnterpriseWikiQaSnapshotService::class)
             ->shouldReceive('capture')
@@ -487,10 +333,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
+        $this->markStepsComplete($run);
 
         $this->mock(EnterpriseWikiQaSnapshotService::class)
             ->shouldReceive('capture')
@@ -501,9 +344,9 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run->refresh();
         $this->assertNotNull($run->qa_result);
         $this->assertArrayHasKey('checks', $run->qa_result);
+        // Semantic QA no longer runs — the key is preserved in the result shape but always null.
         $this->assertArrayHasKey('semantic_qa', $run->qa_result);
-        $this->assertNotNull($run->qa_result['semantic_qa']);
-        $this->assertTrue($run->qa_result['semantic_qa']['pass']);
+        $this->assertNull($run->qa_result['semantic_qa']);
     }
 
     public function test_snapshot_success_preserves_normal_terminal_status(): void
@@ -513,10 +356,7 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
+        $this->markStepsComplete($run);
 
         $this->orchestrator()->runForRun($run);
 
@@ -532,12 +372,9 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
 
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->passingAiResult());
-
-        // First attempt: snapshot fails → run ends as failed
+        // First attempt: snapshot fails -> escalated (a technical failure, not a content verdict).
         $snapshotMock = $this->mock(EnterpriseWikiQaSnapshotService::class);
         $snapshotMock->shouldReceive('capture')
             ->once()
@@ -546,10 +383,10 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $this->orchestrator()->runForRun($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertSame(0, EnterpriseWikiQaSnapshot::query()->count());
 
-        // Second attempt (retry): snapshot succeeds → run reaches passed
+        // Second attempt (retry): snapshot succeeds -> run reaches passed.
         $snapshotMock->shouldReceive('capture')
             ->once()
             ->andReturn(null);
@@ -570,43 +407,31 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         return app(EnterpriseWikiPostIngestQaService::class);
     }
 
-    private function passingAiResult(): array
+    /**
+     * Marks every continuation step (page generation, claim extraction, claim verification)
+     * complete for every page/claim belonging to the run, and clears any lease markers — the
+     * state evaluate() requires before it can reach a passed/failed verdict instead of
+     * escalating due to "cannot be safely determined yet".
+     */
+    private function markStepsComplete(EnterpriseWikiIngestRun $run): void
     {
-        return [
-            'pass'                      => true,
-            'quality_score'             => 0.92,
-            'coverage_score'            => 0.90,
-            'factual_consistency_score' => 0.97,
-            'unsupported_claims'        => [],
-            'missing_topics'            => [],
-            'missing_key_facts'         => [],
-            'critique'                  => 'Content accurately represents the source.',
-            'recommended_repair_action' => 'none',
-            'confidence'                => 0.94,
-            'model'                     => 'gpt-4.1-mini/1.0',
-            'prompt_version'            => '1.0',
-        ];
-    }
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->update([
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+                'claims_extracted_at' => now(),
+                'claims_claimed_at' => null,
+                'claims_claim_token' => null,
+            ]);
 
-    private function failingAiResult(
-        string $action = 'targeted_revision',
-        array $missingTopics = ['Section A'],
-        array $unsupportedClaims = [],
-    ): array {
-        return [
-            'pass'                      => false,
-            'quality_score'             => 0.45,
-            'coverage_score'            => 0.40,
-            'factual_consistency_score' => 0.80,
-            'unsupported_claims'        => $unsupportedClaims,
-            'missing_topics'            => $missingTopics,
-            'missing_key_facts'         => [],
-            'critique'                  => 'Key topics missing.',
-            'recommended_repair_action' => $action,
-            'confidence'                => 0.85,
-            'model'                     => 'gpt-4.1-mini/1.0',
-            'prompt_version'            => '1.0',
-        ];
+        $pageIds = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->pluck('enterprise_wiki_page_id');
+
+        EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->whereNull('verified_at')
+            ->update(['verified_at' => now(), 'verification_claimed_at' => null, 'verification_claim_token' => null]);
     }
 
     private function createCustomer(string $name = 'Snapshot Test AS'): Customer
@@ -622,12 +447,12 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
@@ -636,12 +461,12 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         string $extractedText = 'Authoritative source document text for snapshot tests.',
     ): EnterpriseWikiDocument {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'source.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'extracted_text'    => $extractedText,
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => $extractedText,
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
@@ -650,28 +475,28 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => $qaStatus,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => $qaStatus,
         ]);
     }
 
     private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
     }
@@ -680,8 +505,8 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
     {
         EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $page->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
         ]);
     }
 
@@ -697,10 +522,10 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
 
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
-            'version_number'          => 1,
-            'is_current'              => true,
-            'content_markdown'        => $content !== '' ? $content : "# {$title}\n\nContent.",
-            'generated_by_model'      => 'gpt-5',
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => $content !== '' ? $content : "# {$title}\n\nContent.",
+            'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;

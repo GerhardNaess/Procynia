@@ -35,6 +35,7 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
     use RefreshDatabase;
 
     private const HASH_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
     private const HASH_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
     protected function setUp(): void
@@ -132,13 +133,13 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
             ->first();
 
         $claim = EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id'        => $page->id,
+            'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text'                     => 'Existing claim without ref',
-            'position_order'                 => 0,
-            'confidence'                     => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag'                  => false,
-            'approval_status'                => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'claim_text' => 'Existing claim without ref',
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
         ]);
 
         $this->assertSame(0, EnterpriseWikiSourceReference::count());
@@ -212,13 +213,7 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
-        // Semantic QA must be called as part of re-evaluation
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->once()
-            ->andReturn($this->passingSemanticResult())
-            ->byDefault();
-
+        // Post-ingest QA (deterministic, no AI) must run as part of re-evaluation.
         app(EnterpriseWikiDeepRepairService::class)->attempt($run, self::HASH_A);
 
         $run->refresh();
@@ -248,23 +243,30 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
     // 8: Repair done but QA still fails → escalated
     // =========================================================================
 
-    public function test_deep_repair_with_qa_still_failing_gives_escalated(): void
+    /**
+     * Deep repair only fixes claims/source references/page links — it never touches page
+     * content. A page with genuinely empty content is therefore a defect deep repair cannot
+     * resolve, and post-ingest QA correctly reports it as failed (a concrete, understood
+     * defect), not escalated (which now means "cannot be safely judged yet").
+     */
+    public function test_deep_repair_with_a_remaining_content_defect_gives_failed(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer, hash: self::HASH_A);
         $run = $this->createEscalatedRun($customer, $document);
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
-        $this->mock(WikiSemanticQaAiClient::class)
-            ->shouldReceive('review')
-            ->andReturn($this->escalatingSemanticResult());
+        EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->where('is_current', true)
+            ->update(['content_markdown' => '']);
 
         $result = app(EnterpriseWikiDeepRepairService::class)->attempt($run, self::HASH_A);
 
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $result['qa_status']);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $result['qa_status']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
     // =========================================================================
@@ -365,8 +367,8 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         // QA re-evaluation creates a snapshot with deep repair context
         $this->assertDatabaseHas('enterprise_wiki_qa_snapshots', [
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'deep_repair_attempted'         => true,
-            'deep_repair_source_hash'       => self::HASH_A,
+            'deep_repair_attempted' => true,
+            'deep_repair_source_hash' => self::HASH_A,
         ]);
     }
 
@@ -455,44 +457,22 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
     private function passingSemanticResult(): array
     {
         return [
-            'pass'                     => true,
-            'quality_score'            => 0.92,
-            'coverage_score'           => 0.90,
+            'pass' => true,
+            'quality_score' => 0.92,
+            'coverage_score' => 0.90,
             'factual_consistency_score' => 0.95,
-            'unsupported_claims'       => [],
-            'missing_topics'           => [],
-            'missing_key_facts'        => [],
-            'critique'                 => 'Well covered.',
+            'unsupported_claims' => [],
+            'missing_topics' => [],
+            'missing_key_facts' => [],
+            'critique' => 'Well covered.',
             'recommended_repair_action' => 'none',
-            'confidence'               => 0.9,
-            'model'                    => 'gpt-4.1-mini/1.0',
-            'prompt_version'           => '1.0',
-            'source_hash'              => self::HASH_A,
-            'page_version_id'          => 1,
-            'skipped'                  => false,
-            'escalated'                => false,
-        ];
-    }
-
-    private function escalatingSemanticResult(): array
-    {
-        return [
-            'pass'                     => false,
-            'quality_score'            => 0.2,
-            'coverage_score'           => 0.1,
-            'factual_consistency_score' => 0.2,
-            'unsupported_claims'       => ['Some claim'],
-            'missing_topics'           => ['Topic A'],
-            'missing_key_facts'        => [],
-            'critique'                 => 'Major gaps.',
-            'recommended_repair_action' => 'escalate',
-            'confidence'               => 0.8,
-            'model'                    => 'gpt-4.1-mini/1.0',
-            'prompt_version'           => '1.0',
-            'source_hash'              => self::HASH_A,
-            'page_version_id'          => 1,
-            'skipped'                  => false,
-            'escalated'                => true,
+            'confidence' => 0.9,
+            'model' => 'gpt-4.1-mini/1.0',
+            'prompt_version' => '1.0',
+            'source_hash' => self::HASH_A,
+            'page_version_id' => 1,
+            'skipped' => false,
+            'escalated' => false,
         ];
     }
 
@@ -509,24 +489,24 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer, string $hash = ''): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'source.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => $hash !== '' ? $hash : hash('sha256', Str::random(32)),
-            'extracted_text'    => 'Authoritative source text for deep repair tests.',
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => $hash !== '' ? $hash : hash('sha256', Str::random(32)),
+            'extracted_text' => 'Authoritative source text for deep repair tests.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
@@ -537,31 +517,31 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         ?string $deepRepairSourceHash = null,
     ): EnterpriseWikiIngestRun {
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-            'qa_attempt_count'                 => 1,
-            'maintenance_source_hash'          => $maintenanceSourceHash,
-            'deep_repair_source_hash'          => $deepRepairSourceHash,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'qa_attempt_count' => 1,
+            'maintenance_source_hash' => $maintenanceSourceHash,
+            'deep_repair_source_hash' => $deepRepairSourceHash,
         ]);
     }
 
     private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => self::HASH_A,
         ]);
     }
@@ -577,16 +557,20 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
 
         EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $page->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            // Deep repair only fixes claims/references/links — page generation is assumed
+            // already complete, which post-ingest QA's deterministic step-completeness check
+            // now verifies explicitly.
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
         ]);
 
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
-            'version_number'          => 1,
-            'is_current'              => true,
-            'content_markdown'        => $content !== '' ? $content : "# {$title}\n\nContent.",
-            'generated_by_model'      => 'gpt-5',
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => $content !== '' ? $content : "# {$title}\n\nContent.",
+            'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;
@@ -615,22 +599,22 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
             }
 
             $claim = EnterpriseWikiClaim::query()->create([
-                'enterprise_wiki_page_id'        => $page->id,
+                'enterprise_wiki_page_id' => $page->id,
                 'enterprise_wiki_page_version_id' => $version->id,
-                'claim_text'                     => 'Pre-existing claim for ' . $page->title,
-                'position_order'                 => 0,
-                'confidence'                     => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-                'conflict_flag'                  => false,
-                'approval_status'                => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'claim_text' => 'Pre-existing claim for '.$page->title,
+                'position_order' => 0,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'conflict_flag' => false,
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
             ]);
 
             EnterpriseWikiSourceReference::query()->create([
                 'enterprise_wiki_claim_id' => $claim->id,
-                'source_type'              => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                'source_id'                => $document->id,
-                'source_label'             => $document->original_filename,
-                'excerpt'                  => 'Supporting excerpt.',
-                'source_hash'              => $document->file_hash_sha256 ?? '',
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => $document->id,
+                'source_label' => $document->original_filename,
+                'excerpt' => 'Supporting excerpt.',
+                'source_hash' => $document->file_hash_sha256 ?? '',
             ]);
         }
     }
@@ -642,13 +626,13 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         string $linkType,
     ): void {
         EnterpriseWikiPageLink::query()->create([
-            'customer_id'                   => $run->customer_id,
+            'customer_id' => $run->customer_id,
             'enterprise_wiki_ingest_run_id' => $run->id,
-            'from_page_id'                  => $from->id,
-            'to_page_id'                    => $to->id,
-            'link_type'                     => $linkType,
-            'source'                        => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-            'confidence'                    => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+            'from_page_id' => $from->id,
+            'to_page_id' => $to->id,
+            'link_type' => $linkType,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
         ]);
     }
 }

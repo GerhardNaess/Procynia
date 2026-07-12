@@ -2,40 +2,49 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
-use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Post-ingest QA orchestrator for applied Enterprise Wiki runs.
+ * Post-ingest QA for applied Enterprise Wiki runs — a minimal, deterministic end check.
  *
- * Three-tier QA gate (8G-3 + 8G-4 + 8G-5 + 8G-6):
- *   Level 1 — Technical QA: artefacts exist with content (article + summary)
- *   Level 2 — Structural QA: lint findings, coverage metrics
- *   Level 3 — Semantic QA: AI review of generated content vs. extracted_text source
- *   Level 3.5 — Targeted repair (8G-5): one automatic revision when semantic QA fails with repair_required,
- *               followed by a full re-evaluation (levels 1–3). Result is always terminal (passed or escalated).
+ * QA does not call OpenAI, does not generate or rewrite any page content, and does not
+ * re-analyze content. It only checks facts that are already recorded by the pipeline:
  *
- * QA status flow:
- *   null / pending → running
- *     → Level 1/2 gap found: repair_required → attempt repair → re-check
- *       → still failing: escalated
- *     → Level 1/2 passed → Level 3 (semantic QA, when AI enabled)
- *       → semantic pass: passed
- *       → semantic avvik (targeted_revision/full_regeneration):
- *           → targeted repair (8G-5) → re-evaluate all levels
- *             → re-evaluation passes: passed
- *             → re-evaluation fails or repair not possible: escalated
- *       → semantic escalation or source missing: escalated
- *     → failed (unexpected exception during QA or repair)
+ *   1. Every page the run was supposed to produce has a finished (current, non-empty) version.
+ *   2. Every continuation step (page generation, claim extraction, claim verification) is
+ *      recorded complete for every page/claim belonging to this run.
+ *   3. No active extraction/verification lease is held by another worker, and no checkpoint is
+ *      left half-finished.
+ *   4. No open critical lint finding (error severity, or a broken wikilink specifically) is
+ *      registered for this run.
  *
- * The status transition from null/pending to 'running' is done via an atomic DB update
- * to prevent parallel runs for the same run ID.
+ * Verdict:
+ *   - everything above holds                       → passed
+ *   - a concrete critical defect is found (1 or 4)  → failed
+ *   - anything cannot be safely determined (2 or 3, or the run has no pages at all,
+ *     or QA itself hits an unexpected technical error) → escalated
+ *
+ * A technical failure while running QA (an unexpected exception, a snapshot write failure) is
+ * never recorded as qa_status=failed — that status is reserved for a concrete, understood
+ * content/structure defect. Technical failures escalate instead, so a human can investigate
+ * without the run being wrongly flagged as having a real content problem.
+ *
+ * evaluate() is pure and read-only — it claims nothing, writes nothing, and never calls lint
+ * itself (it reads whatever EnterpriseWikiLintFinding rows the continuation pipeline's own lint
+ * stage already wrote). This lets a caller (e.g. wiki:recover-document-flow --dry-run) predict
+ * the verdict without any side effect, and lets the real run (executeQa()) reuse the exact same
+ * logic for the value it actually persists.
+ *
+ * The status transition from null/pending to 'running' is done via an atomic DB update to
+ * prevent parallel runs for the same run ID.
  */
 class EnterpriseWikiPostIngestQaService
 {
@@ -65,10 +74,6 @@ class EnterpriseWikiPostIngestQaService
 
     public function __construct(
         private readonly EnterpriseWikiCoverageService $coverageService,
-        private readonly EnterpriseWikiAppliedRunLintService $lintService,
-        private readonly EnterpriseWikiGenerateAppliedPagesService $generateService,
-        private readonly EnterpriseWikiSemanticQaService $semanticQaService,
-        private readonly EnterpriseWikiSemanticRepairService $semanticRepairService,
         private readonly EnterpriseWikiQaSnapshotService $snapshotService,
     ) {}
 
@@ -81,7 +86,7 @@ class EnterpriseWikiPostIngestQaService
      * @param  bool  $retry  When true, also claims runs in 'failed' or 'escalated' status.
      *
      * @throws \InvalidArgumentException if the run is not applied
-     * @throws \Throwable on unexpected errors (run is marked failed before re-throw)
+     * @throws \Throwable on unexpected errors (run is escalated before re-throw)
      */
     public function runForRun(EnterpriseWikiIngestRun $run, bool $retry = false): ?array
     {
@@ -128,29 +133,100 @@ class EnterpriseWikiPostIngestQaService
         try {
             return $this->executeQa($fresh);
         } catch (\Throwable $e) {
+            // A technical failure here (e.g. an unexpected DB error) is not itself a verdict
+            // about the run's content — never record it as qa_status=failed. Escalate instead,
+            // so a human can investigate without the run being wrongly flagged as having a
+            // real content defect.
             $fresh->update([
-                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
                 'qa_completed_at' => now(),
                 'qa_last_error' => $e->getMessage(),
             ]);
 
-            Log::error('[WIKI_QA] QA failed with unexpected error', [
+            Log::error('[WIKI_QA] QA execution failed with an unexpected technical error — escalated, not failed.', [
                 'run_id' => $run->id,
                 'error' => $e->getMessage(),
             ]);
 
-            // Snapshot the failed attempt. Errors here must not suppress the original exception.
+            // Snapshot the escalated attempt. Errors here must not suppress the original exception.
             try {
                 $this->snapshotService->capture($fresh, []);
             } catch (\Throwable $snapshotException) {
-                Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot for failed run', [
+                Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot for escalated run', [
                     'run_id' => $run->id,
-                    'error'  => $snapshotException->getMessage(),
+                    'error' => $snapshotException->getMessage(),
                 ]);
             }
 
             throw $e;
         }
+    }
+
+    /**
+     * Pure, read-only deterministic evaluation of a run's current artifacts — claims nothing,
+     * writes nothing, calls no AI. Used internally by executeQa() for the value it persists,
+     * and externally (e.g. wiki:recover-document-flow --dry-run) to predict the verdict without
+     * any side effect.
+     *
+     * @return array{
+     *     verdict: string,
+     *     reason: ?string,
+     *     incomplete_steps: list<string>,
+     *     critical_defects: list<string>,
+     *     checks: array{article_exists: bool, summary_exists: bool, article_has_content: bool, summary_has_content: bool},
+     * }
+     */
+    public function evaluate(EnterpriseWikiIngestRun $run): array
+    {
+        $checks = $this->runChecks($run);
+
+        $pivotRows = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->get();
+
+        if ($pivotRows->isEmpty()) {
+            return [
+                'verdict' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+                'reason' => 'Run has no applied pages — cannot determine a QA result.',
+                'incomplete_steps' => [],
+                'critical_defects' => [],
+                'checks' => $checks,
+            ];
+        }
+
+        $pageIds = $pivotRows->pluck('enterprise_wiki_page_id');
+
+        $incompleteSteps = $this->findIncompleteSteps($pivotRows, $pageIds);
+
+        if ($incompleteSteps !== []) {
+            return [
+                'verdict' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+                'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.',
+                'incomplete_steps' => $incompleteSteps,
+                'critical_defects' => [],
+                'checks' => $checks,
+            ];
+        }
+
+        $criticalDefects = $this->findCriticalDefects($run, $pageIds, $checks);
+
+        if ($criticalDefects !== []) {
+            return [
+                'verdict' => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                'reason' => 'Critical defect(s) found: '.implode(', ', $criticalDefects).'.',
+                'incomplete_steps' => [],
+                'critical_defects' => $criticalDefects,
+                'checks' => $checks,
+            ];
+        }
+
+        return [
+            'verdict' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            'reason' => null,
+            'incomplete_steps' => [],
+            'critical_defects' => [],
+            'checks' => $checks,
+        ];
     }
 
     /**
@@ -213,7 +289,7 @@ class EnterpriseWikiPostIngestQaService
             ->get();
     }
 
-    private function baseEligibleQuery(array $qaStatuses): \Illuminate\Database\Eloquent\Builder
+    private function baseEligibleQuery(array $qaStatuses): Builder
     {
         return EnterpriseWikiIngestRun::query()
             ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
@@ -254,126 +330,28 @@ class EnterpriseWikiPostIngestQaService
 
     private function executeQa(EnterpriseWikiIngestRun $run): array
     {
-        // ── Level 1 + 2: technical and structural QA ─────────────────────────
-
-        $checks = $this->runChecks($run);
-        $hasCriticalGap = $this->hasCriticalGap($checks);
-
-        $repairAttempted = false;
-        $repairResult = null;
-
-        if ($hasCriticalGap) {
-            $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED]);
-
-            $repairAttempted = true;
-            $repairResult = $this->attemptRepair($run);
-
-            // Re-check after repair attempt.
-            $checks = $this->runChecks($run);
-            $hasCriticalGap = $this->hasCriticalGap($checks);
-        }
-
-        $coverageSummary = $this->computeCoverageSummary($run);
-        $lintSummary = $this->computeLintSummary($run);
-
-        // After lint has written findings to DB, check whether any open errors remain.
-        // Lint warnings are stored in qa_result but do not block passed.
-        $hasOpenLintErrors = $this->hasOpenLintErrors($run);
-
-        $structuralFailed = $hasCriticalGap || $hasOpenLintErrors;
-
-        // ── Level 3: semantic QA (8G-4) ──────────────────────────────────────
-        // Semantic QA is required when tech/structural QA passes.
-        // A run cannot reach 'passed' without a completed semantic review.
-
-        $semanticQaResult = null;
-
-        if (! $structuralFailed) {
-            if (! WikiSemanticQaAiClient::isAvailable()) {
-                $result = [
-                    'checks'                    => $checks,
-                    'repair_attempted'          => $repairAttempted,
-                    'repair_result'             => $repairResult,
-                    'coverage_summary'          => $coverageSummary,
-                    'lint_summary'              => $lintSummary,
-                    'open_lint_errors'          => $hasOpenLintErrors,
-                    'semantic_qa'               => null,
-                    'semantic_repair_attempted' => false,
-                    'semantic_repair_result'    => null,
-                    'semantic_qa_post_repair'   => null,
-                ];
-
-                $run->update([
-                    'qa_status'       => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                    'qa_completed_at' => now(),
-                    'qa_last_error'   => 'Semantic QA (8G-4) is required but wiki AI is not enabled. Set ENTERPRISE_WIKI_AI_ENABLED=true to run post-ingest QA.',
-                    'qa_result'       => $result,
-                ]);
-
-                $this->captureSnapshot($run, $result);
-
-                return $result;
-            }
-
-            $semanticQaResult = $this->semanticQaService->review($run);
-        }
-
-        // ── Level 3.5: targeted repair (8G-5) ────────────────────────────────
-        // When semantic QA recommends repair, attempt ONE targeted revision then
-        // re-run the full QA. The result after repair is always terminal (never repair_required).
-
-        $semanticRepairAttempted = false;
-        $semanticRepairResult = null;
-        $semanticQaPostRepair = null;
-
-        $initialStatus = $this->resolveFinalStatus($structuralFailed, $semanticQaResult);
-
-        if ($initialStatus === EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED) {
-            $semanticRepairAttempted = true;
-            $semanticRepairResult = $this->semanticRepairService->repair($run, $semanticQaResult);
-
-            if ($semanticRepairResult['success']) {
-                // Re-run full QA (tech + structural + semantic) against the revised content.
-                $checks = $this->runChecks($run);
-                $hasCriticalGap = $this->hasCriticalGap($checks);
-                $coverageSummary = $this->computeCoverageSummary($run);
-                $lintSummary = $this->computeLintSummary($run);
-                $hasOpenLintErrors = $this->hasOpenLintErrors($run);
-                $structuralFailed = $hasCriticalGap || $hasOpenLintErrors;
-
-                if (! $structuralFailed) {
-                    $semanticQaPostRepair = $this->semanticQaService->review($run);
-                }
-
-                $finalStatus = $this->resolvePostRepairStatus($structuralFailed, $semanticQaPostRepair);
-            } else {
-                // Repair was not possible (source missing, version missing, etc.) — escalate.
-                $finalStatus = EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
-            }
-        } else {
-            $finalStatus = $initialStatus;
-        }
-
-        // ── Build result ──────────────────────────────────────────────────────
+        $evaluation = $this->evaluate($run);
 
         $result = [
-            'checks'                    => $checks,
-            'repair_attempted'          => $repairAttempted,
-            'repair_result'             => $repairResult,
-            'coverage_summary'          => $coverageSummary,
-            'lint_summary'              => $lintSummary,
-            'open_lint_errors'          => $hasOpenLintErrors,
-            'semantic_qa'               => $semanticQaResult,
-            'semantic_repair_attempted' => $semanticRepairAttempted,
-            'semantic_repair_result'    => $semanticRepairResult,
-            'semantic_qa_post_repair'   => $semanticQaPostRepair,
+            'checks' => $evaluation['checks'],
+            'repair_attempted' => false,
+            'repair_result' => null,
+            'coverage_summary' => $this->computeCoverageSummary($run),
+            'lint_summary' => $this->computeLintSummary($run),
+            'open_lint_errors' => $this->hasOpenLintErrors($run),
+            'semantic_qa' => null,
+            'semantic_repair_attempted' => false,
+            'semantic_repair_result' => null,
+            'semantic_qa_post_repair' => null,
+            'incomplete_steps' => $evaluation['incomplete_steps'],
+            'critical_defects' => $evaluation['critical_defects'],
         ];
 
         $run->update([
-            'qa_status'       => $finalStatus,
+            'qa_status' => $evaluation['verdict'],
             'qa_completed_at' => now(),
-            'qa_last_error'   => null,
-            'qa_result'       => $result,
+            'qa_last_error' => $evaluation['reason'],
+            'qa_result' => $result,
         ]);
 
         $this->captureSnapshot($run, $result);
@@ -384,9 +362,10 @@ class EnterpriseWikiPostIngestQaService
     /**
      * Create a QA snapshot (8G-6).
      *
-     * On failure the run is downgraded to 'failed' and qa_last_error is set
-     * so that the run never appears as completed without a recorded snapshot.
-     * qa_result is preserved (already saved before this is called).
+     * On failure the run is escalated (not failed — a snapshot write failure is a technical
+     * problem, not a content verdict) and qa_last_error is set so that the run never appears
+     * as completed without a recorded snapshot. qa_result is preserved (already saved before
+     * this is called).
      */
     private function captureSnapshot(EnterpriseWikiIngestRun $run, array $result): void
     {
@@ -395,85 +374,107 @@ class EnterpriseWikiPostIngestQaService
         } catch (\Throwable $e) {
             Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot', [
                 'run_id' => $run->id,
-                'error'  => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             $run->update([
-                'qa_status'     => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                'qa_last_error' => '[SNAPSHOT] Snapshot creation failed: ' . $e->getMessage(),
+                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+                'qa_last_error' => '[SNAPSHOT] Snapshot creation failed: '.$e->getMessage(),
             ]);
         }
     }
 
-    private function resolveFinalStatus(bool $structuralFailed, ?array $semanticQaResult): string
+    // =========================================================================
+    // Deterministic checks
+    // =========================================================================
+
+    /**
+     * Anything not yet finished — active leases or checkpoints not yet set. A non-empty result
+     * means the run cannot be safely judged yet, regardless of what its content looks like.
+     *
+     * @return list<string>
+     */
+    private function findIncompleteSteps(Collection $pivotRows, Collection $pageIds): array
     {
-        if ($structuralFailed) {
-            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        $reasons = [];
+
+        if ($pivotRows->contains(fn (EnterpriseWikiIngestRunPage $row) => $row->generation_status !== EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED)) {
+            $reasons[] = 'page_generation_incomplete';
         }
 
-        if ($semanticQaResult === null) {
-            // Safety net — should not be reached when structural QA passes.
-            // The unavailable-AI case is handled in executeQa() before this method.
-            return EnterpriseWikiIngestRun::QA_STATUS_FAILED;
+        if ($pivotRows->contains(fn (EnterpriseWikiIngestRunPage $row) => $row->claims_claimed_at !== null)) {
+            $reasons[] = 'extraction_lease_active';
         }
 
-        // Explicit escalation from semantic QA (e.g. source missing or unassessable).
-        if (! empty($semanticQaResult['escalated'])) {
-            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        if ($pivotRows->contains(fn (EnterpriseWikiIngestRunPage $row) => $row->claims_extracted_at === null)) {
+            $reasons[] = 'extraction_incomplete';
         }
 
-        // Skipped result (e.g. source type not supported) — treat as passed.
-        if (! empty($semanticQaResult['skipped'])) {
-            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+        $claimsQuery = EnterpriseWikiClaim::query()->whereIn('enterprise_wiki_page_id', $pageIds);
+
+        if ((clone $claimsQuery)->whereNotNull('verification_claimed_at')->exists()) {
+            $reasons[] = 'verification_lease_active';
         }
 
-        if ($semanticQaResult['pass']) {
-            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+        if ((clone $claimsQuery)->whereNull('verified_at')->exists()) {
+            $reasons[] = 'verification_incomplete';
         }
 
-        // Semantic QA failed — map repair action to status.
-        return match ($semanticQaResult['recommended_repair_action'] ?? '') {
-            'targeted_revision', 'full_regeneration' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-            default => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-        };
+        return $reasons;
     }
 
     /**
-     * Determine the terminal status after a targeted repair attempt (8G-5).
+     * Concrete, understood content/structure defects — not "not finished yet", but "finished
+     * and genuinely wrong".
      *
-     * Never returns repair_required — after one automatic repair, the result is
-     * always passed or escalated. No further automatic repair is attempted.
+     * @return list<string>
      */
-    private function resolvePostRepairStatus(bool $structuralFailed, ?array $semanticQaResult): string
+    private function findCriticalDefects(EnterpriseWikiIngestRun $run, Collection $pageIds, array $checks): array
     {
-        if ($structuralFailed) {
-            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        $defects = [];
+
+        if (($checks['article_exists'] ?? false) === false
+            || ($checks['summary_exists'] ?? false) === false
+            || ($checks['article_has_content'] ?? false) === false
+            || ($checks['summary_has_content'] ?? false) === false
+        ) {
+            $defects[] = 'missing_article_or_summary';
         }
 
-        if ($semanticQaResult === null) {
-            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        $pagesWithContent = DB::table('enterprise_wiki_page_versions')
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->where('is_current', true)
+            ->whereNotNull('content_markdown')
+            ->where('content_markdown', '!=', '')
+            ->pluck('enterprise_wiki_page_id');
+
+        if ($pageIds->diff($pagesWithContent)->isNotEmpty()) {
+            $defects[] = 'missing_or_empty_page_version';
         }
 
-        if (! empty($semanticQaResult['escalated'])) {
-            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        $hasCriticalLint = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->where(function ($q): void {
+                $q->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)
+                    ->orWhere('code', EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK);
+            })
+            ->exists();
+
+        if ($hasCriticalLint) {
+            $defects[] = 'critical_lint_findings_or_broken_links';
         }
 
-        if (! empty($semanticQaResult['skipped'])) {
-            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
-        }
-
-        if ($semanticQaResult['pass']) {
-            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
-        }
-
-        // Still failing after one targeted repair — escalate (no further automatic attempts).
-        return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        return $defects;
     }
 
-    // =========================================================================
-    // Checks
-    // =========================================================================
-
+    /**
+     * Article/summary existence + content check — the run's two mandatory pages. Feeds both
+     * EnterpriseWikiQaSnapshot's technical_qa_passed/structural_qa_passed fields (historical
+     * meaning, unchanged) and findCriticalDefects() (a missing/empty article or summary is
+     * always a critical defect, in addition to the broader all-pages check there).
+     */
     private function runChecks(EnterpriseWikiIngestRun $run): array
     {
         $pivotPageIds = EnterpriseWikiIngestRunPage::query()
@@ -507,14 +508,6 @@ class EnterpriseWikiPostIngestQaService
         ];
     }
 
-    private function hasCriticalGap(array $checks): bool
-    {
-        return ! $checks['article_exists']
-            || ! $checks['summary_exists']
-            || ! $checks['article_has_content']
-            || ! $checks['summary_has_content'];
-    }
-
     private function anyPageHasCurrentContent(Collection $pageIds): bool
     {
         if ($pageIds->isEmpty()) {
@@ -540,32 +533,7 @@ class EnterpriseWikiPostIngestQaService
     }
 
     // =========================================================================
-    // Repair
-    // =========================================================================
-
-    private function attemptRepair(EnterpriseWikiIngestRun $run): array
-    {
-        try {
-            $generated = $this->generateService->generate($run);
-
-            Log::info('[WIKI_QA] Repair generation completed', [
-                'run_id' => $run->id,
-                'generated' => $generated,
-            ]);
-
-            return ['success' => true, 'generated' => $generated];
-        } catch (\Throwable $e) {
-            Log::warning('[WIKI_QA] Repair generation failed', [
-                'run_id' => $run->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return ['success' => false, 'error' => $e->getMessage()];
-        }
-    }
-
-    // =========================================================================
-    // Supplementary metrics
+    // Supplementary metrics (read-only, informational — never gate the verdict)
     // =========================================================================
 
     private function computeCoverageSummary(EnterpriseWikiIngestRun $run): array
@@ -587,18 +555,24 @@ class EnterpriseWikiPostIngestQaService
         }
     }
 
+    /**
+     * Reads whatever lint findings already exist for this run — does not trigger a fresh lint
+     * pass. The continuation pipeline's own lint stage (performAppliedRunLint) always runs
+     * before QA in the ordinary flow, so findings are already current by the time QA reads
+     * them; re-triggering lint from within QA would make QA an active step again rather than a
+     * pure end check.
+     */
     private function computeLintSummary(EnterpriseWikiIngestRun $run): array
     {
-        try {
-            $result = $this->lintService->lint($run);
+        $openFindings = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->get(['severity']);
 
-            return [
-                'findings_created' => $result['findings_created'] ?? 0,
-                'errors' => $result['errors'] ?? 0,
-                'warnings' => $result['warnings'] ?? 0,
-            ];
-        } catch (\Throwable $e) {
-            return ['error' => $e->getMessage()];
-        }
+        return [
+            'errors' => $openFindings->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)->count(),
+            'warnings' => $openFindings->where('severity', EnterpriseWikiLintFinding::SEVERITY_WARNING)->count(),
+        ];
     }
 }

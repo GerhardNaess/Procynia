@@ -10,9 +10,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
-use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Models\EnterpriseWikiQaSnapshot;
 use App\Models\Language;
 use App\Models\Nationality;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,20 +19,17 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * `wiki:recover-document-flow` recovers a run stuck at status=failed by computing a
- * deterministic resume plan from existing checkpoints and artifacts:
+ * `wiki:recover-document-flow` recovers a run stuck at status=failed by re-evaluating QA
+ * deterministically against existing artifacts (no AI, no stage re-execution) and finalizing
+ * from whatever verdict that produces, or — when some continuation step genuinely isn't
+ * finished yet — resuming via a fresh continuation job.
  *
- *   - qa_status already terminal (passed/escalated/failed) + its snapshot and required
- *     artifacts validate → finalize directly from that result (no stages re-run, no dispatch).
- *   - qa_status never reached a terminal state → restore to verification_linking and dispatch
- *     a fresh continuation job (safe because every stage is independently idempotent — see
- *     EnterpriseWikiDocumentFlowService::continueAfterPagesGenerated()).
- *
- * Background: this replaces an earlier, narrower version of this command that was scoped to
- * one specific incident (run 24 — a race between continuation and the scheduled QA sweep,
- * fixed separately in EnterpriseWikiDocumentFlowService::markRunFailed()). Run 24's data no
- * longer exists; its shape is reproduced here only as a regression fixture, not as a run this
- * command still needs to recover.
+ * Background: post-ingest QA used to be AI-driven (semantic review + repair), so recovery
+ * had to trust a possibly-stale existing qa_status/snapshot rather than re-run anything
+ * expensive. QA is now a pure, deterministic end check (see EnterpriseWikiPostIngestQaService),
+ * so recovery re-evaluates directly instead — this is what let run 28 (an OpenAI technical
+ * failure recorded as qa_status=failed during the old AI-based repair step) be recovered
+ * correctly. Run 28's data is used here only as the shape for a regression fixture.
  */
 class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
 {
@@ -110,82 +105,19 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    public function test_refuses_when_qa_terminal_but_no_snapshot_exists(): void
-    {
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withSnapshot: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-    }
-
-    public function test_refuses_when_snapshot_qa_status_does_not_match_run_qa_status(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createStuckRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withSnapshot: false);
-        EnterpriseWikiQaSnapshot::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'customer_id' => $customer->id,
-            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-            'qa_attempt_count' => $run->qa_attempt_count,
-            'snapshotted_at' => now(),
-        ]);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
-    }
-
-    public function test_refuses_when_snapshot_belongs_to_a_different_customer(): void
-    {
-        $customer = $this->createCustomer();
-        $otherCustomer = $this->createCustomer('Other Customer');
-        $run = $this->createStuckRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withSnapshot: false);
-        EnterpriseWikiQaSnapshot::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'customer_id' => $otherCustomer->id,
-            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
-            'qa_attempt_count' => $run->qa_attempt_count,
-            'snapshotted_at' => now(),
-        ]);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-    }
-
-    public function test_refuses_a_passed_run_when_no_current_page_version_exists(): void
-    {
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withPageVersion: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-    }
-
-    public function test_refuses_a_passed_run_when_no_page_links_exist(): void
-    {
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withLink: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-    }
-
-    public function test_refuses_a_passed_run_when_no_claims_exist(): void
-    {
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED, withClaim: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(1);
-    }
-
     // =========================================================================
-    // Direct finalize — qa_status already terminal, snapshot + artifacts validate
+    // Revalidate and finalize — every continuation step is complete, so QA can be
+    // re-evaluated right now from existing artifacts.
     // =========================================================================
 
-    public function test_direct_finalizes_a_passed_run_without_dispatching_a_job(): void
+    public function test_revalidates_and_completes_a_run_whose_artifacts_are_actually_fine(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        // The run 28 shape: a technical failure (e.g. during the old AI-based QA step) left
+        // status=failed and a stale qa_status=failed, even though every artifact is genuinely
+        // complete and defect-free.
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
@@ -193,36 +125,27 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $fresh->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
-        $this->assertSame(1, $fresh->qa_attempt_count);
         $this->assertNotNull($fresh->finished_at);
         $this->assertNull($fresh->error_message);
 
         Queue::assertNothingPushed();
     }
 
-    public function test_direct_finalizes_an_escalated_run_without_dispatching_a_job(): void
+    public function test_revalidation_gives_failed_when_a_real_critical_defect_exists(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(0);
-
-        $fresh = $run->fresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $fresh->status);
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $fresh->qa_status);
-        $this->assertNotNull($fresh->finished_at);
-
-        Queue::assertNothingPushed();
-    }
-
-    public function test_direct_finalizes_a_failed_qa_run_without_promoting_it_to_completed(): void
-    {
-        Queue::fake();
-
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
-        $run->update(['qa_last_error' => 'Semantic QA rejected the generated content.']);
+        // Introduce a genuine critical defect: the article's current version is empty.
+        $article = EnterpriseWikiPage::query()
+            ->whereIn('id', EnterpriseWikiIngestRunPage::where('enterprise_wiki_ingest_run_id', $run->id)->pluck('enterprise_wiki_page_id'))
+            ->where('page_type', EnterpriseWikiPage::PAGE_TYPE_ARTICLE)
+            ->firstOrFail();
+        EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->where('is_current', true)
+            ->update(['content_markdown' => '']);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
@@ -230,59 +153,73 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $fresh->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $fresh->qa_status);
-        $this->assertNotNull($fresh->finished_at);
         $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $fresh->status);
+        $this->assertNotNull($fresh->finished_at);
 
         Queue::assertNothingPushed();
     }
 
-    public function test_direct_finalize_does_not_create_new_page_versions_links_claims_or_snapshots(): void
+    public function test_releases_a_stale_running_qa_claim_before_revalidating(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        // qa_status=running with the owning run already marked failed proves the worker that
+        // held the claim died without reaching a terminal state.
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->assertExitCode(0);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_revalidate_and_finalize_does_not_create_new_page_versions_links_or_claims(): void
+    {
+        Queue::fake();
+
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $versionsBefore = EnterpriseWikiPageVersion::query()->count();
-        $linksBefore = EnterpriseWikiPageLink::query()->count();
         $claimsBefore = EnterpriseWikiClaim::query()->count();
-        $snapshotsBefore = EnterpriseWikiQaSnapshot::query()->count();
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
 
         $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
-        $this->assertSame($linksBefore, EnterpriseWikiPageLink::query()->count());
         $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
-        $this->assertSame($snapshotsBefore, EnterpriseWikiQaSnapshot::query()->count());
     }
 
     // =========================================================================
-    // Resume continuation — qa_status never reached a terminal state
+    // Resume via continuation — some continuation step is not finished yet, so QA cannot
+    // be safely judged.
     // =========================================================================
 
-    public function test_resumes_via_fresh_continuation_when_qa_never_started(): void
+    public function test_resumes_via_fresh_continuation_when_extraction_is_not_complete(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: null, withSnapshot: false, withLink: false, withClaim: false);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: false, qaStatus: null);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
 
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
-        $this->assertNull($fresh->qa_status);
         $this->assertNull($fresh->finished_at);
         $this->assertNull($fresh->error_message);
 
         Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
     }
 
-    public function test_resumes_via_fresh_continuation_when_qa_is_repair_required(): void
+    public function test_resume_continuation_does_not_call_qa_or_touch_qa_status(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, withSnapshot: false, withLink: false, withClaim: false);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: false, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
@@ -291,43 +228,6 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $fresh->qa_status);
 
-        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
-    }
-
-    /**
-     * qa_status=running with the owning run already marked failed means the worker that
-     * claimed QA died before reaching a terminal state (a genuine worker-restart mid-QA) —
-     * that claim is stale and must be released to pending so a fresh continuation can
-     * reclaim it, instead of looping forever on the QA-busy retry path.
-     */
-    public function test_releases_a_stale_running_qa_claim_before_resuming(): void
-    {
-        Queue::fake();
-
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING, withSnapshot: false, withLink: false, withClaim: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(0);
-
-        $fresh = $run->fresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PENDING, $fresh->qa_status);
-
-        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
-    }
-
-    public function test_resume_continuation_does_not_require_links_or_claims_to_already_exist(): void
-    {
-        Queue::fake();
-
-        // A technical failure that happened before claim extraction/linking ever ran must
-        // still be resumable — requiring links/claims up front would wrongly block recovery
-        // for exactly the runs that most need to resume.
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: null, withSnapshot: false, withLink: false, withClaim: false);
-
-        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
-            ->assertExitCode(0);
-
         Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
     }
 
@@ -335,29 +235,29 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
     // Dry-run
     // =========================================================================
 
-    public function test_dry_run_reports_direct_finalize_plan_without_changes(): void
+    public function test_dry_run_predicts_revalidate_and_finalize_without_changes(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
-            ->expectsOutputToContain('direct_finalize')
+            ->expectsOutputToContain('revalidate_and_finalize')
+            ->expectsOutputToContain('predicted verdict=passed')
             ->assertExitCode(0);
 
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $fresh->status);
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
-        $this->assertNotNull($fresh->finished_at);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $fresh->qa_status);
 
         Queue::assertNothingPushed();
     }
 
-    public function test_dry_run_reports_resume_continuation_plan_without_changes(): void
+    public function test_dry_run_predicts_resume_continuation_without_changes(): void
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: null, withSnapshot: false, withLink: false, withClaim: false);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: false, qaStatus: null);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
             ->expectsOutputToContain('resume_continuation')
@@ -365,7 +265,6 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
 
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $fresh->status);
-        $this->assertNotNull($fresh->finished_at);
 
         Queue::assertNothingPushed();
     }
@@ -374,7 +273,7 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
     {
         Queue::fake();
 
-        $run = $this->createStuckRun($this->createCustomer(), qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING, withSnapshot: false, withLink: false, withClaim: false);
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_RUNNING);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
             ->assertExitCode(0);
@@ -382,6 +281,21 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_RUNNING, $run->fresh()->qa_status);
 
         Queue::assertNothingPushed();
+    }
+
+    public function test_dry_run_does_not_increase_qa_attempt_count(): void
+    {
+        // evaluate() is pure and read-only — no AI client bindings are mocked here at all, and
+        // dry-run must never claim the run via runForRun(), so qa_attempt_count is untouched.
+        Queue::fake();
+
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $attemptCountBefore = $run->qa_attempt_count;
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
+            ->assertExitCode(0);
+
+        $this->assertSame($attemptCountBefore, $run->fresh()->qa_attempt_count);
     }
 
     // =========================================================================
@@ -436,24 +350,19 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
     }
 
     /**
-     * Builds a run stuck at status=failed with one applied article page, matching the shape
-     * continueAfterPagesGenerated() would have produced by the time a technical failure could
-     * occur at any point in its sequence. $qaStatus controls which resume-plan branch the
-     * command should choose; a passed/escalated/failed qa_status additionally gets a matching
-     * snapshot (unless withSnapshot=false) since real QA execution always writes one alongside
-     * qa_status.
+     * Builds a run stuck at status=failed with one applied article page and one summary page.
+     *
+     * $stepsComplete=true marks generation/extraction/verification complete for every page and
+     * claim, matching a run whose pipeline genuinely finished (the run 28 shape — QA can be
+     * safely re-evaluated). $stepsComplete=false leaves extraction unfinished, matching a run
+     * that failed before the pipeline actually completed (recovery must resume, not finalize).
      */
     private function createStuckRun(
         Customer $customer,
-        ?string $qaStatus = EnterpriseWikiIngestRun::QA_STATUS_PASSED,
-        bool $withSnapshot = true,
-        bool $withPageVersion = true,
-        bool $withLink = true,
-        bool $withClaim = true,
+        bool $stepsComplete = true,
+        ?string $qaStatus = EnterpriseWikiIngestRun::QA_STATUS_FAILED,
     ): EnterpriseWikiIngestRun {
         $document = $this->createDocument($customer);
-
-        $qaAttemptCount = $qaStatus === null ? 0 : 1;
 
         $run = EnterpriseWikiIngestRun::query()->create([
             'uuid' => Str::uuid()->toString(),
@@ -464,7 +373,7 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'qa_status' => $qaStatus,
-            'qa_attempt_count' => $qaAttemptCount,
+            'qa_attempt_count' => $qaStatus === null ? 0 : 1,
             'error_message' => 'Technical failure while the run was in flight.',
             'finished_at' => now(),
         ]);
@@ -478,72 +387,53 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
+        $summary = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'sammendrag-'.Str::lower(Str::random(6)),
+            'title' => 'Sammendrag',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
 
-        EnterpriseWikiIngestRunPage::query()->create([
+        $articleRow = EnterpriseWikiIngestRunPage::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $article->id,
             'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'claims_extracted_at' => $stepsComplete ? now() : null,
+        ]);
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $summary->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'claims_extracted_at' => $stepsComplete ? now() : null,
         ]);
 
-        $version = null;
+        $articleVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nInnhold.",
+        ]);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $summary->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Sammendrag\n\nInnhold.",
+        ]);
 
-        if ($withPageVersion) {
-            $version = EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $article->id,
-                'version_number' => 1,
-                'is_current' => true,
-                'content_markdown' => "# Artikkel\n\nInnhold.",
-            ]);
-        }
-
-        if ($withLink) {
-            $target = EnterpriseWikiPage::query()->create([
-                'customer_id' => $customer->id,
-                'slug' => 'target-'.Str::lower(Str::random(6)),
-                'title' => 'Target',
-                'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
-                'status' => EnterpriseWikiPage::STATUS_DRAFT,
-                'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
-                'last_source_hash' => str_pad('hash', 64, '0'),
-            ]);
-
-            EnterpriseWikiPageLink::query()->create([
-                'customer_id' => $customer->id,
-                'from_page_id' => $article->id,
-                'to_page_id' => $target->id,
-                'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
-                'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-                'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
-            ]);
-        }
-
-        if ($withClaim && $version !== null) {
+        if ($stepsComplete) {
             EnterpriseWikiClaim::query()->create([
                 'enterprise_wiki_page_id' => $article->id,
-                'enterprise_wiki_page_version_id' => $version->id,
+                'enterprise_wiki_page_version_id' => $articleVersion->id,
                 'claim_text' => 'En påstand fra artikkelen.',
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
                 'conflict_flag' => false,
                 'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 'verified_at' => now(),
-            ]);
-        }
-
-        if ($withSnapshot && in_array($qaStatus, [
-            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
-            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-        ], true)) {
-            EnterpriseWikiQaSnapshot::query()->create([
-                'enterprise_wiki_ingest_run_id' => $run->id,
-                'customer_id' => $customer->id,
-                'qa_status' => $qaStatus,
-                'qa_attempt_count' => $qaAttemptCount,
-                'snapshotted_at' => now(),
-                'technical_qa_passed' => true,
-                'structural_qa_passed' => true,
-                'semantic_qa_ran' => true,
-                'semantic_pass' => $qaStatus === EnterpriseWikiIngestRun::QA_STATUS_PASSED,
             ]);
         }
 

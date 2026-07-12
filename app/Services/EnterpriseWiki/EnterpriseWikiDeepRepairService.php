@@ -67,7 +67,7 @@ class EnterpriseWikiDeepRepairService
         if ($run->deep_repair_source_hash === $currentHash) {
             Log::info('[WIKI_DEEP_REPAIR] Already attempted for this source hash — skipping', [
                 'run_id' => $run->id,
-                'hash'   => $currentHash,
+                'hash' => $currentHash,
             ]);
 
             return $this->result(attempted: false, reason: 'already_attempted_for_hash');
@@ -94,11 +94,11 @@ class EnterpriseWikiDeepRepairService
         // Stamp before repairs so idempotence holds even if repairs fail.
         $run->update([
             'deep_repair_attempted_at' => now(),
-            'deep_repair_source_hash'  => $currentHash,
+            'deep_repair_source_hash' => $currentHash,
         ]);
 
         Log::info('[WIKI_DEEP_REPAIR] Starting deep repair', [
-            'run_id'    => $run->id,
+            'run_id' => $run->id,
             'diagnosis' => $diagnosis,
         ]);
 
@@ -111,9 +111,16 @@ class EnterpriseWikiDeepRepairService
                 $componentsRepaired[] = 'claims';
             }
 
-            if ($diagnosis['source_references']) {
+            // Claims just (re)extracted above have never been verified — diagnose() computed
+            // 'source_references' before this repair ran, so it can't see them. Verifying
+            // whenever claims were touched this pass lets a single deep-repair attempt reach a
+            // genuinely complete state instead of leaving fresh claims permanently unverified.
+            if ($diagnosis['source_references'] || in_array('claims', $componentsRepaired, true)) {
                 $this->verifyService->verify($run);
-                $componentsRepaired[] = 'source_references';
+
+                if (! in_array('source_references', $componentsRepaired, true)) {
+                    $componentsRepaired[] = 'source_references';
+                }
             }
 
             if ($diagnosis['page_links']) {
@@ -123,7 +130,7 @@ class EnterpriseWikiDeepRepairService
         } catch (\Throwable $e) {
             Log::error('[WIKI_DEEP_REPAIR] Component repair failed', [
                 'run_id' => $run->id,
-                'error'  => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             $errorResult = $this->result(
@@ -136,8 +143,8 @@ class EnterpriseWikiDeepRepairService
             );
 
             $run->update([
-                'qa_status'          => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                'qa_last_error'      => '[DEEP_REPAIR] ' . $e->getMessage(),
+                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                'qa_last_error' => '[DEEP_REPAIR] '.$e->getMessage(),
                 'deep_repair_result' => $errorResult,
             ]);
 
@@ -163,7 +170,7 @@ class EnterpriseWikiDeepRepairService
             // runForRun already marks the run as failed and sets qa_last_error.
             Log::error('[WIKI_DEEP_REPAIR] QA re-evaluation after repair failed', [
                 'run_id' => $run->id,
-                'error'  => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             $run->refresh();
@@ -194,9 +201,9 @@ class EnterpriseWikiDeepRepairService
         $run->update(['deep_repair_result' => $repairResult]);
 
         Log::info('[WIKI_DEEP_REPAIR] Deep repair complete', [
-            'run_id'              => $run->id,
+            'run_id' => $run->id,
             'components_repaired' => $componentsRepaired,
-            'qa_status'           => $finalStatus,
+            'qa_status' => $finalStatus,
         ]);
 
         return $repairResult;
@@ -263,9 +270,9 @@ class EnterpriseWikiDeepRepairService
             ->doesntExist();
 
         return [
-            'claims'            => $claimsNeeded,
+            'claims' => $claimsNeeded,
             'source_references' => $sourceRefsNeeded,
-            'page_links'        => $linksNeeded,
+            'page_links' => $linksNeeded,
         ];
     }
 
@@ -282,12 +289,12 @@ class EnterpriseWikiDeepRepairService
         ?array $diagnosis = null,
     ): array {
         return [
-            'attempted'           => $attempted,
-            'reason'              => $reason,
-            'source_hash'         => $sourceHash,
-            'diagnosis'           => $diagnosis,
+            'attempted' => $attempted,
+            'reason' => $reason,
+            'source_hash' => $sourceHash,
+            'diagnosis' => $diagnosis,
             'components_repaired' => $componentsRepaired,
-            'qa_status'           => $qaStatus,
+            'qa_status' => $qaStatus,
         ];
     }
 }
