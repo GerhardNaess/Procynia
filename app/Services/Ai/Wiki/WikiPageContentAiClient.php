@@ -136,6 +136,8 @@ class WikiPageContentAiClient
             '- content_markdown is wiki content — reference other pages inline the way a wiki article does.',
             '- Use [[target-slug|natural visible text]] inside ordinary prose to reference a page from the "ALLOWED WIKILINK TARGETS" list provided in the user message.',
             '- Use [[target-slug]] only when the slug itself already reads naturally as the visible text.',
+            '- The "slug" field is the exact, literal identifier you must copy into the [[...]] markup — it is frequently lowercase or hyphenated and different from the page\'s "title" field. Never substitute the title text where the slug is expected, and never change the slug\'s case, spelling, or hyphenation.',
+            '- The user message includes ready-to-copy [[slug|Title]] markup for every allowed target — copy that markup verbatim rather than typing the slug from memory.',
             '- Only link to slugs that appear in the allowed wikilink target list — never invent a slug, and never link to this page\'s own slug.',
             '- Link the first or most natural occurrence of a concept or entity — do not repeat the same link for every mention.',
             '- Only link semantically important concepts and entities that the text is actually about — do not link generic words.',
@@ -242,9 +244,22 @@ class WikiPageContentAiClient
         $parts[] = '';
         $parts[] = 'ALLOWED WIKILINK TARGETS ('.count($linkCatalog).' pages):';
         $parts[] = '';
-        $parts[] = $linkCatalog !== []
-            ? (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-            : 'No other pages available to link to.';
+
+        if ($linkCatalog !== []) {
+            $parts[] = 'Copy the exact markup below when linking to a page — do not retype the slug from the title, and do not change its case or spelling:';
+            $parts[] = '';
+
+            foreach ($linkCatalog as $entry) {
+                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
+            }
+
+            $parts[] = '';
+            $parts[] = 'Full catalog (slug, title, page_type):';
+            $parts[] = '';
+            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        } else {
+            $parts[] = 'No other pages available to link to.';
+        }
 
         return implode("\n", $parts);
     }

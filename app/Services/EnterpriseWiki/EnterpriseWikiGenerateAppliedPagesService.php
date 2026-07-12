@@ -39,6 +39,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiLinkCatalogService $linkCatalogService,
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
+        private readonly EnterpriseWikiWikilinkCanonicalizer $wikilinkCanonicalizer,
     ) {}
 
     /**
@@ -233,6 +234,11 @@ class EnterpriseWikiGenerateAppliedPagesService
             additionalContext: $additionalContext,
             linkCatalog:       $catalogResult['catalog'],
         );
+
+        // Deterministically rewrite unambiguous near-miss wikilinks (e.g. the model writing a
+        // page's title instead of its differently-cased slug) to their canonical form before
+        // final validation — see EnterpriseWikiWikilinkCanonicalizer for the exact, narrow rules.
+        $markdown = $this->wikilinkCanonicalizer->canonicalize($markdown, $catalogResult['catalog']);
 
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 

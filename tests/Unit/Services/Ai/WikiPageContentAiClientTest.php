@@ -80,6 +80,32 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('prosjekteier', $userPrompt);
     }
 
+    // Runtime fix (run 18): the catalog must show exact, copyable canonical [[slug|Title]]
+    // markup per target — reduces the chance the model writes a title-cased bare slug instead
+    // of the real, differently-cased slug (e.g. [[Advania]] instead of [[advania|Advania]]).
+    public function test_catalog_shows_exact_copyable_canonical_markup_per_target(): void
+    {
+        $catalog = [
+            ['slug' => 'advania', 'title' => 'Advania', 'page_type' => 'entity'],
+            ['slug' => 'risikostyring', 'title' => 'Risikostyring', 'page_type' => 'concept'],
+        ];
+
+        $payload = $this->capturePayload(linkCatalog: $catalog);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('[[advania|Advania]]', $userPrompt);
+        $this->assertStringContainsString('[[risikostyring|Risikostyring]]', $userPrompt);
+    }
+
+    public function test_developer_prompt_instructs_copying_the_slug_exactly(): void
+    {
+        $payload = $this->capturePayload();
+        $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('copy', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('slug', mb_strtolower($developerPrompt));
+    }
+
     public function test_empty_link_catalog_is_documented_as_no_pages_available(): void
     {
         $payload = $this->capturePayload(linkCatalog: []);

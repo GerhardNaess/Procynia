@@ -176,7 +176,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
             ->first();
 
         $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
-        $this->assertSame('AI unavailable', $pivot->generation_error);
+        $this->assertSame('[RuntimeException] AI unavailable', $pivot->generation_error);
         $this->assertNull($pivot->generated_page_version_id);
 
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);

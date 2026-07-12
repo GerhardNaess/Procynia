@@ -10,6 +10,7 @@ use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintenanceCycleService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -228,6 +229,86 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
         // Hash was stored before QA call — the attempted source version is recorded.
         $run->refresh();
         $this->assertSame('hash-fail', $run->maintenance_source_hash);
+    }
+
+    // =========================================================================
+    // Runtime fix: hash-comparison log accuracy (run 18 — "Source changed" logged
+    // with current_hash and prev_hash appearing identical due to a capture-after-mutate bug)
+    // =========================================================================
+
+    public function test_equal_source_hashes_do_not_log_source_changed(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, hash: 'same-hash');
+        $run = $this->createAppliedRun(
+            $customer,
+            qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            document: $document,
+            maintenanceSourceHash: 'same-hash',
+        );
+
+        // The equal-hash branch returns 'skipped' before any "Source changed" log is emitted
+        // and before QA is ever re-triggered — confirmed by both the summary and the fact
+        // that runForRun() is never called.
+        $this->mockQaService()->shouldNotReceive('runForRun');
+
+        $summary = $this->makeService()->run();
+
+        $this->assertSame(0, $summary['retried']);
+        $this->assertSame(1, $summary['skipped']);
+        $run->refresh();
+        $this->assertSame('same-hash', $run->maintenance_source_hash);
+    }
+
+    public function test_different_source_hashes_log_the_real_previous_hash_not_the_new_one(): void
+    {
+        Log::spy();
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, hash: 'hash-new');
+        $run = $this->createAppliedRun(
+            $customer,
+            qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            document: $document,
+            maintenanceSourceHash: 'hash-old',
+        );
+
+        $this->mockQaService()->shouldReceive('runForRun')
+            ->once()
+            ->with(\Mockery::on(fn ($r) => $r->id === $run->id), true)
+            ->andReturnNull();
+
+        $this->makeService()->run();
+
+        Log::shouldHaveReceived('info')
+            ->withArgs(function (string $message, array $context): bool {
+                return $message === '[WIKI_MAINTENANCE] Source changed — triggering QA retry'
+                    && $context['current_hash'] === 'hash-new'
+                    && $context['prev_hash'] === 'hash-old'
+                    && $context['prev_hash'] !== $context['current_hash'];
+            });
+    }
+
+    public function test_first_maintenance_check_uses_a_distinct_log_message_not_source_changed(): void
+    {
+        Log::spy();
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, hash: 'hash-first');
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, document: $document);
+
+        $this->mockQaService()->shouldReceive('runForRun')
+            ->once()
+            ->with(\Mockery::on(fn ($r) => $r->id === $run->id), true)
+            ->andReturnNull();
+
+        $this->makeService()->run();
+
+        Log::shouldHaveReceived('info')
+            ->withArgs(function (string $message, array $context): bool {
+                return $message === '[WIKI_MAINTENANCE] First maintenance check for this run — triggering QA retry'
+                    && $context['prev_hash'] === null;
+            });
     }
 
     // =========================================================================

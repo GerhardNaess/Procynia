@@ -53,6 +53,16 @@ class EnterpriseWikiDeepRepairService
      */
     public function attempt(EnterpriseWikiIngestRun $run, string $currentHash): array
     {
+        // Deep repair is only ever called by EnterpriseWikiMaintenanceCycleService after a QA
+        // retry has run and the run is still qa_status=escalated. A run that failed earlier in
+        // the ordinary document flow (maintainer decision, apply, page generation, wikilink
+        // validation/materialization) has qa_status=null and is excluded further upstream by
+        // EnterpriseWikiPostIngestQaService::scopeToRunsReadyForQa() — its QA retry is a no-op,
+        // so qa_status never becomes escalated and this method is never reached for it. No
+        // separate `status` guard is added here: decision-only runs (source_type
+        // enterprise_wiki_document, main `status` permanently `decision_only`) are a distinct,
+        // legitimate run type that also relies on deep repair and must remain unaffected.
+
         // ── Idempotence ──────────────────────────────────────────────────────
         if ($run->deep_repair_source_hash === $currentHash) {
             Log::info('[WIKI_DEEP_REPAIR] Already attempted for this source hash — skipping', [

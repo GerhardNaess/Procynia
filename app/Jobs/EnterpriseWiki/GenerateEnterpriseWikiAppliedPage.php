@@ -60,7 +60,7 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
         try {
             $service->generatePageForRun($run, $page);
         } catch (Throwable $e) {
-            $this->markPivotFailed($e->getMessage());
+            $this->markPivotFailed($e);
 
             Log::error('[WIKI_PAGE_GENERATION][FAILED]', [
                 'run_id' => $this->runId,
@@ -89,7 +89,7 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        $this->markPivotFailed($exception->getMessage());
+        $this->markPivotFailed($exception);
 
         Log::error('[WIKI_PAGE_GENERATION][JOB_FAILED]', [
             'run_id' => $this->runId,
@@ -104,7 +104,13 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
         FinalizeEnterpriseWikiPageGeneration::dispatch($this->runId);
     }
 
-    private function markPivotFailed(string $message): void
+    /**
+     * Records the failure reason with its exception type prefixed (e.g.
+     * "[EnterpriseWikiInvalidWikilinksException] ...") so that the aggregated run-level
+     * error_message built by FinalizeEnterpriseWikiPageGeneration is understandable without a
+     * stacktrace — the concrete original exception type is visible right there in the run row.
+     */
+    private function markPivotFailed(Throwable $exception): void
     {
         $pivot = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $this->runId)
@@ -117,7 +123,7 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
 
         $pivot->update([
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
-            'generation_error' => mb_substr($message, 0, 1000),
+            'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($exception), $exception->getMessage()), 0, 1000),
         ]);
     }
 }

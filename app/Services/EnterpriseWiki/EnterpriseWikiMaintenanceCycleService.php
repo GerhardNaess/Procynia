@@ -72,6 +72,11 @@ class EnterpriseWikiMaintenanceCycleService
 
     private function findEscalatedWithDocumentSource(): Collection
     {
+        // qa_status=escalated alone is the correct signal here (not main `status` — decision-
+        // only runs legitimately reach qa_status=escalated while their main `status` stays
+        // `decision_only` forever). A run that failed earlier in the ordinary document flow
+        // never reaches qa_status=escalated in the first place — see
+        // EnterpriseWikiPostIngestQaService::scopeToRunsReadyForQa().
         return EnterpriseWikiIngestRun::query()
             ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
             ->where('qa_status', EnterpriseWikiIngestRun::QA_STATUS_ESCALATED)
@@ -94,8 +99,9 @@ class EnterpriseWikiMaintenanceCycleService
         }
 
         $currentHash = $document->file_hash_sha256;
+        $previousHash = $run->maintenance_source_hash;
 
-        if ($currentHash === null || $currentHash === $run->maintenance_source_hash) {
+        if ($currentHash === null || $currentHash === $previousHash) {
             return 'skipped';
         }
 
@@ -104,12 +110,22 @@ class EnterpriseWikiMaintenanceCycleService
             'maintenance_source_hash'  => $currentHash,
         ]);
 
-        Log::info('[WIKI_MAINTENANCE] Source changed — triggering QA retry', [
-            'run_id'       => $run->id,
-            'document_id'  => $document->id,
-            'current_hash' => $currentHash,
-            'prev_hash'    => $run->maintenance_source_hash,
-        ]);
+        // $previousHash was captured before the update() call above, which otherwise mutates
+        // maintenance_source_hash on this same model instance — logging $run->maintenance_source_hash
+        // here would always show the new hash, making current/previous look identical even when
+        // they genuinely differ (or, for a run never checked before, wrongly imply a "change"
+        // from a real prior hash rather than from an absent one).
+        Log::info(
+            $previousHash === null
+                ? '[WIKI_MAINTENANCE] First maintenance check for this run — triggering QA retry'
+                : '[WIKI_MAINTENANCE] Source changed — triggering QA retry',
+            [
+                'run_id'       => $run->id,
+                'document_id'  => $document->id,
+                'current_hash' => $currentHash,
+                'prev_hash'    => $previousHash,
+            ],
+        );
 
         try {
             $this->qaService->runForRun($run->fresh(), retry: true);

@@ -80,18 +80,19 @@ class EnterpriseWikiPostIngestQaService
             $eligibleStatuses[] = EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
         }
 
-        $claimed = DB::table('enterprise_wiki_ingest_runs')
-            ->where('id', $run->id)
-            ->where(function ($q) use ($eligibleStatuses): void {
-                $q->whereNull('qa_status')
-                    ->orWhereIn('qa_status', $eligibleStatuses);
-            })
-            ->update([
-                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_RUNNING,
-                'qa_started_at' => now(),
-                'qa_attempt_count' => DB::raw('COALESCE(qa_attempt_count, 0) + 1'),
-                'updated_at' => now(),
-            ]);
+        $claimed = $this->scopeToRunsReadyForQa(
+            DB::table('enterprise_wiki_ingest_runs')
+                ->where('id', $run->id)
+                ->where(function ($q) use ($eligibleStatuses): void {
+                    $q->whereNull('qa_status')
+                        ->orWhereIn('qa_status', $eligibleStatuses);
+                })
+        )->update([
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_RUNNING,
+            'qa_started_at' => now(),
+            'qa_attempt_count' => DB::raw('COALESCE(qa_attempt_count, 0) + 1'),
+            'updated_at' => now(),
+        ]);
 
         if ($claimed === 0) {
             // Already running or already passed — skip silently.
@@ -136,15 +137,17 @@ class EnterpriseWikiPostIngestQaService
      */
     public function findPendingRuns(): Collection
     {
-        return EnterpriseWikiIngestRun::query()
-            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
-            ->where(function ($q): void {
-                $q->whereNull('qa_status')
-                    ->orWhereIn('qa_status', [
-                        EnterpriseWikiIngestRun::QA_STATUS_PENDING,
-                        EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-                    ]);
-            })
+        return $this->scopeToRunsReadyForQa(
+            EnterpriseWikiIngestRun::query()
+                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+                ->where(function ($q): void {
+                    $q->whereNull('qa_status')
+                        ->orWhereIn('qa_status', [
+                            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
+                            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+                        ]);
+                })
+        )
             ->orderBy('id')
             ->get();
     }
@@ -156,19 +159,47 @@ class EnterpriseWikiPostIngestQaService
      */
     public function findRetryableRuns(): Collection
     {
-        return EnterpriseWikiIngestRun::query()
-            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
-            ->where(function ($q): void {
-                $q->whereNull('qa_status')
-                    ->orWhereIn('qa_status', [
-                        EnterpriseWikiIngestRun::QA_STATUS_PENDING,
-                        EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-                        EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                        EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-                    ]);
-            })
+        return $this->scopeToRunsReadyForQa(
+            EnterpriseWikiIngestRun::query()
+                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+                ->where(function ($q): void {
+                    $q->whereNull('qa_status')
+                        ->orWhereIn('qa_status', [
+                            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
+                            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+                            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+                        ]);
+                })
+        )
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * Excludes the one run state QA retry/maintenance must never touch: main `status` =
+     * `failed` while `qa_status` is still null. That combination means QA never even
+     * started — the failure happened earlier in the ordinary document flow (maintainer
+     * decision, apply, page generation, wikilink validation, or materialization), and the run
+     * must stay failed with its own original, concrete error. QA retry/deep repair must never
+     * be used as a hidden way to complete a run whose page generation never finished.
+     *
+     * Any run whose `qa_status` is already non-null (QA has legitimately started or reached a
+     * terminal status) remains eligible regardless of main `status` — this also correctly
+     * leaves decision-only runs unaffected, since their main `status` never transitions away
+     * from `decision_only` (that transition machinery lives only in
+     * EnterpriseWikiDocumentFlowService, which decision-only runs never go through), yet they
+     * still rely on qa_status-based QA retry/maintenance exactly as before.
+     *
+     * Works for both an Eloquent builder and a DB query builder — both expose the same
+     * where()/orWhere()/whereNotNull() fluent methods used here.
+     */
+    private function scopeToRunsReadyForQa(mixed $query): mixed
+    {
+        return $query->where(function ($q): void {
+            $q->where('status', '!=', EnterpriseWikiIngestRun::STATUS_FAILED)
+                ->orWhereNotNull('qa_status');
+        });
     }
 
     // =========================================================================

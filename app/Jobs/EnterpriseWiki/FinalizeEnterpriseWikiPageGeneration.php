@@ -195,14 +195,29 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             ->map(fn (EnterpriseWikiIngestRunPage $p) => $p->page?->title ?? "page #{$p->enterprise_wiki_page_id}")
             ->implode(', ');
 
+        // Per-page detail (title, page_type, and the concrete reason — which already carries
+        // its original exception type, e.g. "[EnterpriseWikiInvalidWikilinksException] ...",
+        // via GenerateEnterpriseWikiAppliedPage::markPivotFailed()) so the run-level
+        // error_message is understandable without a stacktrace or queue log lookup.
+        $details = $failed
+            ->map(function (EnterpriseWikiIngestRunPage $p) {
+                $title = $p->page?->title ?? "page #{$p->enterprise_wiki_page_id}";
+                $pageType = $p->page?->page_type ?? 'unknown';
+                $reason = $p->generation_error ?? 'unknown error';
+
+                return "{$title} ({$pageType}): {$reason}";
+            })
+            ->implode(' | ');
+
         $run->update([
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
             'error_message' => mb_substr(sprintf(
-                '%d of %d %s page(s) failed to generate: %s.',
+                '%d of %d %s page(s) failed to generate: %s. Details — %s',
                 $failed->count(),
                 $total,
                 $phaseLabel,
                 $titles,
+                $details,
             ), 0, 1000),
             'finished_at' => now(),
         ]);
@@ -212,6 +227,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             'phase' => $phaseLabel,
             'failed_pages' => $failed->count(),
             'total_pages' => $total,
+            'details' => $details,
         ]);
     }
 

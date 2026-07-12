@@ -207,6 +207,137 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
     }
 
     // =========================================================================
+    // Runtime fix: safe canonicalization before final validation (run 18)
+    // =========================================================================
+
+    public function test_bare_title_cased_slug_is_canonicalized_and_generation_completes(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $target = $this->createPage($customer, 'advania', 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        // The model writes the page's title, differently cased, as if it were the slug —
+        // exactly the run 18 failure ([[Advania]] instead of [[advania|Advania]]).
+        $this->mockAiResponse("# {$generated->title}\n\nProsjektet eies av [[Advania]].");
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $generated->id)
+            ->where('is_current', true)
+            ->first();
+
+        $this->assertNotNull($version);
+        $this->assertStringContainsString('[[advania|Advania]]', $version->content_markdown);
+        $this->assertStringNotContainsString('[[Advania]]', $version->content_markdown);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $generated->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+    }
+
+    public function test_unknown_target_is_still_rejected_despite_canonicalization(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $target = $this->createPage($customer, 'advania', 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nSee [[TotallyUnrelatedTarget]] here.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+    }
+
+    public function test_ambiguous_title_match_is_still_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $riskA = $this->createPage($customer, 'risiko-a', 'Risiko', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $riskB = $this->createPage($customer, 'risiko-b', 'Risiko', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $run = $this->createAppliedRun($customer, $document, [$generated, $riskA, $riskB]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nSe [[Risiko]] for mer.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected — two catalog pages share the title "Risiko", so canonicalization
+            // must not guess which one was meant.
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+    }
+
+    public function test_self_link_by_own_title_is_still_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $other = $this->createPage($customer, 'other-page', 'Other Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $other]);
+
+        // The generated page's own title is never in its own link catalog, so canonicalization
+        // cannot rewrite it — it must still be rejected as a self-link by the resolver.
+        $this->mockAiResponse("# {$generated->title}\n\nThis is the [[Artikkel]] itself.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+    }
+
+    public function test_cross_customer_title_match_is_still_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $otherCustomer = $this->createCustomer('Other Customer');
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $other = $this->createPage($customer, 'other-page', 'Other Page');
+        // Another customer happens to have a page with the exact same title — must never be
+        // treated as a canonicalization candidate since it was never in this run's catalog.
+        $this->createPage($otherCustomer, 'advania', 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $run = $this->createAppliedRun($customer, $document, [$generated, $other]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nSee [[Advania]] here.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
