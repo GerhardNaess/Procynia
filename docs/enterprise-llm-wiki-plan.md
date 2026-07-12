@@ -1,6 +1,6 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.15
+Versjon: 0.16
 Dato: 2026-07-12
 Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett**
 
@@ -2630,7 +2630,35 @@ Kommandoen nekter fortsatt eksplisitt (ingen generell «sett status»-kommando) 
 
 **Tester:** 4 nye i `EnterpriseWikiClaimStepResumabilityTest` (delvis ekstraksjon på tvers av sider uten duplikater, checkpoint satt selv ved 0 claims, delvis verifikasjon på tvers av claims uten duplikate references, checkpoint satt for ikke-støttede claims uten reference — begge tester bekrefter AI ikke kalles på nytt for allerede fullførte deler). `EnterpriseWikiRecoverDocumentFlowCommandTest` er skrevet om fullstendig til den nye kontrakten (24 tester: guards, direct-finalize for passed/escalated/failed, resume-continuation inkl. stale `qa_status=running`-frigjøring, dry-run for begge grener, legacy-vakt). `EnterpriseWikiPostIngestQaRaceConditionTest` oppdatert: de to testene som forventet at recovery alltid dispatcher en jobb er endret til å forvente direkte finalisering (ingen dispatch) når QA allerede er terminal, pluss én ny test for resume-via-continuation når QA aldri startet. Full Enterprise Wiki-suite: 1148 passed, 3178 assertions, 0 failed.
 
-**Kjent begrensning:** kontrollen mot to sanntids-samtidige (ikke sekvensielle) duplicate-jobber for claim-ekstraksjon/-verifikasjon har ingen egen reservasjonslås (i motsetning til incremental relink/link semantic repair, som reserverer en rad før AI-kallet). To jobber som starter i nøyaktig samme øyeblikk kan i teorien begge kalle AI for samme side/claim og skrive duplikate rader. Dette er bevisst ikke lukket med en ny reservasjonsmekanisme i denne omgangen — det er et smalere og sjeldnere vindu enn de allerede kjente racene (QA-claim, relink, semantisk reparasjon), og en generell løsning for det ville gått utover minimum nødvendig endring. Sekvensiell gjentakelse (duplicate dispatch, queue retry, worker restart — alt som er eksplisitt testet) er fullt dekket.
+### Reservasjon/lease for claim-ekstraksjon og -verifikasjon under reell samtidighet (rettet 2026-07-12)
+
+**Bakgrunn:** forrige rettelse (steg-nivå idempotens) lukket sekvensiell gjentakelse korrekt, men rapporterte en kjent begrensning: to *sanntids-samtidige* continuation-jobber kunne i teorien begge se `claims_extracted_at`/`verified_at` som `null` på samme tid, begge kalle AI for samme side/claim, og begge forsøke å skrive — siden det ikke fantes noen reservasjon *før* AI-kallet, bare et checkpoint *etter*. Dette bryter det eksplisitte kravet om at to samtidige continuation-jobs skal være trygge.
+
+**Reservasjon/lease-design:** hvert av de to stegene får et eget par nye, nullable felt — samme mønster som allerede brukes for QA (`qa_started_at`/`qa_completed_at`):
+- `enterprise_wiki_ingest_run_pages.claims_claimed_at` + `claims_claim_token` (per run-side)
+- `enterprise_wiki_claims.verification_claimed_at` + `verification_claim_token` (per claim)
+
+**Atomisk reservasjon (før AI-kallet):** en enkelt betinget SQL `UPDATE` fungerer som compare-and-swap, uten å åpne en transaksjon eller holde en radlås:
+
+```sql
+UPDATE enterprise_wiki_ingest_run_pages
+SET claims_claimed_at = now(), claims_claim_token = :new_token
+WHERE id = :row_id
+  AND claims_extracted_at IS NULL
+  AND (claims_claimed_at IS NULL OR claims_claimed_at < :stale_threshold)
+```
+
+Under PostgreSQL READ COMMITTED serialiseres to samtidige `UPDATE`-kall mot samme rad via radlåsen; når den første committer, re-evaluerer den andre sin WHERE-klausul mot den nå oppdaterte raden (EvalPlanQual) — siden `claims_claimed_at` nettopp ble satt til `now()` av den første, matcher ikke lenger den andres betingelse, og `0` rader oppdateres for den. Kun den som faktisk oppdaterte raden fortsetter til AI-kallet; den andre gjenkjenner utfallet (`completed` hvis `claims_extracted_at` nå er satt, ellers `busy`) og gjør ikke noe AI-kall. Samme mønster for `enterprise_wiki_claims.verification_claimed_at`/`verification_claim_token`.
+
+**Persistering med token-validering (etter AI-kallet):** claims/reference og fullførings-checkpointet skrives i en kort transaksjon som re-validerer, under radlås, at reservasjonstokenet fortsatt eies av denne workeren (`WHERE id = ... AND claims_claim_token = :token`). Finner den ingen rad (tokenet er overskrevet av en annen worker som har overtatt en utløpt lease), skrives ingenting og resultatet rapporteres som `busy` — akkurat som om reservasjonen aldri hadde blitt tatt. En AI-feil mellom reservasjon og persistering frigjør leasen eksplisitt (samme token-sjekk) i stedet for å vente på timeout.
+
+**Stale-lease-regel:** lease-varighet er 600 sekunder for begge steg (`EnterpriseWikiExtractPageClaimsService::LEASE_SECONDS`, `EnterpriseWikiVerifyPageClaimsService::LEASE_SECONDS`) — lang nok til at et normalt AI-kall (typisk noen sekunder) aldri utløper midt i, kort nok til at en reelt død worker (drept prosess, ingen sjanse til å frigjøre) ikke blokkerer siden/claimet unødig lenge, og godt under jobbens 1800-sekunders timeout. En ny worker overtar en lease bare når `claims_claimed_at`/`verification_claimed_at` er eldre enn dette — reservasjonsspørringen over er den ENESTE plassen dette sjekkes, så en gammel worker som senere prøver å lagre blir alltid avvist av token-sjekken uansett hvor lenge det er siden. Et fullført checkpoint (`claims_extracted_at`/`verified_at` satt) kan aldri reserveres eller overtas, uansett hva reservasjonsfeltene inneholder — reservasjonsspørringens `WHERE ... IS NULL`-betingelse på selve checkpointet er ubetinget og sjekkes uavhengig av lease-alder.
+
+**Continuation ved aktiv reservasjon:** `performExtractPageClaims()`/`performVerifyPageClaims()` returnerer nå `bool` (samme mønster som `performPostIngestQa()`). Finner ekstraksjons- eller verifikasjonstjenesten minst én rad/claim som er aktivt (ikke-utløpt) reservert av en annen worker, rapporteres `busy > 0` i resultatet — continuation dispatcher da en forsinket ny `ContinueEnterpriseWikiDocumentFlowAfterPages`-jobb (samme `STEP_BUSY_RETRY_DELAY_SECONDS = 30` som brukes for QA-busy) og returnerer umiddelbart, uten å gå videre til senere steg, uten å markere runen `failed`, og uten noe AI-kall. Alt arbeid denne workeren FAKTISK kunne reservere blir likevel gjort — bare de aktivt reserverte radene/claimsene venter til neste forsøk.
+
+**Tester:** 8 nye i `EnterpriseWikiClaimStepLeaseTest` — aktiv reservasjon blokkerer en annen worker (ekstraksjon og verifikasjon), utløpt lease overtas og gammelt token avvises ved lagring (ekstraksjon og verifikasjon, verifisert direkte mot `persist()` via reflection), et fullført checkpoint kan aldri reserveres selv med gjenværende reservasjonsfelt (ekstraksjon og verifikasjon, verifisert direkte mot `reserve()`), to fulle continuation-kjøringer kaller AI nøyaktig én gang per steg uten duplikater og uten å påvirke QA-attempt/snapshot, og continuation som møter en aktiv reservasjon utsetter seg selv uten å feile runen eller kalle AI. Full Enterprise Wiki-suite: 1156 passed, 3238 assertions, 0 failed.
+
+**Kjent begrensning fjernet:** den forrige begrensningen (ingen reservasjonslås for sanntids-samtidighet) er lukket av denne rettelsen.
 
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 
