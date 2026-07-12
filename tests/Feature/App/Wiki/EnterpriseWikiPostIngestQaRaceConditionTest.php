@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiQaSnapshot;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
@@ -131,11 +132,11 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $this->configureUpstreamMocks();
         $this->mockQaBusyThenAlreadyCompleted($run, EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
-        $snapshotsBefore = \DB::table('enterprise_wiki_qa_snapshots')->count();
+        $snapshotsBefore = EnterpriseWikiQaSnapshot::query()->count();
 
         $this->flowService()->continueAfterPagesGenerated($run->id);
 
-        $this->assertSame($snapshotsBefore, \DB::table('enterprise_wiki_qa_snapshots')->count());
+        $this->assertSame($snapshotsBefore, EnterpriseWikiQaSnapshot::query()->count());
     }
 
     public function test_already_passed_qa_does_not_increase_qa_attempt_count(): void
@@ -169,6 +170,229 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $fresh = $run->fresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $fresh->status);
         $this->assertNotNull($fresh->finished_at);
+    }
+
+    // =========================================================================
+    // Runtime fix (real run 24 state): a queue-level exception must never overwrite an
+    // already-legitimate passed/escalated/failed QA result. Run execution status (`status`)
+    // and semantic QA result (`qa_status`/snapshot) are distinct states — the bug was
+    // markRunFailed(qaContext: true) unconditionally setting qa_status=failed whenever the
+    // exception happened to occur while $currentStage === STATUS_QA, even when qa_status was
+    // already a real, completed 'passed' result recorded by a different (scheduler) worker.
+    // =========================================================================
+
+    public function test_failed_continuation_preserves_a_legitimate_passed_qa_result(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createRunAwaitingContinuation($customer);
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            'qa_attempt_count' => 1,
+            'qa_completed_at' => now(),
+        ]);
+        $snapshot = $this->createPassedSnapshot($run);
+
+        $this->configureUpstreamMocks();
+
+        // A genuinely unexpected exception while performPostIngestQa() is still trying to
+        // claim/execute QA — regardless of the reason, it must not clobber the qa_status the
+        // run already legitimately has.
+        $this->mock(EnterpriseWikiPostIngestQaService::class)
+            ->shouldReceive('runForRun')
+            ->once()
+            ->andThrow(new RuntimeException("Post-ingest QA did not claim run [{$run->id}]."));
+
+        try {
+            $this->flowService()->continueAfterPagesGenerated($run->id);
+            $this->fail('Expected the exception to propagate to the queue worker.');
+        } catch (RuntimeException) {
+            // expected — a real unexpected exception must still surface (so the operator/queue
+            // sees it), it just must not corrupt the already-completed QA result.
+        }
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        $this->assertSame(1, $fresh->qa_attempt_count);
+        $this->assertNotNull($fresh->finished_at);
+        $this->assertNotNull($fresh->error_message);
+
+        $snapshot->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $snapshot->qa_status);
+    }
+
+    /**
+     * The real end-to-end sequence: verification_linking with an already-passed QA result
+     * and snapshot → the old race exception is thrown → the job's failed() hook runs (after
+     * the service's own catch already ran markRunFailed()) → the run is failed but qa_status
+     * is preserved as passed → wiki:recover-document-flow restores it → a fresh continuation
+     * completes it → no duplicates anywhere.
+     */
+    public function test_full_sequence_from_verification_linking_through_recovery_to_completed(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunAwaitingContinuation($customer);
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            'qa_attempt_count' => 1,
+            'qa_completed_at' => now(),
+        ]);
+        $this->createPassedSnapshot($run);
+
+        $article = EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $run->id)->first()->page;
+        $target = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'target-'.Str::lower(Str::random(6)),
+            'title' => 'Target',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+        EnterpriseWikiPageLink::query()->create([
+            'customer_id' => $customer->id,
+            'from_page_id' => $article->id,
+            'to_page_id' => $target->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+        ]);
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail()->id,
+            'claim_text' => 'En påstand.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $versionsBefore = EnterpriseWikiPageVersion::query()->count();
+        $linksBefore = EnterpriseWikiPageLink::query()->count();
+        $claimsBefore = EnterpriseWikiClaim::query()->count();
+        $snapshotsBefore = EnterpriseWikiQaSnapshot::query()->count();
+
+        // Step 3: the old race exception, thrown from inside performPostIngestQa()'s claim.
+        $this->configureUpstreamMocks();
+        $this->mock(EnterpriseWikiPostIngestQaService::class)
+            ->shouldReceive('runForRun')
+            ->once()
+            ->andThrow(new RuntimeException("Post-ingest QA did not claim run [{$run->id}]."));
+
+        $job = new ContinueEnterpriseWikiDocumentFlowAfterPages($run->id);
+
+        try {
+            $job->handle(app(EnterpriseWikiDocumentFlowService::class));
+            $this->fail('Expected the exception to propagate.');
+        } catch (\Throwable $e) {
+            // Step 4: what Laravel's worker does after handle() throws for a tries=1 job.
+            $job->failed($e);
+        }
+
+        // Step 5: failed, but qa_status/snapshot untouched.
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        $this->assertSame(1, $fresh->qa_attempt_count);
+        $this->assertNotNull($fresh->finished_at);
+        $this->assertNotNull($fresh->error_message);
+
+        // Step 6+7: controlled recovery.
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])->assertExitCode(0);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        $this->assertNull($fresh->finished_at);
+        $this->assertNull($fresh->error_message);
+
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
+
+        // Step 8: run the freshly-dispatched continuation for real.
+        $this->configureUpstreamMocks();
+        $this->mock(EnterpriseWikiPostIngestQaService::class)
+            ->shouldReceive('runForRun')
+            ->once()
+            ->andReturnNull();
+
+        $this->flowService()->continueAfterPagesGenerated($run->id);
+
+        // Steps 8-11: completed, finished_at set, qa_status still passed, attempt count unchanged.
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $fresh->status);
+        $this->assertNotNull($fresh->finished_at);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        $this->assertSame(1, $fresh->qa_attempt_count);
+
+        // Step 12: no duplicates anywhere.
+        $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
+        $this->assertSame($linksBefore, EnterpriseWikiPageLink::query()->count());
+        $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
+        $this->assertSame($snapshotsBefore, EnterpriseWikiQaSnapshot::query()->count());
+    }
+
+    /**
+     * The already-corrupted-old-state case: no need to reproduce the failure live — the
+     * recovery command must work purely from the pre-existing DB state (status=failed,
+     * qa_status=failed, known error_message, passed snapshot), using the snapshot as the
+     * source of truth rather than trusting the run's own (corrupted) qa_status column.
+     */
+    public function test_recovery_of_an_already_corrupted_old_state_restores_from_the_snapshot(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunAwaitingContinuation($customer);
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+            'qa_attempt_count' => 1,
+            'error_message' => "Post-ingest QA did not claim run [{$run->id}].",
+            'finished_at' => now(),
+        ]);
+        $this->createPassedSnapshot($run);
+
+        // Real artifacts the recovery guards must be able to confirm exist.
+        $article = EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $run->id)->first()->page;
+        $target = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'target-'.Str::lower(Str::random(6)),
+            'title' => 'Target',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+        EnterpriseWikiPageLink::query()->create([
+            'customer_id' => $customer->id,
+            'from_page_id' => $article->id,
+            'to_page_id' => $target->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+        ]);
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail()->id,
+            'claim_text' => 'En påstand.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])->assertExitCode(0);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        $this->assertSame(1, $fresh->qa_attempt_count);
+        $this->assertNull($fresh->finished_at);
+        $this->assertNull($fresh->error_message);
+
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
     }
 
     public function test_completed_run_is_idempotent_on_new_continuation_call(): void
@@ -417,11 +641,11 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $this->mockQaBusyThenAlreadyCompleted($run, EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
         $this->flowService()->continueAfterPagesGenerated($run->id);
-        $snapshotsAfterFirst = \DB::table('enterprise_wiki_qa_snapshots')->count();
+        $snapshotsAfterFirst = EnterpriseWikiQaSnapshot::query()->count();
 
         $this->flowService()->continueAfterPagesGenerated($run->id);
 
-        $this->assertSame($snapshotsAfterFirst, \DB::table('enterprise_wiki_qa_snapshots')->count());
+        $this->assertSame($snapshotsAfterFirst, EnterpriseWikiQaSnapshot::query()->count());
     }
 
     // =========================================================================
@@ -459,7 +683,7 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $pageVersionsBefore = EnterpriseWikiPageVersion::query()->count();
         $pageLinksBefore = EnterpriseWikiPageLink::query()->count();
         $claimsBefore = EnterpriseWikiClaim::query()->count();
-        $snapshotsBefore = \DB::table('enterprise_wiki_qa_snapshots')->count();
+        $snapshotsBefore = EnterpriseWikiQaSnapshot::query()->count();
 
         $this->configureUpstreamMocks();
         $this->mock(EnterpriseWikiPostIngestQaService::class)->shouldReceive('runForRun')->once()->andReturnNull();
@@ -475,7 +699,7 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $this->assertSame($pageVersionsBefore, EnterpriseWikiPageVersion::query()->count());
         $this->assertSame($pageLinksBefore, EnterpriseWikiPageLink::query()->count());
         $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
-        $this->assertSame($snapshotsBefore, \DB::table('enterprise_wiki_qa_snapshots')->count());
+        $this->assertSame($snapshotsBefore, EnterpriseWikiQaSnapshot::query()->count());
     }
 
     // =========================================================================
@@ -656,5 +880,20 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         ]);
 
         return $run;
+    }
+
+    private function createPassedSnapshot(EnterpriseWikiIngestRun $run, int $qaAttemptCount = 1): \App\Models\EnterpriseWikiQaSnapshot
+    {
+        return \App\Models\EnterpriseWikiQaSnapshot::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'customer_id' => $run->customer_id,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            'qa_attempt_count' => $qaAttemptCount,
+            'snapshotted_at' => now(),
+            'technical_qa_passed' => true,
+            'structural_qa_passed' => true,
+            'semantic_qa_ran' => true,
+            'semantic_pass' => true,
+        ]);
     }
 }

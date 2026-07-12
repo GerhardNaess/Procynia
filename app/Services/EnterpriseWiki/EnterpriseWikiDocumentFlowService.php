@@ -538,10 +538,30 @@ class EnterpriseWikiDocumentFlowService
         ]);
     }
 
+    /**
+     * Marks the run's execution status failed. Run execution status (`status`) and semantic
+     * QA result (`qa_status`/`qa_result`/`qa_last_error`, and the QA snapshot they're backed
+     * by) are two distinct, orthogonal states — an exception in the continuation pipeline
+     * means the ORCHESTRATION failed, not that QA itself produced a bad verdict.
+     *
+     * If `qa_status` already holds a terminal, legitimate result (passed/escalated/failed —
+     * set by this run's own real QA execution, e.g. by the scheduler winning a claim race
+     * before this exception was thrown) it is left completely untouched: `qa_completed_at`,
+     * `qa_last_error`, and the QA snapshot already recorded for it are not overwritten. This
+     * is exactly the run-24 defect: a genuine `qa_status=passed` was clobbered to `failed`
+     * because the exception happened while `$currentStage === STATUS_QA`, even though QA had
+     * already legitimately completed under a different worker.
+     */
     private function markRunFailed(EnterpriseWikiIngestRun $run, Throwable $exception, bool $qaContext = false, ?string $phase = null): void
     {
         // Capture before update() mutates $run->status to 'failed' on this same instance.
         $phase ??= $run->status;
+
+        $qaAlreadyTerminal = in_array($run->qa_status, [
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+        ], true);
 
         $update = [
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
@@ -549,7 +569,7 @@ class EnterpriseWikiDocumentFlowService
             'finished_at' => now(),
         ];
 
-        if ($qaContext) {
+        if ($qaContext && ! $qaAlreadyTerminal) {
             $update['qa_status'] = EnterpriseWikiIngestRun::QA_STATUS_FAILED;
             $update['qa_completed_at'] = now();
             $update['qa_last_error'] = mb_substr($exception->getMessage(), 0, 1000);
@@ -560,6 +580,7 @@ class EnterpriseWikiDocumentFlowService
         Log::error('[WIKI_DOCUMENT_FLOW] Run failed.', [
             'run_id' => $run->id,
             'qa_context' => $qaContext,
+            'qa_status_preserved' => $qaContext && $qaAlreadyTerminal,
             'phase' => $phase,
             'exception' => get_class($exception),
             'error' => $exception->getMessage(),
