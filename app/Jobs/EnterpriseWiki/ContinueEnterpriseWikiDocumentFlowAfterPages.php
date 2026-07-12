@@ -27,9 +27,17 @@ class ContinueEnterpriseWikiDocumentFlowAfterPages implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    /**
+     * Exposed as a class constant (rather than only the instance property below) so other
+     * Enterprise Wiki components can derive a value from it at compile time instead of
+     * duplicating the number — see EnterpriseWikiExtractPageClaimsService::LEASE_SECONDS /
+     * EnterpriseWikiVerifyPageClaimsService::LEASE_SECONDS, which must always exceed this.
+     */
+    public const TIMEOUT_SECONDS = 1800;
+
     public int $tries = 1;
 
-    public int $timeout = 1800;
+    public int $timeout = self::TIMEOUT_SECONDS;
 
     public bool $failOnTimeout = true;
 

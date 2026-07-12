@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiIngestRun;
@@ -37,12 +38,27 @@ use Throwable;
 class EnterpriseWikiExtractPageClaimsService
 {
     /**
-     * Lease duration for a claim-extraction reservation. Long enough that a normal AI call
-     * (single request, typically a few seconds) never expires mid-flight; short enough that a
-     * genuinely dead worker (killed process, no chance to release) does not block the page
-     * indefinitely — well under the 1800s job timeout of ContinueEnterpriseWikiDocumentFlowAfterPages.
+     * Safety margin added on top of the continuation job's own timeout (queue scheduling
+     * jitter, clock skew between workers, Laravel's own grace period before force-killing a
+     * timed-out job) — not itself the source of truth for how long a legitimate AI call may
+     * run.
      */
-    private const LEASE_SECONDS = 600;
+    private const TIMEOUT_SAFETY_MARGIN_SECONDS = 300;
+
+    /**
+     * Lease duration for a claim-extraction reservation.
+     *
+     * Invariant: LEASE_SECONDS > ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS.
+     * The reservation is taken inside that job's single execution, so a live worker legitimately
+     * mid-AI-call can still be running at any point up to the job's own timeout. A lease shorter
+     * than that timeout (600s was tried and rejected — see the class docs below) lets another
+     * worker reclaim it and start a SECOND AI call for the same page while the first is still
+     * within its allowed execution window — exactly the duplicate-AI-call race this reservation
+     * exists to prevent. Deliberately derived from the job's timeout constant rather than a
+     * separately hand-picked number, so the two can never silently drift apart; enforced by
+     * EnterpriseWikiClaimStepLeaseTest::test_lease_duration_exceeds_continuation_job_timeout_by_a_safety_margin().
+     */
+    private const LEASE_SECONDS = ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS + self::TIMEOUT_SAFETY_MARGIN_SECONDS;
 
     public function __construct(
         private readonly WikiPageClaimExtractionAiClient $aiClient,

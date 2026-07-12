@@ -25,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use ReflectionClass;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -96,6 +97,60 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
     }
 
     // =========================================================================
+    // 1b/2b: A long-running but still-valid reservation still blocks a second worker
+    // =========================================================================
+
+    /**
+     * 700s would have been "stale" under the old, unsafe 600s lease — it is not stale under
+     * the current lease (job timeout + safety margin), so a legitimate, still-running worker's
+     * reservation must still block a second worker from calling AI.
+     */
+    public function test_extraction_reservation_older_than_the_previous_unsafe_threshold_but_within_lease_still_blocks_a_second_worker(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        [$row] = $this->addPage($run, 'Side lenge reservert');
+
+        $this->assertLessThan($this->leaseSecondsFor(EnterpriseWikiExtractPageClaimsService::class), 700 + 900);
+
+        $row->update([
+            'claims_claimed_at' => now()->subSeconds(700 + 900), // > old 600s threshold, still < current lease
+            'claims_claim_token' => 'worker-a-token',
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(0, $result['pages']);
+        $this->assertSame(1, $result['busy']);
+        $this->assertSame('worker-a-token', $row->fresh()->claims_claim_token);
+    }
+
+    public function test_verification_reservation_older_than_the_previous_unsafe_threshold_but_within_lease_still_blocks_a_second_worker(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        [, , $version] = $this->addPage($run, 'Side med lenge reservert påstand');
+        $claim = $this->createClaim($version);
+
+        $this->assertLessThan($this->leaseSecondsFor(EnterpriseWikiVerifyPageClaimsService::class), 700 + 900);
+
+        $claim->update([
+            'verification_claimed_at' => now()->subSeconds(700 + 900),
+            'verification_claim_token' => 'worker-a-token',
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $this->assertSame(0, $result['references']);
+        $this->assertSame(1, $result['busy']);
+        $this->assertSame('worker-a-token', $claim->fresh()->verification_claim_token);
+    }
+
+    // =========================================================================
     // 3: Stale extraction lease is reclaimed; old token is rejected
     // =========================================================================
 
@@ -107,7 +162,8 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
 
         $staleToken = 'stale-worker-a-token';
         $row->update([
-            'claims_claimed_at' => now()->subSeconds(700), // older than the 600s lease
+            // Older than the current lease (job timeout + safety margin), not just the old 600s.
+            'claims_claimed_at' => now()->subSeconds($this->leaseSecondsFor(EnterpriseWikiExtractPageClaimsService::class) + 100),
             'claims_claim_token' => $staleToken,
         ]);
 
@@ -155,7 +211,7 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
 
         $staleToken = 'stale-worker-a-token';
         $claim->update([
-            'verification_claimed_at' => now()->subSeconds(700),
+            'verification_claimed_at' => now()->subSeconds($this->leaseSecondsFor(EnterpriseWikiVerifyPageClaimsService::class) + 100),
             'verification_claim_token' => $staleToken,
         ]);
 
@@ -241,6 +297,42 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $this->assertSame(0, $result['references']);
         $this->assertSame(0, $result['no_support']);
         $this->assertSame(0, $result['busy']);
+    }
+
+    // =========================================================================
+    // Timeout invariant: lease duration must always outlive the continuation job's timeout
+    // =========================================================================
+
+    /**
+     * The reservation is taken inside ContinueEnterpriseWikiDocumentFlowAfterPages's single
+     * execution, so a live worker may legitimately still be mid-AI-call at any point up to the
+     * job's own timeout. A lease shorter than (or equal to) that timeout would let another
+     * worker reclaim it and start a second AI call for the same page/claim while the first is
+     * still within its allowed execution window — the exact race this reservation exists to
+     * prevent. This test reads the actual constants (not a hardcoded number) so the invariant
+     * cannot silently regress if either value is edited independently in the future.
+     */
+    public function test_lease_duration_exceeds_continuation_job_timeout_by_a_safety_margin(): void
+    {
+        $jobTimeout = ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS;
+
+        $extractionLease = $this->leaseSecondsFor(EnterpriseWikiExtractPageClaimsService::class);
+        $verificationLease = $this->leaseSecondsFor(EnterpriseWikiVerifyPageClaimsService::class);
+
+        $this->assertGreaterThan(
+            $jobTimeout,
+            $extractionLease,
+            'Claim extraction lease must outlive the continuation job timeout, or a live worker could lose its reservation mid-AI-call.',
+        );
+        $this->assertGreaterThan(
+            $jobTimeout,
+            $verificationLease,
+            'Claim verification lease must outlive the continuation job timeout, or a live worker could lose its reservation mid-AI-call.',
+        );
+
+        // A concrete, human-checkable margin — not just "greater than zero".
+        $this->assertGreaterThanOrEqual(300, $extractionLease - $jobTimeout);
+        $this->assertGreaterThanOrEqual(300, $verificationLease - $jobTimeout);
     }
 
     // =========================================================================
@@ -474,6 +566,11 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
                 'links_checked' => 0, 'findings_created' => 0, 'findings_skipped' => 0,
                 'findings_resolved' => 0, 'errors' => 0, 'warnings' => 0, 'info' => 0,
             ]);
+    }
+
+    private function leaseSecondsFor(string $serviceClass): int
+    {
+        return (new ReflectionClass($serviceClass))->getConstant('LEASE_SECONDS');
     }
 
     private function mockQaClaims(EnterpriseWikiIngestRun $run, string $qaStatus): void

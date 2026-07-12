@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -37,10 +38,18 @@ use Throwable;
 class EnterpriseWikiVerifyPageClaimsService
 {
     /**
-     * Lease duration for a claim-verification reservation — see
-     * EnterpriseWikiExtractPageClaimsService::LEASE_SECONDS for the same rationale.
+     * Same safety margin as EnterpriseWikiExtractPageClaimsService::TIMEOUT_SAFETY_MARGIN_SECONDS.
      */
-    private const LEASE_SECONDS = 600;
+    private const TIMEOUT_SAFETY_MARGIN_SECONDS = 300;
+
+    /**
+     * Lease duration for a claim-verification reservation — same invariant and rationale as
+     * EnterpriseWikiExtractPageClaimsService::LEASE_SECONDS: must exceed
+     * ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS, since the reservation is
+     * taken inside that job's single execution and a live worker may legitimately still be
+     * mid-AI-call at any point up to the job's own timeout.
+     */
+    private const LEASE_SECONDS = ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS + self::TIMEOUT_SAFETY_MARGIN_SECONDS;
 
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
