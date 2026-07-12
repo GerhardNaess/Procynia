@@ -34,11 +34,12 @@ use Throwable;
 class EnterpriseWikiDocumentFlowService
 {
     /**
-     * How long to wait before re-dispatching the continuation job when post-ingest QA is
-     * busy (claimed elsewhere but not yet terminal) — short enough that a run doesn't sit
-     * idle for long, long enough not to hammer the same busy row in a tight loop.
+     * How long to wait before re-dispatching the continuation job when a stage is busy —
+     * post-ingest QA claimed elsewhere but not yet terminal, or a claim extraction/verification
+     * lease is actively held by another live worker — short enough that a run doesn't sit idle
+     * for long, long enough not to hammer the same busy row/claim in a tight loop.
      */
-    private const QA_BUSY_RETRY_DELAY_SECONDS = 30;
+    private const STEP_BUSY_RETRY_DELAY_SECONDS = 30;
 
     public function __construct(
         private readonly EnterpriseWikiIngestService $ingestService,
@@ -144,8 +145,7 @@ class EnterpriseWikiDocumentFlowService
      * No separate atomic claim is needed here: FinalizeEnterpriseWikiPageGeneration already
      * transitions the run out of generating_pages under its own row lock before dispatching
      * this continuation exactly once, so by the time this runs the run is already claimed.
-     */
-    /**
+     *
      * Every individual stage below is independently safe to re-run against a run that has
      * already progressed past it — see the class-level docs on each stage's service for its
      * own idempotency/checkpoint mechanism. This method itself does not need to compute which
@@ -185,8 +185,20 @@ class EnterpriseWikiDocumentFlowService
         try {
             $this->performMaterializeWikilinks($run);
             $this->performIncrementalRelinking($run);
-            $this->performExtractPageClaims($run);
-            $this->performVerifyPageClaims($run);
+
+            if (! $this->performExtractPageClaims($run)) {
+                // Another live worker holds an active reservation on at least one page's
+                // claim extraction — a deferred retry of this same continuation job has
+                // already been dispatched. Do not proceed to verification/lint/QA, and do
+                // not mark the run failed: this is an expected concurrent state.
+                return;
+            }
+
+            if (! $this->performVerifyPageClaims($run)) {
+                // Same reasoning as above, for an actively-held claim verification lease.
+                return;
+            }
+
             $this->performAppliedRunLint($run);
             $this->performLinkSemanticRepair($run);
 
@@ -369,7 +381,13 @@ class EnterpriseWikiDocumentFlowService
         ]);
     }
 
-    private function performExtractPageClaims(EnterpriseWikiIngestRun $run): void
+    /**
+     * @return bool true when extraction is done (nothing left actively leased elsewhere) and
+     *              the flow may proceed; false when at least one page's extraction lease is
+     *              held by another live worker — a deferred retry has been dispatched and the
+     *              caller must stop without proceeding or marking the run failed.
+     */
+    private function performExtractPageClaims(EnterpriseWikiIngestRun $run): bool
     {
         $this->markVerificationStage($run);
 
@@ -380,10 +398,30 @@ class EnterpriseWikiDocumentFlowService
             'pages' => $result['pages'] ?? null,
             'claims' => $result['claims'] ?? null,
             'skipped' => $result['skipped'] ?? null,
+            'busy' => $result['busy'] ?? 0,
         ]);
+
+        if (($result['busy'] ?? 0) > 0) {
+            Log::info('[WIKI_DOCUMENT_FLOW] Claim extraction busy — continuation deferred.', [
+                'run_id' => $run->id,
+                'busy' => $result['busy'],
+            ]);
+
+            ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id)
+                ->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
+
+            return false;
+        }
+
+        return true;
     }
 
-    private function performVerifyPageClaims(EnterpriseWikiIngestRun $run): void
+    /**
+     * @return bool true when verification is done and the flow may proceed; false when at
+     *              least one claim's verification lease is held by another live worker — a
+     *              deferred retry has been dispatched and the caller must stop.
+     */
+    private function performVerifyPageClaims(EnterpriseWikiIngestRun $run): bool
     {
         $result = $this->verifyPageClaimsService->verify($run->fresh() ?? $run);
 
@@ -394,7 +432,22 @@ class EnterpriseWikiDocumentFlowService
             'references' => $result['references'] ?? null,
             'skipped' => $result['skipped'] ?? null,
             'no_support' => $result['no_support'] ?? null,
+            'busy' => $result['busy'] ?? 0,
         ]);
+
+        if (($result['busy'] ?? 0) > 0) {
+            Log::info('[WIKI_DOCUMENT_FLOW] Claim verification busy — continuation deferred.', [
+                'run_id' => $run->id,
+                'busy' => $result['busy'],
+            ]);
+
+            ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id)
+                ->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
+
+            return false;
+        }
+
+        return true;
     }
 
     private function performAppliedRunLint(EnterpriseWikiIngestRun $run): void
@@ -510,7 +563,7 @@ class EnterpriseWikiDocumentFlowService
         ]);
 
         ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id)
-            ->delay(now()->addSeconds(self::QA_BUSY_RETRY_DELAY_SECONDS));
+            ->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
 
         return false;
     }

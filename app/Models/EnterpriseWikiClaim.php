@@ -46,6 +46,8 @@ class EnterpriseWikiClaim extends Model
         'approved_by_user_id',
         'approved_at',
         'verified_at',
+        'verification_claimed_at',
+        'verification_claim_token',
     ];
 
     protected function casts(): array
@@ -55,6 +57,7 @@ class EnterpriseWikiClaim extends Model
             'conflict_flag' => 'boolean',
             'approved_at' => 'datetime',
             'verified_at' => 'datetime',
+            'verification_claimed_at' => 'datetime',
         ];
     }
 

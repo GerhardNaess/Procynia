@@ -11,6 +11,8 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Verifies existing EnterpriseWikiClaim rows against the originating source document
@@ -20,21 +22,32 @@ use Illuminate\Support\Facades\DB;
  * the verdict — a claim that AI found unsupported never gets a source reference, so "a
  * reference exists" cannot distinguish "not yet verified" from "verified and found
  * unsupported". Without this, every continuation pass would re-call AI for every
- * unsupported claim indefinitely. The AI call happens outside any transaction; writing the
- * reference (when supported) and the checkpoint together inside one transaction guarantees
- * a crash between the AI call and persistence never leaves verified_at set without its
- * reference, or a reference without verified_at.
+ * unsupported claim indefinitely.
+ *
+ * Concurrency: a claim is reserved via a single atomic conditional UPDATE
+ * (verification_claimed_at/verification_claim_token) BEFORE the AI call — a plain SQL
+ * compare-and-swap, not a held transaction/row lock, so nothing is locked while the AI call is
+ * in flight. Persisting the result (reference, when supported, and the verified_at checkpoint
+ * either way) happens in a short transaction that re-validates the reservation token is still
+ * owned by this worker before writing anything, so a worker whose lease was reclaimed by
+ * another worker can never overwrite that worker's result.
  *
  * Does not touch claim text, page versions, lint findings, or ProcessEnterpriseWikiIngest.
  */
 class EnterpriseWikiVerifyPageClaimsService
 {
+    /**
+     * Lease duration for a claim-verification reservation — see
+     * EnterpriseWikiExtractPageClaimsService::LEASE_SECONDS for the same rationale.
+     */
+    private const LEASE_SECONDS = 600;
+
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
     ) {}
 
     /**
-     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int}
+     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int, busy: int}
      *
      * @throws \InvalidArgumentException if the run is not applied or the source document is missing
      * @throws \RuntimeException if AI is unavailable or verification fails
@@ -71,6 +84,7 @@ class EnterpriseWikiVerifyPageClaimsService
         $references = 0;
         $skipped = 0;
         $noSupport = 0;
+        $busy = 0;
 
         foreach ($pivotRows as $row) {
             $page = $row->page;
@@ -121,35 +135,50 @@ class EnterpriseWikiVerifyPageClaimsService
                     continue;
                 }
 
-                $claims++;
+                $token = (string) Str::uuid();
+                $reservation = $this->reserve($claim, $token);
 
-                $result = $this->aiClient->verifyClaim(
-                    claimText: $claim->claim_text,
-                    sourceText: $sourceText,
-                    languageCode: $languageCode,
-                );
-
-                if (! $result['supported']) {
-                    $claim->update(['verified_at' => now()]);
-                    $noSupport++;
+                if ($reservation === 'completed') {
+                    $skipped++;
 
                     continue;
                 }
 
-                DB::transaction(function () use ($claim, $document, $result): void {
-                    EnterpriseWikiSourceReference::query()->create([
-                        'enterprise_wiki_claim_id' => $claim->id,
-                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                        'source_id' => $document->id,
-                        'source_label' => $document->original_filename,
-                        'excerpt' => $result['excerpt'],
-                        'source_hash' => $document->file_hash_sha256 ?? '',
-                    ]);
+                if ($reservation === 'busy') {
+                    $busy++;
 
-                    $claim->update(['verified_at' => now()]);
-                });
+                    continue;
+                }
 
-                $references++;
+                $claims++;
+
+                try {
+                    $result = $this->aiClient->verifyClaim(
+                        claimText: $claim->claim_text,
+                        sourceText: $sourceText,
+                        languageCode: $languageCode,
+                    );
+                } catch (Throwable $e) {
+                    $this->release($claim->id, $token);
+
+                    throw $e;
+                }
+
+                $outcome = $this->persist($claim->id, $token, $document, $result);
+
+                if ($outcome === null) {
+                    // Another worker reclaimed this lease as stale while the AI call was in
+                    // flight; that worker's own attempt is the one that will persist a result.
+                    $busy++;
+
+                    continue;
+                }
+
+                if ($outcome === 'unsupported') {
+                    $noSupport++;
+                } else {
+                    $references++;
+                }
             }
         }
 
@@ -159,7 +188,101 @@ class EnterpriseWikiVerifyPageClaimsService
             'references' => $references,
             'skipped' => $skipped,
             'no_support' => $noSupport,
+            'busy' => $busy,
         ];
+    }
+
+    /**
+     * Atomically reserve a claim for verification — see
+     * EnterpriseWikiExtractPageClaimsService::reserve() for the same compare-and-swap pattern.
+     *
+     * @return string one of 'reserved', 'completed', 'busy'
+     */
+    private function reserve(EnterpriseWikiClaim $claim, string $token): string
+    {
+        $staleThreshold = now()->subSeconds(self::LEASE_SECONDS);
+
+        $claimed = EnterpriseWikiClaim::query()
+            ->where('id', $claim->id)
+            ->whereNull('verified_at')
+            ->where(function ($q) use ($staleThreshold): void {
+                $q->whereNull('verification_claimed_at')->orWhere('verification_claimed_at', '<', $staleThreshold);
+            })
+            ->update([
+                'verification_claimed_at' => now(),
+                'verification_claim_token' => $token,
+            ]);
+
+        if ($claimed > 0) {
+            return 'reserved';
+        }
+
+        $fresh = EnterpriseWikiClaim::query()->find($claim->id);
+
+        return $fresh?->verified_at !== null ? 'completed' : 'busy';
+    }
+
+    /**
+     * Release a reservation this worker still owns — a no-op if the token no longer matches
+     * (already reclaimed by another worker as stale).
+     */
+    private function release(int $claimId, string $token): void
+    {
+        EnterpriseWikiClaim::query()
+            ->where('id', $claimId)
+            ->where('verification_claim_token', $token)
+            ->update([
+                'verification_claimed_at' => null,
+                'verification_claim_token' => null,
+            ]);
+    }
+
+    /**
+     * Persist the verification result and the completion checkpoint atomically, but only if
+     * this worker's token is still the current owner of the reservation.
+     *
+     * @return string|null 'supported', 'unsupported', or null if the reservation was lost
+     */
+    private function persist(int $claimId, string $token, EnterpriseWikiDocument $document, array $result): ?string
+    {
+        return DB::transaction(function () use ($claimId, $token, $document, $result): ?string {
+            $claim = EnterpriseWikiClaim::query()
+                ->where('id', $claimId)
+                ->where('verification_claim_token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if ($claim === null) {
+                return null;
+            }
+
+            if (! $result['supported']) {
+                $claim->update([
+                    'verified_at' => now(),
+                    'verification_claimed_at' => null,
+                    'verification_claim_token' => null,
+                ]);
+
+                return 'unsupported';
+            }
+
+            EnterpriseWikiSourceReference::query()->create([
+                'enterprise_wiki_claim_id' => $claim->id,
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => $document->id,
+                'source_label' => $document->original_filename,
+                'excerpt' => $result['excerpt'],
+                'source_hash' => $document->file_hash_sha256 ?? '',
+            ]);
+
+            $claim->update([
+                'verified_at' => now(),
+                'verification_claimed_at' => null,
+                'verification_claim_token' => null,
+            ]);
+
+            return 'supported';
+        });
     }
 
     private function resolveLanguageCode(int $customerId): string

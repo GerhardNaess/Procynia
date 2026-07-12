@@ -41,6 +41,8 @@ class EnterpriseWikiIngestRunPage extends Model
         'generation_completed_at',
         'generation_error',
         'claims_extracted_at',
+        'claims_claimed_at',
+        'claims_claim_token',
     ];
 
     protected function casts(): array
@@ -49,6 +51,7 @@ class EnterpriseWikiIngestRunPage extends Model
             'generation_started_at' => 'datetime',
             'generation_completed_at' => 'datetime',
             'claims_extracted_at' => 'datetime',
+            'claims_claimed_at' => 'datetime',
         ];
     }
 
