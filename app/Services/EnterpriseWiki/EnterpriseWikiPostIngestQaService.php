@@ -39,6 +39,30 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiPostIngestQaService
 {
+    /**
+     * Main-flow `status` values that mean a run is still actively owned by
+     * RunEnterpriseWikiDocumentFlow / ContinueEnterpriseWikiDocumentFlowAfterPages — i.e.
+     * every non-terminal status except `qa` (the ordinary flow's own QA stage, which must
+     * remain claimable by runForRun()) and `decision_only` (a distinct, valid run type that
+     * never transitions through this state machine at all — see scopeToRunsReadyForQa()).
+     *
+     * Scheduled/explicit-retry discovery (findPendingRuns()/findRetryableRuns()) must never
+     * return a run in one of these statuses: the ordinary document flow owns the first
+     * post-ingest QA attempt for it, and letting the scheduler claim it first is exactly the
+     * run-24 race (scheduler sets qa_status=passed while the continuation job is still mid
+     * verification_linking, so the continuation job's own claim then fails).
+     */
+    private const ACTIVE_DOCUMENT_FLOW_STATUSES = [
+        EnterpriseWikiIngestRun::STATUS_QUEUED,
+        EnterpriseWikiIngestRun::STATUS_RUNNING,
+        EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+        EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+        EnterpriseWikiIngestRun::STATUS_APPLYING,
+        EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES,
+        EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+    ];
+
     public function __construct(
         private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
@@ -133,47 +157,69 @@ class EnterpriseWikiPostIngestQaService
      * Find applied runs eligible for scheduled QA polling (null, pending, repair_required).
      *
      * Does NOT include 'failed' or 'escalated' — those require an explicit --retry decision.
-     * Does not include 'running' (in progress) or 'passed' (complete).
+     * Does not include 'running' (in progress) or 'passed' (complete). Does not include a run
+     * still owned by the ordinary document flow (see ACTIVE_DOCUMENT_FLOW_STATUSES).
      */
     public function findPendingRuns(): Collection
     {
-        return $this->scopeToRunsReadyForQa(
-            EnterpriseWikiIngestRun::query()
-                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
-                ->where(function ($q): void {
-                    $q->whereNull('qa_status')
-                        ->orWhereIn('qa_status', [
-                            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
-                            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-                        ]);
-                })
-        )
-            ->orderBy('id')
-            ->get();
+        return $this->findEligibleRuns([
+            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+        ], 'scheduler');
     }
 
     /**
      * Find applied runs eligible for explicit retry (null, pending, repair_required, failed, escalated).
      *
-     * Use only when operator has explicitly requested a retry via --retry flag.
+     * Use only when operator has explicitly requested a retry via --retry flag. Does not
+     * include a run still owned by the ordinary document flow (see
+     * ACTIVE_DOCUMENT_FLOW_STATUSES) — an explicit retry must never race a run's own
+     * first-attempt continuation any more than scheduled polling may.
      */
     public function findRetryableRuns(): Collection
     {
+        return $this->findEligibleRuns([
+            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+        ], 'scheduler');
+    }
+
+    /**
+     * Shared discovery logic for findPendingRuns()/findRetryableRuns(): applied runs whose
+     * qa_status is one of $qaStatuses (or null), excluding any run still actively owned by the
+     * ordinary document flow. Logs once per call (not per row) when at least one run was
+     * excluded for being active, so a busy scheduler tick doesn't produce noisy per-row logs.
+     */
+    private function findEligibleRuns(array $qaStatuses, string $caller): Collection
+    {
+        $excludedActiveIds = $this->baseEligibleQuery($qaStatuses)
+            ->whereIn('status', self::ACTIVE_DOCUMENT_FLOW_STATUSES)
+            ->pluck('id');
+
+        if ($excludedActiveIds->isNotEmpty()) {
+            Log::info('[WIKI_POST_INGEST_QA] Active document run excluded from scheduled QA.', [
+                'excluded_count' => $excludedActiveIds->count(),
+                'run_ids' => $excludedActiveIds->take(50)->all(),
+                'caller' => $caller,
+            ]);
+        }
+
         return $this->scopeToRunsReadyForQa(
-            EnterpriseWikiIngestRun::query()
-                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
-                ->where(function ($q): void {
-                    $q->whereNull('qa_status')
-                        ->orWhereIn('qa_status', [
-                            EnterpriseWikiIngestRun::QA_STATUS_PENDING,
-                            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-                            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-                        ]);
-                })
+            $this->baseEligibleQuery($qaStatuses)->whereNotIn('status', self::ACTIVE_DOCUMENT_FLOW_STATUSES)
         )
             ->orderBy('id')
             ->get();
+    }
+
+    private function baseEligibleQuery(array $qaStatuses): \Illuminate\Database\Eloquent\Builder
+    {
+        return EnterpriseWikiIngestRun::query()
+            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+            ->where(function ($q) use ($qaStatuses): void {
+                $q->whereNull('qa_status')->orWhereIn('qa_status', $qaStatuses);
+            });
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
@@ -32,6 +33,13 @@ use Throwable;
  */
 class EnterpriseWikiDocumentFlowService
 {
+    /**
+     * How long to wait before re-dispatching the continuation job when post-ingest QA is
+     * busy (claimed elsewhere but not yet terminal) — short enough that a run doesn't sit
+     * idle for long, long enough not to hammer the same busy row in a tight loop.
+     */
+    private const QA_BUSY_RETRY_DELAY_SECONDS = 30;
+
     public function __construct(
         private readonly EnterpriseWikiIngestService $ingestService,
         private readonly EnterpriseWikiMaintainerDecisionService $maintainerDecisionService,
@@ -164,12 +172,18 @@ class EnterpriseWikiDocumentFlowService
             $this->performLinkSemanticRepair($run);
 
             $currentStage = EnterpriseWikiIngestRun::STATUS_QA;
-            $this->performPostIngestQa($run);
+
+            if (! $this->performPostIngestQa($run)) {
+                // Busy/concurrent state, not a failure — a deferred retry of this same
+                // continuation job has already been dispatched. Leave the run exactly where
+                // it is; do not finalize, do not mark it failed.
+                return;
+            }
 
             $currentStage = 'finalizing';
             $this->finalizeFromQaResult($run->fresh() ?? $run);
         } catch (Throwable $e) {
-            $this->markRunFailed($run->fresh() ?? $run, $e, $currentStage === EnterpriseWikiIngestRun::STATUS_QA);
+            $this->markRunFailed($run->fresh() ?? $run, $e, $currentStage === EnterpriseWikiIngestRun::STATUS_QA, $currentStage);
 
             throw $e;
         }
@@ -388,22 +402,89 @@ class EnterpriseWikiDocumentFlowService
         ]);
     }
 
-    private function performPostIngestQa(EnterpriseWikiIngestRun $run): void
+    /**
+     * Runs (or recognizes the outcome of) post-ingest QA for this run's first, ordinary-flow
+     * attempt. Returns true when the flow may proceed to finalizeFromQaResult() — either
+     * because this call claimed and ran QA itself, or because QA was already terminally
+     * completed by someone else (the scheduled QA sweep winning a race against this
+     * continuation, in particular). Returns false when QA is busy/in-progress elsewhere and
+     * not yet terminal: a deferred retry of this same continuation job has been dispatched,
+     * and the caller must stop without finalizing or marking the run failed.
+     *
+     * Never throws for a "did not claim" outcome — see the run-24 race this replaces: the
+     * scheduled `wiki:run-post-ingest-qa --all-pending` sweep claiming a run that was still
+     * mid continueAfterPagesGenerated() and racing this exact call.
+     */
+    private function performPostIngestQa(EnterpriseWikiIngestRun $run): bool
     {
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_QA]);
 
         $result = $this->postIngestQaService->runForRun($run->fresh() ?? $run);
 
-        if ($result === null) {
-            throw new InvalidArgumentException(
-                "Post-ingest QA did not claim run [{$run->id}]."
-            );
+        if ($result !== null) {
+            $qaStatus = $run->fresh()?->qa_status;
+
+            Log::info('[WIKI_DOCUMENT_FLOW] Post-ingest QA claimed by continuation.', [
+                'run_id' => $run->id,
+                'qa_status' => $qaStatus,
+                'claim_result' => 'claimed',
+                'caller' => 'continuation',
+            ]);
+
+            Log::info('[WIKI_DOCUMENT_FLOW] Post-ingest QA completed.', [
+                'run_id' => $run->id,
+                'qa_status' => $qaStatus,
+            ]);
+
+            return true;
         }
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Post-ingest QA completed.', [
+        $fresh = $run->fresh();
+
+        if ($fresh === null) {
+            throw new InvalidArgumentException("Run [{$run->id}] disappeared during post-ingest QA.");
+        }
+
+        $terminalQaStatuses = [
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+        ];
+
+        if (in_array($fresh->qa_status, $terminalQaStatuses, true)) {
+            // Someone else — most likely the scheduled QA sweep — already ran QA to a
+            // terminal outcome for this run. Do not attempt a new QA run, do not create a
+            // duplicate snapshot: proceed straight to finalization using that result.
+            Log::info('[WIKI_DOCUMENT_FLOW] Post-ingest QA already completed.', [
+                'run_id' => $run->id,
+                'status' => $fresh->status,
+                'qa_status' => $fresh->qa_status,
+                'qa_attempt_count' => $fresh->qa_attempt_count,
+                'claim_result' => 'already_completed',
+                'caller' => 'continuation',
+            ]);
+
+            return true;
+        }
+
+        // qa_status is null/pending/running/repair_required but the atomic claim still
+        // failed: another worker (the scheduler, or a concurrent continuation dispatch) is
+        // actively running QA for this run right now. This is a genuine busy/concurrent
+        // state, not a failure — defer via the existing queue/retry pattern rather than
+        // polling in-process or assuming any outcome.
+        Log::info('[WIKI_DOCUMENT_FLOW] Post-ingest QA busy — continuation deferred.', [
             'run_id' => $run->id,
-            'qa_status' => $run->fresh()?->qa_status,
+            'status' => $fresh->status,
+            'qa_status' => $fresh->qa_status,
+            'qa_attempt_count' => $fresh->qa_attempt_count,
+            'claim_result' => 'busy',
+            'caller' => 'continuation',
         ]);
+
+        ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id)
+            ->delay(now()->addSeconds(self::QA_BUSY_RETRY_DELAY_SECONDS));
+
+        return false;
     }
 
     private function finalizeFromQaResult(EnterpriseWikiIngestRun $run): void
@@ -457,8 +538,11 @@ class EnterpriseWikiDocumentFlowService
         ]);
     }
 
-    private function markRunFailed(EnterpriseWikiIngestRun $run, Throwable $exception, bool $qaContext = false): void
+    private function markRunFailed(EnterpriseWikiIngestRun $run, Throwable $exception, bool $qaContext = false, ?string $phase = null): void
     {
+        // Capture before update() mutates $run->status to 'failed' on this same instance.
+        $phase ??= $run->status;
+
         $update = [
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
             'error_message' => mb_substr($exception->getMessage(), 0, 1000),
@@ -476,6 +560,8 @@ class EnterpriseWikiDocumentFlowService
         Log::error('[WIKI_DOCUMENT_FLOW] Run failed.', [
             'run_id' => $run->id,
             'qa_context' => $qaContext,
+            'phase' => $phase,
+            'exception' => get_class($exception),
             'error' => $exception->getMessage(),
         ]);
     }

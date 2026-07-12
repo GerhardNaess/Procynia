@@ -43,22 +43,38 @@ class ContinueEnterpriseWikiDocumentFlowAfterPages implements ShouldQueue
         $flowService->continueAfterPagesGenerated($this->runId);
     }
 
+    /**
+     * Safety net for a genuinely unexpected continuation failure — e.g. the worker process
+     * itself was killed/restarted mid-flight, so EnterpriseWikiDocumentFlowService's own
+     * try/catch never got to run markRunFailed(). Never overwrites an already-terminal run
+     * (completed/failed/escalated), so a legitimate result recorded before the crash is
+     * preserved rather than clobbered.
+     */
     public function failed(Throwable $exception): void
     {
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
-        if ($run === null || $run->isTerminal()) {
+        if ($run === null) {
             return;
         }
 
-        $run->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
-            'error_message' => mb_substr($exception->getMessage(), 0, 1000),
-            'finished_at' => now(),
-        ]);
+        $phase = $run->status;
+        $qaStatus = $run->qa_status;
 
-        Log::error('[WIKI_DOCUMENT_FLOW_CONTINUATION_JOB] Run failed.', [
+        if (! $run->isTerminal()) {
+            $run->update([
+                'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                'error_message' => mb_substr($exception->getMessage(), 0, 1000),
+                'finished_at' => now(),
+            ]);
+        }
+
+        Log::error('[WIKI_DOCUMENT_FLOW] Continuation job failed.', [
             'run_id' => $this->runId,
+            'status' => $phase,
+            'qa_status' => $qaStatus,
+            'phase' => $phase,
+            'exception' => get_class($exception),
             'error' => $exception->getMessage(),
         ]);
     }
