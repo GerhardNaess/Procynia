@@ -393,6 +393,372 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Runtime fix: idempotent apply via canonical (customer_id, slug) lookup
+    //
+    // source_article/source_summary carry no page_id at all in the maintainer decision
+    // schema (see EnterpriseWikiMaintainerDecisionPrompt) — only concept/entity entries do.
+    // So an action=update decision for the source article/summary can never be resolved by
+    // page_id; the (customer_id, slug) lookup is what makes reuse possible.
+    // =========================================================================
+
+    public function test_create_action_creates_page_when_slug_does_not_exist(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createDecisionOnlyRun($customer, $this->baseDecision());
+
+        $result = $this->service->apply($run);
+
+        $this->assertSame(2, $result['created']);
+        $this->assertTrue(
+            EnterpriseWikiPage::query()->where('customer_id', $customer->id)->where('slug', 'test-artikkel-ab1c2d')->exists()
+        );
+    }
+
+    public function test_update_action_without_page_id_reuses_existing_page_by_slug(): void
+    {
+        $customer = $this->createCustomer();
+        $existingArticle = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+        $pagesBefore = EnterpriseWikiPage::query()->count();
+
+        $decision = $this->baseDecision([
+            'source_article' => [
+                'action' => 'update',
+                'title' => 'Test Artikkel',
+                'proposed_slug' => 'test-artikkel-ab1c2d',
+                'reason' => 'Already created by an earlier, partially-completed run.',
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $result = $this->service->apply($run);
+
+        // Only source_article is overridden above — source_summary in the base decision still
+        // proposes a fresh slug, so it is genuinely created; the article must not be.
+        $this->assertSame($pagesBefore + 1, EnterpriseWikiPage::query()->count());
+        $this->assertSame(1, $result['updated']);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $existingArticle->id)
+            ->first();
+        $this->assertNotNull($pivot);
+        $this->assertSame(EnterpriseWikiIngestRunPage::ACTION_UPDATED, $pivot->action);
+    }
+
+    public function test_update_action_does_not_insert_when_slug_already_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $existingArticle = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+
+        $decision = $this->baseDecision([
+            'source_article' => [
+                'action' => 'update',
+                'title' => 'Test Artikkel',
+                'proposed_slug' => 'test-artikkel-ab1c2d',
+                'reason' => 'Update, no page_id in schema for source pages.',
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $matching = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->where('slug', 'test-artikkel-ab1c2d')->get();
+        $this->assertCount(1, $matching, 'update must reuse the existing row, never INSERT a second one.');
+        $this->assertSame($existingArticle->id, $matching->first()->id);
+    }
+
+    public function test_create_action_reuses_existing_page_from_earlier_partially_completed_run(): void
+    {
+        $customer = $this->createCustomer();
+        $existingSummary = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Test Artikkel', 'sammendrag-test-artikkel-ab1c2d');
+        $pagesBefore = EnterpriseWikiPage::query()->count();
+
+        // A regenerated decision for a new run proposed "create" again for the exact same
+        // canonical slug — the existing canonical page must win over this stale assumption.
+        $decision = $this->baseDecision([
+            'source_summary' => [
+                'action' => 'create',
+                'title' => 'Sammendrag: Test Artikkel',
+                'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d',
+                'reason' => 'New summary.',
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $result = $this->service->apply($run);
+
+        // Only source_summary is overridden above — source_article in the base decision still
+        // proposes a fresh slug, so it is genuinely created; the summary must not be.
+        $this->assertSame($pagesBefore + 1, EnterpriseWikiPage::query()->count());
+        $this->assertSame($existingSummary->id, EnterpriseWikiPage::query()->where('slug', 'sammendrag-test-artikkel-ab1c2d')->first()->id);
+        $this->assertSame(1, $result['updated']);
+    }
+
+    public function test_existing_current_page_version_is_retained_on_reuse(): void
+    {
+        $customer = $this->createCustomer();
+        $existingArticle = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $existingArticle->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Test Artikkel\n\nOriginalt innhold.",
+        ]);
+
+        $decision = $this->baseDecision([
+            'source_article' => [
+                'action' => 'update',
+                'title' => 'Test Artikkel',
+                'proposed_slug' => 'test-artikkel-ab1c2d',
+                'reason' => 'Reuse.',
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $version->refresh();
+        $this->assertTrue((bool) $version->is_current);
+        $this->assertSame("# Test Artikkel\n\nOriginalt innhold.", $version->content_markdown);
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $existingArticle->id)->count());
+    }
+
+    public function test_existing_page_id_is_retained_even_when_decision_says_create(): void
+    {
+        $customer = $this->createCustomer();
+        $existingArticle = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+
+        $decision = $this->baseDecision([
+            'source_article' => [
+                'action' => 'create',
+                'title' => 'Test Artikkel',
+                'proposed_slug' => 'test-artikkel-ab1c2d',
+                'reason' => 'Stale create assumption from the decision AI.',
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $this->assertSame($existingArticle->id, EnterpriseWikiPage::query()->where('slug', 'test-artikkel-ab1c2d')->first()->id);
+    }
+
+    public function test_page_count_does_not_increase_on_retry_for_the_same_document(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision();
+
+        $runA = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runA);
+        $countAfterFirst = EnterpriseWikiPage::query()->count();
+
+        // Simulates a retry after runA failed downstream: a new run, same document, same
+        // maintainer decision (still proposing "create" for both source pages).
+        $runB = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runB);
+
+        $this->assertSame($countAfterFirst, EnterpriseWikiPage::query()->count());
+    }
+
+    public function test_pivot_is_created_for_the_new_run_when_an_existing_page_is_reused(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision();
+
+        $runA = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runA);
+
+        $runB = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runB);
+
+        $pivotCountForRunB = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $runB->id)
+            ->count();
+
+        $this->assertSame(2, $pivotCountForRunB);
+    }
+
+    public function test_pivot_action_is_updated_for_every_reused_page(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision();
+
+        $runA = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runA);
+
+        $runB = $this->createDecisionOnlyRun($customer, $decision);
+        $this->service->apply($runB);
+
+        $pivots = EnterpriseWikiIngestRunPage::query()->where('enterprise_wiki_ingest_run_id', $runB->id)->get();
+
+        $this->assertCount(2, $pivots);
+        foreach ($pivots as $pivot) {
+            $this->assertSame(EnterpriseWikiIngestRunPage::ACTION_UPDATED, $pivot->action);
+        }
+    }
+
+    public function test_same_run_cannot_get_a_duplicate_pivot_row_for_the_same_page(): void
+    {
+        $customer = $this->createCustomer();
+        $existingPage = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Delt Side', 'delt-side-ab1c2d');
+
+        // Two different decision entries resolve to the exact same existing page within one run.
+        $decision = $this->baseDecision([
+            'source_article' => ['action' => 'update', 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'x'],
+            'concept_pages' => [
+                ['action' => 'update', 'page_id' => $existingPage->id, 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'Same page referenced twice.'],
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $pivotCount = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $existingPage->id)
+            ->count();
+
+        $this->assertSame(1, $pivotCount);
+    }
+
+    public function test_article_reuse_by_slug_is_idempotent(): void
+    {
+        $customer = $this->createCustomer();
+        $existing = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+        $decision = $this->baseDecision([
+            'source_article' => ['action' => 'update', 'title' => 'Test Artikkel', 'proposed_slug' => 'test-artikkel-ab1c2d', 'reason' => 'x'],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $this->assertSame($existing->id, EnterpriseWikiPage::query()->where('slug', 'test-artikkel-ab1c2d')->first()->id);
+    }
+
+    public function test_summary_reuse_by_slug_is_idempotent(): void
+    {
+        $customer = $this->createCustomer();
+        $existing = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag', 'sammendrag-test-artikkel-ab1c2d');
+        $decision = $this->baseDecision([
+            'source_summary' => ['action' => 'update', 'title' => 'Sammendrag', 'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d', 'reason' => 'x'],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $this->assertSame($existing->id, EnterpriseWikiPage::query()->where('slug', 'sammendrag-test-artikkel-ab1c2d')->first()->id);
+    }
+
+    public function test_concept_reuse_by_slug_is_idempotent_when_decision_says_create(): void
+    {
+        $customer = $this->createCustomer();
+        $existing = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Konsept', 'konsept-xy1z');
+        $decision = $this->baseDecision([
+            'concept_pages' => [
+                ['action' => 'create', 'page_id' => null, 'title' => 'Konsept', 'proposed_slug' => 'konsept-xy1z', 'reason' => 'Stale create.'],
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $this->assertSame(1, EnterpriseWikiPage::query()->where('slug', 'konsept-xy1z')->count());
+        $this->assertSame($existing->id, EnterpriseWikiPage::query()->where('slug', 'konsept-xy1z')->first()->id);
+    }
+
+    public function test_entity_reuse_by_slug_is_idempotent_when_decision_says_create(): void
+    {
+        $customer = $this->createCustomer();
+        $existing = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entitet', 'entitet-xy1z');
+        $decision = $this->baseDecision([
+            'entity_pages' => [
+                ['action' => 'create', 'page_id' => null, 'title' => 'Entitet', 'proposed_slug' => 'entitet-xy1z', 'reason' => 'Stale create.'],
+            ],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($run);
+
+        $this->assertSame(1, EnterpriseWikiPage::query()->where('slug', 'entitet-xy1z')->count());
+        $this->assertSame($existing->id, EnterpriseWikiPage::query()->where('slug', 'entitet-xy1z')->first()->id);
+    }
+
+    public function test_slug_lookup_is_scoped_to_customer(): void
+    {
+        $customerA = $this->createCustomer('Kunde A');
+        $customerB = $this->createCustomer('Kunde B');
+        $this->createPageWithSlug($customerB, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+
+        $run = $this->createDecisionOnlyRun($customerA, $this->baseDecision());
+
+        $result = $this->service->apply($run);
+
+        // customer A has no page with this slug yet, so it must be created — never reused
+        // from customer B's row, and never rejected as an unexpected duplicate.
+        $this->assertSame(2, $result['created']);
+        $ownPage = EnterpriseWikiPage::query()->where('customer_id', $customerA->id)->where('slug', 'test-artikkel-ab1c2d')->first();
+        $this->assertNotNull($ownPage);
+        $this->assertNotSame(
+            EnterpriseWikiPage::query()->where('customer_id', $customerB->id)->where('slug', 'test-artikkel-ab1c2d')->first()->id,
+            $ownPage->id,
+        );
+    }
+
+    public function test_same_slug_at_another_customer_is_unaffected(): void
+    {
+        $customerA = $this->createCustomer('Kunde A');
+        $customerB = $this->createCustomer('Kunde B');
+        $existingB = $this->createPageWithSlug($customerB, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel', 'test-artikkel-ab1c2d');
+
+        $run = $this->createDecisionOnlyRun($customerA, $this->baseDecision());
+        $this->service->apply($run);
+
+        $existingB->refresh();
+        $this->assertSame('Test Artikkel', $existingB->title);
+        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $existingB->page_type);
+        $this->assertSame(1, EnterpriseWikiPage::query()->where('customer_id', $customerB->id)->count());
+    }
+
+    public function test_unique_constraint_on_customer_and_slug_is_still_enforced(): void
+    {
+        $customer = $this->createCustomer();
+        $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Første', 'samme-slug-ab1c2d');
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+
+        // Bypasses the apply service entirely — proves the migration-level constraint itself
+        // is untouched, independent of the service's own idempotency logic.
+        EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'samme-slug-ab1c2d',
+            'title' => 'Andre',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    public function test_two_applies_proposing_the_same_new_slug_do_not_throw_or_duplicate(): void
+    {
+        // Simulates the outcome of a race between two concurrent apply() calls for the same
+        // (customer_id, slug): the second one must reuse deterministically rather than throw
+        // UniqueConstraintViolationException or invent a new slug.
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision();
+
+        $runA = $this->createDecisionOnlyRun($customer, $decision);
+        $runB = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->service->apply($runA);
+        $result = $this->service->apply($runB);
+
+        $this->assertSame(0, $result['created']);
+        $this->assertSame(2, $result['updated']);
+        $this->assertSame(2, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -434,6 +800,24 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         return EnterpriseWikiPage::query()->create([
             'customer_id'      => $customer->id,
             'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
+            'title'            => $title,
+            'page_type'        => $pageType,
+            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    /**
+     * Like createPage(), but with an exact slug — needed to simulate a page an earlier,
+     * partially-completed run already created under the same canonical slug the current
+     * decision proposes.
+     */
+    private function createPageWithSlug(Customer $customer, string $pageType, string $title, string $slug): EnterpriseWikiPage
+    {
+        return EnterpriseWikiPage::query()->create([
+            'customer_id'      => $customer->id,
+            'slug'             => $slug,
             'title'            => $title,
             'page_type'        => $pageType,
             'status'           => EnterpriseWikiPage::STATUS_DRAFT,
