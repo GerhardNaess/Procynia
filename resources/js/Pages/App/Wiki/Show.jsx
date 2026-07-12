@@ -119,6 +119,32 @@ const LINT_SEVERITY_STYLES = {
     info: 'bg-slate-100 text-slate-600',
 };
 
+const WIKI_INLINE_LINK_CLASS =
+    'rounded-sm text-violet-700 underline decoration-violet-300 decoration-2 underline-offset-2 transition hover:text-violet-800 hover:decoration-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500';
+
+/**
+ * ReactMarkdown's `a` component override for the article body: EnterpriseWikiWikilinkRenderer
+ * rewrites canonical [[slug|anchor]] wikilinks into standard `/app/wiki/{slug}` markdown links
+ * server-side, so this only needs to route those internally via Inertia instead of a full page
+ * reload — every other markdown link (external URLs, etc.) renders as a plain anchor exactly
+ * as before.
+ */
+function WikiArticleLink({ href, children, ...rest }) {
+    if (typeof href === 'string' && href.startsWith('/app/wiki/')) {
+        return (
+            <Link href={href} className={WIKI_INLINE_LINK_CLASS}>
+                {children}
+            </Link>
+        );
+    }
+
+    return (
+        <a href={href} {...rest}>
+            {children}
+        </a>
+    );
+}
+
 function LinkedPageList({ pages, label }) {
     if (!pages || pages.length === 0) return null;
 
@@ -360,7 +386,7 @@ export default function WikiShow({
                     {hasArticle ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             <div className="wiki-article">
-                                <ReactMarkdown>{articleContent}</ReactMarkdown>
+                                <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>
                             </div>
                         </div>
                     ) : (

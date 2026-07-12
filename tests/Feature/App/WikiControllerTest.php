@@ -1160,6 +1160,186 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Inline wikilink rendering fix: rendered_markdown must contain clickable
+    // internal links derived from canonical [[slug|anchor]] wikilinks
+    // =========================================================================
+
+    public function test_current_content_markdown_with_wikilink_is_not_mutated_by_show(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        $original = "# Artikkel\n\nSamarbeidet med [[{$target->slug}|Advania]] er sentralt.";
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => $original,
+        ]);
+
+        $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $this->assertDatabaseHas('enterprise_wiki_page_versions', [
+            'enterprise_wiki_page_id' => $article->id,
+            'content_markdown' => $original,
+        ]);
+    }
+
+    public function test_rendered_markdown_contains_internal_link_for_valid_wikilink(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nSamarbeidet med [[{$target->slug}|Advania]] er sentralt.",
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($target): bool {
+            $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+            return $rendered !== null
+                && str_contains($rendered, "(/app/wiki/{$target->slug})")
+                && str_contains($rendered, 'Advania');
+        });
+    }
+
+    public function test_rendered_markdown_anchor_text_is_visible_in_the_transformed_link(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Styringsgruppe', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nEskalerer til [[{$target->slug}|styringsgruppen]] ved avvik.",
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+            return str_contains($rendered, '[styringsgruppen]');
+        });
+    }
+
+    public function test_bare_slug_wikilink_renders_with_deterministic_display_text(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Prince2', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nSe [[{$target->slug}]] for mer.",
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($target): bool {
+            $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+            return str_contains($rendered, "[{$target->slug}](/app/wiki/{$target->slug})");
+        });
+    }
+
+    public function test_rendered_markdown_is_computed_the_same_way_for_every_page_type(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Advania', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+
+        foreach ([
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+            EnterpriseWikiPage::PAGE_TYPE_ENTITY,
+        ] as $pageType) {
+            $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, "Side {$pageType}", $pageType);
+            EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $page->id,
+                'version_number' => 1,
+                'is_current' => true,
+                'content_markdown' => "# Side\n\nSe [[{$target->slug}|Advania]] her.",
+            ]);
+
+            $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+            $response->assertOk();
+            $response->assertViewHas('page', function (array $inertia) use ($target, $pageType): bool {
+                $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+                return $rendered !== null && str_contains($rendered, "(/app/wiki/{$target->slug})");
+            });
+        }
+    }
+
+    public function test_incremental_relink_generated_version_renders_inline_links(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        // generated_by_model tag mirrors EnterpriseWikiIncrementalRelinkService::writeNewCurrentVersion() —
+        // the renderer only ever reads content_markdown, so provenance never affects rendering.
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nDette nevner [[{$target->slug}|Konsept]] nå.",
+            'generated_by_model' => 'gpt-5/incremental-relink',
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($target): bool {
+            $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+            return str_contains($rendered, "(/app/wiki/{$target->slug})");
+        });
+    }
+
+    public function test_semantic_repair_generated_version_renders_inline_links(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $target = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Entitet', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel');
+        // generated_by_model tag mirrors EnterpriseWikiLinkSemanticRepairService::writeNewCurrentVersion().
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nRepareringen la til [[{$target->slug}|Entitet]] her.",
+            'generated_by_model' => 'gpt-5/link-semantic-repair',
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($target): bool {
+            $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
+
+            return str_contains($rendered, "(/app/wiki/{$target->slug})");
+        });
+    }
+
+    // =========================================================================
     // Phase 8E-18: traversal data in show()
     // =========================================================================
 
