@@ -1,7 +1,7 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.9
-Dato: 2026-07-11
+Versjon: 0.10
+Dato: 2026-07-12
 Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — inline wikilinks er nå klikkbare i UI og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` — **Fase 8I er dermed komplett**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
@@ -2532,6 +2532,31 @@ Claims og source references forblir verifikasjonslaget — de er ikke hovedinnho
 - Det skal ikke opprettes full mesh mellom alle pages (dette er nettopp feilen 8I retter opp).
 - Kunnskapsbase/RAG skal ikke blandes inn.
 - `KnowledgeItem`, `KnowledgeItemVersion`, `KnowledgeItemChunk`, dagens Kunnskapsbase/RAG, billing, Filament/admin, AI workspace og legacy `ProcessEnterpriseWikiIngest` røres ikke.
+
+### Runtime-feil fra Enterprise Wiki run 18 — rettet (2026-07-12, commit `a34d172`)
+
+**Bekreftet feil:**
+- Article generation fullførte, men summary generation feilet med `EnterpriseWikiInvalidWikilinksException`: "invalid wikilink slug(s): Advania" — modellen skrev sidetittelen `[[Advania]]` i stedet for den kanoniske, ulikt casede sluggen `[[advania|Advania]]`. Den tillatte katalogen inneholdt 14 andre pages og var altså korrekt bygget — problemet var en nær-miss i modellens output, ikke katalogen.
+- Fordi article/summary-fasen feilet, ble canonical wikilink-materialisering aldri kjørt for runen.
+- Runen endte med `status=failed` og en konkret feilmelding, men `qa_status` ble aldri satt (QA hadde aldri startet). `EnterpriseWikiPostIngestQaService::findPendingRuns()`/`runForRun()` filtrerte kun på `qa_status` (`whereNull('qa_status')` eller eksplisitte QA-statuser) — aldri på run-flytens hoved-`status`. Dette gjorde at det planlagte `wiki:run-post-ingest-qa --all-pending`-kallet (hvert 15. minutt) plukket opp runen på nytt, kjørte QA sin egen `attemptRepair()` → `EnterpriseWikiGenerateAppliedPagesService::generate()` (som **ikke** validerer wikilinks) og genererte de manglende sidene selv — runen endte deretter som `escalated` i stedet for å forbli `failed` med sin opprinnelige, konkrete feil.
+- Vedlikeholdsloggen skrev "Source changed — triggering QA retry" med `current_hash` og `prev_hash` som så identiske ut: `EnterpriseWikiMaintenanceCycleService::processRun()` kalte `$run->update([...'maintenance_source_hash' => $currentHash])` (som muterer modellinstansen) **før** loggkallet leste `$run->maintenance_source_hash` — loggen viste dermed alltid den nye hashen på begge steder.
+
+**Rettelse — trygg wikilink-kanonisering (`EnterpriseWikiWikilinkCanonicalizer`, ny):**
+- Kjøres i `EnterpriseWikiGenerateAppliedPagesService::generatePageForRun()` rett etter AI-kallet og før `validateWikilinks()`. Tre trygge, deterministiske matcher mot den eksakte katalogen som ble sendt til modellen: (1) eksakt canonical slug — uendret, (2) case-insensitiv eksakt slug-match dersom nøyaktig én katalogside matcher, (3) eksakt sidetittel, case-insensitivt, dersom nøyaktig én katalogside matcher. `[[Advania]]` → `[[advania|Advania]]` når katalogen har `slug=advania, title=Advania`.
+- Ingen fuzzy/partial matching, ingen automatisk sideopprettelse. Tvetydig match (flere katalogsider matcher), ukjent target, self-link og cross-customer target forblir uendret av canonicalizeren og avvises fortsatt av eksisterende `EnterpriseWikiLinkResolver`/`validateWikilinks()` nøyaktig som før.
+- Anchor-tekst bevares alltid; fenced/inline code og vanlige Markdown-lenker røres aldri (gjenbruker samme kode-splitting-mønster som `EnterpriseWikiWikilinkRenderer`).
+- `WikiPageContentAiClient`s katalog-prompt viser nå eksakte, kopierbare `[[slug|Title]]`-eksempler per target, og developer-prompten instruerer modellen eksplisitt om å kopiere slug-delen bokstavelig i stedet for å skrive den fra hukommelsen.
+- Modell, tokenbudsjett, reasoning, Responses-decoder og køer er uendret.
+
+**Rettelse — maintenance-gating (`EnterpriseWikiPostIngestQaService::scopeToRunsReadyForQa()`, ny):**
+- Ny regel: en run med hoved-`status=failed` og `qa_status` fortsatt `null` ekskluderes fra `findPendingRuns()`, `findRetryableRuns()` og selve den atomiske claim-spørringen i `runForRun()` — uavhengig av `--retry`. Det er nøyaktig denne kombinasjonen som betyr at feilen skjedde tidligere i den ordinære dokumentflyten (maintainer decision, apply, page generation, wikilink validation, materialisering) og at QA aldri fikk sjansen til å starte.
+- Enhver run hvor `qa_status` allerede er satt (QA har startet/kjørt) forblir kvalifisert uavhengig av hoved-`status` — dette lar `decision_only`-runer (hvis hoved-`status` aldri forlater `decision_only`, siden den tilstandsmaskinen kun finnes i `EnterpriseWikiDocumentFlowService`) fortsette å fungere akkurat som før.
+- `EnterpriseWikiDeepRepairService::attempt()` og `EnterpriseWikiMaintenanceCycleService::findEscalatedWithDocumentSource()` er **ikke** endret med en egen `status`-sjekk — de er allerede korrekt beskyttet transitivt: en run som rammes av regelen over når aldri `qa_status=escalated`, så deep repair blir aldri kalt for den.
+- Hash-bugen er rettet ved å fange `maintenance_source_hash` i en lokal variabel *før* `$run->update()` muterer modellen, og ved å bruke en egen loggmelding ("First maintenance check for this run") når det ikke finnes noen reell forrige hash å sammenligne med.
+
+**Observability:** `GenerateEnterpriseWikiAppliedPage::markPivotFailed()` lagrer nå `generation_error` med opprinnelig exception-type prefikset (`[EnterpriseWikiInvalidWikilinksException] ...`), og `FinalizeEnterpriseWikiPageGeneration::markRunFailed()` bygger `run.error_message` fra fase + per-side tittel/page_type/årsak — feilen er nå forståelig direkte fra `run.error_message` uten stacktrace eller kø-logg.
+
+**Tester:** 15 nye tester i `EnterpriseWikiWikilinkCanonicalizerTest` (unit), 5 nye i `EnterpriseWikiGeneratePageWikilinkValidationTest`, 2 nye i `WikiPageContentAiClientTest`, 3 nye i `EnterpriseWikiMaintenanceCycleTest` (hash-logg-nøyaktighet), 8 nye i `EnterpriseWikiPostIngestQaGatingTest` (gating + observability + legacy-vakt). Full suite: 1062 passed, 2840 assertions, 0 failed.
 
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 
