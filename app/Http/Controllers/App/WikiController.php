@@ -429,13 +429,20 @@ class WikiController extends Controller
 
         $currentVersion = $page->currentVersion()->first();
 
-        $claimSummary = ['total' => 0, 'source_found' => 0, 'missing_excerpt' => 0, 'missing_source' => 0, 'conflict' => 0];
+        $claimSummary = [
+            'total' => 0,
+            'source_found' => 0,
+            'missing_excerpt' => 0,
+            'manually_approved' => 0,
+            'missing_source' => 0,
+            'conflict' => 0,
+        ];
         $claims = [];
 
         if ($currentVersion !== null) {
             $claimCollection = EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $currentVersion->id)
-                ->with('sourceReferences')
+                ->with(['sourceReferences', 'approvedBy'])
                 ->orderBy('position_order')
                 ->get();
 
@@ -446,13 +453,12 @@ class WikiController extends Controller
                     $claimSummary['conflict']++;
                 }
 
-                if ($claim->sourceReferences->isEmpty()) {
-                    $claimSummary['missing_source']++;
-                } elseif ($claim->sourceReferences->every(fn($r) => empty($r->excerpt))) {
-                    $claimSummary['missing_excerpt']++;
-                } else {
-                    $claimSummary['source_found']++;
-                }
+                $claimSummary[match ($claim->sourceStatus()) {
+                    EnterpriseWikiClaim::SOURCE_STATUS_FOUND => 'source_found',
+                    EnterpriseWikiClaim::SOURCE_STATUS_MISSING_EXCERPT => 'missing_excerpt',
+                    EnterpriseWikiClaim::SOURCE_STATUS_MANUALLY_APPROVED => 'manually_approved',
+                    EnterpriseWikiClaim::SOURCE_STATUS_MISSING => 'missing_source',
+                }]++;
             }
 
             $claims = $claimCollection
@@ -463,6 +469,10 @@ class WikiController extends Controller
                     'conflict_flag' => $claim->conflict_flag,
                     'approval_status' => $claim->approval_status,
                     'position_order' => $claim->position_order,
+                    'source_status' => $claim->sourceStatus(),
+                    'approved_by_name' => $claim->approvedBy?->name,
+                    'approved_at' => $claim->approved_at,
+                    'approval_comment' => $claim->approval_comment,
                     'source_references' => $claim->sourceReferences
                         ->map(fn($ref) => [
                             'id' => $ref->id,

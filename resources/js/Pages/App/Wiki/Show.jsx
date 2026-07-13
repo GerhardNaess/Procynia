@@ -31,6 +31,15 @@ const CLAIM_STATUS_STYLES = {
     rejected: 'bg-rose-100 text-rose-700',
 };
 
+const SOURCE_STATUS_STYLES = {
+    source_found: 'bg-emerald-100 text-emerald-700',
+    missing_excerpt: 'bg-amber-100 text-amber-700',
+    manually_approved: 'bg-sky-100 text-sky-700',
+    missing_source: 'bg-rose-100 text-rose-700',
+};
+
+const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source']);
+
 const HIGH_VOLUME_THRESHOLD = 100;
 
 function Badge({ label, cls }) {
@@ -84,6 +93,12 @@ function ClaimSummary({ summary, tw }) {
                     <CheckIcon />
                     {summary.source_found} {tw.quality_source_found ?? 'kilde funnet'}
                 </span>
+                {summary.manually_approved > 0 && (
+                    <span className="flex items-center gap-1 text-sky-700">
+                        <CheckIcon className="h-3.5 w-3.5" />
+                        {summary.manually_approved} {tw.quality_manually_approved ?? 'manuelt godkjent'}
+                    </span>
+                )}
                 {summary.missing_excerpt > 0 && (
                     <span className="flex items-center gap-1 text-amber-700">
                         <WarnIcon className="h-3.5 w-3.5" />
@@ -193,6 +208,9 @@ export default function WikiShow({
 
     const [processing, setProcessing] = useState(null);
     const [verificationOpen, setVerificationOpen] = useState(false);
+    const [claimProcessing, setClaimProcessing] = useState(null);
+    const [approvalComments, setApprovalComments] = useState({});
+    const [expandedLintGroups, setExpandedLintGroups] = useState({});
 
     const sendAction = (action) => {
         if (processing) return;
@@ -200,6 +218,49 @@ export default function WikiShow({
         router.patch(`/app/wiki/${page.slug}/${action}`, {}, {
             onFinish: () => setProcessing(null),
         });
+    };
+
+    const approveClaim = (claim) => {
+        if (claimProcessing) return;
+        setClaimProcessing(claim.id);
+        router.patch(
+            `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
+            { comment: approvalComments[claim.id] || undefined },
+            { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
+    const unapproveClaim = (claim) => {
+        if (claimProcessing) return;
+        setClaimProcessing(claim.id);
+        router.patch(
+            `/app/wiki/${page.slug}/claims/${claim.id}/unapprove`,
+            {},
+            { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
+    const sourceStatusLabel = (status) => ({
+        source_found: tw.quality_source_found ?? 'Kilde funnet',
+        missing_excerpt: tw.quality_missing_excerpt ?? 'Mangler utdrag',
+        manually_approved: tw.quality_manually_approved ?? 'Manuelt godkjent',
+        missing_source: tw.quality_no_source ?? 'Mangler kilde',
+    }[status] ?? status);
+
+    const lintGroups = Object.values(
+        lintFindings.reduce((acc, f) => {
+            (acc[f.code] ??= []).push(f);
+            return acc;
+        }, {}),
+    );
+
+    const collapsedLintLabel = (code, count, sampleMessage) => {
+        if (code === 'claim_missing_source') {
+            return (tw.lint_group_claim_missing_source ?? ':count påstander mangler kilde').replace(':count', count);
+        }
+        return (tw.lint_group_generic ?? ':message (×:count)')
+            .replace(':message', sampleMessage)
+            .replace(':count', count);
     };
 
     const actionLabel = tw.action_confirming ?? 'Behandler...';
@@ -493,21 +554,60 @@ export default function WikiShow({
                                         {tw.lint_findings_heading ?? 'Helsekontroll'}
                                     </p>
                                     <ul className="space-y-2">
-                                        {lintFindings.map((f) => (
-                                            <li
-                                                key={f.id}
-                                                className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
-                                            >
-                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600'}`}>
-                                                    {f.severity === 'error'
+                                        {lintGroups.map((group) => {
+                                            const first = group[0];
+                                            const severityBadge = (
+                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                                    {first.severity === 'error'
                                                         ? (tw.lint_severity_error ?? 'Feil')
-                                                        : f.severity === 'warning'
+                                                        : first.severity === 'warning'
                                                             ? (tw.lint_severity_warning ?? 'Advarsel')
                                                             : (tw.lint_severity_info ?? 'Info')}
                                                 </span>
-                                                <p className="text-sm text-slate-700">{f.message}</p>
-                                            </li>
-                                        ))}
+                                            );
+
+                                            if (group.length === 1) {
+                                                return (
+                                                    <li
+                                                        key={first.id}
+                                                        className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
+                                                    >
+                                                        {severityBadge}
+                                                        <p className="text-sm text-slate-700">{first.message}</p>
+                                                    </li>
+                                                );
+                                            }
+
+                                            const isExpanded = expandedLintGroups[first.code] ?? false;
+
+                                            return (
+                                                <li
+                                                    key={first.code}
+                                                    className="rounded-xl border border-slate-100 bg-white px-4 py-3"
+                                                >
+                                                    <div className="flex items-start gap-3">
+                                                        {severityBadge}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setExpandedLintGroups((prev) => ({ ...prev, [first.code]: !isExpanded }))}
+                                                            className="flex-1 text-left text-sm text-slate-700 hover:underline"
+                                                        >
+                                                            {collapsedLintLabel(first.code, group.length, first.message)}
+                                                            <span className="ml-1 text-xs text-slate-400">
+                                                                ({isExpanded ? (tw.lint_group_hide_details ?? 'Skjul detaljer') : (tw.lint_group_show_details ?? 'Vis detaljer')})
+                                                            </span>
+                                                        </button>
+                                                    </div>
+                                                    {isExpanded && (
+                                                        <ul className="mt-2 space-y-1 pl-8 text-xs text-slate-500">
+                                                            {group.map((f) => (
+                                                                <li key={f.id}>{f.message}</li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                 </div>
                             )}
@@ -544,35 +644,55 @@ export default function WikiShow({
                                                             {tw.conflict_detected ?? 'Mulig konflikt'}
                                                         </span>
                                                     )}
-                                                    {(() => {
-                                                        const hasSource = claim.source_references.length > 0;
-                                                        const hasExcerpt = claim.source_references.some(r => r.excerpt?.trim());
-                                                        if (!hasSource) {
-                                                            return (
-                                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                                                    <WarnIcon className="h-3 w-3" />
-                                                                    {tw.quality_no_source ?? 'Mangler kilde'}
-                                                                </span>
-                                                            );
-                                                        }
-                                                        if (!hasExcerpt) {
-                                                            return (
-                                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                                                    <WarnIcon className="h-3 w-3" />
-                                                                    {tw.quality_missing_excerpt ?? 'Mangler utdrag'}
-                                                                </span>
-                                                            );
-                                                        }
-                                                        return (
-                                                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${isApproved ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                                <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-                                                                </svg>
-                                                                {tw.quality_source_found ?? 'Kilde funnet'}
-                                                            </span>
-                                                        );
-                                                    })()}
+                                                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
+                                                        {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
+                                                            <WarnIcon className="h-3 w-3" />
+                                                        ) : (
+                                                            <CheckIcon className="h-3 w-3" />
+                                                        )}
+                                                        {sourceStatusLabel(claim.source_status)}
+                                                    </span>
                                                 </div>
+
+                                                {isSystemOwner && claim.source_status === 'missing_source' && (
+                                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            maxLength={1000}
+                                                            placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
+                                                            value={approvalComments[claim.id] ?? ''}
+                                                            onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
+                                                            className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            disabled={claimProcessing === claim.id}
+                                                            onClick={() => approveClaim(claim)}
+                                                            className="rounded-full bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+                                                        >
+                                                            {tw.approve_claim_button ?? 'Godkjenn manuelt'}
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {isSystemOwner && claim.approval_status === 'approved' && (
+                                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                                                        <span>
+                                                            {(tw.approved_by_at ?? 'Godkjent av :name den :date')
+                                                                .replace(':name', claim.approved_by_name ?? '—')
+                                                                .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString() : '')}
+                                                            {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            disabled={claimProcessing === claim.id}
+                                                            onClick={() => unapproveClaim(claim)}
+                                                            className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                                                        >
+                                                            {tw.unapprove_claim_button ?? 'Angre godkjenning'}
+                                                        </button>
+                                                    </div>
+                                                )}
 
                                                 <div className="mt-4 border-t border-slate-100 pt-4">
                                                     {claim.source_references.length === 0 ? (

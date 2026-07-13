@@ -20,6 +20,7 @@ use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
@@ -316,5 +317,7 @@ Route::prefix('app')
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
             Route::patch('/{slug}/reject', [WikiController::class, 'reject'])->name('reject');
+            Route::patch('/{slug}/claims/{claim}/approve', [WikiClaimController::class, 'approve'])->name('claims.approve');
+            Route::patch('/{slug}/claims/{claim}/unapprove', [WikiClaimController::class, 'unapprove'])->name('claims.unapprove');
         });
     });

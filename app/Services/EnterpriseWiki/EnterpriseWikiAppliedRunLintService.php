@@ -144,6 +144,69 @@ class EnterpriseWikiAppliedRunLintService
         return $counts;
     }
 
+    /**
+     * Resolve any open "claim has no source reference" finding(s) for this specific claim —
+     * called immediately after the claim gains a real source reference (automatic
+     * reconciliation) or a manual approval, so the UI reflects it without waiting for the next
+     * full lint pass. A claim can have more than one such finding (one per lint mechanism/run
+     * that touched it — wiki:lint and wiki:lint-applied-run key findings differently), so this
+     * resolves all of them, not just one.
+     */
+    public function resolveClaimMissingSourceFinding(EnterpriseWikiClaim $claim): void
+    {
+        EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('code', EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->update([
+                'status' => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+                'resolved_at' => now(),
+            ]);
+    }
+
+    /**
+     * Re-open the "claim has no source reference" finding(s) for this claim if it still
+     * genuinely lacks a source — called after a manual approval is undone. A no-op when the
+     * claim already has a real source reference (nothing to warn about) or is still manually
+     * approved. If no prior finding exists at all (lint never ran on this claim), creates one
+     * using the same non-run-scoped shape wiki:lint itself would use.
+     */
+    public function reopenClaimMissingSourceFindingIfStillMissing(EnterpriseWikiClaim $claim): void
+    {
+        if (! $claim->needsSourceWarning()) {
+            return;
+        }
+
+        $reopened = EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('code', EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE)
+            ->update([
+                'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+                'detected_at' => now(),
+                'resolved_at' => null,
+            ]);
+
+        if ($reopened > 0) {
+            return;
+        }
+
+        $claim->loadMissing('page');
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $claim->page->customer_id,
+            'enterprise_wiki_ingest_run_id' => null,
+            'enterprise_wiki_page_id' => $claim->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $claim->enterprise_wiki_page_version_id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'enterprise_wiki_document_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Claim has no source reference.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+    }
+
     // =========================================================================
     // Check groups
     // =========================================================================
@@ -244,8 +307,10 @@ class EnterpriseWikiAppliedRunLintService
         foreach ($claims as $claim) {
             $counts['claims_checked']++;
 
-            // claim_missing_source (reuse existing code)
-            if ($claim->sourceReferences->isEmpty()) {
+            // claim_missing_source (reuse existing code) — suppressed when the claim has
+            // either a real source reference or a manual System Owner approval; see
+            // EnterpriseWikiClaim::needsSourceWarning().
+            if ($claim->needsSourceWarning()) {
                 $this->upsertFinding(
                     $this->claimKey($run, $page, $version, $claim, EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE),
                     EnterpriseWikiLintFinding::SEVERITY_WARNING,

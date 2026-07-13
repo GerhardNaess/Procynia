@@ -60,8 +60,10 @@ class EnterpriseWikiLintService
             ->get();
 
         foreach ($claims as $claim) {
-            // Rule: claim_missing_source
-            if ($claim->sourceReferences->isEmpty()) {
+            // Rule: claim_missing_source — suppressed when the claim has either a real source
+            // reference or a manual System Owner approval; see
+            // EnterpriseWikiClaim::needsSourceWarning().
+            if ($claim->needsSourceWarning()) {
                 [$finding, $isOpened] = $this->upsertFinding(
                     [
                         'customer_id' => $customerId,

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -78,8 +79,8 @@ class WikiSourceController extends Controller
             $absolutePath = Storage::disk('local')->path($storedPath);
             $extractedText = trim($this->documentTextExtractor->extractText($absolutePath));
 
-            DB::transaction(function () use ($customerId, $user, $file, $storedPath, $fileHash, $extractedText): void {
-                EnterpriseWikiDocument::query()->create([
+            $document = DB::transaction(function () use ($customerId, $user, $file, $storedPath, $fileHash, $extractedText): EnterpriseWikiDocument {
+                return EnterpriseWikiDocument::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $user?->id,
                     'original_filename' => $file->getClientOriginalName(),
@@ -91,6 +92,10 @@ class WikiSourceController extends Controller
                         : EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
                 ]);
             });
+
+            if ($document->document_status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
+                ReconcileEnterpriseWikiClaimSourcesForDocument::dispatch($document->id);
+            }
         } catch (\Throwable $e) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
