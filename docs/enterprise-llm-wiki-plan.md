@@ -1,8 +1,8 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.18
-Dato: 2026-07-12
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett**
+Versjon: 0.19
+Dato: 2026-07-13
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Neste planlagt: Fase 9 — Wiki-svar på eksisterende ekstraherte krav — produktbeslutning tatt 2026-07-13, ikke implementert**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -2749,6 +2749,14 @@ Dette gjør recovery enklere enn før: de gamle snapshot-matching-guardene (finn
 
 **Tester:** 45 nye/oppdaterte tester — `CustomerQaAccessTest` (19: QA-tildeling og fjerning, hovedrolle uendret, kundeisolasjon, uautorisert tildeling, effektive tilganger for alle rollekombinasjoner, «Alle»-tilgang, Tilganger-tab QA-kolonne og konfigurasjon, is_qa/can_approve_wiki_claims-props), `WikiClaimControllerTest` (6 nye: QA-bruker godkjenner/angrer, Bid Manager+QA og Contributor+QA godkjenner, uautorisert forsøk endrer ingen audit-felt, QA-bruker fra annen kunde får 404), `WikiControllerTest` (7 nye: Contributor+QA ser draft/pending_review, Contributor+QA og Bid Manager+QA kan IKKE godkjenne/avvise hel side). Full Enterprise Wiki-suite: 1163 passed, 3179 assertions, 0 failed. Kundemiljø-suite (`CustomerQaAccessTest`, `CustomerUserManagementTest`, `CustomerEnvironmentPageTest`, `UserBidRoleTest`): 72 passed; 2 forhåndseksisterende, urelaterte feil i `CustomerEnvironmentPageTest` (bekreftet uendret før/etter denne oppgaven via `git stash`) er ikke rettet, jf. oppgavens avgrensning.
 
+### Presisering: godkjenningsfeltene på en claim er gjeldende tilstand, ikke et fullstendig revisjonsspor (2026-07-13)
+
+De to seksjonene over beskriver at `approval_status`/`approved_by_user_id`/`approved_at`/`approval_comment` «lagrer den faktiske bruker-IDen til den som utførte handlingen» og at fjerning av QA fra en bruker ikke endrer en *eksisterende, fortsatt gjeldende* godkjenning. Dette er korrekt, men må ikke leses som at det finnes et fullstendig, historisk revisjonsspor over alle godkjennings-/tilbaketrekkingshendelser på en claim.
+
+`WikiClaimController::unapprove()` nullstiller alle fire feltene direkte tilbake til `pending`/`null` — det finnes ingen egen historikk-/loggtabell som bevarer forrige tilstand. Konkret: godkjennes en claim av bruker A, angres den deretter, og godkjennes den så på nytt av bruker B, finnes det **ingen** lagret spor av at bruker A noensinne godkjente den — den informasjonen er permanent overskrevet av `unapprove()`, og senere av den nye godkjenningen. Feltene representerer altså kun **siste kjente godkjenningshandling** på claimen, ikke en append-only hendelseslogg over alle godkjenninger og tilbaketrekkinger.
+
+Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hvem, når, kommentar, for hver enkelt hendelse — også de som senere er tilbaketrukket) blir et faktisk krav, må det modelleres som en egen, append-only historikktabell (f.eks. `enterprise_wiki_claim_approval_events`). Dette er ikke bygget, og er utenfor scope for det som er levert til nå.
+
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 
 > **Ikke aktiv fase.** Produksjonsaktivering skjer etter at coverage/eval (8G), continuous maintainer loop (8H) **og Karpathy-lenking/inkrementelt vedlikehold (8I)** er implementert og verifisert. Eksisterende runbook fra Fase 7 brukes som teknisk grunnlag. 8I er lagt til i v0.6 fordi produksjonsaktivering av en wiki uten fungerende inline-lenker ville aktivert et system som ikke oppfyller Karpathy-premisset.
@@ -2759,6 +2767,29 @@ Krav (uendret fra Fase 7-runbook):
 - reversering via `ENTERPRISE_WIKI_AI_ENABLED=false`
 
 ### Fase 9 — Sammenligning mot dagens RAG
+
+> **Ikke implementert — kun produktbeslutning og modell er låst (2026-07-13).** Ingen kode, migrasjon, React- eller testfil er endret som del av denne beslutningen. Retrieval-strategi, promptdesign, datamodell for lagring av wiki-svar, nøyaktig UI-plassering og tilgangsstyring er ikke avgjort og krever egen avklaring før implementering starter.
+
+**Produktbeslutning:** Procynia skal fortsatt bruke de samme allerede ekstraherte kravene som dagens svarfunksjon allerede bruker. Det skal ikke opprettes:
+
+- en ny kravsekstraksjon
+- en parallell kravtabell
+- kopier av krav
+- en ny anbuds- eller dokumentflyt
+
+**Modell:**
+
+```text
+Samme ekstraherte krav
+        |
+        +→ eksisterende svarmotor
+        |
+        +→ Enterprise Wiki-svarmotor
+```
+
+**UI-retning:** hvert eksisterende ekstrahert krav får en ny knapp, «Generer Wiki-svar», i tillegg til den eksisterende svarknappen. Den eksisterende svarfunksjonen beholdes helt uendret — Wiki-svaret kommer i tillegg, ikke som erstatning.
+
+**Videre arbeid i denne fasen (som før, fortsatt gjeldende retning):**
 - Parallell visning: wiki-svar vs. RAG-svar for samme requirement
 - Bruker kan velge foretrukket svar og gi tilbakemelding
 - Metrikker: kildedekning, konfidensmerking, brukerpreferanse
