@@ -76,7 +76,7 @@ class RequirementCandidateExtractor
         $model = (string) ($payload['model'] ?? '');
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 180);
+            $response = $this->openAiClient->post('responses', $payload, 300);
         } catch (ConnectionException $exception) {
             return $this->failedSegmentResult(
                 document: $document,
@@ -640,8 +640,13 @@ class RequirementCandidateExtractor
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
         $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
 
+        // 300s (not 180s): a real chunk extraction call for a large ANNEX document measured
+        // 167.8s to complete successfully, and its sibling chunk was killed by curl at exactly
+        // 180.0s (cURL error 28) — 180s left no safety margin for gpt-4.1-mini generating ~90+
+        // structured requirement objects. Matches WikiPageContentAiClient's 300s precedent for
+        // similarly heavy structured generation.
         try {
-            $response = $this->openAiClient->post('responses', $payload, 180);
+            $response = $this->openAiClient->post('responses', $payload, 300);
         } catch (ConnectionException $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -995,7 +1000,7 @@ class RequirementCandidateExtractor
         $promptVersion = $this->blockPromptBuilder->promptVersion();
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 180);
+            $response = $this->openAiClient->post('responses', $payload, 300);
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';

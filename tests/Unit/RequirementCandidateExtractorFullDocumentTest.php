@@ -6,7 +6,11 @@ use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiRequirement;
 use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
+use App\Services\OpenAi\OpenAiClient;
+use GuzzleHttp\Psr7\Response as Psr7Response;
+use Illuminate\Http\Client\Response as HttpClientResponse;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 /**
@@ -612,5 +616,53 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $this->assertStringStartsWith('{"candidates":[', $result->metadata['raw_output_preview']);
 
         Http::assertSentCount(1);
+    }
+
+    /**
+     * Regression for the ANNEX 01A production incident (2026-07-13): a real chunk extraction
+     * call for a large document measured 167.8s to complete successfully, while its sibling
+     * chunk was killed by curl at exactly 180.0s (cURL error 28, "Operation timed out after
+     * 180001 milliseconds") — the fixed 180s HTTP timeout left no safety margin for
+     * gpt-4.1-mini generating ~90+ structured requirement objects. This asserts the full-document
+     * extraction call now uses the same 300s timeout already established for comparably heavy
+     * structured generation elsewhere in the codebase (see WikiPageContentAiClient).
+     */
+    public function test_full_document_extraction_uses_a_300_second_http_timeout(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 209,
+            'saved_notice_id' => 410,
+            'original_filename' => 'timeout-regression-test.docx',
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+        ]);
+
+        $capturedTimeout = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('post')
+            ->once()
+            ->andReturnUsing(function (string $endpoint, array $payload, int $timeoutSeconds = 180) use (&$capturedTimeout): HttpClientResponse {
+                $capturedTimeout = $timeoutSeconds;
+
+                return new HttpClientResponse(new Psr7Response(200, [], json_encode([
+                    'id' => 'resp_timeout_regression_test',
+                    'object' => 'response',
+                    'status' => 'completed',
+                    'output_text' => json_encode(['candidates' => []], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'usage' => [
+                        'input_tokens' => 10,
+                        'output_tokens' => 5,
+                        'total_tokens' => 15,
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)));
+            });
+
+        app(RequirementCandidateExtractor::class)->extractFullDocumentRaw($document, 'run-timeout-regression-test');
+
+        $this->assertSame(300, $capturedTimeout);
     }
 }
