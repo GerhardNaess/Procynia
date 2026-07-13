@@ -10,7 +10,7 @@ namespace App\Services\Ai\Requirements;
  */
 final class FullDocumentRequirementExtractionPrompt
 {
-    public const PROMPT_VERSION = '2026-05-11.phase_1.v9';
+    public const PROMPT_VERSION = '2026-07-13.phase_1.v10';
 
     public const PROMPT_NAME = 'phase_1_requirement_extraction';
 
@@ -151,6 +151,14 @@ final class FullDocumentRequirementExtractionPrompt
             'Ikke returner kandidater med is_requirement=false.',
             'Når du er i tvil mellom kravtekst og veiledning, skal du være konservativ og utelate teksten.',
 
+            'STRUKTURERTE TABELLRADER:',
+            'Etter dokumentteksten kan det følge en egen seksjon «STRUKTURERTE TABELLRADER» med et JSON-array. Hver rad i dette JSON-arrayet er en rad fra en kravtabell i kildedokumentet, med feltet source_row_key og cellenes overskrift/verdi bevart nøyaktig som i originaldokumentet.',
+            'Disse radene representerer den samme tabellen som eventuelt også vises som løpende tekst i dokumentteksten over. Bruk JSON-radene som fasit for kolonneverdier — ikke den løpende teksten — siden løpende tekst kan ha mistet hvilken kolonne en verdi hørte til.',
+            'For hver rad i STRUKTURERTE TABELLRADER som representerer et formelt krav (typisk når en celle med kravtekst er utfylt), skal du opprette nøyaktig ett kandidatobjekt og sette feltet source_row_key til nøyaktig samme verdi som radens source_row_key. Ikke endre, forkort eller finn opp denne verdien.',
+            'Ikke opprett et eget kandidatobjekt for den samme tabellraden på nytt fra den løpende teksten — hver tabellrad skal bare gi ett kandidatobjekt totalt.',
+            'For krav som ikke stammer fra en STRUKTURERTE TABELLRADER-rad (for eksempel krav i løpende tekst, lister eller andre tabeller uten strukturert data), sett source_row_key til null.',
+            'Rader i STRUKTURERTE TABELLRADER uten reell kravtekst i noen celle (for eksempel rene overskriftsrader eller helt tomme rader) skal ikke gi noe kandidatobjekt.',
+
             'KVALITETSSIKRING FØR SVAR:',
             'Kontroller at hver kandidat har tydelig kravkontekst.',
             'Kontroller at ingen kandidat bare er bakgrunn, veiledning, introduksjon, evalueringsmetode eller forklaring av nummerering.',
@@ -159,6 +167,7 @@ final class FullDocumentRequirementExtractionPrompt
             'Kontroller at alle returnerte kandidater har is_requirement=true.',
             'Kontroller at hver rad representerer ett krav og bare ett krav.',
             'Kontroller at kravblokker er komplette nok til å forstås isolert.',
+            'Kontroller at source_row_key er satt nøyaktig som oppgitt for kandidater fra STRUKTURERTE TABELLRADER, og null ellers.',
             'Unngå duplikater.',
         ]);
     }
@@ -178,7 +187,14 @@ final class FullDocumentRequirementExtractionPrompt
         return trim($normalized);
     }
 
-    public static function requestPayload(string $documentText): array
+    /**
+     * @param  list<array<string, mixed>>  $structuredTableRows  Canonical rows (see
+     *                                                           DocxTableRowData::toAiPayloadArray()) from source DOCX tables overlapping this
+     *                                                           document/window's text — passed as structured JSON, appended after $documentText has
+     *                                                           already gone through inputTextForDocument()'s normalization, so the JSON itself is never
+     *                                                           subject to the same whitespace/punctuation regex passes as prose text.
+     */
+    public static function requestPayload(string $documentText, array $structuredTableRows = []): array
     {
         return [
             'model' => self::model(),
@@ -197,7 +213,7 @@ final class FullDocumentRequirementExtractionPrompt
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => self::inputTextForDocument($documentText),
+                            'text' => self::inputTextForDocumentWithTables($documentText, $structuredTableRows),
                         ],
                     ],
                 ],
@@ -214,6 +230,25 @@ final class FullDocumentRequirementExtractionPrompt
             'temperature' => self::temperature(),
             'max_output_tokens' => self::maxOutputTokens(),
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $structuredTableRows
+     */
+    public static function inputTextForDocumentWithTables(string $documentText, array $structuredTableRows): string
+    {
+        $normalizedText = self::inputTextForDocument($documentText);
+
+        if ($structuredTableRows === []) {
+            return $normalizedText;
+        }
+
+        $tableBlock = implode("\n", [
+            'STRUKTURERTE TABELLRADER:',
+            json_encode($structuredTableRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+
+        return $normalizedText !== '' ? $normalizedText."\n\n".$tableBlock : $tableBlock;
     }
 
     private static function schema(): array
@@ -259,6 +294,12 @@ final class FullDocumentRequirementExtractionPrompt
                         ['type' => 'null'],
                     ],
                 ],
+                'source_row_key' => [
+                    'anyOf' => [
+                        ['type' => 'string'],
+                        ['type' => 'null'],
+                    ],
+                ],
                 'is_requirement' => [
                     'type' => 'boolean',
                 ],
@@ -273,6 +314,7 @@ final class FullDocumentRequirementExtractionPrompt
                 'parent_reference',
                 'original_text',
                 'source_reference_text',
+                'source_row_key',
                 'is_requirement',
                 'confidence',
             ],

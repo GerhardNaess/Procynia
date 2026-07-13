@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Data\Ai\Requirements\DocxTableData;
+use App\Data\Ai\Requirements\DocxTableRowData;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SavedNoticeAiDocument extends Model
 {
@@ -52,6 +54,7 @@ class SavedNoticeAiDocument extends Model
         'file_size_bytes',
         'processing_status',
         'extracted_text',
+        'structured_tables',
         'text_extracted_at',
         'queued_at',
         'processing_started_at',
@@ -64,11 +67,59 @@ class SavedNoticeAiDocument extends Model
     {
         return [
             'file_size_bytes' => 'integer',
+            'structured_tables' => 'array',
             'text_extracted_at' => 'datetime',
             'queued_at' => 'datetime',
             'processing_started_at' => 'datetime',
             'processing_finished_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Purpose: Resolve this document's deterministically-parsed DOCX tables (see
+     * DocumentTextExtractor::extractDocxTextAndTables()), if any were captured at upload time.
+     * Inputs: None.
+     * Returns: The document's tables, or an empty array for non-DOCX documents/documents
+     * uploaded before this feature existed.
+     * Side effects: None.
+     *
+     * @return list<DocxTableData>
+     */
+    public function structuredTables(): array
+    {
+        $raw = $this->structured_tables;
+
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        return DocxTableData::manyFromArray($raw);
+    }
+
+    /**
+     * Purpose: Resolve the structured table rows whose position in this document's flat
+     * extracted_text falls within a given character range — used to attribute rows to the
+     * requirement-extraction chunk/window covering that range.
+     * Inputs: Inclusive/exclusive character range [start, end) within extracted_text.
+     * Returns: Matching rows, each translated to be relative to $start (see
+     * DocxTableRowData::withOffset()) so callers can position them within the window's own text.
+     * Side effects: None.
+     *
+     * @return list<DocxTableRowData>
+     */
+    public function structuredTableRowsInRange(int $start, int $end): array
+    {
+        $rows = [];
+
+        foreach ($this->structuredTables() as $table) {
+            foreach ($table->rows as $row) {
+                if ($row->charStart >= $start && $row->charStart < $end) {
+                    $rows[] = $row->withOffset($start);
+                }
+            }
+        }
+
+        return $rows;
     }
 
     public function savedNotice(): BelongsTo

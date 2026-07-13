@@ -53,8 +53,8 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
         public bool $isRequirement,
         public float $confidence,
         public array $warnings,
-    ) {
-    }
+        public ?string $sourceRowKey = null,
+    ) {}
 
     public static function fromPromptRow(array $row, SavedNoticeAiDocument $document, int $rowIndex): self
     {
@@ -87,6 +87,7 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
             isRequirement: (bool) ($row['is_requirement'] ?? true),
             confidence: self::normalizeConfidence($row['confidence'] ?? 0.0),
             warnings: self::normalizeStringList($row['warnings'] ?? []),
+            sourceRowKey: self::normalizeNullableString($row['source_row_key'] ?? null),
         );
     }
 
@@ -260,6 +261,7 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
             'is_requirement' => $this->isRequirement,
             'confidence' => $this->confidence,
             'warnings' => $this->warnings,
+            'source_row_key' => $this->sourceRowKey,
         ];
     }
 

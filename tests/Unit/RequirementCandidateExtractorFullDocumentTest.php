@@ -31,7 +31,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 203,
             'saved_notice_id' => 404,
@@ -94,6 +94,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
                     'parent_reference',
                     'original_text',
                     'source_reference_text',
+                    'source_row_key',
                     'is_requirement',
                     'confidence',
                 ]
@@ -117,7 +118,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 208,
             'saved_notice_id' => 409,
@@ -209,7 +210,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
      */
     public function test_it_normalises_control_characters_and_ocr_style_requirement_identifier_spacing_before_sending_phase_one_requests(): void
     {
-        $input = "Linje 1\r\n\r\nKrav\tmed" . chr(11) . "kontrolltegn og 1 - 2 . 2. E 1 samt 1-2.2.E 3 samt 1 -2.2.S 1 og 2 . 6";
+        $input = "Linje 1\r\n\r\nKrav\tmed".chr(11).'kontrolltegn og 1 - 2 . 2. E 1 samt 1-2.2.E 3 samt 1 -2.2.S 1 og 2 . 6';
 
         $this->assertSame(
             "Linje 1\n\nKrav med kontrolltegn og 1-2.2.E1 samt 1-2.2.E3 samt 1-2.2.S1 og 2.6",
@@ -244,7 +245,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 207,
             'saved_notice_id' => 408,
@@ -252,7 +253,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
             'extracted_text' => "Første krav: Leverandøren skal levere dokumentasjon innen 10 dager.\n\nAndre krav: Leverandøren skal beskrive løsning og bemanning.",
         ]);
 
-        $rawOutput = '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren' . chr(11) . 'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
+        $rawOutput = '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren'.chr(11).'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
 
         Http::fake([
             '*' => Http::response([
@@ -290,7 +291,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 209,
             'saved_notice_id' => 410,
@@ -342,7 +343,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $method = new \ReflectionMethod($extractor, 'parsePhaseOneOutput');
         $method->setAccessible(true);
 
-        $rawOutput = chr(0xEF) . chr(0xBB) . chr(0xBF) . '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren' . chr(11) . ' ' . chr(0xC3) . chr(0x28) . 'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
+        $rawOutput = chr(0xEF).chr(0xBB).chr(0xBF).'{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren'.chr(11).' '.chr(0xC3).chr(0x28).'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
 
         $parsed = $method->invoke($extractor, $rawOutput);
 
@@ -363,7 +364,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 210,
             'saved_notice_id' => 411,
@@ -371,7 +372,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
             'extracted_text' => "Første krav: Leverandøren skal levere dokumentasjon innen 10 dager.\n\nAndre krav: Leverandøren skal beskrive løsning og bemanning.",
         ]);
 
-        $rawOutput = "```json\n" . json_encode([
+        $rawOutput = "```json\n".json_encode([
             'candidates' => [[
                 'requirement_identifier' => '1.1',
                 'parent_reference' => null,
@@ -380,7 +381,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
                 'is_requirement' => true,
                 'confidence' => 0.93,
             ]],
-        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n```";
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."\n```";
 
         Http::fake([
             '*' => Http::response([
@@ -416,7 +417,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 204,
             'saved_notice_id' => 405,
@@ -496,6 +497,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
                     'parent_reference',
                     'original_text',
                     'source_reference_text',
+                    'source_row_key',
                     'is_requirement',
                     'confidence',
                 ]
@@ -519,7 +521,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 205,
             'saved_notice_id' => 406,
@@ -580,7 +582,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 206,
             'saved_notice_id' => 407,
@@ -632,7 +634,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     {
         config()->set('services.openai.api_key', 'test-key');
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 209,
             'saved_notice_id' => 410,
@@ -695,7 +697,7 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         // Sanity check on the fixture itself: comfortably exceeds the 14,000-char split trigger.
         $this->assertGreaterThan(20000, mb_strlen($documentText, 'UTF-8'));
 
-        $document = new SavedNoticeAiDocument();
+        $document = new SavedNoticeAiDocument;
         $document->forceFill([
             'id' => 210,
             'saved_notice_id' => 411,

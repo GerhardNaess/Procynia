@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Data\Ai\Requirements\DocxTableData;
 use App\Services\DocumentTextExtractor;
 use RuntimeException;
 use Tests\TestCase;
@@ -14,7 +15,7 @@ class DocumentTextExtractorTest extends TestCase
         $path = $this->tempDocumentPath('docx');
 
         try {
-            $zip = new ZipArchive();
+            $zip = new ZipArchive;
             $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
 
             $xml = <<<'XML'
@@ -31,7 +32,7 @@ XML;
             $zip->addFromString('word/document.xml', $xml);
             $zip->close();
 
-            $extractor = new DocumentTextExtractor();
+            $extractor = new DocumentTextExtractor;
 
             $this->assertSame(
                 "Dokumenttittel\n\nFørste avsnitt med tekst.\n\nAndre avsnitt med mer tekst.",
@@ -42,12 +43,164 @@ XML;
         }
     }
 
+    /**
+     * Regression for the ANNEX 01A structure-loss report: a requirement table like
+     * Req. No. / Requirement text / Type / Response instruction / Y/N / Detailed response
+     * (the last three columns blank, as in the real source document) must parse into a
+     * DocxTableData with the exact original headers preserved, one data row with all six
+     * columns present (blank ones included, not silently dropped), and a stable source_row_key.
+     */
+    public function test_it_parses_docx_table_into_structured_rows_preserving_headers_and_blank_cells(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>2.1 Buying responsibility, not activities</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Type</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Response instruction</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Y/N</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Detailed response</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.1</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>The Services in the Agreement are described in this Annex.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p></w:p></w:tc>
+                <w:tc><w:p></w:p></w:tc>
+                <w:tc><w:p></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p><w:r><w:t>Etterfølgende avsnitt utenfor tabellen.</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $zip->addFromString('word/document.xml', $xml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            // Flat text (backward-compatible with extractText()) still contains the section
+            // heading and trailing paragraph, unaffected by the table-structure extraction.
+            $this->assertStringContainsString('2.1 Buying responsibility, not activities', $result['text']);
+            $this->assertStringContainsString('Etterfølgende avsnitt utenfor tabellen.', $result['text']);
+
+            $this->assertCount(1, $result['tables']);
+            $table = $result['tables'][0];
+
+            $this->assertSame(
+                ['Req. No.', 'Requirement text', 'Type', 'Response instruction', 'Y/N', 'Detailed response'],
+                $table->headerLabels,
+            );
+            $this->assertCount(1, $table->rows);
+
+            $row = $table->rows[0];
+            $this->assertSame('tbl0-row0', $row->sourceRowKey);
+            $this->assertCount(6, $row->cells);
+
+            $cellsByHeader = collect($row->cells)->keyBy('originalHeader');
+
+            $this->assertSame('2.1.1', $cellsByHeader['Req. No.']->value);
+            $this->assertSame('req_no', $cellsByHeader['Req. No.']->normalizedColumnKey);
+            $this->assertSame(
+                'The Services in the Agreement are described in this Annex.',
+                $cellsByHeader['Requirement text']->value,
+            );
+            $this->assertSame('requirement_text', $cellsByHeader['Requirement text']->normalizedColumnKey);
+            $this->assertSame('M', $cellsByHeader['Type']->value);
+            $this->assertSame('type', $cellsByHeader['Type']->normalizedColumnKey);
+
+            // Blank source columns must still be present as empty-value cells, not dropped.
+            $this->assertSame('', $cellsByHeader['Response instruction']->value);
+            $this->assertSame('response_instruction', $cellsByHeader['Response instruction']->normalizedColumnKey);
+            $this->assertSame('', $cellsByHeader['Y/N']->value);
+            $this->assertSame('y_n', $cellsByHeader['Y/N']->normalizedColumnKey);
+            $this->assertSame('', $cellsByHeader['Detailed response']->value);
+            $this->assertSame('detailed_response', $cellsByHeader['Detailed response']->normalizedColumnKey);
+
+            // The row's char range must correspond to real positions within the flat text.
+            $rowSlice = mb_substr($result['text'], $row->charStart, $row->charEnd - $row->charStart, 'UTF-8');
+            $this->assertStringContainsString('2.1.1', $rowSlice);
+            $this->assertStringContainsString('The Services in the Agreement are described in this Annex.', $rowSlice);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_stamps_document_scoped_source_row_keys_and_preserves_them_through_json_round_trip(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.1</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>First requirement.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.2</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Second requirement.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+    </w:body>
+</w:document>
+XML;
+
+            $zip->addFromString('word/document.xml', $xml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+            $table = $result['tables'][0]->withDocumentId(42);
+
+            $this->assertSame('doc42-tbl0-row0', $table->rows[0]->sourceRowKey);
+            $this->assertSame('doc42-tbl0-row1', $table->rows[1]->sourceRowKey);
+
+            // JSON round trip (the canonical form for provenance/persistence, per requirement)
+            // must preserve every field exactly, including the stamped source_row_key.
+            $decoded = DocxTableData::fromArray(
+                json_decode(json_encode($table), true),
+            );
+
+            $this->assertSame('doc42-tbl0-row0', $decoded->rows[0]->sourceRowKey);
+            $this->assertSame('2.1.1', $decoded->rows[0]->cells[0]->value);
+            $this->assertSame('First requirement.', $decoded->rows[0]->cells[1]->value);
+            $this->assertSame('doc42-tbl0-row1', $decoded->rows[1]->sourceRowKey);
+            $this->assertSame('Second requirement.', $decoded->rows[1]->cells[1]->value);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function test_it_extracts_structured_docx_blocks_with_heading_levels(): void
     {
         $path = $this->tempDocumentPath('docx');
 
         try {
-            $zip = new ZipArchive();
+            $zip = new ZipArchive;
             $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
 
             $documentXml = <<<'XML'
@@ -97,7 +250,7 @@ XML;
             $zip->addFromString('word/styles.xml', $stylesXml);
             $zip->close();
 
-            $extractor = new DocumentTextExtractor();
+            $extractor = new DocumentTextExtractor;
             $blocks = $extractor->extractStructuredText($path);
 
             $this->assertCount(5, $blocks);
@@ -119,7 +272,7 @@ XML;
         $path = $this->tempDocumentPath('xlsx');
 
         try {
-            $zip = new ZipArchive();
+            $zip = new ZipArchive;
             $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
 
             $sheetXml = <<<'XML'
@@ -141,7 +294,7 @@ XML;
             $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
             $zip->close();
 
-            $extractor = new DocumentTextExtractor();
+            $extractor = new DocumentTextExtractor;
 
             $this->assertSame(
                 "Kolonne A Kolonne B\n\nVerdi 1 Verdi 2",
@@ -172,7 +325,7 @@ XML;
         try {
             $this->writeValidTestPdf($path);
 
-            $extractor = new DocumentTextExtractor();
+            $extractor = new DocumentTextExtractor;
 
             $this->assertSame(
                 "Overskrift\n\nFørste avsnitt med tekst.\n\nAndre avsnitt med mer tekst.",
@@ -185,7 +338,7 @@ XML;
 
     public function test_it_detects_extended_pdf_heading_patterns(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $this->assertSame(1, $this->invokePdfHeadingLevel($extractor, '1 Innledning'));
         $this->assertSame(2, $this->invokePdfHeadingLevel($extractor, '1.1 Bakgrunn'));
@@ -197,7 +350,7 @@ XML;
 
     public function test_it_does_not_classify_bullet_lists_as_poppler_table_runs(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 '• Prosjektleder hos Leverandøren med operativt koordineringsansvar',
@@ -252,7 +405,7 @@ XML;
 
     public function test_it_keeps_poppler_list_lines_as_list_blocks(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 '• Prosjektleder hos Leverandøren med operativt koordineringsansvar',
@@ -315,7 +468,7 @@ XML;
 
     public function test_it_does_not_treat_sentence_like_two_fragment_blocks_as_tables(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'I praksis pleier migreringsstrategier ved overtakelse av IT-drift å kategoriseres etter hvordan',
@@ -360,7 +513,7 @@ XML;
 
     public function test_it_does_not_classify_toc_dotted_leader_lines_with_page_numbers_as_tables(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 '1.1 Koordinering og samhandling i Etableringsprosjektet .................................................... 2',
@@ -419,7 +572,7 @@ XML;
 
     public function test_it_does_not_emit_toc_dotted_leader_lines_into_semantic_blocks(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Innholdsfortegnelse',
@@ -515,7 +668,7 @@ XML;
 
     public function test_pdf_visually_wrapped_lines_are_joined_with_space_into_one_paragraph(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Dette er første del av en lang setning som',
@@ -545,7 +698,7 @@ XML;
 
     public function test_pdf_real_paragraph_break_produces_two_separate_blocks(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup('Første avsnitt.', 100, 72, 400, 120),
             $this->popplerLineGroup('Andre avsnitt.', 160, 72, 380, 180),
@@ -560,7 +713,7 @@ XML;
 
     public function test_pdf_hyphenated_line_ending_is_merged_without_hyphen_when_next_line_starts_lowercase(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Leverandøren skal sikre kontinuer-',
@@ -589,7 +742,7 @@ XML;
 
     public function test_pdf_hyphen_is_preserved_when_next_line_starts_with_uppercase(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Tjenesten oppfyller kravene i EU-',
@@ -618,7 +771,7 @@ XML;
 
     public function test_pdf_list_items_are_emitted_individually_not_merged_into_paragraph(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup('• Første listepunkt', 100, 72, 400, 120, [
                 ['text' => '•', 'left' => 72, 'width' => 12],
@@ -641,7 +794,7 @@ XML;
 
     public function test_it_keeps_real_page_six_failure_level_rows_in_one_table_run(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Nivå Kategori Beskrivelse',
@@ -829,7 +982,7 @@ XML;
 
     public function test_it_still_detects_real_poppler_table_runs_for_multicolumn_rows(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Krav-ID Krav Dokumentasjon',
@@ -892,7 +1045,7 @@ XML;
 
     public function test_it_detects_poppler_tables_when_bullet_markers_share_the_description_cell(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Nivå Kategori Beskrivelse',
@@ -958,7 +1111,7 @@ XML;
 
     public function test_it_detects_flattened_poppler_table_rows_when_columns_are_separated_by_whitespace(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Krav-ID    Krav    Dokumentasjon',
@@ -1007,7 +1160,7 @@ XML;
 
     public function test_it_keeps_wrapped_first_column_rows_inside_poppler_tables(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $lineGroups = [
             $this->popplerLineGroup(
                 'Ansvarlig Leverandøren',
@@ -1149,7 +1302,7 @@ XML;
     // were broken into single-row fragments because continuation lines at that x-position were rejected.
     public function test_it_detects_table_run_through_continuation_in_second_column(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // 4-column layout: col1=50, col2=120, col3=300, col4=540.
         // firstCellLeft=50 → old isLeftColumnContinuation zone is [30,95].
@@ -1201,7 +1354,7 @@ XML;
 
     public function test_it_appends_second_column_continuation_text_to_correct_cell(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // Same geometry: col2 starts at left=120, beyond the old left-zone boundary of firstCellLeft+45=95.
         $tableLines = [
@@ -1252,7 +1405,7 @@ XML;
     // Coordinates are taken directly from the real ANSVARSMATRISE table on PDF page 29.
     public function test_it_detects_table_run_when_continuation_top_falls_within_tall_item_span(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $lineGroups = [
             // Header (index 0): 4 columns matching the real ANSVARSMATRISE header layout.
@@ -1308,7 +1461,7 @@ XML;
 
     public function test_it_merges_adjacent_poppler_table_blocks_across_a_page_break(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
         $previousTableBlock = [
             'type' => 'table',
             'page_number' => 13,
@@ -1450,7 +1603,7 @@ XML;
 
     public function test_it_merges_table_across_page_break_with_intervening_footer_and_separator_blocks(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
             ['Ansvarlig', 'Leverandøren'],
@@ -1524,7 +1677,7 @@ XML;
 
     public function test_it_merges_a_continuing_table_across_a_page_break_even_when_the_second_page_block_is_wider(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page14Table = $this->makeSimpleTableBlock(14, 1262, 892, 750, 393, 'Tabell 3 – side 14', [
             ['Ansvarlig', 'Leverandøren'],
@@ -1557,7 +1710,7 @@ XML;
 
     public function test_it_does_not_merge_tables_separated_by_a_content_heading(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
             ['Ansvarlig', 'Leverandøren'],
@@ -1598,7 +1751,7 @@ XML;
 
     public function test_it_does_not_merge_tables_separated_by_body_text(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
             ['Ansvarlig', 'Leverandøren'],
@@ -1636,7 +1789,7 @@ XML;
 
     public function test_it_merges_table_across_three_pages_using_page_end(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 5 – side 13', [
             ['Rad 1A', 'Rad 1B'],
@@ -1668,7 +1821,7 @@ XML;
 
     public function test_it_updates_merged_table_title_with_page_range(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page5Table = $this->makeSimpleTableBlock(5, 1000, 842, 200, 750, 'Tabell 3 – side 5', [
             ['Kolonne A', 'Kolonne B'],
@@ -1691,7 +1844,7 @@ XML;
 
     public function test_it_does_not_merge_separate_tables_on_non_consecutive_pages(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $page5Table = $this->makeSimpleTableBlock(5, 1000, 842, 200, 400, 'Tabell 1 – side 5', [
             ['A', 'B'],
@@ -1713,7 +1866,7 @@ XML;
 
     public function test_it_does_not_merge_table_whose_previous_part_ends_too_high_on_the_page(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // Table ending at 60% of the page — below the 0.70 threshold.
         $page1Table = $this->makeSimpleTableBlock(1, 1000, 842, 100, 500, 'Tabell 1 – side 1', [
@@ -1737,7 +1890,7 @@ XML;
     /**
      * Build a minimal table block compatible with mergePopplerPdfTableBlocks requirements.
      *
-     * @param array<int, array{0: string, 1: string}> $rows  Two-column row data.
+     * @param  array<int, array{0: string, 1: string}>  $rows  Two-column row data.
      * @return array<string, mixed>
      */
     private function makeSimpleTableBlock(
@@ -1811,16 +1964,16 @@ XML;
         // A minimal but structurally complete PDF that pdftotext can parse.
         // WinAnsiEncoding maps 0xF8 → ø, giving us "Første" with correct UTF-8 output.
         $header = "%PDF-1.4\n";
-        $obj1   = "1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n";
-        $obj2   = "2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n";
-        $obj3   = "3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
-            . " /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica"
-            . " /Encoding /WinAnsiEncoding>>>>>>\n>>\nendobj\n";
+        $obj1 = "1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n";
+        $obj2 = "2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n";
+        $obj3 = "3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+            .' /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica'
+            ." /Encoding /WinAnsiEncoding>>>>>>\n>>\nendobj\n";
         // \370 is octal 0xF8 = ø in WinAnsiEncoding
-        $stream = "BT /F1 14 Tf 72 720 Td (Overskrift) Tj"
-            . " 0 -100 Td (F\370rste avsnitt med tekst.) Tj"
-            . " 0 -100 Td (Andre avsnitt med mer tekst.) Tj ET\n";
-        $obj4 = "4 0 obj\n<</Length " . strlen($stream) . ">>\nstream\n{$stream}endstream\nendobj\n";
+        $stream = 'BT /F1 14 Tf 72 720 Td (Overskrift) Tj'
+            ." 0 -100 Td (F\370rste avsnitt med tekst.) Tj"
+            ." 0 -100 Td (Andre avsnitt med mer tekst.) Tj ET\n";
+        $obj4 = "4 0 obj\n<</Length ".strlen($stream).">>\nstream\n{$stream}endstream\nendobj\n";
 
         $o1 = strlen($header);
         $o2 = $o1 + strlen($obj1);
@@ -1829,14 +1982,14 @@ XML;
         $xrefOffset = $o4 + strlen($obj4);
 
         $xref = "xref\n0 5\n"
-            . "0000000000 65535 f \n"
-            . str_pad((string) $o1, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
-            . str_pad((string) $o2, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
-            . str_pad((string) $o3, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
-            . str_pad((string) $o4, 10, '0', STR_PAD_LEFT) . " 00000 n \n";
+            ."0000000000 65535 f \n"
+            .str_pad((string) $o1, 10, '0', STR_PAD_LEFT)." 00000 n \n"
+            .str_pad((string) $o2, 10, '0', STR_PAD_LEFT)." 00000 n \n"
+            .str_pad((string) $o3, 10, '0', STR_PAD_LEFT)." 00000 n \n"
+            .str_pad((string) $o4, 10, '0', STR_PAD_LEFT)." 00000 n \n";
         $trailer = "trailer\n<</Size 5 /Root 1 0 R>>\nstartxref\n{$xrefOffset}\n%%EOF\n";
 
-        file_put_contents($path, $header . $obj1 . $obj2 . $obj3 . $obj4 . $xref . $trailer);
+        file_put_contents($path, $header.$obj1.$obj2.$obj3.$obj4.$xref.$trailer);
     }
 
     private function tempDocumentPath(string $extension): string
@@ -1872,7 +2025,7 @@ XML;
      * Returns: The invoked method result.
      * Side effects: None.
      *
-     * @param array<int, mixed> $arguments
+     * @param  array<int, mixed>  $arguments
      */
     private function invokeDocumentTextExtractorMethod(DocumentTextExtractor $extractor, string $methodName, array $arguments = []): mixed
     {
@@ -1888,8 +2041,8 @@ XML;
      * Returns: A line-group array compatible with the Poppler table/list detector.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $items
-     * @param array<string, mixed> $overrides
+     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
     private function popplerLineGroup(string $text, int $top, int $left, int $right, int $bottom, array $items = [], array $overrides = []): array
@@ -1915,7 +2068,7 @@ XML;
 
     public function test_it_suppresses_pdf_copyright_footer_with_side_x_av_y(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // A4 page (842pt). Footer sits at ~795pt — top ratio 0.944, inside the bottom edge zone.
         $blocks = [
@@ -1932,7 +2085,7 @@ XML;
 
     public function test_it_suppresses_pdf_page_x_of_y_footer(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         $blocks = [
             $this->fakePdfBlock('paragraph', 'Egne tekniske koordineringsmøter ved behov.', 400, 842, 5),
@@ -1948,7 +2101,7 @@ XML;
 
     public function test_it_keeps_body_text_containing_the_word_side(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // "side" inside a sentence, positioned well within the body — must not be removed.
         $blocks = [
@@ -1963,7 +2116,7 @@ XML;
 
     public function test_it_keeps_real_text_near_bottom_without_page_marker(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // Legitimate last sentence on a page, near the bottom but no page-number pattern and no digits.
         // top=795, page_height=842 → ratio 0.944 (inside edge zone), but text has no digits and is long.
@@ -1979,7 +2132,7 @@ XML;
 
     public function test_it_suppresses_repeated_header_text_across_pages_by_repetition_rule(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // Company header repeated on three pages — no page number, but repetition rule should catch it.
         $blocks = [
@@ -1998,7 +2151,7 @@ XML;
 
     public function test_it_does_not_suppress_heading_blocks_near_page_edge(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // Headings must never be filtered regardless of position or content.
         $blocks = [
@@ -2013,7 +2166,7 @@ XML;
 
     public function test_it_leaves_blocks_without_page_height_untouched(): void
     {
-        $extractor = new DocumentTextExtractor();
+        $extractor = new DocumentTextExtractor;
 
         // page_height=0 means the block did not come through the PDF pipeline.
         // These must never be filtered — ensures DOCX/non-PDF blocks are safe.
@@ -2028,7 +2181,7 @@ XML;
     }
 
     /**
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
     private function fakePdfBlock(string $type, string $text, int $top, int $pageHeight, int $pageNumber = 1, array $overrides = []): array

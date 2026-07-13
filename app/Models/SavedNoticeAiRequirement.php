@@ -160,6 +160,7 @@ class SavedNoticeAiRequirement extends Model
         'extraction_method',
         'source_reference',
         'extraction_metadata',
+        'source_row_key',
         'review_status',
         'work_status',
         'assigned_user_id',

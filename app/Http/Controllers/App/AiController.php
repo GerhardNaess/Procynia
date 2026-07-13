@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
 use App\Http\Controllers\Controller;
@@ -370,7 +371,21 @@ class AiController extends Controller
             abort_unless(is_string($storedPath) && $storedPath !== '', 500, 'Failed to store AI document.');
 
             $absolutePath = Storage::disk('local')->path($storedPath);
-            $extractedText = $this->documentTextExtractor->extractText($absolutePath);
+
+            // DOCX gets structure-preserving extraction (see DocumentTextExtractor::
+            // extractDocxTextAndTables()) so requirement tables retain their column/value
+            // association instead of relying on flattened prose alone. Other formats keep the
+            // existing plain-text path unchanged.
+            $parsedTables = [];
+
+            if ($extension === 'docx') {
+                $docxResult = $this->documentTextExtractor->extractDocxTextAndTables($absolutePath);
+                $extractedText = $docxResult['text'];
+                $parsedTables = $docxResult['tables'];
+            } else {
+                $extractedText = $this->documentTextExtractor->extractText($absolutePath);
+            }
+
             $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
 
             $documentRecord = $record->aiDocuments()->create([
@@ -383,6 +398,13 @@ class AiController extends Controller
                 'extracted_text' => $extractedText,
                 'text_extracted_at' => now(),
             ]);
+
+            if ($parsedTables !== []) {
+                $stampedTables = DocxTableData::manyWithDocumentId($parsedTables, $documentRecord->id);
+                $documentRecord->forceFill([
+                    'structured_tables' => array_map(static fn (DocxTableData $table): array => $table->toArray(), $stampedTables),
+                ])->save();
+            }
 
             $documentRunId = (string) Str::uuid();
 

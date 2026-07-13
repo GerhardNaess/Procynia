@@ -24,8 +24,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
         public string $approvalStatus,
         public array $sourceReference = [],
         public array $extractionMetadata = [],
-    ) {
-    }
+        public ?string $sourceRowKey = null,
+    ) {}
 
     /**
      * Purpose: Build a canonical persistence DTO from a structured AI extraction candidate.
@@ -59,6 +59,7 @@ final readonly class RequirementCandidateData implements JsonSerializable
             approvalStatus: SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
             sourceReference: $sourceReference,
             extractionMetadata: self::buildExtractionMetadata($candidate, $extractionMetadata),
+            sourceRowKey: self::normalizeNullableString($candidate->sourceRowKey),
         );
     }
 
@@ -129,6 +130,7 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'assigned_user_id' => null,
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
+            'source_row_key' => $this->sourceRowKey,
             'original_candidate_snapshot' => $this->toSnapshotArray(),
             'current_requirement_snapshot' => $this->toSnapshotArray(),
             'requirement_type' => $this->requirementType,
@@ -160,6 +162,7 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'extraction_method' => $this->extractionMethod,
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
+            'source_row_key' => $this->sourceRowKey,
         ];
     }
 
@@ -181,6 +184,7 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
+            'source_row_key' => $this->sourceRowKey,
         ];
     }
 

@@ -2,30 +2,33 @@
 
 namespace Tests\Unit;
 
+use App\Data\Ai\Requirements\DocxTableCellData;
+use App\Data\Ai\Requirements\DocxTableData;
+use App\Data\Ai\Requirements\DocxTableRowData;
 use App\Data\Ai\Requirements\RequirementEditData;
+use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
+use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
+use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
+use App\Models\AiTokenEvent;
 use App\Models\Customer;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
-use App\Models\CustomerAiCaseUsage;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
-use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
-use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
-use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
-use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
-use App\Models\AiTokenEvent;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementLoader;
-use Closure;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Queue\TimeoutExceededException;
@@ -164,9 +167,9 @@ class RequirementExtractionRunServiceTest extends TestCase
             '1. Kravområde 1 .... 2',
             '2. Veiledning om leverandørens besvarelse .... 3',
             '3. Kravområde 2 .... 4',
-            '1. Kravområde 1' . "\n" . '1-1.S.1 Leverandøren skal levere dokumentasjon innen 10 dager.',
-            '2. Veiledning om leverandørens besvarelse' . "\n" . 'Leverandøren skal skrive tydelig og kort.',
-            '3. Kravområde 2' . "\n" . '1-1.S.2 Leverandøren skal beskrive løsning og bemanning.',
+            '1. Kravområde 1'."\n".'1-1.S.1 Leverandøren skal levere dokumentasjon innen 10 dager.',
+            '2. Veiledning om leverandørens besvarelse'."\n".'Leverandøren skal skrive tydelig og kort.',
+            '3. Kravområde 2'."\n".'1-1.S.2 Leverandøren skal beskrive løsning og bemanning.',
         ]);
 
         $document = $this->createAiDocument($savedNotice, [
@@ -767,15 +770,8 @@ class RequirementExtractionRunServiceTest extends TestCase
             app(RequirementEditorService::class),
         );
 
-        $spyService = new class(
-            app(RequirementCandidateExtractor::class),
-            app(RequirementEditorService::class),
-            $realService,
-            $this,
-        ) extends RequirementExtractionRunService {
-            /**
-             * @var Closure|null
-             */
+        $spyService = new class(app(RequirementCandidateExtractor::class), app(RequirementEditorService::class), $realService, $this) extends RequirementExtractionRunService
+        {
             public ?Closure $promoteAssertion = null;
 
             public function __construct(
@@ -797,7 +793,7 @@ class RequirementExtractionRunServiceTest extends TestCase
             }
         };
 
-        $spyService->promoteAssertion = function (RequirementExtractionRun $run, SavedNoticeAiDocument $document) use ($realService): void {
+        $spyService->promoteAssertion = function (RequirementExtractionRun $run, SavedNoticeAiDocument $document): void {
             $freshRun = RequirementExtractionRun::query()->findOrFail($run->id);
             $freshDocument = SavedNoticeAiDocument::query()->findOrFail($document->id);
 
@@ -891,6 +887,120 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertSame($run->id, $stagedRequirements[0]->extraction_run_id);
         Queue::assertPushed(FinalizeRequirementExtractionRun::class, 1);
         Http::assertSentCount(1);
+    }
+
+    public function test_process_requirement_extraction_chunk_attributes_structured_table_rows_to_the_chunk_and_persists_source_row_key(): void
+    {
+        Queue::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004T', 'Structured table row target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 12:00:00');
+
+        $extractedText = "Innledning.\n\nReq. No. 2.1.1 The Services in the Agreement are described in Annex 1.";
+        $rowText = 'Req. No. 2.1.1 The Services in the Agreement are described in Annex 1.';
+        $rowCharStart = mb_strpos($extractedText, $rowText, 0, 'UTF-8');
+        $rowCharEnd = $rowCharStart + mb_strlen($rowText, 'UTF-8');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'annex-01a.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/annex-01a.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => $extractedText,
+            'text_extracted_at' => '2026-04-07 12:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'processing_started_at' => '2026-04-07 12:02:00',
+        ]);
+
+        $table = new DocxTableData(
+            tableIndex: 0,
+            headerLabels: ['Req. No.', 'Requirement text', 'Type'],
+            rows: [
+                new DocxTableRowData(
+                    sourceRowKey: 'placeholder',
+                    tableIndex: 0,
+                    rowIndex: 0,
+                    charStart: $rowCharStart,
+                    charEnd: $rowCharEnd,
+                    cells: [
+                        new DocxTableCellData(0, 'Req. No.', 'req_no', '2.1.1'),
+                        new DocxTableCellData(1, 'Requirement text', 'requirement_text', 'The Services in the Agreement are described in Annex 1.'),
+                        new DocxTableCellData(2, 'Type', 'type', 'M'),
+                    ],
+                ),
+            ],
+        );
+        $stampedTable = DocxTableData::manyWithDocumentId([$table], $document->id)[0];
+        $expectedSourceRowKey = $stampedTable->rows[0]->sourceRowKey;
+
+        $document->forceFill(['structured_tables' => [$stampedTable->toArray()]])->save();
+        $document->refresh();
+
+        $chunk = $this->createAiDocumentChunk($document, $extractedText, 0);
+        $chunk->forceFill(['char_start' => 0, 'char_end' => mb_strlen($extractedText, 'UTF-8')])->save();
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'started_at' => '2026-04-07 12:02:00',
+            'last_heartbeat_at' => '2026-04-07 12:02:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_QUEUED,
+        ]);
+
+        $capturedUserText = null;
+
+        Http::fake(function ($request) use (&$capturedUserText, $expectedSourceRowKey) {
+            $data = $request->data();
+            $capturedUserText = data_get($data, 'input.1.content.0.text');
+
+            return Http::response([
+                'id' => 'resp_structured_table_row_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'candidates' => [[
+                        'requirement_identifier' => '2.1.1',
+                        'parent_reference' => null,
+                        'original_text' => 'The Services in the Agreement are described in Annex 1.',
+                        'source_reference_text' => 'Req. No. 2.1.1',
+                        'source_row_key' => $expectedSourceRowKey,
+                        'is_requirement' => true,
+                        'confidence' => 0.98,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => [
+                    'input_tokens' => 120,
+                    'output_tokens' => 42,
+                    'total_tokens' => 162,
+                ],
+            ], 200);
+        });
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $call->refresh();
+
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $call->status);
+        $this->assertIsString($capturedUserText);
+        $this->assertStringContainsString('STRUKTURERTE TABELLRADER:', (string) $capturedUserText);
+        $this->assertStringContainsString($expectedSourceRowKey, (string) $capturedUserText);
+        $this->assertStringContainsString('"req_no"', (string) $capturedUserText);
+
+        $stagedRequirements = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->get();
+
+        $this->assertCount(1, $stagedRequirements);
+        $this->assertSame($expectedSourceRowKey, $stagedRequirements[0]->source_row_key);
     }
 
     public function test_process_requirement_extraction_chunk_is_idempotent_when_the_call_is_already_completed(): void

@@ -14,9 +14,9 @@ use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
-use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -35,10 +35,9 @@ class RequirementExtractionRunService
     public function __construct(
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly RequirementEditorService $requirementEditorService,
-        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
-        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
-    ) {
-    }
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
+        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger,
+    ) {}
 
     /**
      * Purpose: Create or reuse the queued extraction run for one AI document and dispatch the worker job when needed.
@@ -437,10 +436,16 @@ class RequirementExtractionRunService
             $chunkDocument = clone $document;
             $chunkDocument->extracted_text = (string) $chunk->content;
 
+            $chunkTableRows = $document->structuredTableRowsInRange(
+                (int) $chunk->char_start,
+                (int) $chunk->char_end,
+            );
+
             try {
                 $result = $this->candidateExtractor->extractFullDocument(
                     $chunkDocument,
-                    $run->uuid . '-chunk-' . $chunk->chunk_index,
+                    $run->uuid.'-chunk-'.$chunk->chunk_index,
+                    $chunkTableRows,
                 );
             } catch (Throwable $throwable) {
                 $this->failCall($runningCall, $document, 'unexpected_error', $throwable->getMessage());
@@ -685,9 +690,17 @@ class RequirementExtractionRunService
             $chunkCall = $this->startCall($run, $document, $chunk->id);
             $chunkDocument = clone $document;
             $chunkDocument->extracted_text = (string) $chunk->content;
+            $chunkTableRows = $document->structuredTableRowsInRange(
+                (int) $chunk->char_start,
+                (int) $chunk->char_end,
+            );
 
             try {
-                $result = $this->candidateExtractor->extractFullDocument($chunkDocument, $run->uuid . '-chunk-' . $chunk->chunk_index);
+                $result = $this->candidateExtractor->extractFullDocument(
+                    $chunkDocument,
+                    $run->uuid.'-chunk-'.$chunk->chunk_index,
+                    $chunkTableRows,
+                );
             } catch (Throwable $throwable) {
                 $this->failCall($chunkCall, $document, 'chunk_extraction_failed', $throwable->getMessage());
 
@@ -740,8 +753,8 @@ class RequirementExtractionRunService
 
             $this->finishCall($chunkCall, $document, $result);
             foreach ($result->candidates as $candidate) {
-    $allCandidates[] = $candidate;
-}
+                $allCandidates[] = $candidate;
+            }
 
             Log::info('[PROCYNIA][REQ_PIPELINE] Chunk extraction completed.', [
                 'run_id' => $run->uuid,
@@ -818,7 +831,6 @@ class RequirementExtractionRunService
             'phase_1_requirement_extraction' => true,
         ]);
 
-        return;
     }
 
     /**
@@ -1084,7 +1096,6 @@ class RequirementExtractionRunService
         return null;
     }
 
-
     /**
      * Purpose: Find an anchor using whitespace-normalized matching when exact matching fails.
      * Inputs: The full document text, the anchor text, and the cursor offset.
@@ -1230,7 +1241,6 @@ class RequirementExtractionRunService
         ];
     }
 
-
     /**
      * Purpose: Persist staged AI requirement rows for a successful full-document extraction result.
      * Inputs: The extraction run, the source document, and the extraction result.
@@ -1308,8 +1318,6 @@ class RequirementExtractionRunService
             return $stagedRequirementCount;
         });
     }
-
-
 
     /**
      * Purpose: Persist chunk-based AI requirement rows after document-level deduplication.
@@ -1444,6 +1452,7 @@ class RequirementExtractionRunService
             return $stagedRequirementCount;
         });
     }
+
     /**
      * Purpose: Deduplicate staged requirement rows across chunks before promotion, mirroring documentDedupeCandidates().
      * Inputs: The extraction run (already locked by the caller's transaction).
@@ -1658,15 +1667,15 @@ class RequirementExtractionRunService
             ->value('model');
 
         $this->tokenLogger->record([
-            'customer_id'                  => (int) ($customerId ?? 0),
-            'user_id'                      => null,
-            'operation_key'                => AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
-            'model'                        => $model ?? '',
-            'input_tokens'                 => (int) $run->input_tokens_total,
-            'output_tokens'                => (int) $run->output_tokens_total,
-            'total_tokens'                 => $totalTokens,
-            'saved_notice_id'              => $run->saved_notice_id,
-            'saved_notice_ai_document_id'  => $document->id,
+            'customer_id' => (int) ($customerId ?? 0),
+            'user_id' => null,
+            'operation_key' => AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+            'model' => $model ?? '',
+            'input_tokens' => (int) $run->input_tokens_total,
+            'output_tokens' => (int) $run->output_tokens_total,
+            'total_tokens' => $totalTokens,
+            'saved_notice_id' => $run->saved_notice_id,
+            'saved_notice_ai_document_id' => $document->id,
             'requirement_extraction_run_id' => $run->id,
         ]);
         // provider, deployment_name and provider_region are resolved automatically
@@ -1682,8 +1691,7 @@ class RequirementExtractionRunService
     private function recordAiCaseUsageAfterCompletedExtractionRun(
         RequirementExtractionRun $run,
         SavedNoticeAiDocument $document,
-    ): void
-    {
+    ): void {
         try {
             $savedNotice = $document->savedNotice;
 
@@ -1948,6 +1956,7 @@ class RequirementExtractionRunService
 
             if (! array_key_exists($fingerprint, $deduped)) {
                 $deduped[$fingerprint] = $candidate;
+
                 continue;
             }
 

@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
-use DOMElement;
+use App\Data\Ai\Requirements\DocxTableCellData;
+use App\Data\Ai\Requirements\DocxTableData;
+use App\Data\Ai\Requirements\DocxTableRowData;
 use DOMDocument;
+use DOMElement;
 use DOMXPath;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -75,7 +78,7 @@ class DocumentTextExtractor
      */
     private function extractDocxText(string $path): string
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($path) !== true) {
             return '';
@@ -92,6 +95,365 @@ class DocumentTextExtractor
     }
 
     /**
+     * Purpose: Extract DOCX text alongside deterministically-parsed <w:tbl> table structure, so
+     * requirement extraction can use canonical structured rows (source_row_key, original headers,
+     * cell values) instead of relying on flattened prose to preserve column/value association.
+     * Inputs: Absolute filesystem path to a DOCX file.
+     * Returns: The same flat text extractText()/extractDocxText() would produce, plus the
+     * document's tables with rows positioned via char_start/char_end within that same text.
+     * Side effects: Opens the ZIP archive and parses XML. Used only by the requirement
+     * extraction upload path (AiController::storeDocuments()) — extractText()/extractStructuredText()
+     * and their existing callers (Enterprise Wiki, Knowledge Base ingest) are untouched.
+     *
+     * @return array{text: string, tables: list<DocxTableData>}
+     */
+    public function extractDocxTextAndTables(string $path): array
+    {
+        $empty = ['text' => '', 'tables' => []];
+
+        if (! is_file($path) || ! is_readable($path)) {
+            return $empty;
+        }
+
+        $zip = new ZipArchive;
+
+        if ($zip->open($path) !== true) {
+            return $empty;
+        }
+
+        $xml = $zip->getFromName('word/document.xml');
+        $zip->close();
+
+        if (! is_string($xml) || trim($xml) === '') {
+            return $empty;
+        }
+
+        return $this->parseWordXmlTextAndTables($xml);
+    }
+
+    /**
+     * @return array{text: string, tables: list<DocxTableData>}
+     */
+    private function parseWordXmlTextAndTables(string $xml): array
+    {
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument;
+
+            if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return ['text' => '', 'tables' => []];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+            $paragraphs = [];
+            /** @var array<int, int> $tableOrderByObjectId spl_object_id(w:tbl) => table order index */
+            $tableOrderByObjectId = [];
+            /** @var array<int, array<int, int>> $rowOrderByTable tableIndex => [spl_object_id(w:tr) => row order index] */
+            $rowOrderByTable = [];
+            /** @var array<int, array<int, array<int, list<string>>>> $tableCellParagraphs tableIndex => rowIndex => colIndex => paragraph texts */
+            $tableCellParagraphs = [];
+            /** @var array<string, array{0: int, 1: int}> $rowParagraphIndexRange "tableIndex:rowIndex" => [minParagraphIndex, maxParagraphIndex] */
+            $rowParagraphIndexRange = [];
+
+            foreach ($xpath->query('//w:p') as $paragraph) {
+                $textNodes = $xpath->query('.//w:t', $paragraph);
+                $parts = [];
+
+                if ($textNodes !== false) {
+                    foreach ($textNodes as $textNode) {
+                        $parts[] = (string) $textNode->textContent;
+                    }
+                }
+
+                $paragraphText = $this->normalizeWhitespace(implode(' ', $parts));
+
+                // Table ancestry/column registration happens BEFORE the blank-text skip below,
+                // so a genuinely blank cell (e.g. the empty "Response instruction"/"Y/N"/
+                // "Detailed response" columns in a requirement table) still gets a column entry
+                // with an empty value, rather than silently disappearing from the row's cells —
+                // every <w:tc> contains at least one <w:p> per the OOXML spec, blank or not.
+                $cellAncestry = $this->docxTableCellAncestry($paragraph);
+
+                if ($cellAncestry !== null) {
+                    [$tableCell, $tableRow, $table] = $cellAncestry;
+
+                    $tableObjectId = spl_object_id($table);
+
+                    if (! array_key_exists($tableObjectId, $tableOrderByObjectId)) {
+                        $tableOrderByObjectId[$tableObjectId] = count($tableOrderByObjectId);
+                    }
+
+                    $tableIndex = $tableOrderByObjectId[$tableObjectId];
+                    $rowOrderByTable[$tableIndex] ??= [];
+                    $rowObjectId = spl_object_id($tableRow);
+
+                    if (! array_key_exists($rowObjectId, $rowOrderByTable[$tableIndex])) {
+                        $rowOrderByTable[$tableIndex][$rowObjectId] = count($rowOrderByTable[$tableIndex]);
+                    }
+
+                    $rowIndex = $rowOrderByTable[$tableIndex][$rowObjectId];
+                    $columnIndex = $this->docxTableCellColumnIndex($tableCell, $tableRow);
+                    $tableCellParagraphs[$tableIndex][$rowIndex][$columnIndex] ??= [];
+
+                    if ($paragraphText !== '') {
+                        $tableCellParagraphs[$tableIndex][$rowIndex][$columnIndex][] = $paragraphText;
+
+                        $paragraphIndex = count($paragraphs);
+                        $rangeKey = $tableIndex.':'.$rowIndex;
+
+                        if (! isset($rowParagraphIndexRange[$rangeKey])) {
+                            $rowParagraphIndexRange[$rangeKey] = [$paragraphIndex, $paragraphIndex];
+                        } else {
+                            $rowParagraphIndexRange[$rangeKey][1] = $paragraphIndex;
+                        }
+                    }
+                }
+
+                if ($paragraphText === '') {
+                    continue;
+                }
+
+                $paragraphs[] = $paragraphText;
+            }
+
+            $joinedText = $this->normalizeBlockText(implode("\n\n", $paragraphs));
+            $paragraphOffsets = $this->locateParagraphOffsets($paragraphs, $joinedText);
+            $tables = $this->buildDocxTablesFromParagraphs($tableCellParagraphs, $rowParagraphIndexRange, $paragraphOffsets);
+
+            return ['text' => $joinedText, 'tables' => $tables];
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Find the nearest enclosing table cell/row/table for a <w:p> paragraph node, if any.
+     * Inputs: The paragraph DOM element.
+     * Returns: [w:tc, w:tr, w:tbl] ancestor elements, or null if the paragraph is not inside a table.
+     * Side effects: None.
+     *
+     * @return array{0: DOMElement, 1: DOMElement, 2: DOMElement}|null
+     */
+    private function docxTableCellAncestry(DOMElement $paragraph): ?array
+    {
+        $cell = null;
+        $row = null;
+        $node = $paragraph->parentNode;
+
+        while ($node instanceof DOMElement) {
+            if ($cell === null && $node->localName === 'tc') {
+                $cell = $node;
+            } elseif ($cell !== null && $row === null && $node->localName === 'tr') {
+                $row = $node;
+            } elseif ($row !== null && $node->localName === 'tbl') {
+                return [$cell, $row, $node];
+            }
+
+            $node = $node->parentNode;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Determine a table cell's column position among its row's direct <w:tc> siblings.
+     * Inputs: The cell element and its parent row element.
+     * Returns: Zero-based column index. Cells merged via w:gridSpan/w:vMerge are not expanded —
+     * each physical <w:tc> is counted once, a known simplification for merged-cell layouts.
+     * Side effects: None.
+     */
+    private function docxTableCellColumnIndex(DOMElement $tableCell, DOMElement $tableRow): int
+    {
+        $columnIndex = 0;
+
+        foreach ($tableRow->childNodes as $child) {
+            if ($child === $tableCell) {
+                break;
+            }
+
+            if ($child instanceof DOMElement && $child->localName === 'tc') {
+                $columnIndex++;
+            }
+        }
+
+        return $columnIndex;
+    }
+
+    /**
+     * Purpose: Locate each paragraph's character offset within the final joined/normalized text.
+     * Inputs: Ordered paragraph texts and the final joined text they were built from.
+     * Returns: Per-paragraph-index [start, end] character offsets.
+     * Side effects: None.
+     *
+     * @param  list<string>  $paragraphs
+     * @return array<int, array{start: int, end: int}>
+     */
+    private function locateParagraphOffsets(array $paragraphs, string $joinedText): array
+    {
+        $offsets = [];
+        $cursor = 0;
+
+        foreach ($paragraphs as $index => $paragraphText) {
+            $position = mb_strpos($joinedText, $paragraphText, $cursor, 'UTF-8');
+
+            if ($position === false) {
+                // Should not happen (every paragraph is an exact substring of the text it was
+                // joined into), but fail safe rather than throw on an unexpected edge case.
+                $offsets[$index] = ['start' => $cursor, 'end' => $cursor];
+
+                continue;
+            }
+
+            $end = $position + mb_strlen($paragraphText, 'UTF-8');
+            $offsets[$index] = ['start' => $position, 'end' => $end];
+            $cursor = $end;
+        }
+
+        return $offsets;
+    }
+
+    /**
+     * Purpose: Build DocxTableData objects from the raw per-cell paragraph texts collected while
+     * walking the document. The first (lowest-index) row of each table is treated as the header
+     * row; its cell text becomes each data cell's original_header/normalized_column_key.
+     * Inputs: tableIndex => rowIndex => colIndex => paragraph texts; row paragraph-index ranges;
+     * paragraph character offsets.
+     * Returns: One DocxTableData per parsed table, in document order.
+     * Side effects: None.
+     *
+     * @param  array<int, array<int, array<int, list<string>>>>  $tableCellParagraphs
+     * @param  array<string, array{0: int, 1: int}>  $rowParagraphIndexRange
+     * @param  array<int, array{start: int, end: int}>  $paragraphOffsets
+     * @return list<DocxTableData>
+     */
+    private function buildDocxTablesFromParagraphs(
+        array $tableCellParagraphs,
+        array $rowParagraphIndexRange,
+        array $paragraphOffsets,
+    ): array {
+        $tables = [];
+
+        ksort($tableCellParagraphs);
+
+        foreach ($tableCellParagraphs as $tableIndex => $rows) {
+            ksort($rows);
+            $rowIndexes = array_keys($rows);
+
+            if ($rowIndexes === []) {
+                continue;
+            }
+
+            $headerRowIndex = min($rowIndexes);
+            $headerCells = $rows[$headerRowIndex];
+            ksort($headerCells);
+
+            $headerLabels = [];
+
+            foreach ($headerCells as $columnIndex => $cellParagraphTexts) {
+                $headerLabels[$columnIndex] = trim(implode(' ', $cellParagraphTexts));
+            }
+
+            $usedColumnKeys = [];
+            $dataRows = [];
+            $dataRowOrdinal = 0;
+
+            foreach ($rows as $rowIndex => $cells) {
+                if ($rowIndex === $headerRowIndex) {
+                    continue;
+                }
+
+                ksort($cells);
+
+                $rangeKey = $tableIndex.':'.$rowIndex;
+                [$minParagraphIndex, $maxParagraphIndex] = $rowParagraphIndexRange[$rangeKey] ?? [0, 0];
+                $charStart = $paragraphOffsets[$minParagraphIndex]['start'] ?? 0;
+                $charEnd = $paragraphOffsets[$maxParagraphIndex]['end'] ?? $charStart;
+
+                $dataCells = [];
+
+                foreach ($cells as $columnIndex => $cellParagraphTexts) {
+                    $originalHeader = $headerLabels[$columnIndex] ?? null;
+                    $normalizedColumnKey = $this->uniqueDocxColumnKey(
+                        $originalHeader !== null && $originalHeader !== '' ? $originalHeader : ('column_'.$columnIndex),
+                        $usedColumnKeys,
+                    );
+
+                    $dataCells[] = new DocxTableCellData(
+                        columnIndex: $columnIndex,
+                        originalHeader: $originalHeader !== '' ? $originalHeader : null,
+                        normalizedColumnKey: $normalizedColumnKey,
+                        value: trim(implode(' ', $cellParagraphTexts)),
+                    );
+                }
+
+                // Placeholder key ("tbl{n}-row{n}") — DocxTableData::withDocumentId() stamps the
+                // final, document-scoped source_row_key once the document's DB id is known.
+                $dataRows[] = new DocxTableRowData(
+                    sourceRowKey: sprintf('tbl%d-row%d', $tableIndex, $dataRowOrdinal),
+                    tableIndex: $tableIndex,
+                    rowIndex: $dataRowOrdinal,
+                    charStart: $charStart,
+                    charEnd: $charEnd,
+                    cells: $dataCells,
+                );
+
+                $dataRowOrdinal++;
+            }
+
+            if ($dataRows === []) {
+                continue;
+            }
+
+            $tables[] = new DocxTableData(
+                tableIndex: $tableIndex,
+                headerLabels: array_values($headerLabels),
+                rows: $dataRows,
+            );
+        }
+
+        return $tables;
+    }
+
+    /**
+     * Purpose: Derive a machine-friendly, unique-within-table column key from a raw header label.
+     * Inputs: The raw header text and the set of keys already used in this table.
+     * Returns: A lowercase, ASCII, underscore-separated key; disambiguated with a numeric suffix
+     * if the same key was already produced for an earlier column (e.g. duplicate/blank headers).
+     * Side effects: Adds the returned key to $usedColumnKeys (passed by reference).
+     */
+    private function uniqueDocxColumnKey(string $header, array &$usedColumnKeys): string
+    {
+        $key = mb_strtolower(trim($header), 'UTF-8');
+        $key = strtr($key, [
+            'æ' => 'ae', 'ø' => 'o', 'å' => 'aa',
+            'é' => 'e', 'è' => 'e', 'ê' => 'e',
+            'ü' => 'u', 'ö' => 'o', 'ä' => 'a',
+        ]);
+        $key = preg_replace('/[^a-z0-9]+/u', '_', $key) ?? '';
+        $key = trim($key, '_');
+
+        if ($key === '') {
+            $key = 'column';
+        }
+
+        $baseKey = $key;
+        $suffix = 2;
+
+        while (isset($usedColumnKeys[$key])) {
+            $key = $baseKey.'_'.$suffix;
+            $suffix++;
+        }
+
+        $usedColumnKeys[$key] = true;
+
+        return $key;
+    }
+
+    /**
      * Purpose: Extract structured paragraphs from a DOCX file.
      * Inputs: Absolute filesystem path to a DOCX file.
      * Returns: Ordered blocks containing text, style, and heading level metadata.
@@ -101,7 +463,7 @@ class DocumentTextExtractor
      */
     private function extractStructuredDocxText(string $path): array
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($path) !== true) {
             return [];
@@ -326,7 +688,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return [];
@@ -398,8 +760,8 @@ class DocumentTextExtractor
      * Returns: Ordered blocks for a single page.
      * Side effects: Reads extracted image files from the working directory.
      *
-     * @param int $tableIndexInDocument Zero-based table index that is incremented as tables are discovered.
-     * @param int $graphicIndexInDocument Zero-based graphic index that is incremented as graphics are discovered.
+     * @param  int  $tableIndexInDocument  Zero-based table index that is incremented as tables are discovered.
+     * @param  int  $graphicIndexInDocument  Zero-based graphic index that is incremented as graphics are discovered.
      * @return array<int, array<string, mixed>>
      */
     private function extractPopplerPdfPageBlocks(
@@ -411,8 +773,7 @@ class DocumentTextExtractor
         int $pageHeight,
         int &$tableIndexInDocument,
         int &$graphicIndexInDocument,
-    ): array
-    {
+    ): array {
         $pageNumber = max(1, (int) ($pageNode->attributes?->getNamedItem('number')?->nodeValue ?? 0));
         $pageWidth = max(1, $pageWidth);
         $pageHeight = max(1, $pageHeight);
@@ -589,7 +950,7 @@ class DocumentTextExtractor
      * Returns: Ordered line groups with combined line text and geometry.
      * Side effects: None.
      *
-     * @param array<int, array{text: string, top: int, left: int, width: int, height: int, bottom: int, page_number: int}> $textItems
+     * @param  array<int, array{text: string, top: int, left: int, width: int, height: int, bottom: int, page_number: int}>  $textItems
      * @return array<int, array<string, mixed>>
      */
     private function groupPopplerPdfTextItemsIntoLines(array $textItems): array
@@ -657,7 +1018,7 @@ class DocumentTextExtractor
      * Returns: The same line group with normalized line text.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      * @return array<string, mixed>
      */
     private function finalizePopplerPdfLine(array $line): array
@@ -699,7 +1060,7 @@ class DocumentTextExtractor
      * Returns: Ordered table run descriptors with title and row boundaries.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
+     * @param  array<int, array<string, mixed>>  $lineGroups
      * @return array<int, array{start_index: int, end_index: int, title_index?: int}>
      */
     private function detectPopplerPdfTableRuns(array $lineGroups, int $pageWidth): array
@@ -782,7 +1143,7 @@ class DocumentTextExtractor
      * Returns: True when the line contains two or more aligned cells.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      */
     private function isPopplerPdfTableCandidateLine(array $line, int $pageWidth): bool
     {
@@ -817,7 +1178,7 @@ class DocumentTextExtractor
      * Returns: True when the line looks like a TOC entry with a numbered prefix, leader dots or long spacing, and a trailing page marker.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      */
     private function isPopplerPdfTocEntryLine(array $line): bool
     {
@@ -844,7 +1205,7 @@ class DocumentTextExtractor
      * Returns: Normalized column left positions in reading order.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      * @return array<int, int>
      */
     private function popplerPdfTableColumnTemplate(array $line): ?array
@@ -876,8 +1237,8 @@ class DocumentTextExtractor
      * Returns: True when the cell positions stay aligned with the template.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
-     * @param array<int, int> $template
+     * @param  array<string, mixed>  $line
+     * @param  array<int, int>  $template
      */
     private function matchesPopplerPdfTableColumns(array $line, array $template): bool
     {
@@ -923,8 +1284,8 @@ class DocumentTextExtractor
      * Returns: True when the preceding line looks like a table heading or caption.
      * Side effects: None.
      *
-     * @param array<string, mixed> $titleLine
-     * @param array<string, mixed> $firstTableLine
+     * @param  array<string, mixed>  $titleLine
+     * @param  array<string, mixed>  $firstTableLine
      */
     private function isPopplerPdfTableTitleCandidate(array $titleLine, array $firstTableLine, int $pageWidth): bool
     {
@@ -956,8 +1317,8 @@ class DocumentTextExtractor
      * Returns: A single structured table block with title, rows, and table metadata.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
-     * @param array<string, mixed> $tableRun
+     * @param  array<int, array<string, mixed>>  $lineGroups
+     * @param  array<string, mixed>  $tableRun
      * @return array<string, mixed>|null
      */
     private function buildPopplerPdfTableBlock(
@@ -967,8 +1328,7 @@ class DocumentTextExtractor
         int $tableSequenceInDocument,
         int $pageWidth,
         int $pageHeight,
-    ): ?array
-    {
+    ): ?array {
         $startIndex = (int) ($tableRun['start_index'] ?? 0);
         $endIndex = (int) ($tableRun['end_index'] ?? $startIndex);
         $titleIndex = isset($tableRun['title_index']) ? (int) $tableRun['title_index'] : null;
@@ -1317,7 +1677,7 @@ class DocumentTextExtractor
      * Returns: Ordered non-empty cell texts suitable for table JSON and previews.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      * @return array<int, string>
      */
     private function popplerPdfTableLineCellTexts(array $line): array
@@ -1340,7 +1700,7 @@ class DocumentTextExtractor
      * Returns: Ordered cell descriptors suitable for table detection.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      * @return array<int, array{text: string, left: ?int, width: ?int}>
      */
     private function normalizePopplerPdfTableCells(array $line): array
@@ -1420,9 +1780,9 @@ class DocumentTextExtractor
      * Returns: True when the line is a wrapped continuation inside the table body.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
-     * @param array<string, mixed> $previousLine
-     * @param array<string, mixed> $template
+     * @param  array<string, mixed>  $line
+     * @param  array<string, mixed>  $previousLine
+     * @param  array<string, mixed>  $template
      */
     private function isPopplerPdfTableContinuationLine(array $line, array $previousLine, array $template, int $pageWidth): bool
     {
@@ -1494,7 +1854,7 @@ class DocumentTextExtractor
      * Returns: Logical rows with merged cells that can be rendered as a single table.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $tableLines
+     * @param  array<int, array<string, mixed>>  $tableLines
      * @return array<int, array{cells: array<int, array{text: string, left: ?int, width: ?int}}, source_lines: array<int, array<string, mixed>>}>
      */
     private function buildPopplerPdfTableLogicalRows(array $tableLines, int $pageWidth): array
@@ -1546,8 +1906,8 @@ class DocumentTextExtractor
      * Returns: The same row with updated cell text.
      * Side effects: Mutates the supplied row structure.
      *
-     * @param array<string, mixed> $currentRow
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $currentRow
+     * @param  array<string, mixed>  $line
      */
     private function appendPopplerPdfTableContinuationLine(array &$currentRow, array $line): void
     {
@@ -1601,7 +1961,7 @@ class DocumentTextExtractor
      * Returns: The same block list with consecutive cross-page table fragments merged into one block.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $blocks
+     * @param  array<int, array<string, mixed>>  $blocks
      * @return array<int, array<string, mixed>>
      */
     private function mergePopplerPdfTableBlocksAcrossPages(array $blocks): array
@@ -1620,6 +1980,7 @@ class DocumentTextExtractor
                 // Standard adjacent merge: the previous block is the table on page N.
                 if (is_array($lastBlock) && $this->shouldMergePopplerPdfTableBlocks($lastBlock, $block)) {
                     $mergedBlocks[$lastIndex] = $this->mergePopplerPdfTableBlocks($lastBlock, $block);
+
                     continue;
                 }
 
@@ -1630,6 +1991,7 @@ class DocumentTextExtractor
 
                     if ($lookbackIndex !== null) {
                         $mergedBlocks[$lookbackIndex] = $this->mergePopplerPdfTableBlocks($mergedBlocks[$lookbackIndex], $block);
+
                         continue;
                     }
                 }
@@ -1647,8 +2009,8 @@ class DocumentTextExtractor
      * Returns: True when the blocks should be merged into one table block.
      * Side effects: None.
      *
-     * @param array<string, mixed> $previousBlock
-     * @param array<string, mixed> $currentBlock
+     * @param  array<string, mixed>  $previousBlock
+     * @param  array<string, mixed>  $currentBlock
      */
     private function shouldMergePopplerPdfTableBlocks(array $previousBlock, array $currentBlock): bool
     {
@@ -1715,7 +2077,7 @@ class DocumentTextExtractor
      * Returns: True when the block carries no document content and should be skipped during cross-page table lookup.
      * Side effects: None.
      *
-     * @param array<string, mixed> $block
+     * @param  array<string, mixed>  $block
      */
     private function isTransparentPdfPageSeparatorBlock(array $block): bool
     {
@@ -1759,7 +2121,7 @@ class DocumentTextExtractor
      * Returns: True when the block is a page footer that does not represent new document content.
      * Side effects: None.
      *
-     * @param array<string, mixed> $block
+     * @param  array<string, mixed>  $block
      */
     private function isTransparentPdfTrailingFooterBlock(array $block): bool
     {
@@ -1781,8 +2143,8 @@ class DocumentTextExtractor
      * Returns: The index into $mergedBlocks of a mergeable previous table block, or null when none qualifies.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $mergedBlocks
-     * @param array<string, mixed> $currentBlock
+     * @param  array<int, array<string, mixed>>  $mergedBlocks
+     * @param  array<string, mixed>  $currentBlock
      */
     private function findMergeableTableBlockIndexViaLookback(array $mergedBlocks, array $currentBlock): ?int
     {
@@ -1845,8 +2207,8 @@ class DocumentTextExtractor
      * Returns: One combined table block with concatenated rows and metadata.
      * Side effects: None.
      *
-     * @param array<string, mixed> $previousBlock
-     * @param array<string, mixed> $currentBlock
+     * @param  array<string, mixed>  $previousBlock
+     * @param  array<string, mixed>  $currentBlock
      * @return array<string, mixed>
      */
     private function mergePopplerPdfTableBlocks(array $previousBlock, array $currentBlock): array
@@ -2016,8 +2378,8 @@ class DocumentTextExtractor
      * Returns: An HTML table string suitable for previews and retrieval payloads.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
-     * @param array<int, int> $headerRowIndices
+     * @param  array<int, array<string, mixed>>  $rows
+     * @param  array<int, int>  $headerRowIndices
      */
     private function buildPopplerPdfTableHtml(array $rows, int $columnCount, ?int $titleRowIndex, array $headerRowIndices): string
     {
@@ -2102,8 +2464,8 @@ class DocumentTextExtractor
      * Returns: Ordered text, heading, and list blocks.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
-     * @param array<int, bool> $consumedLineIndexes
+     * @param  array<int, array<string, mixed>>  $lineGroups
+     * @param  array<int, bool>  $consumedLineIndexes
      * @return array<int, array<string, mixed>>
      */
     private function buildPopplerPdfTextBlocks(array $lineGroups, array $consumedLineIndexes, int $pageNumber): array
@@ -2168,18 +2530,21 @@ class DocumentTextExtractor
             if ($text === '') {
                 $flushParagraph();
                 $previousLine = null;
+
                 continue;
             }
 
             if ($pageHasTocEntries && $this->isPopplerPdfTocHeadingLine($text)) {
                 $flushParagraph();
                 $previousLine = null;
+
                 continue;
             }
 
             if ($this->isPopplerPdfTocEntryLine((array) $line)) {
                 $flushParagraph();
                 $previousLine = null;
+
                 continue;
             }
 
@@ -2209,6 +2574,7 @@ class DocumentTextExtractor
                     ],
                 ];
                 $previousLine = $line;
+
                 continue;
             }
 
@@ -2231,6 +2597,7 @@ class DocumentTextExtractor
                     ],
                 ];
                 $previousLine = $line;
+
                 continue;
             }
 
@@ -2261,8 +2628,8 @@ class DocumentTextExtractor
      * Returns: One image block or null when no readable image bytes are available.
      * Side effects: Reads extracted image files from disk.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
-     * @param array<int, bool> $consumedLineIndexes
+     * @param  array<int, array<string, mixed>>  $lineGroups
+     * @param  array<int, bool>  $consumedLineIndexes
      * @return array<string, mixed>|null
      */
     private function buildPopplerPdfImageBlock(
@@ -2273,8 +2640,7 @@ class DocumentTextExtractor
         int $graphicSequenceInDocument,
         array &$consumedLineIndexes,
         string $pdfPath,
-    ): ?array
-    {
+    ): ?array {
         $pageWidth = max(1, (int) ($imageItem['page_width'] ?? 0));
         $pageHeight = max(1, (int) ($imageItem['page_height'] ?? 0));
 
@@ -2435,7 +2801,7 @@ class DocumentTextExtractor
      * Returns: True when the image is small enough and close enough to the page edge to be treated as decoration.
      * Side effects: None.
      *
-     * @param array<string, mixed> $imageItem
+     * @param  array<string, mixed>  $imageItem
      */
     private function isPopplerPdfDecorativeGraphic(array $imageItem, int $pageWidth, int $pageHeight): bool
     {
@@ -2492,9 +2858,9 @@ class DocumentTextExtractor
      * Returns: The line index of a nearby caption or null.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
-     * @param array<string, mixed> $imageItem
-     * @param array<int, bool> $consumedLineIndexes
+     * @param  array<int, array<string, mixed>>  $lineGroups
+     * @param  array<string, mixed>  $imageItem
+     * @param  array<int, bool>  $consumedLineIndexes
      */
     private function detectPopplerPdfCaptionLineIndex(array $lineGroups, array $imageItem, array $consumedLineIndexes): ?int
     {
@@ -2545,9 +2911,9 @@ class DocumentTextExtractor
      * Returns: The nearest usable text line or null.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $lineGroups
-     * @param array<string, mixed> $imageItem
-     * @param array<int, bool> $consumedLineIndexes
+     * @param  array<int, array<string, mixed>>  $lineGroups
+     * @param  array<string, mixed>  $imageItem
+     * @param  array<int, bool>  $consumedLineIndexes
      */
     private function popplerPdfNearbyLineText(array $lineGroups, array $imageItem, array $consumedLineIndexes, int $direction): ?string
     {
@@ -2643,7 +3009,7 @@ class DocumentTextExtractor
      * Returns: True when the layout looks like a list rather than a table row.
      * Side effects: None.
      *
-     * @param array<string, mixed> $line
+     * @param  array<string, mixed>  $line
      */
     private function isPopplerPdfListLine(array $line): bool
     {
@@ -2759,7 +3125,7 @@ class DocumentTextExtractor
      * Blocks without a valid page_height pass through unchanged, which keeps DOCX and other
      * non-PDF extraction paths unaffected even if this method were ever called on their output.
      *
-     * @param array<int, array<string, mixed>> $blocks
+     * @param  array<int, array<string, mixed>>  $blocks
      * @return array<int, array<string, mixed>>
      */
     private function suppressPdfRunningHeaderFooterBlocks(array $blocks): array
@@ -2998,6 +3364,7 @@ class DocumentTextExtractor
 
                 if (is_dir($entryPath)) {
                     $this->removeTemporaryDirectory($entryPath);
+
                     continue;
                 }
 
@@ -3077,7 +3444,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($documentXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return [];
@@ -3146,7 +3513,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($stylesXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return [];
@@ -3230,7 +3597,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return '';
@@ -3273,7 +3640,7 @@ class DocumentTextExtractor
      */
     private function extractXlsxText(string $path): string
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($path) !== true) {
             return '';
@@ -3320,7 +3687,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return [];
@@ -3362,7 +3729,7 @@ class DocumentTextExtractor
         $previousLibxmlState = libxml_use_internal_errors(true);
 
         try {
-            $dom = new DOMDocument();
+            $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
                 return '';
@@ -3655,7 +4022,7 @@ class DocumentTextExtractor
      * are treated as soft hyphens — the hyphen is removed and the words merged.
      * All other consecutive lines are joined with a single space.
      *
-     * @param array<int, string> $lines
+     * @param  array<int, string>  $lines
      */
     private function joinPdfParagraphLines(array $lines): string
     {
@@ -3663,12 +4030,13 @@ class DocumentTextExtractor
         foreach ($lines as $line) {
             if ($result === '') {
                 $result = $line;
+
                 continue;
             }
             if (str_ends_with($result, '-') && preg_match('/^\p{Ll}/u', $line)) {
-                $result = mb_substr($result, 0, -1) . $line;
+                $result = mb_substr($result, 0, -1).$line;
             } else {
-                $result .= ' ' . $line;
+                $result .= ' '.$line;
             }
         }
 

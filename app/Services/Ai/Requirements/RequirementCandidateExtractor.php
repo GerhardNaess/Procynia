@@ -3,12 +3,12 @@
 namespace App\Services\Ai\Requirements;
 
 use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
+use App\Data\Ai\Requirements\DocxTableRowData;
 use App\Data\Ai\Requirements\RequirementExtractionBlockData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Data\Ai\Requirements\RequirementExtractionResultData;
 use App\Data\Ai\Requirements\RequirementSegmentExtractionResultData;
 use App\Models\SavedNoticeAiDocument;
-use App\Models\SavedNoticeAiRequirement;
 use App\Services\OpenAi\OpenAiClient;
 use App\Services\RequirementExtractor;
 use Illuminate\Http\Client\ConnectionException;
@@ -64,9 +64,13 @@ class RequirementCandidateExtractor
      * token budget). See buildPhaseOneExtractionWindows() / splitOversizedSegment().
      */
     private const PHASE_ONE_WINDOW_TRIGGER_CHARS = 14000;
+
     private const PHASE_ONE_WINDOW_TARGET_CHARS = 12000;
+
     private const PHASE_ONE_WINDOW_MIN_CHARS = 6000;
+
     private const PHASE_ONE_WINDOW_OVERLAP_CHARS = 1200;
+
     private const PHASE_ONE_WINDOW_BOUNDARY_SCAN_CHARS = 500;
 
     /**
@@ -81,8 +85,7 @@ class RequirementCandidateExtractor
         private readonly RequirementExtractor $legacyRequirementExtractor,
         private readonly RequirementSegmentExtractionPromptBuilder $promptBuilder,
         private readonly RequirementExtractionPromptBuilder $blockPromptBuilder,
-    ) {
-    }
+    ) {}
 
     public function extract(SavedNoticeAiDocument $document, DocumentRequirementSegmentData $segment, ?string $runId = null): RequirementSegmentExtractionResultData
     {
@@ -221,7 +224,14 @@ class RequirementCandidateExtractor
         return $this->performFullDocumentExtractionRequest($document, $runId);
     }
 
-    public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null): RequirementExtractionResultData
+    /**
+     * @param  list<DocxTableRowData>  $tableRows  Structured DOCX table rows relative to
+     *                                             $document->extracted_text (i.e. already chunk-relative when called for one chunk — see
+     *                                             RequirementExtractionRunService::processRunCall()). Each row is further attributed to
+     *                                             whichever window its char_start falls within, so structured rows are only sent alongside
+     *                                             the specific call whose text actually contains them.
+     */
+    public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null, array $tableRows = []): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
         $startedAt = microtime(true);
@@ -256,11 +266,18 @@ class RequirementCandidateExtractor
                 'windowed_extraction' => $windowCount > 1,
             ];
 
+            $windowTableRows = array_values(array_filter(
+                $tableRows,
+                static fn (DocxTableRowData $row): bool => $row->charStart >= $windowMeta['window_start_position']
+                    && $row->charStart < $windowMeta['window_end_position'],
+            ));
+
             $requestResult = $this->performFullDocumentExtractionRequestForText(
                 document: $document,
                 documentText: (string) ($window['text'] ?? ''),
                 runId: $windowRunId,
                 windowMeta: $windowMeta,
+                tableRows: $windowTableRows,
             );
 
             $requestResults[] = $requestResult;
@@ -488,7 +505,6 @@ class RequirementCandidateExtractor
         );
     }
 
-
     public function extractStructuredBlock(SavedNoticeAiDocument $document, RequirementExtractionBlockData $block, ?string $runId = null): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
@@ -641,17 +657,26 @@ class RequirementCandidateExtractor
         );
     }
 
+    /**
+     * @param  list<DocxTableRowData>  $tableRows  Rows overlapping
+     *                                             this specific window's text range, already relative to it — see extractFullDocument().
+     */
     private function performFullDocumentExtractionRequestForText(
         SavedNoticeAiDocument $document,
         string $documentText,
         string $runId,
         array $windowMeta = [],
+        array $tableRows = [],
     ): array {
         $startedAt = microtime(true);
         $documentText = trim($documentText);
         $documentTextLength = mb_strlen($documentText, 'UTF-8');
         $promptTextLength = mb_strlen(FullDocumentRequirementExtractionPrompt::text(), 'UTF-8');
-        $payload = FullDocumentRequirementExtractionPrompt::requestPayload($documentText);
+        $structuredTableRowsForAi = array_map(
+            static fn (DocxTableRowData $row): array => $row->toAiPayloadArray(),
+            $tableRows,
+        );
+        $payload = FullDocumentRequirementExtractionPrompt::requestPayload($documentText, $structuredTableRowsForAi);
         $model = (string) ($payload['model'] ?? FullDocumentRequirementExtractionPrompt::model());
         $userInputText = (string) data_get($payload, 'input.1.content.0.text', FullDocumentRequirementExtractionPrompt::inputTextForDocument($documentText));
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
@@ -1692,6 +1717,7 @@ class RequirementCandidateExtractor
             'parent_reference',
             'original_text',
             'source_reference_text',
+            'source_row_key',
             'is_requirement',
             'confidence',
         ]));
@@ -1966,6 +1992,7 @@ class RequirementCandidateExtractor
             'domain' => $this->normalizeListField($row['domain'] ?? null),
             'related_references' => $this->normalizeListField($row['related_references'] ?? null),
             'source_reference_text' => $sourceReferenceText !== '' ? $sourceReferenceText : null,
+            'source_row_key' => $this->normalizeScalar($row['source_row_key'] ?? null) ?: null,
             'interpretation_risk' => $this->normalizeScalar($row['interpretation_risk'] ?? null) ?: null,
             'is_requirement' => $this->normalizeBoolean($row['is_requirement'] ?? true),
             'confidence' => $this->normalizeConfidence($row['confidence'] ?? 1.0),
@@ -2152,7 +2179,6 @@ class RequirementCandidateExtractor
         return 1.0;
     }
 
-
     private function filterPhaseOneRows(array $rows): array
     {
         $filtered = [];
@@ -2176,7 +2202,7 @@ class RequirementCandidateExtractor
     {
         $sourceReferenceText = mb_strtolower($this->normalizeScalar($row['source_reference_text'] ?? null), 'UTF-8');
         $parentReference = mb_strtolower($this->normalizeScalar($row['parent_reference'] ?? null), 'UTF-8');
-        $referenceContext = trim($sourceReferenceText . ' ' . $parentReference);
+        $referenceContext = trim($sourceReferenceText.' '.$parentReference);
 
         if ($referenceContext === '') {
             return false;
