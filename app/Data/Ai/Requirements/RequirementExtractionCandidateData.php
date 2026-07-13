@@ -236,6 +236,96 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
         );
     }
 
+    /**
+     * Purpose: Attach a verified table-row match to this candidate — either the AI's own
+     * source_row_key confirmed against a row actually sent to it ($origin = 'ai_verified'), or a
+     * row recovered by the backend via exact normalized-text matching when the AI omitted or
+     * mis-echoed the key ($origin = 'text_matched'). Overrides the candidate's requirement
+     * identifier with the row's own identifier cell when the table has a recognizable ID column
+     * (see DocxTableRowData::identifierCellValue()) so the persisted requirement number is
+     * grounded in the source table, not the AI's restatement of it.
+     * Inputs: The resolved DocxTableRowData and how it was resolved.
+     * Returns: A new candidate with sourceRowKey set and source_reference enriched.
+     * Side effects: None.
+     */
+    public function withResolvedTableRow(DocxTableRowData $row, string $origin): self
+    {
+        $identifierOverride = $row->identifierCellValue();
+
+        return new self(
+            sourceDocumentId: $this->sourceDocumentId,
+            sourceBlockId: $this->sourceBlockId,
+            sourceBlockIndex: $this->sourceBlockIndex,
+            requirementIdentifier: $identifierOverride ?? $this->requirementIdentifier,
+            parentReference: $this->parentReference,
+            requirementType: $this->requirementType,
+            obligationType: $this->obligationType,
+            extractionMethod: $this->extractionMethod,
+            originalText: $this->originalText,
+            normalizedText: $this->normalizedText,
+            comment: $this->comment,
+            evaluationNotes: $this->evaluationNotes,
+            responseExpectation: $this->responseExpectation,
+            expectedEvidence: $this->expectedEvidence,
+            keywords: $this->keywords,
+            domain: $this->domain,
+            relatedReferences: $this->relatedReferences,
+            sourceReference: array_merge($this->sourceReference, array_filter([
+                'source_row_key_origin' => $origin,
+                'source_row_identifier' => $identifierOverride,
+                'source_row_type_code' => $row->typeCellValue(),
+                'source_section_number' => $row->sectionNumber,
+                'source_section_title' => $row->sectionTitle,
+            ], static fn (mixed $value): bool => $value !== null)),
+            interpretationRisk: $this->interpretationRisk,
+            isRequirement: $this->isRequirement,
+            confidence: $this->confidence,
+            warnings: $this->warnings,
+            sourceRowKey: $row->sourceRowKey,
+        );
+    }
+
+    /**
+     * Purpose: Reject a source_row_key the AI echoed that does not match any row actually sent to
+     * it in this window — persisting an unverifiable key would be a validation error, not a model
+     * quirk (a hallucinated/mismatched key must never be treated as valid provenance). The
+     * rejected value is kept in source_reference for diagnostics only, never as source_row_key.
+     * Inputs: The claimed source_row_key that failed verification.
+     * Returns: A new candidate with sourceRowKey cleared and the rejection recorded.
+     * Side effects: None.
+     */
+    public function withRejectedSourceRowKey(string $claimedSourceRowKey): self
+    {
+        return new self(
+            sourceDocumentId: $this->sourceDocumentId,
+            sourceBlockId: $this->sourceBlockId,
+            sourceBlockIndex: $this->sourceBlockIndex,
+            requirementIdentifier: $this->requirementIdentifier,
+            parentReference: $this->parentReference,
+            requirementType: $this->requirementType,
+            obligationType: $this->obligationType,
+            extractionMethod: $this->extractionMethod,
+            originalText: $this->originalText,
+            normalizedText: $this->normalizedText,
+            comment: $this->comment,
+            evaluationNotes: $this->evaluationNotes,
+            responseExpectation: $this->responseExpectation,
+            expectedEvidence: $this->expectedEvidence,
+            keywords: $this->keywords,
+            domain: $this->domain,
+            relatedReferences: $this->relatedReferences,
+            sourceReference: array_merge($this->sourceReference, [
+                'source_row_key_origin' => 'ai_rejected_hallucinated',
+                'source_row_key_rejected' => $claimedSourceRowKey,
+            ]),
+            interpretationRisk: $this->interpretationRisk,
+            isRequirement: $this->isRequirement,
+            confidence: $this->confidence,
+            warnings: [...$this->warnings, sprintf('source_row_key_rejected:%s', $claimedSourceRowKey)],
+            sourceRowKey: null,
+        );
+    }
+
     public function jsonSerialize(): array
     {
         return [

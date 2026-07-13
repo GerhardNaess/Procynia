@@ -195,6 +195,91 @@ XML;
         }
     }
 
+    public function test_it_captures_the_nearest_preceding_heading_as_table_section_context(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p>
+            <w:pPr><w:pStyle w:val="Overskrift1"/></w:pPr>
+            <w:r><w:t>2. Buying responsibility</w:t></w:r>
+        </w:p>
+        <w:p>
+            <w:pPr><w:pStyle w:val="Overskrift2"/></w:pPr>
+            <w:r><w:t>2.1 Buying responsibility, not activities</w:t></w:r>
+        </w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Type</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.1</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>The Services in the Agreement are described in Annex 1.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p>
+            <w:pPr><w:pStyle w:val="Overskrift2"/></w:pPr>
+            <w:r><w:t>Untitled section without a leading number</w:t></w:r>
+        </w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>3.1.1</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+    </w:body>
+</w:document>
+XML;
+
+            $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Overskrift1">
+        <w:name w:val="Overskrift 1"/>
+    </w:style>
+    <w:style w:type="paragraph" w:styleId="Overskrift2">
+        <w:name w:val="Overskrift 2"/>
+    </w:style>
+</w:styles>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/styles.xml', $stylesXml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(2, $result['tables']);
+
+            $firstTable = $result['tables'][0];
+            $this->assertSame('2.1', $firstTable->sectionNumber);
+            $this->assertSame('Buying responsibility, not activities', $firstTable->sectionTitle);
+            $this->assertSame('2.1', $firstTable->rows[0]->sectionNumber);
+            $this->assertSame('Buying responsibility, not activities', $firstTable->rows[0]->sectionTitle);
+            $this->assertSame('2.1.1', $firstTable->rows[0]->identifierCellValue());
+            $this->assertSame('M', $firstTable->rows[0]->typeCellValue());
+
+            $secondTable = $result['tables'][1];
+            $this->assertNull($secondTable->sectionNumber);
+            $this->assertSame('Untitled section without a leading number', $secondTable->sectionTitle);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function test_it_extracts_structured_docx_blocks_with_heading_levels(): void
     {
         $path = $this->tempDocumentPath('docx');

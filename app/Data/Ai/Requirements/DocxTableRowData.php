@@ -18,9 +18,28 @@ use JsonSerializable;
  * `charStart`/`charEnd` are positions within the document's flat `extracted_text` (see
  * DocumentTextExtractor::extractDocxTextAndTables()), used to attribute a row to the correct
  * requirement-extraction chunk/window.
+ *
+ * `sectionNumber`/`sectionTitle` are copied from the owning DocxTableData (see its doc comment) —
+ * duplicated onto every row because rows, not tables, are the unit carried through extraction and
+ * used for requirement provenance.
  */
 final readonly class DocxTableRowData implements JsonSerializable
 {
+    /**
+     * Column-key aliases used to identify which cell holds the row's own requirement
+     * number/type, so a validated source_row_key can enrich a candidate with authoritative
+     * values instead of trusting the AI's restatement of them. Deliberately conservative —
+     * only exact normalized-column-key matches, no fuzzy header guessing.
+     */
+    private const IDENTIFIER_COLUMN_KEY_ALIASES = [
+        'req_no', 'reqno', 'req_nr', 'requirement_no', 'requirement_nr',
+        'krav_nr', 'kravnummer', 'krav_nummer', 'kravnr', 'id', 'no', 'nr', 'number',
+    ];
+
+    private const TYPE_COLUMN_KEY_ALIASES = [
+        'type', 'krav_type', 'kravtype',
+    ];
+
     /**
      * @param  list<DocxTableCellData>  $cells
      */
@@ -31,6 +50,8 @@ final readonly class DocxTableRowData implements JsonSerializable
         public int $charStart,
         public int $charEnd,
         public array $cells,
+        public ?string $sectionNumber = null,
+        public ?string $sectionTitle = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -45,6 +66,8 @@ final readonly class DocxTableRowData implements JsonSerializable
                 static fn (array $cell): DocxTableCellData => DocxTableCellData::fromArray($cell),
                 is_array($data['cells'] ?? null) ? $data['cells'] : [],
             ),
+            sectionNumber: isset($data['section_number']) ? (string) $data['section_number'] : null,
+            sectionTitle: isset($data['section_title']) ? (string) $data['section_title'] : null,
         );
     }
 
@@ -57,7 +80,40 @@ final readonly class DocxTableRowData implements JsonSerializable
             'char_start' => $this->charStart,
             'char_end' => $this->charEnd,
             'cells' => array_map(static fn (DocxTableCellData $cell): array => $cell->toArray(), $this->cells),
+            'section_number' => $this->sectionNumber,
+            'section_title' => $this->sectionTitle,
         ];
+    }
+
+    /**
+     * The row's own requirement-number cell value (e.g. "2.1.1"), or null when no column is
+     * recognized as an identifier column.
+     */
+    public function identifierCellValue(): ?string
+    {
+        return $this->cellValueByColumnKeyAliases(self::IDENTIFIER_COLUMN_KEY_ALIASES);
+    }
+
+    /**
+     * The row's own requirement-type cell value (e.g. "M"), verbatim as written in the source
+     * table — distinct from the app's internal requirement_type enum/taxonomy.
+     */
+    public function typeCellValue(): ?string
+    {
+        return $this->cellValueByColumnKeyAliases(self::TYPE_COLUMN_KEY_ALIASES);
+    }
+
+    private function cellValueByColumnKeyAliases(array $aliases): ?string
+    {
+        foreach ($this->cells as $cell) {
+            if (in_array($cell->normalizedColumnKey, $aliases, true)) {
+                $value = trim($cell->value);
+
+                return $value !== '' ? $value : null;
+            }
+        }
+
+        return null;
     }
 
     public function jsonSerialize(): array
@@ -78,6 +134,8 @@ final readonly class DocxTableRowData implements JsonSerializable
             charStart: $this->charStart - $offset,
             charEnd: $this->charEnd - $offset,
             cells: $this->cells,
+            sectionNumber: $this->sectionNumber,
+            sectionTitle: $this->sectionTitle,
         );
     }
 
@@ -95,6 +153,8 @@ final readonly class DocxTableRowData implements JsonSerializable
             charStart: $this->charStart,
             charEnd: $this->charEnd,
             cells: $this->cells,
+            sectionNumber: $this->sectionNumber,
+            sectionTitle: $this->sectionTitle,
         );
     }
 

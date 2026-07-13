@@ -323,6 +323,7 @@ class RequirementCandidateExtractor
                 $windowFilteredCandidateCount = count($filteredRows);
                 $windowFilteredOutCount = $windowRawCandidateCount - $windowFilteredCandidateCount;
                 $windowCandidates = $this->mapCandidates($document, $filteredRows);
+                $windowCandidates = $this->reconcileCandidatesWithTableRows($windowCandidates, $windowTableRows);
 
                 $rawCandidateCount += $windowRawCandidateCount;
                 $filteredCandidateCount += $windowFilteredCandidateCount;
@@ -2288,6 +2289,98 @@ class RequirementCandidateExtractor
         }
 
         return $candidates;
+    }
+
+    /**
+     * Purpose: Verify each candidate's AI-echoed source_row_key against the rows actually sent to
+     * this window, reject any key that doesn't match one of them (a hallucinated or cross-window
+     * key is unverifiable provenance, not a valid one — see RequirementExtractionCandidateData::
+     * withRejectedSourceRowKey()), and recover a source_row_key by exact text match for
+     * table-derived candidates the AI left unattributed. Never accepts an unverified key.
+     * Inputs: The window's mapped candidates and the structured table rows sent for that window.
+     * Returns: The same candidates, each with sourceRowKey either verified, recovered, rejected,
+     * or left as-is (no row context available).
+     * Side effects: None.
+     *
+     * @param  list<RequirementExtractionCandidateData>  $candidates
+     * @param  list<DocxTableRowData>  $windowTableRows
+     * @return list<RequirementExtractionCandidateData>
+     */
+    private function reconcileCandidatesWithTableRows(array $candidates, array $windowTableRows): array
+    {
+        // Deliberately no early return for an empty $windowTableRows — a candidate can still
+        // claim a source_row_key even when this window sent none, and that claim must be
+        // rejected the same way as a claim that doesn't match any row that was sent.
+        $rowsByKey = [];
+
+        foreach ($windowTableRows as $row) {
+            $rowsByKey[$row->sourceRowKey] = $row;
+        }
+
+        return array_map(function (RequirementExtractionCandidateData $candidate) use ($rowsByKey, $windowTableRows): RequirementExtractionCandidateData {
+            $claimedKey = $candidate->sourceRowKey;
+
+            if ($claimedKey !== null && isset($rowsByKey[$claimedKey])) {
+                return $candidate->withResolvedTableRow($rowsByKey[$claimedKey], 'ai_verified');
+            }
+
+            if ($claimedKey !== null) {
+                $candidate = $candidate->withRejectedSourceRowKey($claimedKey);
+            }
+
+            $matchedRow = $this->matchTableRowByExactText($candidate, $windowTableRows);
+
+            return $matchedRow instanceof DocxTableRowData
+                ? $candidate->withResolvedTableRow($matchedRow, 'text_matched')
+                : $candidate;
+        }, $candidates);
+    }
+
+    /**
+     * Purpose: Recover a source_row_key by exact (normalized) text match against the rows sent to
+     * this window, when the AI omitted or mis-echoed the key for a genuinely table-derived
+     * candidate. Deliberately conservative — only an exact normalized match counts, and an
+     * ambiguous match (more than one row's cell matches) is treated as no match, so a candidate
+     * either gets confident, verifiable provenance or none at all.
+     * Inputs: The candidate to match and the window's structured table rows.
+     * Returns: The uniquely-matching row, or null when there is no exact or an ambiguous match.
+     * Side effects: None.
+     *
+     * @param  list<DocxTableRowData>  $windowTableRows
+     */
+    private function matchTableRowByExactText(RequirementExtractionCandidateData $candidate, array $windowTableRows): ?DocxTableRowData
+    {
+        $candidateNormalized = $this->normalizeTextForRowMatching($candidate->originalText);
+
+        if ($candidateNormalized === '') {
+            $candidateNormalized = $this->normalizeTextForRowMatching($candidate->normalizedText);
+        }
+
+        if ($candidateNormalized === '') {
+            return null;
+        }
+
+        $matches = [];
+
+        foreach ($windowTableRows as $row) {
+            foreach ($row->cells as $cell) {
+                if ($this->normalizeTextForRowMatching($cell->value) === $candidateNormalized) {
+                    $matches[$row->sourceRowKey] = $row;
+
+                    break;
+                }
+            }
+        }
+
+        return count($matches) === 1 ? array_values($matches)[0] : null;
+    }
+
+    private function normalizeTextForRowMatching(string $value): string
+    {
+        $normalized = mb_strtolower(trim($value), 'UTF-8');
+        $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+        return rtrim($normalized, ". \t\n\r");
     }
 
     private function fallbackResult(

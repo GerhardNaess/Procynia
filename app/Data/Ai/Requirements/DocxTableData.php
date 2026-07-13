@@ -10,6 +10,12 @@ use JsonSerializable;
  * texts (verbatim, for reference/debugging) — the header association per data cell already lives
  * on DocxTableCellData::$originalHeader, so consumers never need to re-join rows against
  * $headerLabels by column index.
+ *
+ * `sectionNumber`/`sectionTitle` are the nearest preceding H1/H2 heading (split into a leading
+ * numbering prefix and the remaining title text, e.g. "2.1" / "Buying responsibility, not
+ * activities") that was in effect when this table started — null when no heading precedes it.
+ * The same values are also copied onto every row (see DocxTableRowData) since rows, not tables,
+ * are the unit passed to the AI and used for requirement provenance.
  */
 final readonly class DocxTableData implements JsonSerializable
 {
@@ -21,6 +27,8 @@ final readonly class DocxTableData implements JsonSerializable
         public int $tableIndex,
         public array $headerLabels,
         public array $rows,
+        public ?string $sectionNumber = null,
+        public ?string $sectionTitle = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -32,6 +40,8 @@ final readonly class DocxTableData implements JsonSerializable
                 static fn (array $row): DocxTableRowData => DocxTableRowData::fromArray($row),
                 is_array($data['rows'] ?? null) ? $data['rows'] : [],
             ),
+            sectionNumber: isset($data['section_number']) ? (string) $data['section_number'] : null,
+            sectionTitle: isset($data['section_title']) ? (string) $data['section_title'] : null,
         );
     }
 
@@ -41,6 +51,8 @@ final readonly class DocxTableData implements JsonSerializable
             'table_index' => $this->tableIndex,
             'header_labels' => $this->headerLabels,
             'rows' => array_map(static fn (DocxTableRowData $row): array => $row->toArray(), $this->rows),
+            'section_number' => $this->sectionNumber,
+            'section_title' => $this->sectionTitle,
         ];
     }
 
@@ -74,6 +86,8 @@ final readonly class DocxTableData implements JsonSerializable
                 ),
                 $this->rows,
             ),
+            sectionNumber: $this->sectionNumber,
+            sectionTitle: $this->sectionTitle,
         );
     }
 

@@ -1001,6 +1001,109 @@ class RequirementExtractionRunServiceTest extends TestCase
 
         $this->assertCount(1, $stagedRequirements);
         $this->assertSame($expectedSourceRowKey, $stagedRequirements[0]->source_row_key);
+        $this->assertSame('2.1.1', $stagedRequirements[0]->requirement_identifier);
+        $this->assertSame('ai_verified', $stagedRequirements[0]->source_reference['source_row_key_origin']);
+        $this->assertSame('M', $stagedRequirements[0]->source_reference['source_row_type_code']);
+    }
+
+    public function test_process_requirement_extraction_chunk_never_persists_a_source_row_key_the_ai_hallucinated(): void
+    {
+        Queue::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004H', 'Hallucinated row key target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 12:00:00');
+
+        $extractedText = 'A narrative requirement sentence with no matching table row.';
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'annex-01a-hallucination.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/annex-01a-hallucination.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => $extractedText,
+            'text_extracted_at' => '2026-04-07 12:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'processing_started_at' => '2026-04-07 12:02:00',
+        ]);
+
+        // A real table exists elsewhere on the document, but NOT within this chunk's char range —
+        // so it must never be sent to this window, meaning any source_row_key the AI claims here
+        // is, by definition, unverifiable and must be rejected rather than persisted.
+        $table = new DocxTableData(
+            tableIndex: 0,
+            headerLabels: ['Req. No.', 'Requirement text'],
+            rows: [
+                new DocxTableRowData(
+                    sourceRowKey: 'placeholder',
+                    tableIndex: 0,
+                    rowIndex: 0,
+                    charStart: 5000,
+                    charEnd: 5050,
+                    cells: [
+                        new DocxTableCellData(0, 'Req. No.', 'req_no', '9.9.9'),
+                        new DocxTableCellData(1, 'Requirement text', 'requirement_text', 'Somewhere else entirely.'),
+                    ],
+                ),
+            ],
+        );
+        $stampedTable = DocxTableData::manyWithDocumentId([$table], $document->id)[0];
+        $document->forceFill(['structured_tables' => [$stampedTable->toArray()]])->save();
+        $document->refresh();
+
+        $chunk = $this->createAiDocumentChunk($document, $extractedText, 0);
+        $chunk->forceFill(['char_start' => 0, 'char_end' => mb_strlen($extractedText, 'UTF-8')])->save();
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'started_at' => '2026-04-07 12:02:00',
+            'last_heartbeat_at' => '2026-04-07 12:02:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_QUEUED,
+        ]);
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_hallucination_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'candidates' => [[
+                        'requirement_identifier' => null,
+                        'parent_reference' => null,
+                        'original_text' => $extractedText,
+                        'source_reference_text' => null,
+                        'source_row_key' => $stampedTable->rows[0]->sourceRowKey,
+                        'is_requirement' => true,
+                        'confidence' => 0.9,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => ['input_tokens' => 90, 'output_tokens' => 20, 'total_tokens' => 110],
+            ], 200),
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $call->refresh();
+
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $call->status);
+
+        $stagedRequirements = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->get();
+
+        $this->assertCount(1, $stagedRequirements);
+        $this->assertNull($stagedRequirements[0]->source_row_key);
+        $this->assertSame('ai_rejected_hallucinated', $stagedRequirements[0]->source_reference['source_row_key_origin']);
+        $this->assertSame($stampedTable->rows[0]->sourceRowKey, $stagedRequirements[0]->source_reference['source_row_key_rejected']);
     }
 
     public function test_process_requirement_extraction_chunk_is_idempotent_when_the_call_is_already_completed(): void

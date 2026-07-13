@@ -122,19 +122,20 @@ class DocumentTextExtractor
         }
 
         $xml = $zip->getFromName('word/document.xml');
+        $stylesXml = $zip->getFromName('word/styles.xml');
         $zip->close();
 
         if (! is_string($xml) || trim($xml) === '') {
             return $empty;
         }
 
-        return $this->parseWordXmlTextAndTables($xml);
+        return $this->parseWordXmlTextAndTables($xml, is_string($stylesXml) ? $stylesXml : null);
     }
 
     /**
      * @return array{text: string, tables: list<DocxTableData>}
      */
-    private function parseWordXmlTextAndTables(string $xml): array
+    private function parseWordXmlTextAndTables(string $xml, ?string $stylesXml = null): array
     {
         $previousLibxmlState = libxml_use_internal_errors(true);
 
@@ -147,6 +148,7 @@ class DocumentTextExtractor
 
             $xpath = new DOMXPath($dom);
             $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+            $styleMap = $this->extractDocxStyleMap($stylesXml);
 
             $paragraphs = [];
             /** @var array<int, int> $tableOrderByObjectId spl_object_id(w:tbl) => table order index */
@@ -157,6 +159,9 @@ class DocumentTextExtractor
             $tableCellParagraphs = [];
             /** @var array<string, array{0: int, 1: int}> $rowParagraphIndexRange "tableIndex:rowIndex" => [minParagraphIndex, maxParagraphIndex] */
             $rowParagraphIndexRange = [];
+            /** @var array<int, string> $tableSectionHeading tableIndex => nearest preceding heading text */
+            $tableSectionHeading = [];
+            $currentSectionHeading = null;
 
             foreach ($xpath->query('//w:p') as $paragraph) {
                 $textNodes = $xpath->query('.//w:t', $paragraph);
@@ -187,6 +192,11 @@ class DocumentTextExtractor
                     }
 
                     $tableIndex = $tableOrderByObjectId[$tableObjectId];
+
+                    if (! array_key_exists($tableIndex, $tableSectionHeading)) {
+                        $tableSectionHeading[$tableIndex] = $currentSectionHeading;
+                    }
+
                     $rowOrderByTable[$tableIndex] ??= [];
                     $rowObjectId = spl_object_id($tableRow);
 
@@ -210,6 +220,22 @@ class DocumentTextExtractor
                             $rowParagraphIndexRange[$rangeKey][1] = $paragraphIndex;
                         }
                     }
+                } elseif ($paragraphText !== '') {
+                    // Heading tracking only considers body-level paragraphs (not inside a table
+                    // cell) — a styled heading inside a table cell is not a document section.
+                    $styleId = null;
+                    $styleNode = $xpath->query('.//w:pPr/w:pStyle', $paragraph);
+
+                    if ($styleNode !== false && $styleNode->length > 0) {
+                        $styleId = (string) $styleNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+                    }
+
+                    $resolvedStyle = $styleMap[$styleId] ?? $styleId;
+                    $level = $this->resolveDocxHeadingLevel($styleId, $resolvedStyle);
+
+                    if ($level !== null) {
+                        $currentSectionHeading = $paragraphText;
+                    }
                 }
 
                 if ($paragraphText === '') {
@@ -221,7 +247,7 @@ class DocumentTextExtractor
 
             $joinedText = $this->normalizeBlockText(implode("\n\n", $paragraphs));
             $paragraphOffsets = $this->locateParagraphOffsets($paragraphs, $joinedText);
-            $tables = $this->buildDocxTablesFromParagraphs($tableCellParagraphs, $rowParagraphIndexRange, $paragraphOffsets);
+            $tables = $this->buildDocxTablesFromParagraphs($tableCellParagraphs, $rowParagraphIndexRange, $paragraphOffsets, $tableSectionHeading);
 
             return ['text' => $joinedText, 'tables' => $tables];
         } finally {
@@ -328,12 +354,14 @@ class DocumentTextExtractor
      * @param  array<int, array<int, array<int, list<string>>>>  $tableCellParagraphs
      * @param  array<string, array{0: int, 1: int}>  $rowParagraphIndexRange
      * @param  array<int, array{start: int, end: int}>  $paragraphOffsets
+     * @param  array<int, string|null>  $tableSectionHeading  tableIndex => nearest preceding heading text
      * @return list<DocxTableData>
      */
     private function buildDocxTablesFromParagraphs(
         array $tableCellParagraphs,
         array $rowParagraphIndexRange,
         array $paragraphOffsets,
+        array $tableSectionHeading = [],
     ): array {
         $tables = [];
 
@@ -356,6 +384,8 @@ class DocumentTextExtractor
             foreach ($headerCells as $columnIndex => $cellParagraphTexts) {
                 $headerLabels[$columnIndex] = trim(implode(' ', $cellParagraphTexts));
             }
+
+            [$sectionNumber, $sectionTitle] = $this->splitDocxSectionHeading($tableSectionHeading[$tableIndex] ?? null);
 
             $usedColumnKeys = [];
             $dataRows = [];
@@ -399,6 +429,8 @@ class DocumentTextExtractor
                     charStart: $charStart,
                     charEnd: $charEnd,
                     cells: $dataCells,
+                    sectionNumber: $sectionNumber,
+                    sectionTitle: $sectionTitle,
                 );
 
                 $dataRowOrdinal++;
@@ -412,10 +444,38 @@ class DocumentTextExtractor
                 tableIndex: $tableIndex,
                 headerLabels: array_values($headerLabels),
                 rows: $dataRows,
+                sectionNumber: $sectionNumber,
+                sectionTitle: $sectionTitle,
             );
         }
 
         return $tables;
+    }
+
+    /**
+     * Purpose: Split a DOCX heading paragraph's text into a leading numbering prefix and the
+     * remaining title (e.g. "2.1 Buying responsibility, not activities" -> ["2.1", "Buying
+     * responsibility, not activities"]). Falls back to a null number with the full text as the
+     * title when no leading numbering pattern is present.
+     * Inputs: The raw heading paragraph text, or null when no heading precedes the table.
+     * Returns: [sectionNumber, sectionTitle], both null when $headingText is null/blank.
+     * Side effects: None.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function splitDocxSectionHeading(?string $headingText): array
+    {
+        if ($headingText === null || trim($headingText) === '') {
+            return [null, null];
+        }
+
+        $headingText = trim($headingText);
+
+        if (preg_match('/^(\d+(?:\.\d+)*)\.?\s+(.+)$/u', $headingText, $matches) === 1) {
+            return [$matches[1], trim($matches[2])];
+        }
+
+        return [null, $headingText];
     }
 
     /**

@@ -43,14 +43,14 @@ final readonly class RequirementViewData implements JsonSerializable
         public ?string $rejectedAt,
         public ?int $rejectedByUserId,
         public int $revisionCount,
+        public ?string $sourceRowKey = null,
         public ?array $sourceReference = null,
         public ?array $extractionMetadata = null,
         public ?string $reviewStatusUpdateUrl = null,
         public ?string $editUrl = null,
         public ?string $workUpdateUrl = null,
         public ?string $assignedUserUpdateUrl = null,
-    ) {
-    }
+    ) {}
 
     public static function fromRequirement(SavedNoticeAiRequirement $requirement, array $urls = []): self
     {
@@ -100,6 +100,7 @@ final readonly class RequirementViewData implements JsonSerializable
             rejectedAt: optional($requirement->rejected_at)?->toIso8601String(),
             rejectedByUserId: $requirement->rejected_by_user_id !== null ? (int) $requirement->rejected_by_user_id : null,
             revisionCount: (int) ($requirement->revisions_count ?? $requirement->revisions->count() ?? 0),
+            sourceRowKey: $requirement->source_row_key,
             sourceReference: is_array($requirement->source_reference) ? $requirement->source_reference : null,
             extractionMetadata: is_array($requirement->extraction_metadata) ? $requirement->extraction_metadata : null,
             reviewStatusUpdateUrl: $urls['review_status_update_url'] ?? null,
@@ -149,6 +150,7 @@ final readonly class RequirementViewData implements JsonSerializable
             'rejected_at' => $this->rejectedAt,
             'rejected_by_user_id' => $this->rejectedByUserId,
             'revision_count' => $this->revisionCount,
+            'source_row_key' => $this->sourceRowKey,
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
             'review_status_update_url' => $this->reviewStatusUpdateUrl,

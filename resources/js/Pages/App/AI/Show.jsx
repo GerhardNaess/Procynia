@@ -3654,6 +3654,13 @@ export default function AiShow({
                                         : tai.no_responsible_user;
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
+                                    const hasVerifiedTableRowProvenance = Boolean(requirement.source_row_key);
+                                    const sourceRowTypeCode = hasVerifiedTableRowProvenance
+                                        ? (requirement.source_reference?.source_row_type_code ?? null)
+                                        : null;
+                                    const sourceSectionTitle = hasVerifiedTableRowProvenance
+                                        ? (requirement.source_reference?.source_section_title ?? null)
+                                        : null;
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
                                     const originalRequirementText = requirement.original_requirement_text ?? null;
                                     const hasOriginalDifference = Boolean(
@@ -3743,12 +3750,20 @@ export default function AiShow({
                                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                                     <div className="min-w-0 flex-1 space-y-2">
                                                         <div className="flex flex-wrap items-center gap-2">
-                                                            {currentRequirementIdentifier !== '—' ? (
+                                                            {currentRequirementIdentifier !== '—' || sourceRowTypeCode ? (
                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                    {currentRequirementIdentifier}
+                                                                    {[
+                                                                        currentRequirementIdentifier !== '—' ? currentRequirementIdentifier : null,
+                                                                        sourceRowTypeCode,
+                                                                    ].filter(Boolean).join(' · ')}
                                                                 </span>
                                                             ) : null}
                                                         </div>
+                                                        {sourceSectionTitle ? (
+                                                            <div className="text-xs font-medium text-slate-500">
+                                                                {sourceSectionTitle}
+                                                            </div>
+                                                        ) : null}
                                                         <div className="text-base font-semibold leading-7 text-slate-950 break-words">
                                                             {currentRequirementText}
                                                         </div>
