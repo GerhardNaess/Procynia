@@ -27,7 +27,16 @@ class ProcessRequirementExtractionChunk implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 1;
-    public int $timeout = 600;
+    /**
+     * A chunk can now fan out into up to ~3 sequential OpenAI calls internally (see
+     * RequirementCandidateExtractor::splitOversizedSegment(), max chunk size 36,000 chars split
+     * into ~12,000-char windows) at up to 450s each — worst case ~1,350s of AI-call time, plus
+     * JSON parsing and DB writes for the resulting candidates. 2100s leaves ~750s (55%) margin.
+     * Must stay below the ai-requirements queue's REDIS_QUEUE_RETRY_AFTER (docker-compose.yml),
+     * or Redis could re-dispatch this call to another worker while this one is still legitimately
+     * running.
+     */
+    public int $timeout = 2100;
     public bool $failOnTimeout = true;
 
     public function __construct(

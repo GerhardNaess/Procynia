@@ -528,12 +528,12 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertSame('ai-requirements', $jobFromCallOnly->queue);
         $this->assertSame(456, $jobFromCallOnly->callId);
         $this->assertNull($jobFromCallOnly->runId);
-        $this->assertSame(600, $jobFromCallOnly->timeout);
+        $this->assertSame(2100, $jobFromCallOnly->timeout);
         $this->assertTrue($jobFromCallOnly->failOnTimeout);
         $this->assertSame('ai-requirements', $jobFromRunAndCall->queue);
         $this->assertSame(456, $jobFromRunAndCall->callId);
         $this->assertSame(123, $jobFromRunAndCall->runId);
-        $this->assertSame(600, $jobFromRunAndCall->timeout);
+        $this->assertSame(2100, $jobFromRunAndCall->timeout);
         $this->assertTrue($jobFromRunAndCall->failOnTimeout);
     }
 

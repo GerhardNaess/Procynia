@@ -54,11 +54,27 @@ class RequirementCandidateExtractor
         'interpretation_risk',
     ];
 
-    private const PHASE_ONE_WINDOW_TRIGGER_CHARS = 8000;
-    private const PHASE_ONE_WINDOW_TARGET_CHARS = 5500;
-    private const PHASE_ONE_WINDOW_MIN_CHARS = 3500;
+    /**
+     * Calibrated from the ANNEX 01A production incident (2026-07-13): observed density was
+     * ~300-325 chars and ~80 output tokens per candidate (chunk of 30,468 chars produced 94
+     * candidates using 7,773 of the 8,000 max_output_tokens — 97% of budget, no safety margin).
+     * TRIGGER/TARGET/MIN below assume density could realistically be up to ~2x worse (denser,
+     * terser tabular requirements) and still keep each window comfortably under ~100 candidates
+     * (12,000 chars / ~150 chars-per-candidate worst case ≈ 80 candidates, ~64% of the 8,000
+     * token budget). See buildPhaseOneExtractionWindows() / splitOversizedSegment().
+     */
+    private const PHASE_ONE_WINDOW_TRIGGER_CHARS = 14000;
+    private const PHASE_ONE_WINDOW_TARGET_CHARS = 12000;
+    private const PHASE_ONE_WINDOW_MIN_CHARS = 6000;
     private const PHASE_ONE_WINDOW_OVERLAP_CHARS = 1200;
     private const PHASE_ONE_WINDOW_BOUNDARY_SCAN_CHARS = 500;
+
+    /**
+     * Observability ceiling (not a hard limit): a window's parsed candidate count above this is
+     * logged as a warning even when parsing succeeds, since it means the call ran close to the
+     * max_output_tokens budget with little margin. See maybeLogDenseWindowWarning().
+     */
+    private const PHASE_ONE_WINDOW_SAFE_CANDIDATE_COUNT = 100;
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
@@ -76,7 +92,7 @@ class RequirementCandidateExtractor
         $model = (string) ($payload['model'] ?? '');
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 300);
+            $response = $this->openAiClient->post('responses', $payload, 450);
         } catch (ConnectionException $exception) {
             return $this->failedSegmentResult(
                 document: $document,
@@ -285,6 +301,7 @@ class RequirementCandidateExtractor
                 $parsed = $this->parsePhaseOneOutput((string) ($requestResult['raw_output'] ?? ''));
                 $rows = $parsed['rows'] ?? [];
                 $windowRawCandidateCount = count($rows);
+                $this->maybeLogDenseWindowWarning($document, $runId, $windowMeta, $windowRawCandidateCount, $requestResult);
                 $filteredRows = $this->filterPhaseOneRows($rows);
                 $windowFilteredCandidateCount = count($filteredRows);
                 $windowFilteredOutCount = $windowRawCandidateCount - $windowFilteredCandidateCount;
@@ -640,13 +657,15 @@ class RequirementCandidateExtractor
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
         $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
 
-        // 300s (not 180s): a real chunk extraction call for a large ANNEX document measured
-        // 167.8s to complete successfully, and its sibling chunk was killed by curl at exactly
-        // 180.0s (cURL error 28) — 180s left no safety margin for gpt-4.1-mini generating ~90+
-        // structured requirement objects. Matches WikiPageContentAiClient's 300s precedent for
-        // similarly heavy structured generation.
+        // 450s: a real chunk extraction call for a large ANNEX document measured 167.8s to
+        // complete successfully, and its sibling chunk was killed by curl at exactly 180.0s
+        // (cURL error 28) — 180s left no safety margin for gpt-4.1-mini generating ~90+
+        // structured requirement objects (WikiPageContentAiClient's 300s precedent for similarly
+        // heavy structured generation was the first fix, then raised further to 450s once
+        // splitOversizedSegment() below was found to allow up to ~3 sequential calls per chunk —
+        // see ProcessRequirementExtractionChunk::$timeout for the corresponding job-level margin).
         try {
-            $response = $this->openAiClient->post('responses', $payload, 300);
+            $response = $this->openAiClient->post('responses', $payload, 450);
         } catch (ConnectionException $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -812,6 +831,57 @@ class RequirementCandidateExtractor
             ]];
         }
 
+        $segments = $this->phaseOneFamilyHeaderSegments($text, $length);
+
+        // Family-header splitting groups requirement families (Skal-krav/Bør-krav/...) but has
+        // no size ceiling of its own — a single family (or a document with none of these
+        // headers at all) can still be arbitrarily large. Every segment is additionally passed
+        // through the char-budget splitter, which only takes effect once a segment exceeds
+        // PHASE_ONE_WINDOW_TRIGGER_CHARS, so documents that already fit safely in one call are
+        // unaffected.
+        $pieces = [];
+
+        foreach ($segments as $segment) {
+            foreach ($this->splitOversizedSegment($text, $segment['start_position'], $segment['end_position']) as $piece) {
+                $pieceText = trim((string) mb_substr($text, $piece['start_position'], $piece['end_position'] - $piece['start_position'], 'UTF-8'));
+
+                if ($pieceText === '') {
+                    continue;
+                }
+
+                $pieces[] = [
+                    'text' => $pieceText,
+                    'start_position' => $piece['start_position'],
+                    'end_position' => $piece['end_position'],
+                ];
+            }
+        }
+
+        if ($pieces === []) {
+            return [[
+                'text' => $text,
+                'start_position' => 0,
+                'end_position' => $length,
+                'window_index' => 0,
+                'window_count' => 1,
+            ]];
+        }
+
+        $windowCount = count($pieces);
+
+        foreach ($pieces as $index => $piece) {
+            $pieces[$index]['window_index'] = $index;
+            $pieces[$index]['window_count'] = $windowCount;
+        }
+
+        return $pieces;
+    }
+
+    /**
+     * @return list<array{start_position: int, end_position: int}>
+     */
+    private function phaseOneFamilyHeaderSegments(string $text, int $length): array
+    {
         $lineRecords = $this->phaseOneLineRecordsWithOffsets($text);
         $familyHeaderPositions = [];
 
@@ -825,65 +895,111 @@ class RequirementCandidateExtractor
         sort($familyHeaderPositions);
 
         if (count($familyHeaderPositions) <= 1) {
-            return [[
-                'text' => $text,
-                'start_position' => 0,
-                'end_position' => $length,
-                'window_index' => 0,
-                'window_count' => 1,
-            ]];
+            return [['start_position' => 0, 'end_position' => $length]];
         }
 
-        $windowStarts = [0];
+        $segmentStarts = [0];
 
         foreach (array_slice($familyHeaderPositions, 1) as $familyHeaderPosition) {
-            if ($familyHeaderPosition > 0 && end($windowStarts) !== $familyHeaderPosition) {
-                $windowStarts[] = $familyHeaderPosition;
+            if ($familyHeaderPosition > 0 && end($segmentStarts) !== $familyHeaderPosition) {
+                $segmentStarts[] = $familyHeaderPosition;
             }
         }
 
-        $windowStarts = array_values(array_unique($windowStarts));
-        sort($windowStarts);
+        $segmentStarts = array_values(array_unique($segmentStarts));
+        sort($segmentStarts);
 
-        $windows = [];
-        $windowCount = count($windowStarts);
+        $segments = [];
+        $segmentCount = count($segmentStarts);
 
-        foreach ($windowStarts as $windowIndex => $windowStart) {
-            $windowEnd = $windowIndex < $windowCount - 1 ? $windowStarts[$windowIndex + 1] : $length;
-            $windowText = trim((string) mb_substr($text, $windowStart, $windowEnd - $windowStart, 'UTF-8'));
+        foreach ($segmentStarts as $index => $segmentStart) {
+            $segmentEnd = $index < $segmentCount - 1 ? $segmentStarts[$index + 1] : $length;
+            $segments[] = ['start_position' => $segmentStart, 'end_position' => $segmentEnd];
+        }
 
-            if ($windowText === '') {
-                continue;
+        return $segments !== [] ? $segments : [['start_position' => 0, 'end_position' => $length]];
+    }
+
+    /**
+     * Splits one family-header segment into safely-sized pieces when it exceeds
+     * PHASE_ONE_WINDOW_TRIGGER_CHARS, targeting PHASE_ONE_WINDOW_TARGET_CHARS per piece and
+     * snapping each cut to a natural paragraph/sentence boundary via choosePhaseOneWindowEnd() —
+     * this is the adaptive re-splitting that keeps a single OpenAI call from having to return an
+     * unbounded number of candidate requirements (see class-level constant doc comment).
+     *
+     * @return list<array{start_position: int, end_position: int}>
+     */
+    private function splitOversizedSegment(string $text, int $segmentStart, int $segmentEnd): array
+    {
+        $segmentLength = $segmentEnd - $segmentStart;
+
+        if ($segmentLength <= self::PHASE_ONE_WINDOW_TRIGGER_CHARS) {
+            return [['start_position' => $segmentStart, 'end_position' => $segmentEnd]];
+        }
+
+        $pieces = [];
+        $cursor = $segmentStart;
+
+        while ($cursor < $segmentEnd) {
+            $idealEnd = min($segmentEnd, $cursor + self::PHASE_ONE_WINDOW_TARGET_CHARS);
+
+            if ($segmentEnd - $idealEnd < self::PHASE_ONE_WINDOW_MIN_CHARS) {
+                // The remainder is too small to stand alone as its own call; absorb it into
+                // this piece rather than creating a tiny trailing window.
+                $pieces[] = ['start_position' => $cursor, 'end_position' => $segmentEnd];
+
+                break;
             }
 
-            $windows[] = [
-                'text' => $windowText,
-                'start_position' => $windowStart,
-                'end_position' => $windowEnd,
-                'window_index' => count($windows),
-                'window_count' => 0,
-            ];
+            $end = $this->choosePhaseOneWindowEnd($text, $cursor, $idealEnd, $segmentEnd);
+            $end = max($end, $cursor + 1);
+            $pieces[] = ['start_position' => $cursor, 'end_position' => $end];
+
+            $cursor = max($cursor + 1, $end - self::PHASE_ONE_WINDOW_OVERLAP_CHARS);
         }
 
-        $windowCount = count($windows);
-
-        foreach ($windows as $index => $window) {
-            $windows[$index]['window_index'] = $index;
-            $windows[$index]['window_count'] = $windowCount;
-        }
-
-        return $windows !== [] ? $windows : [[
-            'text' => $text,
-            'start_position' => 0,
-            'end_position' => $length,
-            'window_index' => 0,
-            'window_count' => 1,
-        ]];
+        return $pieces;
     }
 
     private function shouldUseWindowedPhaseOneExtraction(string $text): bool
     {
         return count($this->buildPhaseOneExtractionWindows($text)) > 1;
+    }
+
+    /**
+     * Purpose: Surface (without failing the call) when a single window's raw candidate count
+     * approaches the practical ceiling implied by max_output_tokens, so dense documents are
+     * observable in logs even when parsing still succeeds. See the class-level PHASE_ONE_WINDOW_*
+     * constant doc comment for how PHASE_ONE_WINDOW_SAFE_CANDIDATE_COUNT was derived.
+     * Inputs: The document, run id, window metadata, raw candidate count, and the request result
+     * (for output token usage).
+     * Returns: None.
+     * Side effects: Writes a warning log entry when the safe candidate ceiling is exceeded.
+     */
+    private function maybeLogDenseWindowWarning(
+        SavedNoticeAiDocument $document,
+        string $runId,
+        array $windowMeta,
+        int $rawCandidateCount,
+        array $requestResult,
+    ): void {
+        if ($rawCandidateCount <= self::PHASE_ONE_WINDOW_SAFE_CANDIDATE_COUNT) {
+            return;
+        }
+
+        Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction window returned an unusually high candidate count.', [
+            'run_id' => $runId,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'window_index' => $windowMeta['window_index'] ?? null,
+            'window_count' => $windowMeta['window_count'] ?? null,
+            'window_start_position' => $windowMeta['window_start_position'] ?? null,
+            'window_end_position' => $windowMeta['window_end_position'] ?? null,
+            'raw_candidate_count' => $rawCandidateCount,
+            'safe_candidate_ceiling' => self::PHASE_ONE_WINDOW_SAFE_CANDIDATE_COUNT,
+            'output_tokens' => $requestResult['output_tokens'] ?? null,
+            'max_output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+        ]);
     }
 
     /**
@@ -1000,7 +1116,7 @@ class RequirementCandidateExtractor
         $promptVersion = $this->blockPromptBuilder->promptVersion();
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 300);
+            $response = $this->openAiClient->post('responses', $payload, 450);
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';

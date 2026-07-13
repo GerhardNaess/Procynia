@@ -623,11 +623,12 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
      * call for a large document measured 167.8s to complete successfully, while its sibling
      * chunk was killed by curl at exactly 180.0s (cURL error 28, "Operation timed out after
      * 180001 milliseconds") — the fixed 180s HTTP timeout left no safety margin for
-     * gpt-4.1-mini generating ~90+ structured requirement objects. This asserts the full-document
-     * extraction call now uses the same 300s timeout already established for comparably heavy
-     * structured generation elsewhere in the codebase (see WikiPageContentAiClient).
+     * gpt-4.1-mini generating ~90+ structured requirement objects. Raised to 300s initially
+     * (matching WikiPageContentAiClient's precedent for comparably heavy structured generation),
+     * then to 450s once splitOversizedSegment() introduced up to ~3 sequential calls per chunk —
+     * see ProcessRequirementExtractionChunk::$timeout for the corresponding job-level margin.
      */
-    public function test_full_document_extraction_uses_a_300_second_http_timeout(): void
+    public function test_full_document_extraction_uses_a_450_second_http_timeout(): void
     {
         config()->set('services.openai.api_key', 'test-key');
 
@@ -663,6 +664,78 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
 
         app(RequirementCandidateExtractor::class)->extractFullDocumentRaw($document, 'run-timeout-regression-test');
 
-        $this->assertSame(300, $capturedTimeout);
+        $this->assertSame(450, $capturedTimeout);
+    }
+
+    /**
+     * Regression for the adaptive-splitting gap found while investigating the ANNEX 01A
+     * incident: a document section with no requirement-family headers (Skal-krav/Bør-krav/...)
+     * previously became exactly one OpenAI call no matter how large it was — real production
+     * data showed one 30,468-char chunk already used 97% of the max_output_tokens budget (94
+     * candidates, 7,773/8,000 tokens), leaving no margin for denser documents. This asserts an
+     * oversized single-segment document is now split into multiple safely-sized calls instead
+     * of one unbounded call.
+     */
+    public function test_it_adaptively_splits_an_oversized_single_family_segment_into_multiple_windows(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $paragraphs = [];
+
+        for ($i = 1; $i <= 200; $i++) {
+            $paragraphs[] = sprintf(
+                'Krav %d: Leverandoren skal oppfylle dokumentasjonskravet nummer %d innen fristen som er angitt i kontraktens vedlegg for tjenesteleveranse.',
+                $i,
+                $i,
+            );
+        }
+
+        $documentText = implode("\n\n", $paragraphs);
+
+        // Sanity check on the fixture itself: comfortably exceeds the 14,000-char split trigger.
+        $this->assertGreaterThan(20000, mb_strlen($documentText, 'UTF-8'));
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 210,
+            'saved_notice_id' => 411,
+            'original_filename' => 'oversized-single-segment-test.docx',
+            'extracted_text' => $documentText,
+        ]);
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_oversized_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode(['candidates' => []], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => [
+                    'input_tokens' => 100,
+                    'output_tokens' => 10,
+                    'total_tokens' => 110,
+                ],
+            ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-oversized-test');
+
+        $this->assertTrue($result->ok);
+        $this->assertGreaterThanOrEqual(2, $result->extractionCallCount);
+
+        $recorded = Http::recorded()->values();
+        $this->assertSame($result->extractionCallCount, $recorded->count());
+
+        foreach ($recorded as [$request, $ignoredResponse]) {
+            $inputText = (string) data_get($request->data(), 'input.1.content.0.text', '');
+            // Generous ceiling well above target (12,000) + overlap (1,200): each window must
+            // have been kept well under the full ~24,000-char document, not passed through whole.
+            $this->assertLessThanOrEqual(20000, mb_strlen($inputText, 'UTF-8'));
+        }
+
+        $firstInputText = (string) data_get($recorded->first()[0]->data(), 'input.1.content.0.text', '');
+        $lastInputText = (string) data_get($recorded->last()[0]->data(), 'input.1.content.0.text', '');
+
+        $this->assertStringContainsString('Krav 1:', $firstInputText);
+        $this->assertStringContainsString('Krav 200:', $lastInputText);
     }
 }
