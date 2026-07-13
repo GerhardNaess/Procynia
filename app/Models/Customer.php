@@ -17,10 +17,13 @@ class Customer extends Model
 
     public const PERMISSION_VIEW_ALL_CASES = 'view_all_cases';
 
+    public const PERMISSION_APPROVE_WIKI_CLAIMS = 'approve_wiki_claims';
+
     public const DEFAULT_PERMISSION_SETTINGS = [
         self::PERMISSION_CREATE_DEPARTMENTS => ['system_owner'],
         self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
+        self::PERMISSION_APPROVE_WIKI_CLAIMS => ['system_owner', 'qa'],
     ];
 
     public const PLAN_FREE = 'free';
@@ -106,7 +109,13 @@ class Customer extends Model
         return array_merge(self::DEFAULT_PERMISSION_SETTINGS, $stored);
     }
 
-    public function roleHasPermission(string $bidRole, string $permission): bool
+    /**
+     * QA is not a mutually-exclusive bid_role — it is an additive capability a user can hold
+     * alongside their ordinary role (see User::isQa()). $isQa therefore is a separate flag, not
+     * a value $bidRole can take, and only matters when the permission's roles list contains the
+     * "qa" column.
+     */
+    public function roleHasPermission(string $bidRole, string $permission, bool $isQa = false): bool
     {
         if ($bidRole === 'system_owner') {
             return true;
@@ -114,7 +123,9 @@ class Customer extends Model
 
         $roles = $this->resolvedPermissionSettings()[$permission] ?? [];
 
-        return in_array($bidRole, $roles, true) || in_array('all', $roles, true);
+        return in_array($bidRole, $roles, true)
+            || in_array('all', $roles, true)
+            || ($isQa && in_array('qa', $roles, true));
     }
 
     public function users(): HasMany

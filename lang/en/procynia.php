@@ -1844,6 +1844,8 @@ return [
         'field_name' => 'Name',
         'field_email' => 'Email',
         'field_role' => 'Role',
+        'field_is_qa' => 'QA (quality assurance)',
+        'hint_is_qa' => 'QA is an add-on capability layered on top of the user\'s ordinary role. It does not replace the role, and only grants access to approve Wiki claims (in addition to whatever the role and "Everyone" already grant).',
         'field_password' => 'Password',
         'field_new_password' => 'New password',
         'field_confirm_password' => 'Confirm password',

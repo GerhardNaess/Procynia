@@ -142,17 +142,28 @@ Defined in `docs/chunking-strategy.md`. H1/H2 headings are hard structural bound
 
 ### Customer permission settings
 
-System Owners can configure role-based permissions via the **Tilganger** tab in Kundemiljø. Stored as `permission_settings` JSON on `customers`. Three configurable permissions:
+System Owners can configure role-based permissions via the **Tilganger** tab in Kundemiljø. Stored as `permission_settings` JSON on `customers`. Four configurable permissions:
 
 - `create_departments` — default: `['system_owner']`
 - `create_users` — default: `['system_owner', 'bid_manager', 'contributor']`
 - `view_all_cases` — default: `['system_owner', 'bid_manager', 'contributor']`
+- `approve_wiki_claims` — default: `['system_owner', 'qa']`
 
-Key methods: `Customer::roleHasPermission()`, `User::canManageCustomerUsers()`, `User::canViewAllCasesViaSettings()`, `CustomerContext::canCreateCustomerDepartments()`.
+Key methods: `Customer::roleHasPermission()`, `User::canManageCustomerUsers()`, `User::canViewAllCasesViaSettings()`, `User::canApproveWikiClaims()`, `CustomerContext::canCreateCustomerDepartments()`.
 
 Case visibility is enforced in `SavedNoticeAccessService::applyVisibility()`. Without `view_all_cases`, contributors/viewers only see cases they are directly involved in (saved_by, bid_manager, opportunity_owner, or explicit `SavedNoticeUserAccess`). Department-based fallback visibility is also gated by this setting.
 
 Contributors with user management permission automatically get access to all customer departments when creating/editing users (via `CustomerContext::manageableDepartmentIds()`).
+
+#### QA (additive capability, not a role)
+
+`users.is_qa` is a boolean flag layered on top of a user's ordinary `bid_role` — it is never a replacement for the role, and a user keeps their existing role (`bid_manager`, `contributor`, ...) when QA is toggled on or off. Because a user belongs to exactly one customer (`users.customer_id`), `is_qa` is already customer-scoped the same way `bid_role` is — no separate customer-membership pivot was needed.
+
+`Customer::roleHasPermission(string $bidRole, string $permission, bool $isQa = false)` treats `"qa"` as another valid entry in a permission's roles list (alongside `bid_manager`, `contributor`, `"all"`) — it is not a mutually-exclusive role value `$bidRole` can hold. Every existing permission check (`canManageCustomerUsers()`, `canCreateCustomerDepartments()`, `canViewAllCasesViaSettings()`) now passes `$user->isQa()` through, so the **QA** column in the Tilganger gallery works uniformly for every permission row, not just the new one. System Owner always passes regardless of QA (`roleHasPermission()` short-circuits `true` for `system_owner` before consulting the roles list).
+
+`User::canApproveWikiClaims()` gates manual Wiki claim approval/undo (`WikiClaimController::approve()`/`unapprove()`) — System Owner, or any role with QA and effective access to `approve_wiki_claims`. This is a separate permission from whole-page approve/reject (`WikiController::approve()`/`reject()`), which remains System Owner-only; QA never grants page-level approval. `WikiController::visibleStatuses()` also grants draft/pending_review read access via `canApproveWikiClaims()`, so a Contributor+QA can open the page and verification basis needed to act on claims — this is the only additional visibility QA grants; it does not touch Wiki administration, document import, source deletion, or any other admin action.
+
+QA is administered in the existing "Brukere" tab (`UserController::store()`/`update()`) using the same authorization as editing `bid_role` (System Owner only, never on oneself) — no new admin capability was introduced.
 
 ### Knowledge base document support
 

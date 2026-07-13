@@ -21,6 +21,7 @@ use Illuminate\Notifications\Notifiable;
     'password',
     'role',
     'bid_role',
+    'is_qa',
     'bid_manager_scope',
     'primary_affiliation_scope',
     'primary_department_id',
@@ -103,6 +104,7 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'is_qa' => 'boolean',
         ];
     }
 
@@ -241,7 +243,7 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
-        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS)) {
+        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS, $this->isQa())) {
             return false;
         }
 
@@ -273,7 +275,25 @@ class User extends Authenticatable implements FilamentUser
         $customer = $this->customer;
 
         return $customer !== null
-            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES);
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES, $this->isQa());
+    }
+
+    /**
+     * Manual Wiki claim approval/undo (WikiClaimController::approve()/unapprove()). System
+     * Owner always passes (Customer::roleHasPermission() short-circuits true for that role);
+     * otherwise this is granted only when the customer's permission gallery lists either the
+     * user's ordinary bid_role, "Alle", or "qa" (and the user actually has QA).
+     */
+    public function canApproveWikiClaims(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa());
     }
 
     public static function customerRoleForBidRole(string $bidRole): string
@@ -300,6 +320,16 @@ class User extends Authenticatable implements FilamentUser
     public function isSystemOwner(): bool
     {
         return $this->resolvedBidRole() === self::BID_ROLE_SYSTEM_OWNER;
+    }
+
+    /**
+     * QA is an additive capability, not a bid_role — a user keeps their ordinary role
+     * (bid_manager, contributor, ...) and QA layers extra permissions on top of it. See
+     * Customer::roleHasPermission() for how this is combined with the ordinary role and "Alle".
+     */
+    public function isQa(): bool
+    {
+        return (bool) $this->is_qa;
     }
 
     public function resolvedBidManagerScope(): ?string

@@ -668,12 +668,21 @@ class WikiController extends Controller
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
     }
 
-    /** @return list<string> */
+    /**
+     * Draft/pending_review visibility is also granted via canApproveWikiClaims() — a user who
+     * can manually approve claims (System Owner, or Bid Manager/Contributor/etc. with QA) needs
+     * to be able to open the page and its verification basis to act on them, even when their
+     * ordinary role would not otherwise grant review access. This is read-only visibility; it
+     * does not extend to whole-page approval/rejection (submit()/approve()/reject() remain
+     * System Owner-only above) or to any Wiki administration action.
+     *
+     * @return list<string>
+     */
     private function visibleStatuses(?User $user): array
     {
         $statuses = [EnterpriseWikiPage::STATUS_APPROVED];
 
-        if ($user?->isSystemOwner() || $user?->isBidManager()) {
+        if ($user?->isSystemOwner() || $user?->isBidManager() || $user?->canApproveWikiClaims()) {
             $statuses[] = EnterpriseWikiPage::STATUS_DRAFT;
             $statuses[] = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
         }

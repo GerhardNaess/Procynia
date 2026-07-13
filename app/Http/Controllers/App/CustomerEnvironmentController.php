@@ -91,11 +91,12 @@ class CustomerEnvironmentController extends Controller
             403,
         );
 
-        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', 'all'];
+        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', 'qa', 'all'];
         $allowedPermissions = [
             Customer::PERMISSION_CREATE_DEPARTMENTS,
             Customer::PERMISSION_CREATE_USERS,
             Customer::PERMISSION_VIEW_ALL_CASES,
+            Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
         ];
 
         $validated = $request->validate([
@@ -127,6 +128,7 @@ class CustomerEnvironmentController extends Controller
             ['value' => 'system_owner', 'label' => 'System Owner', 'locked' => true],
             ['value' => 'bid_manager', 'label' => 'Bid Manager', 'locked' => false],
             ['value' => 'contributor', 'label' => 'Contributor', 'locked' => false],
+            ['value' => 'qa', 'label' => 'QA', 'locked' => false],
             ['value' => 'all', 'label' => 'Alle', 'locked' => false],
         ];
 
@@ -145,6 +147,11 @@ class CustomerEnvironmentController extends Controller
                 'key' => Customer::PERMISSION_VIEW_ALL_CASES,
                 'label' => 'Se alle saker',
                 'roles' => $settings[Customer::PERMISSION_VIEW_ALL_CASES],
+            ],
+            [
+                'key' => Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
+                'label' => 'Godkjenne Wiki-påstander',
+                'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_CLAIMS],
             ],
         ];
 
@@ -235,6 +242,7 @@ class CustomerEnvironmentController extends Controller
             'email' => $user->email,
             'bid_role' => $user->bid_role_label,
             'bid_role_value' => $user->resolvedBidRole(),
+            'is_qa' => (bool) $user->is_qa,
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),

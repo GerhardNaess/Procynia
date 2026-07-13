@@ -11,11 +11,14 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 /**
- * Manual claim source approval — a System Owner can approve a claim that has no source
- * reference (recording who/when/why) so it no longer shows the "missing source" warning, and
- * can undo that approval later. Uses the same access control as the existing Wiki page
- * approval flow (WikiController::approve()/reject()) — System Owner only, Bid Manager remains
- * read-only.
+ * Manual claim source approval — a System Owner, or any user with the QA capability and
+ * effective access to the approve_wiki_claims permission, can approve a claim that has no
+ * source reference (recording who/when/why) so it no longer shows the "missing source" warning,
+ * and can undo that approval later. See User::canApproveWikiClaims().
+ *
+ * This is a separate permission from whole-page approval/rejection (WikiController::approve()/
+ * reject()), which remains System Owner-only — QA never grants the ability to approve or
+ * reject an entire Wiki page.
  *
  * Never creates a source reference — a manual approval is a distinct, explicit review decision
  * (EnterpriseWikiClaim.approval_status/approved_by_user_id/approved_at/approval_comment), not a
@@ -33,7 +36,7 @@ class WikiClaimController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner()) {
+        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
             abort(403);
         }
 
@@ -63,7 +66,7 @@ class WikiClaimController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner()) {
+        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
             abort(403);
         }
 

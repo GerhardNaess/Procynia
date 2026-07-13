@@ -109,6 +109,9 @@ export default function UsersIndex({ users }) {
                                         </div>
                                         <div className="flex flex-wrap gap-2 text-xs font-medium">
                                             <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-700">{user.bid_role}</span>
+                                            {user.is_qa ? (
+                                                <span className="rounded-full bg-teal-100 px-3 py-1 text-teal-700">QA</span>
+                                            ) : null}
                                             {user.bid_manager_scope_summary ? (
                                                 <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">
                                                     {user.bid_manager_scope_summary}
@@ -187,7 +190,14 @@ export default function UsersIndex({ users }) {
                                                 <td className="px-6 py-4 text-slate-500">{user.department_name ?? '—'}</td>
                                                 <td className="px-6 py-4">
                                                     <div className="space-y-1">
-                                                        <div>{user.bid_role}</div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span>{user.bid_role}</span>
+                                                            {user.is_qa ? (
+                                                                <span className="inline-flex rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-semibold text-teal-700">
+                                                                    QA
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
                                                         {user.bid_manager_scope_summary ? (
                                                             <div className="text-xs font-medium text-slate-500">{user.bid_manager_scope_summary}</div>
                                                         ) : null}

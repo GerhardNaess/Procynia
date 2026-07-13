@@ -161,6 +161,7 @@ class UserController extends Controller
                 'password' => $validated['password'],
                 'role' => User::customerRoleForBidRole($targetBidRole),
                 'bid_role' => $targetBidRole,
+                'is_qa' => $actor->isSystemOwner() ? (bool) ($validated['is_qa'] ?? false) : false,
                 'bid_manager_scope' => $bidManagerScope,
                 'primary_affiliation_scope' => $primaryAffiliationScope,
                 'primary_department_id' => $primaryDepartmentId,
@@ -237,6 +238,7 @@ class UserController extends Controller
         }
 
         DB::transaction(function () use (
+            $actor,
             $record,
             $validated,
             $nextRole,
@@ -251,6 +253,7 @@ class UserController extends Controller
                 'name' => Str::squish($validated['name']),
                 'role' => $nextRole,
                 'bid_role' => $nextBidRole,
+                'is_qa' => $this->canEditBidRole($actor, $record) ? (bool) ($validated['is_qa'] ?? false) : $record->is_qa,
                 'bid_manager_scope' => $bidManagerScope,
                 'primary_affiliation_scope' => $primaryAffiliationScope,
                 'primary_department_id' => $primaryDepartmentId,
@@ -539,6 +542,7 @@ class UserController extends Controller
                 ->all(),
             'bid_role' => $user->bid_role_label,
             'bid_role_value' => $user->resolvedBidRole(),
+            'is_qa' => (bool) $user->is_qa,
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -581,6 +585,7 @@ class UserController extends Controller
                 ->all(),
             'bid_role_value' => $user->resolvedBidRole(),
             'bid_role_label' => $user->bid_role_label,
+            'is_qa' => (bool) $user->is_qa,
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
@@ -1088,6 +1093,9 @@ class UserController extends Controller
             'bid_role' => $actor->isSystemOwner()
                 ? ['required', 'string', Rule::in(User::BID_ROLES)]
                 : ['prohibited'],
+            'is_qa' => $actor->isSystemOwner()
+                ? ['nullable', 'boolean']
+                : ['prohibited'],
             'bid_manager_scope' => $actor->isSystemOwner()
                 ? ['nullable', 'string', Rule::in(User::BID_MANAGER_SCOPES)]
                 : ['prohibited'],
@@ -1118,6 +1126,9 @@ class UserController extends Controller
             'role' => ['prohibited'],
             'bid_role' => $this->canEditBidRole($actor, $record)
                 ? ['required', 'string', Rule::in(User::BID_ROLES)]
+                : ['prohibited'],
+            'is_qa' => $this->canEditBidRole($actor, $record)
+                ? ['nullable', 'boolean']
                 : ['prohibited'],
             'bid_manager_scope' => $this->canEditBidManagerScope($actor, $record)
                 ? ['nullable', 'string', Rule::in(User::BID_MANAGER_SCOPES)]
@@ -1150,6 +1161,7 @@ class UserController extends Controller
 
         $protectedFields = [
             'bid_role',
+            'is_qa',
             'bid_manager_scope',
             'managed_department_ids',
         ];

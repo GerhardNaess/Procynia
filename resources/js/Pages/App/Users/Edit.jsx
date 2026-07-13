@@ -28,6 +28,7 @@ export default function UsersEdit({
     const form = useForm({
         name: user.name,
         bid_role: user.bid_role_value,
+        is_qa: user.is_qa ?? false,
         bid_manager_scope: user.bid_manager_scope_value ?? (bidManagerScopeOptions[0]?.value ?? 'company'),
         primary_affiliation_scope: user.primary_affiliation_scope_value ?? (primaryAffiliationScopeOptions[0]?.value ?? 'company'),
         primary_department_id: user.primary_department_id ?? '',
@@ -214,6 +215,35 @@ export default function UsersEdit({
                                         System Owner har full kontroll over brukere, roller, avdelingsstruktur og bid-managernes administrative ansvarsområde.
                                     </p>
                                 </AlertBox>
+                            ) : null}
+
+                            {canEditRole ? (
+                                <div className="space-y-2 md:col-span-2">
+                                    <input type="hidden" name="is_qa" value={form.data.is_qa ? '1' : '0'} />
+                                    <label className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.data.is_qa}
+                                            onChange={(event) => form.setData('is_qa', event.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-300"
+                                        />
+                                        <span className="inline-flex items-center gap-1.5">
+                                            {usersFormText.field_is_qa ?? 'QA (kvalitetssikring)'}
+                                            <InfoHint
+                                                size="sm"
+                                                label="Vis forklaring for QA"
+                                                text={usersFormText.hint_is_qa ?? 'QA er en tilleggsfunksjon som legges til brukerens ordinære rolle. Den erstatter ikke rollen, og gir kun tilgang til å godkjenne Wiki-påstander (i tillegg til det rollen og «Alle» allerede gir).'}
+                                            />
+                                        </span>
+                                    </label>
+                                    {errors.is_qa ? <p className="text-sm text-rose-600">{errors.is_qa}</p> : null}
+                                </div>
+                            ) : user.is_qa ? (
+                                <div className="space-y-2 md:col-span-2">
+                                    <span className="inline-flex rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                                        QA
+                                    </span>
+                                </div>
                             ) : null}
 
                             {isBidManager && canEditBidManagerScope ? (

@@ -1844,6 +1844,8 @@ return [
         'field_name' => 'Navn',
         'field_email' => 'E-post',
         'field_role' => 'Rolle',
+        'field_is_qa' => 'QA (kvalitetssikring)',
+        'hint_is_qa' => 'QA er en tilleggsfunksjon som legges til brukerens ordinære rolle. Den erstatter ikke rollen, og gir kun tilgang til å godkjenne Wiki-påstander (i tillegg til det rollen og «Alle» allerede gir).',
         'field_password' => 'Passord',
         'field_new_password' => 'Nytt passord',
         'field_confirm_password' => 'Bekreft passord',

@@ -611,6 +611,11 @@ export default function CustomerEnvironmentIndex({
                                                         >
                                                             {user.bid_role}
                                                         </span>
+                                                        {user.is_qa ? (
+                                                            <span className="ml-2 inline-flex rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                                                                QA
+                                                            </span>
+                                                        ) : null}
                                                         {user.bid_manager_scope_summary ? (
                                                             <div className="mt-2 text-xs font-medium text-slate-500">
                                                                 {user.bid_manager_scope_summary}

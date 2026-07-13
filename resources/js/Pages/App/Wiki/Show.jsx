@@ -205,6 +205,10 @@ export default function WikiShow({
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const isSystemOwner = auth.user?.is_system_owner ?? false;
+    // Claim approve/undo uses its own permission (System Owner, or QA + effective access to
+    // approve_wiki_claims) — separate from whole-page approve/reject, which stays System
+    // Owner-only. See User::canApproveWikiClaims().
+    const canApproveWikiClaims = auth.user?.can_approve_wiki_claims ?? false;
 
     const [processing, setProcessing] = useState(null);
     const [verificationOpen, setVerificationOpen] = useState(false);
@@ -654,7 +658,7 @@ export default function WikiShow({
                                                     </span>
                                                 </div>
 
-                                                {isSystemOwner && claim.source_status === 'missing_source' && (
+                                                {canApproveWikiClaims && claim.source_status === 'missing_source' && (
                                                     <div className="mt-3 flex flex-wrap items-center gap-2">
                                                         <input
                                                             type="text"
@@ -675,7 +679,7 @@ export default function WikiShow({
                                                     </div>
                                                 )}
 
-                                                {isSystemOwner && claim.approval_status === 'approved' && (
+                                                {canApproveWikiClaims && claim.approval_status === 'approved' && (
                                                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
                                                         <span>
                                                             {(tw.approved_by_at ?? 'Godkjent av :name den :date')

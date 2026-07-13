@@ -95,6 +95,100 @@ class WikiClaimControllerTest extends TestCase
     }
 
     // =========================================================================
+    // QA capability (additive — combined with an ordinary role, never replacing it)
+    // =========================================================================
+
+    public function test_qa_user_can_approve_claim_manually(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $response = $this->actingAs($qaContributor)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            ['comment' => 'Kvalitetssikret av QA.'],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isApproved());
+        $this->assertSame($qaContributor->id, $fresh->approved_by_user_id);
+        $this->assertSame('Kvalitetssikret av QA.', $fresh->approval_comment);
+        $this->assertNotNull($fresh->approved_at);
+    }
+
+    public function test_qa_user_can_undo_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $qaBidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER, isQa: true);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($qaBidManager)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve", ['comment' => null]);
+        $this->assertTrue($claim->fresh()->isApproved());
+
+        $response = $this->actingAs($qaBidManager)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/unapprove");
+
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+        $this->assertFalse($claim->fresh()->isApproved());
+    }
+
+    public function test_bid_manager_with_qa_can_approve_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $qaBidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER, isQa: true);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($qaBidManager)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $this->assertTrue($claim->fresh()->isApproved());
+    }
+
+    public function test_contributor_with_qa_can_approve_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($qaContributor)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $this->assertTrue($claim->fresh()->isApproved());
+    }
+
+    public function test_unauthorized_approval_attempt_does_not_change_any_audit_field(): void
+    {
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: false);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($contributor)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            ['comment' => 'Forsøk uten tilgang.'],
+        )->assertForbidden();
+
+        $fresh = $claim->fresh();
+        $this->assertFalse($fresh->isApproved());
+        $this->assertNull($fresh->approved_by_user_id);
+        $this->assertNull($fresh->approved_at);
+        $this->assertNull($fresh->approval_comment);
+    }
+
+    public function test_qa_user_from_another_customer_cannot_approve_claim(): void
+    {
+        $customer = $this->createCustomer('Eier AS');
+        $otherCustomer = $this->createCustomer('Fremmed AS');
+        $qaContributor = $this->createUser($otherCustomer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($qaContributor)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve")
+            ->assertNotFound();
+
+        $this->assertFalse($claim->fresh()->isApproved());
+    }
+
+    // =========================================================================
     // Warning removal / restoration
     // =========================================================================
 
@@ -231,7 +325,7 @@ class WikiClaimControllerTest extends TestCase
         ]);
     }
 
-    private function createUser(Customer $customer, string $bidRole): User
+    private function createUser(Customer $customer, string $bidRole, bool $isQa = false): User
     {
         return User::query()->create([
             'name' => 'Wiki Claim Tester',
@@ -239,6 +333,7 @@ class WikiClaimControllerTest extends TestCase
             'password' => bcrypt('secret'),
             'role' => User::ROLE_USER,
             'bid_role' => $bidRole,
+            'is_qa' => $isQa,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);

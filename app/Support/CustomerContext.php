@@ -101,7 +101,7 @@ class CustomerContext
             return false;
         }
 
-        return $customer->roleHasPermission($user->resolvedBidRole(), Customer::PERMISSION_CREATE_DEPARTMENTS);
+        return $customer->roleHasPermission($user->resolvedBidRole(), Customer::PERMISSION_CREATE_DEPARTMENTS, $user->isQa());
     }
 
     public function customerDepartmentIds(?User $user = null): array

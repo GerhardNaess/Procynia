@@ -230,6 +230,30 @@ class WikiControllerTest extends TestCase
         $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
+    /**
+     * QA needs the narrowest possible read access to do its job: a Contributor with QA must be
+     * able to open a draft/pending_review page (and its claims) to approve them, even though
+     * plain Contributor visibility would 404 it (see test_show_returns_404_for_draft_page_to_
+     * contributor above).
+     */
+    public function test_contributor_with_qa_can_view_draft_page(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'QA ser utkast');
+
+        $this->actingAs($qaContributor)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    public function test_contributor_with_qa_can_view_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'QA ser til godkjenning');
+
+        $this->actingAs($qaContributor)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
     // =========================================================================
     // show() — customer isolation
     // =========================================================================
@@ -405,6 +429,38 @@ class WikiControllerTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
+    /**
+     * Regression: QA is a separate permission from whole-page approval/rejection. A user who
+     * can approve individual claims via QA must still be System-Owner-only for approving or
+     * rejecting an entire Wiki page (see WikiClaimControllerTest for the claim-level permission
+     * this is deliberately NOT reused for).
+     */
+    public function test_contributor_with_qa_cannot_approve_whole_page(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'QA godkjenner ikke hele siden');
+
+        $this->actingAs($qaContributor)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_bid_manager_with_qa_cannot_approve_whole_page(): void
+    {
+        $customer = $this->createCustomer();
+        $qaBidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER, isQa: true);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM+QA godkjenner ikke hele siden');
+
+        $this->actingAs($qaBidManager)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
     public function test_approve_of_draft_page_returns_422(): void
     {
         $customer = $this->createCustomer();
@@ -484,6 +540,19 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM avviser');
 
         $this->actingAs($manager)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_contributor_with_qa_cannot_reject_whole_page(): void
+    {
+        $customer = $this->createCustomer();
+        $qaContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR, isQa: true);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'QA avviser ikke hele siden');
+
+        $this->actingAs($qaContributor)
             ->patch('/app/wiki/'.$page->slug.'/reject')
             ->assertForbidden();
 
@@ -1869,7 +1938,7 @@ class WikiControllerTest extends TestCase
         ]);
     }
 
-    private function createUser(Customer $customer, string $bidRole): User
+    private function createUser(Customer $customer, string $bidRole, bool $isQa = false): User
     {
         return User::query()->create([
             'name' => 'Test User',
@@ -1877,6 +1946,7 @@ class WikiControllerTest extends TestCase
             'password' => bcrypt('secret'),
             'role' => User::ROLE_USER,
             'bid_role' => $bidRole,
+            'is_qa' => $isQa,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
