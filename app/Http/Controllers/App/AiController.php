@@ -2053,7 +2053,42 @@ class AiController extends Controller
                 'text' => null,
                 'missing_summary' => null,
                 'sources' => [],
+                'sections' => [],
+                'main_pages' => [],
+                'discovered_pages' => [],
+                'engine_version' => null,
                 'generated_at' => null,
+            ];
+        }
+
+        $sources = is_array($wikiAnswer->sources) ? $wikiAnswer->sources : [];
+        $researchTrace = is_array($wikiAnswer->research_trace) ? $wikiAnswer->research_trace : null;
+        $answer = is_array($researchTrace['answer'] ?? null) ? $researchTrace['answer'] : null;
+
+        $pageTitleById = [];
+
+        foreach ($sources as $source) {
+            if (isset($source['enterprise_wiki_page_id'])) {
+                $pageTitleById[$source['enterprise_wiki_page_id']] = $source['page_title'] ?? null;
+            }
+        }
+
+        $sections = [];
+
+        foreach (($answer['answer_sections'] ?? []) as $section) {
+            if (! is_array($section)) {
+                continue;
+            }
+
+            $sectionPageIds = is_array($section['page_ids'] ?? null) ? $section['page_ids'] : [];
+
+            $sections[] = [
+                'text' => (string) ($section['text'] ?? ''),
+                'page_ids' => $sectionPageIds,
+                'page_titles' => array_values(array_filter(array_map(
+                    static fn (mixed $pageId): ?string => $pageTitleById[$pageId] ?? null,
+                    $sectionPageIds,
+                ))),
             ];
         }
 
@@ -2063,7 +2098,17 @@ class AiController extends Controller
                 ?? $wikiAnswer->coverage_status,
             'text' => $wikiAnswer->answer_text,
             'missing_summary' => $wikiAnswer->missing_summary,
-            'sources' => is_array($wikiAnswer->sources) ? $wikiAnswer->sources : [],
+            'sources' => $sources,
+            'sections' => $sections,
+            'main_pages' => array_values(array_filter(
+                $sources,
+                static fn (array $source): bool => ($source['selection_type'] ?? null) === 'direct_search',
+            )),
+            'discovered_pages' => array_values(array_filter(
+                $sources,
+                static fn (array $source): bool => ($source['selection_type'] ?? null) === 'wikilink',
+            )),
+            'engine_version' => $wikiAnswer->engine_version,
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
         ];
     }

@@ -5203,7 +5203,22 @@ export default function AiShow({
                                                     ) : null}
                                                 </div>
 
-                                                {activeRequirementWikiAnswer.text ? (
+                                                {Array.isArray(activeRequirementWikiAnswer.sections) && activeRequirementWikiAnswer.sections.length > 0 ? (
+                                                    <div className="space-y-3">
+                                                        {activeRequirementWikiAnswer.sections.map((section, sectionIndex) => (
+                                                            <div key={`wiki-answer-section-${sectionIndex}`} className="space-y-1">
+                                                                <div className="whitespace-pre-line text-sm leading-7 text-slate-800">
+                                                                    {section.text}
+                                                                </div>
+                                                                {Array.isArray(section.page_titles) && section.page_titles.length > 0 ? (
+                                                                    <div className="text-xs text-violet-600">
+                                                                        {section.page_titles.join(' · ')}
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : activeRequirementWikiAnswer.text ? (
                                                     <div className="whitespace-pre-line text-sm leading-7 text-slate-800">
                                                         {activeRequirementWikiAnswer.text}
                                                     </div>
@@ -5219,18 +5234,41 @@ export default function AiShow({
                                                     </div>
                                                 ) : null}
 
-                                                {Array.isArray(activeRequirementWikiAnswer.sources) && activeRequirementWikiAnswer.sources.length > 0 ? (
+                                                {Array.isArray(activeRequirementWikiAnswer.main_pages) && activeRequirementWikiAnswer.main_pages.length > 0 ? (
                                                     <div className="space-y-2">
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
-                                                            {tai.wiki_answer_sources_title}
+                                                            {tai.wiki_answer_main_pages_title}
                                                         </div>
                                                         <ul className="space-y-1.5">
-                                                            {activeRequirementWikiAnswer.sources.map((source) => (
+                                                            {activeRequirementWikiAnswer.main_pages.map((source) => (
                                                                 <li
-                                                                    key={`wiki-source-page-${source.enterprise_wiki_page_id}`}
+                                                                    key={`wiki-source-main-${source.enterprise_wiki_page_id}`}
                                                                     className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
                                                                 >
                                                                     {source.page_title ?? source.page_slug ?? '—'}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                ) : null}
+
+                                                {Array.isArray(activeRequirementWikiAnswer.discovered_pages) && activeRequirementWikiAnswer.discovered_pages.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                            {tai.wiki_answer_discovered_pages_title}
+                                                        </div>
+                                                        <ul className="space-y-1.5">
+                                                            {activeRequirementWikiAnswer.discovered_pages.map((source) => (
+                                                                <li
+                                                                    key={`wiki-source-discovered-${source.enterprise_wiki_page_id}`}
+                                                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                                                >
+                                                                    <div>{source.page_title ?? source.page_slug ?? '—'}</div>
+                                                                    {source.discovered_from_title ? (
+                                                                        <div className="text-xs text-slate-400">
+                                                                            {tai.wiki_answer_discovered_from_prefix} {source.discovered_from_title}
+                                                                        </div>
+                                                                    ) : null}
                                                                 </li>
                                                             ))}
                                                         </ul>

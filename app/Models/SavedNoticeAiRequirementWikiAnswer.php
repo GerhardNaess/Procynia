@@ -37,6 +37,8 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         'answer_text',
         'missing_summary',
         'sources',
+        'research_trace',
+        'engine_version',
         'model',
         'generated_by_user_id',
         'generated_at',
@@ -46,6 +48,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
     {
         return [
             'sources' => 'array',
+            'research_trace' => 'array',
             'generated_at' => 'datetime',
         ];
     }

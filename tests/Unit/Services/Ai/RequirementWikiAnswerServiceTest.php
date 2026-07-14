@@ -3,34 +3,33 @@
 namespace Tests\Unit\Services\Ai;
 
 use App\Models\Customer;
-use App\Models\EnterpriseWikiClaim;
-use App\Models\EnterpriseWikiPage;
-use App\Models\EnterpriseWikiPageVersion;
-use App\Models\Language;
-use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
-use App\Models\User;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
+use App\Services\Ai\Wiki\RequirementWikiResearchService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Mockery\MockInterface;
 use RuntimeException;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Purpose: Verify the Wiki-answer engine (Fase 9) only ever draws on Enterprise Wiki content that
- * is approved and available for the requirement's own customer, never fabricates an answer when
- * coverage is 'none', and persists entirely separately from the existing answer-draft flow.
+ * Purpose: Verify RequirementWikiAnswerService's own orchestration — combining a (mocked)
+ * research context with a (mocked) final-answer result, assembling answer_text from validated
+ * sections, building the sources/research_trace/engine_version persistence payload, and never
+ * touching the existing answer-draft flow. Research (page discovery) and answer-writing behavior
+ * themselves are covered by RequirementWikiResearchServiceTest/RequirementWikiAnswerAiClientTest.
  * Inputs: None.
  * Returns: None.
  * Side effects: None.
  */
 class RequirementWikiAnswerServiceTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use UsesProjectPostgresConnection;
 
     protected function setUp(): void
@@ -53,404 +52,272 @@ class RequirementWikiAnswerServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_returns_none_coverage_without_calling_ai_when_no_approved_wiki_content_exists(): void
+    public function test_it_persists_research_trace_and_engine_version(): void
     {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen 10 dager.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            'coverage_status' => 'full',
+            'answer_sections' => [['text' => 'Svaret.', 'page_ids' => [$page->id]]],
+            'missing_summary' => null,
+            'used_page_ids' => [$page->id],
+        ]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertIsArray($answer->research_trace);
+        $this->assertArrayHasKey('research', $answer->research_trace);
+        $this->assertArrayHasKey('answer', $answer->research_trace);
+        $this->assertSame(RequirementWikiAnswerService::ENGINE_VERSION, $answer->engine_version);
+    }
+
+    public function test_old_answers_without_the_new_fields_can_still_be_loaded(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+
+        DB::table('saved_notice_ai_requirement_wiki_answers')->insert([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => 'full',
+            'answer_text' => 'Gammelt svar fra før research_trace fantes.',
+            'sources' => json_encode([['enterprise_wiki_page_id' => 1, 'page_title' => 'Gammel side', 'page_slug' => 'gammel', 'page_type' => 'article', 'claim_ids' => [1]]]),
+            'research_trace' => null,
+            'engine_version' => null,
+            'generated_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $loaded = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->firstOrFail();
+
+        $this->assertSame('Gammelt svar fra før research_trace fantes.', $loaded->answer_text);
+        $this->assertNull($loaded->research_trace);
+        $this->assertNull($loaded->engine_version);
+        $this->assertIsArray($loaded->sources);
+    }
+
+    public function test_full_coverage_assembles_the_answer_text_from_validated_sections(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            'coverage_status' => 'full',
+            'answer_sections' => [
+                ['text' => 'Første avsnitt.', 'page_ids' => [$page->id]],
+                ['text' => 'Andre avsnitt.', 'page_ids' => [$page->id]],
+            ],
+            'missing_summary' => null,
+            'used_page_ids' => [$page->id],
+        ]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('full', $answer->coverage_status);
+        $this->assertSame("Første avsnitt.\n\nAndre avsnitt.", $answer->answer_text);
+        $this->assertCount(1, $answer->sources);
+        $this->assertSame($page->id, $answer->sources[0]['enterprise_wiki_page_id']);
+    }
+
+    public function test_partial_coverage_keeps_answer_text_and_missing_summary(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            'coverage_status' => 'partial',
+            'answer_sections' => [['text' => 'Delvis svar.', 'page_ids' => [$page->id]]],
+            'missing_summary' => 'Wiki-en dekker ikke responstider.',
+            'used_page_ids' => [$page->id],
+        ]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('partial', $answer->coverage_status);
+        $this->assertSame('Delvis svar.', $answer->answer_text);
+        $this->assertSame('Wiki-en dekker ikke responstider.', $answer->missing_summary);
+    }
+
+    public function test_none_coverage_from_zero_pages_read_never_calls_the_answer_client(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
         $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
+        $this->assertSame('none', $answer->coverage_status);
         $this->assertNull($answer->answer_text);
-        $this->assertNotNull($answer->missing_summary);
         $this->assertSame([], $answer->sources);
     }
 
-    public function test_it_ignores_wiki_content_belonging_to_a_different_customer(): void
+    public function test_none_coverage_from_the_answer_client_forces_null_answer_text(): void
     {
-        $customer = $this->createCustomer('Customer A');
-        $otherCustomer = $this->createCustomer('Customer B');
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen 10 dager.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
-        $this->createApprovedClaim($otherCustomer, 'Dokumentasjon leveres innen 10 dager i henhold til avtalen.');
-
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
-    }
-
-    public function test_it_ignores_pages_that_are_not_approved(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen 10 dager.');
-
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen 10 dager i henhold til avtalen.', [
-            'page' => ['status' => EnterpriseWikiPage::STATUS_DRAFT],
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            'coverage_status' => 'none',
+            'answer_sections' => [],
+            'missing_summary' => null,
+            'used_page_ids' => [],
         ]);
 
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
-
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
-    }
-
-    public function test_it_ignores_claims_flagged_as_conflicting(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen 10 dager.');
-
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen 10 dager i henhold til avtalen.', [
-            'claim' => ['conflict_flag' => true],
-        ]);
-
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
-    }
-
-    public function test_it_ignores_claims_belonging_to_a_superseded_page_version(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen 10 dager.');
-
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen 10 dager i henhold til avtalen.', [
-            'version' => ['is_current' => false],
-        ]);
-
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
-    }
-
-    public function test_it_generates_a_full_coverage_answer_from_relevant_approved_claims(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
-
-        $claim = $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
-
-        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use ($claim): void {
-            $mock->shouldReceive('generateAnswer')
-                ->once()
-                ->withArgs(function (string $identifier, string $text, array $candidates, string $language) use ($claim): bool {
-                    return $candidates !== [] && $candidates[0]['claim_key'] === 'claim-'.$claim->id;
-                })
-                ->andReturn([
-                    'coverage_status' => 'full',
-                    'answer_text' => 'Dokumentasjon leveres innen ti dager.',
-                    'missing_summary' => null,
-                    'used_claim_keys' => ['claim-'.$claim->id],
-                ]);
-        });
-
-        $user = User::factory()->create([
-            'customer_id' => $customer->id,
-            'role' => User::ROLE_USER,
-        ]);
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', $user->id);
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL, $answer->coverage_status);
-        $this->assertSame('Dokumentasjon leveres innen ti dager.', $answer->answer_text);
-        $this->assertNull($answer->missing_summary);
-        $this->assertCount(1, $answer->sources);
-        $this->assertSame([$claim->id], $answer->sources[0]['claim_ids']);
-        $this->assertSame($user->id, $answer->generated_by_user_id);
-        $this->assertNotNull($answer->generated_at);
-    }
-
-    public function test_it_records_a_partial_coverage_answer_with_missing_summary(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
-
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('generateAnswer')
-            ->once()
-            ->andReturn([
-                'coverage_status' => 'partial',
-                'answer_text' => 'Dokumentasjon leveres innen ti dager.',
-                'missing_summary' => 'Wiki-en dokumenterer ikke hvilket format dokumentasjonen skal leveres i.',
-                'used_claim_keys' => [],
-            ]));
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_PARTIAL, $answer->coverage_status);
-        $this->assertSame('Wiki-en dokumenterer ikke hvilket format dokumentasjonen skal leveres i.', $answer->missing_summary);
-    }
-
-    /**
-     * Anti-fabrication guarantee (task requirement 6): when the AI itself reports 'none' despite
-     * candidate claims existing, no answer text is ever persisted.
-     */
-    public function test_it_never_persists_a_fabricated_answer_when_ai_reports_no_coverage(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
-
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('generateAnswer')
-            ->once()
-            ->andReturn([
-                'coverage_status' => 'none',
-                'answer_text' => null,
-                'missing_summary' => null,
-                'used_claim_keys' => [],
-            ]));
-
-        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE, $answer->coverage_status);
+        $this->assertSame('none', $answer->coverage_status);
         $this->assertNull($answer->answer_text);
         $this->assertSame([], $answer->sources);
     }
 
     public function test_it_never_reads_or_writes_the_existing_answer_draft_columns(): void
     {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
         $requirement->forceFill([
             'answer_draft_text' => 'Eksisterende svarutkast som aldri skal endres.',
             'answer_draft_generated_at' => now(),
         ])->save();
 
+        $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
+
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $requirement->refresh();
-
         $this->assertSame('Eksisterende svarutkast som aldri skal endres.', $requirement->answer_draft_text);
     }
 
     public function test_regenerating_updates_the_same_row_instead_of_creating_a_duplicate(): void
     {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
+        $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-        $firstCount = SavedNoticeAiRequirementWikiAnswer::query()
-            ->where('saved_notice_ai_requirement_id', $requirement->id)
-            ->count();
 
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('generateAnswer')
-            ->once()
-            ->andReturn([
-                'coverage_status' => 'full',
-                'answer_text' => 'Dokumentasjon leveres innen ti dager.',
-                'missing_summary' => null,
-                'used_claim_keys' => [],
-            ]));
-
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            'coverage_status' => 'full',
+            'answer_sections' => [['text' => 'Nytt svar.', 'page_ids' => [$page->id]]],
+            'missing_summary' => null,
+            'used_page_ids' => [$page->id],
+        ]);
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-        $secondCount = SavedNoticeAiRequirementWikiAnswer::query()
-            ->where('saved_notice_ai_requirement_id', $requirement->id)
-            ->count();
 
-        $this->assertSame(1, $firstCount);
-        $this->assertSame(1, $secondCount);
-        $this->assertSame(
-            SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
-            $requirement->wikiAnswer()->first()->coverage_status,
-        );
+        $count = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->count();
+        $this->assertSame(1, $count);
+        $this->assertSame('Nytt svar.', $requirement->wikiAnswer()->first()->answer_text);
     }
 
-    public function test_it_deduplicates_wiki_page_sources_by_page_id_even_when_multiple_claims_from_the_same_page_are_used(): void
+    public function test_sources_carry_discovery_provenance_for_pages_actually_cited(): void
     {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $directPage = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+        $linkedPage = $this->createWikiPageWithVersion($customer, 'Continual Improvement', 'Innhold.');
 
-        $firstClaim = $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.', [
-            'page' => ['title' => 'Leveranseprosess'],
-        ]);
-        $secondClaim = EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $firstClaim->enterprise_wiki_page_id,
-            'enterprise_wiki_page_version_id' => $firstClaim->enterprise_wiki_page_version_id,
-            'claim_text' => 'Dokumentasjonen leveres i henhold til avtalt frist på ti dager.',
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-        ]);
+        $pages = [
+            $this->fakePage($directPage->id, 'Problem Management'),
+            array_merge($this->fakePage($linkedPage->id, 'Continual Improvement'), [
+                'selection_type' => 'wikilink',
+                'discovered_from_page_id' => $directPage->id,
+                'discovered_from_title' => 'Problem Management',
+                'link_direction' => 'outgoing',
+            ]),
+        ];
 
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('generateAnswer')
-            ->once()
-            ->andReturn([
-                'coverage_status' => 'full',
-                'answer_text' => 'Dokumentasjon leveres innen ti dager.',
-                'missing_summary' => null,
-                'used_claim_keys' => ['claim-'.$firstClaim->id, 'claim-'.$secondClaim->id],
-            ]));
+        $this->mockResearchService($this->fakeResearchContext($requirement, $pages));
+        $this->mockAnswerClient([
+            'coverage_status' => 'full',
+            'answer_sections' => [['text' => 'Svar.', 'page_ids' => [$directPage->id, $linkedPage->id]]],
+            'missing_summary' => null,
+            'used_page_ids' => [$directPage->id, $linkedPage->id],
+        ]);
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
-        $this->assertCount(1, $answer->sources, 'Two claims from the same page must collapse into one source entry.');
-        $this->assertSame($firstClaim->enterprise_wiki_page_id, $answer->sources[0]['enterprise_wiki_page_id']);
-        $this->assertEqualsCanonicalizing(
-            [$firstClaim->id, $secondClaim->id],
-            $answer->sources[0]['claim_ids'],
-        );
+        $byId = collect($answer->sources)->keyBy('enterprise_wiki_page_id');
+        $this->assertSame('direct_search', $byId[$directPage->id]['selection_type']);
+        $this->assertSame('wikilink', $byId[$linkedPage->id]['selection_type']);
+        $this->assertSame('Problem Management', $byId[$linkedPage->id]['discovered_from_title']);
     }
 
-    /**
-     * Real-world regression: a requirement phrased "...dokumentasjon innen ti dager" must still
-     * match a claim phrased with different Norwegian inflections ("dokumentasjonen"/"leveransene")
-     * — the deterministic token-overlap rule must not be defeated by plural/definite suffixes alone.
-     */
-    public function test_it_matches_claims_despite_norwegian_inflectional_differences(): void
+    public function test_it_throws_when_wiki_ai_generation_is_disabled_and_candidates_exist(): void
     {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Beskriv leveransene og dokumentasjonen for prosjektet.');
-
-        $claim = $this->createApprovedClaim(
-            $customer,
-            'Leveransen og dokumentasjon knyttet til prosjektet beskrives i eget vedlegg.',
-        );
-
-        $captured = null;
-        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
-            $mock->shouldReceive('generateAnswer')
-                ->once()
-                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
-                    $captured = $candidates;
-
-                    return [
-                        'coverage_status' => 'full',
-                        'answer_text' => 'Svar.',
-                        'missing_summary' => null,
-                        'used_claim_keys' => array_column($candidates, 'claim_key'),
-                    ];
-                });
-        });
-
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertNotNull($captured);
-        $this->assertSame(['claim-'.$claim->id], array_column($captured, 'claim_key'));
-    }
-
-    /**
-     * Real-world regression: a requirement written with the English ITIL term "incident" must
-     * still match a claim written with the Norwegian equivalent "hendelse" (and vice versa) via
-     * the small, explicit terminology map — not just literal token equality.
-     */
-    public function test_it_matches_claims_via_known_norwegian_english_terminology_synonyms(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Beskriv rutinen for incident håndtering i drift.');
-
-        $claim = $this->createApprovedClaim(
-            $customer,
-            'Rutinen for hendelseshåndtering i drift dekker eskalering og oppfølging.',
-        );
-
-        $captured = null;
-        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
-            $mock->shouldReceive('generateAnswer')
-                ->once()
-                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
-                    $captured = $candidates;
-
-                    return [
-                        'coverage_status' => 'full',
-                        'answer_text' => 'Svar.',
-                        'missing_summary' => null,
-                        'used_claim_keys' => array_column($candidates, 'claim_key'),
-                    ];
-                });
-        });
-
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertNotNull($captured);
-        $this->assertSame(['claim-'.$claim->id], array_column($captured, 'claim_key'));
-    }
-
-    /**
-     * Guards against sending "most of the Wiki" to the AI: even with a large eligible pool, only a
-     * small, bounded slice (MAX_CANDIDATE_CLAIMS) is ever sent — see RequirementWikiAnswerService's
-     * class constant doc comment for why 20 was chosen.
-     */
-    public function test_it_never_sends_more_than_a_small_bounded_slice_of_the_customers_wiki_to_the_ai(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Beskriv leverandørens rutine for endringshåndtering og tjenestenivå.');
-
-        $totalClaims = 30;
-
-        for ($i = 0; $i < $totalClaims; $i++) {
-            $this->createApprovedClaim(
-                $customer,
-                "Leverandørens rutine for endringshåndtering og tjenestenivå dekker punkt {$i}.",
-            );
-        }
-
-        $captured = null;
-        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
-            $mock->shouldReceive('generateAnswer')
-                ->once()
-                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
-                    $captured = $candidates;
-
-                    return [
-                        'coverage_status' => 'full',
-                        'answer_text' => 'Svar.',
-                        'missing_summary' => null,
-                        'used_claim_keys' => [],
-                    ];
-                });
-        });
-
-        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
-
-        $this->assertNotNull($captured);
-        $this->assertLessThanOrEqual(20, count($captured));
-        $this->assertLessThan($totalClaims, count($captured), 'The whole eligible pool must not be sent to the AI.');
-    }
-
-    public function test_it_throws_when_candidates_exist_but_wiki_ai_generation_is_disabled(): void
-    {
-        $customer = $this->createCustomer();
-        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
-        $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
         config(['services.enterprise_wiki.ai_enabled' => false]);
 
         $this->expectException(RuntimeException::class);
 
+        // Real collaborators here (not mocked) — the exception must originate from the real
+        // RequirementWikiResearchService, propagated unchanged through the answer service.
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
     }
 
-    private function createCustomer(string $name = 'Wiki Answer Test AS'): Customer
+    private function mockResearchService(array $context): void
     {
-        $language = Language::query()->firstOrCreate(
-            ['code' => 'no'],
-            ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],
-        );
+        $this->mock(RequirementWikiResearchService::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('research')->once()->andReturn($context));
+    }
 
-        $nationality = Nationality::query()->firstOrCreate(
-            ['code' => 'NO'],
-            ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO'],
-        );
+    private function mockAnswerClient(array $result): void
+    {
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')->once()->andReturn($result));
+    }
 
-        return Customer::query()->create([
-            'name' => $name,
-            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
-            'language_id' => $language->id,
-            'nationality_id' => $nationality->id,
-            'is_active' => true,
-        ]);
+    private function fakePage(int $pageId, string $title): array
+    {
+        return [
+            'page_id' => $pageId,
+            'title' => $title,
+            'page_type' => 'concept',
+            'slug' => Str::slug($title),
+            'selection_type' => 'direct_search',
+            'discovered_from_page_id' => null,
+            'discovered_from_title' => null,
+            'link_direction' => null,
+            'content_mode' => 'full',
+            'content_markdown' => "# {$title}\n\nInnhold om {$title}.",
+            'selected_headings' => [],
+            'supporting_claim_ids' => [],
+            'round_read' => 1,
+        ];
+    }
+
+    private function fakeResearchContext(SavedNoticeAiRequirement $requirement, array $pages, ?string $stopReason = 'enough_context'): array
+    {
+        return [
+            'requirement' => ['id' => $requirement->id, 'text' => $requirement->requirement_text],
+            'initial_candidates' => [],
+            'research_rounds' => [],
+            'pages' => $pages,
+            'limits' => [
+                'catalog_size' => count($pages),
+                'rounds_used' => 1,
+                'pages_read' => count($pages),
+                'context_size' => array_sum(array_map(static fn (array $page): int => mb_strlen($page['content_markdown'], 'UTF-8'), $pages)),
+                'stop_reason' => $stopReason,
+                'max_rounds' => 3,
+                'max_pages' => 8,
+                'max_context_size' => 24000,
+            ],
+        ];
     }
 
     private function createRequirement(Customer $customer, string $requirementText): SavedNoticeAiRequirement
@@ -480,36 +347,5 @@ class RequirementWikiAnswerServiceTest extends TestCase
             'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
             'published_at' => now(),
         ]);
-    }
-
-    /**
-     * @param  array{page?: array, version?: array, claim?: array}  $overrides
-     */
-    private function createApprovedClaim(Customer $customer, string $claimText, array $overrides = []): EnterpriseWikiClaim
-    {
-        $page = EnterpriseWikiPage::query()->create(array_merge([
-            'customer_id' => $customer->id,
-            'slug' => 'wiki-answer-page-'.Str::lower(Str::random(8)),
-            'title' => 'Dokumentasjonskrav',
-            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-            'status' => EnterpriseWikiPage::STATUS_APPROVED,
-            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
-            'last_source_hash' => str_pad('hash', 64, '0'),
-        ], $overrides['page'] ?? []));
-
-        $version = EnterpriseWikiPageVersion::query()->create(array_merge([
-            'enterprise_wiki_page_id' => $page->id,
-            'version_number' => 1,
-            'is_current' => true,
-            'content_markdown' => '# Dokumentasjonskrav',
-        ], $overrides['version'] ?? []));
-
-        return EnterpriseWikiClaim::query()->create(array_merge([
-            'enterprise_wiki_page_id' => $page->id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => $claimText,
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-        ], $overrides['claim'] ?? []));
     }
 }
