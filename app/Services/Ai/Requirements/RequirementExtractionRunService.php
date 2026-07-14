@@ -440,12 +440,17 @@ class RequirementExtractionRunService
                 (int) $chunk->char_start,
                 (int) $chunk->char_end,
             );
+            $chunkTextElements = $document->structuredTextElementsInRange(
+                (int) $chunk->char_start,
+                (int) $chunk->char_end,
+            );
 
             try {
                 $result = $this->candidateExtractor->extractFullDocument(
                     $chunkDocument,
                     $run->uuid.'-chunk-'.$chunk->chunk_index,
                     $chunkTableRows,
+                    $chunkTextElements,
                 );
             } catch (Throwable $throwable) {
                 $this->failCall($runningCall, $document, 'unexpected_error', $throwable->getMessage());
@@ -694,12 +699,17 @@ class RequirementExtractionRunService
                 (int) $chunk->char_start,
                 (int) $chunk->char_end,
             );
+            $chunkTextElements = $document->structuredTextElementsInRange(
+                (int) $chunk->char_start,
+                (int) $chunk->char_end,
+            );
 
             try {
                 $result = $this->candidateExtractor->extractFullDocument(
                     $chunkDocument,
                     $run->uuid.'-chunk-'.$chunk->chunk_index,
                     $chunkTableRows,
+                    $chunkTextElements,
                 );
             } catch (Throwable $throwable) {
                 $this->failCall($chunkCall, $document, 'chunk_extraction_failed', $throwable->getMessage());

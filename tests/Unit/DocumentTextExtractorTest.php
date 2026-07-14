@@ -956,6 +956,84 @@ XML;
             );
             $this->assertSame($first['tables'][0]->rows[0]->identifierCellValue(), '1.1.1');
             $this->assertSame($second['tables'][0]->rows[0]->identifierCellValue(), '1.1.1');
+
+            // text_elements (the flat paragraph/list-item provenance model consumed by
+            // RequirementCandidateExtractor::reconcileCandidatesWithTextElements()) must be just
+            // as stable across re-parses as tables/headings — same element_keys, same content.
+            $this->assertEquals($first['text_elements'], $second['text_elements']);
+            $this->assertSame(
+                array_map(static fn (array $e) => $e['element_key'], $first['text_elements']),
+                array_map(static fn (array $e) => $e['element_key'], $second['text_elements']),
+            );
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /**
+     * A plain (non-numbered) body paragraph and a numbered list item must both be collected as
+     * canonical `text_elements` — the requirement-provenance model paragraph/list_item candidates
+     * are reconciled against (see RequirementCandidateExtractor::reconcileCandidatesWithTextElements()).
+     * Headings are section context, not requirement sources, so they must not appear here.
+     */
+    public function test_it_collects_plain_paragraphs_and_list_items_as_text_elements_with_section_context(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Buying responsibility, not activities</w:t></w:r></w:p>
+        <w:p><w:r><w:t>The Contractor shall provide documentation within 10 days.</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>The Contractor shall notify the Customer.</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>
+</w:styles>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="2">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, $stylesXml, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(2, $result['text_elements']);
+
+            $paragraphElement = $result['text_elements'][0];
+            $this->assertSame('paragraph-0', $paragraphElement['element_key']);
+            $this->assertSame('paragraph', $paragraphElement['element_type']);
+            $this->assertSame('The Contractor shall provide documentation within 10 days.', $paragraphElement['text']);
+            $this->assertNull($paragraphElement['number']);
+            $this->assertSame('Buying responsibility, not activities', $paragraphElement['section_title']);
+            $this->assertGreaterThanOrEqual(0, $paragraphElement['char_start']);
+            $this->assertGreaterThan($paragraphElement['char_start'], $paragraphElement['char_end']);
+
+            $listItemElement = $result['text_elements'][1];
+            $this->assertSame('listitem-0', $listItemElement['element_key']);
+            $this->assertSame('list_item', $listItemElement['element_type']);
+            $this->assertSame('The Contractor shall notify the Customer.', $listItemElement['text']);
+            $this->assertSame('1', $listItemElement['number']);
+            $this->assertSame('Buying responsibility, not activities', $listItemElement['section_title']);
+
+            // Headings are section context, never a requirement-source text_element.
+            foreach ($result['text_elements'] as $element) {
+                $this->assertNotSame('heading', $element['element_type']);
+            }
         } finally {
             @unlink($path);
         }

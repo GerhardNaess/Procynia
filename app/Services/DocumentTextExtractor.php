@@ -106,16 +106,22 @@ class DocumentTextExtractor
      * text extractText()/extractDocxText() would produce. This is the server-authoritative
      * source of provenance for requirement extraction — never the AI's restatement of it.
      * Inputs: Absolute filesystem path to a DOCX file.
-     * Returns: text, tables, headings, list_items — see above.
+     * Returns: text, tables, headings, list_items, text_elements — see above. `text_elements` is
+     * the flat, stably-keyed, requirement-provenance-ready subset of body-level elements that can
+     * themselves be a requirement source — plain paragraphs and list items (headings are section
+     * context, not requirement text, so they are not included here) — each carrying element_key,
+     * element_type ('paragraph'|'list_item'), text, number (list items only), section_number/
+     * section_title, and char_start/char_end. See RequirementCandidateExtractor::
+     * reconcileCandidatesWithTextElements().
      * Side effects: Opens the ZIP archive and parses XML. Used only by the requirement
      * extraction upload path (AiController::storeDocuments()) — extractText()/extractStructuredText()
      * and their existing callers (Enterprise Wiki, Knowledge Base ingest) are untouched.
      *
-     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>}
+     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>, text_elements: list<array<string, mixed>>}
      */
     public function extractDocxTextAndTables(string $path): array
     {
-        $empty = ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => []];
+        $empty = ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => [], 'text_elements' => []];
 
         if (! is_file($path) || ! is_readable($path)) {
             return $empty;
@@ -144,7 +150,7 @@ class DocumentTextExtractor
     }
 
     /**
-     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>}
+     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>, text_elements: list<array<string, mixed>>}
      */
     private function parseWordXmlTextAndTables(string $xml, ?string $stylesXml = null, ?string $numberingXml = null): array
     {
@@ -154,7 +160,7 @@ class DocumentTextExtractor
             $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
-                return ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => []];
+                return ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => [], 'text_elements' => []];
             }
 
             $xpath = new DOMXPath($dom);
@@ -192,8 +198,11 @@ class DocumentTextExtractor
             $headings = [];
             /** @var list<DocxListItemData> $listItems canonical list-item source elements, in document order */
             $listItems = [];
+            /** @var list<array<string, mixed>> $textElements flat, normalized paragraph + list-item requirement-source elements, in document order */
+            $textElements = [];
             $headingOrdinal = 0;
             $listItemOrdinal = 0;
+            $paragraphOrdinal = 0;
 
             foreach ($xpath->query('//w:p') as $paragraph) {
                 $textNodes = $xpath->query('.//w:t', $paragraph);
@@ -306,16 +315,49 @@ class DocumentTextExtractor
                     } elseif ($numberingRef !== null) {
                         // Auto-numbered body paragraph that isn't a recognized document heading —
                         // a list item (e.g. a lettered/numbered clause inside body text).
+                        $listItemKey = sprintf('listitem-%d', $listItemOrdinal);
+
                         $listItems[] = new DocxListItemData(
-                            sourceKey: sprintf('listitem-%d', $listItemOrdinal),
+                            sourceKey: $listItemKey,
                             documentOrder: $paragraphIndex,
                             ilvl: $numberingRef['ilvl'],
                             text: $paragraphText,
                             number: $renderedNumber,
                             charStart: 0,
                             charEnd: 0,
+                            sectionNumber: $currentSectionHeadingNumber,
+                            sectionTitle: $currentSectionHeadingText,
                         );
+                        $textElements[] = [
+                            'element_key' => $listItemKey,
+                            'element_type' => 'list_item',
+                            'document_order' => $paragraphIndex,
+                            'text' => $paragraphText,
+                            'number' => $renderedNumber,
+                            'section_number' => $currentSectionHeadingNumber,
+                            'section_title' => $currentSectionHeadingText,
+                            'char_start' => 0,
+                            'char_end' => 0,
+                        ];
                         $listItemOrdinal++;
+                    } else {
+                        // A plain body paragraph — no heading style, no Word auto-numbering. Still
+                        // a valid requirement source (running-text requirements), just without a
+                        // reconstructed number of its own.
+                        $paragraphKey = sprintf('paragraph-%d', $paragraphOrdinal);
+
+                        $textElements[] = [
+                            'element_key' => $paragraphKey,
+                            'element_type' => 'paragraph',
+                            'document_order' => $paragraphIndex,
+                            'text' => $paragraphText,
+                            'number' => null,
+                            'section_number' => $currentSectionHeadingNumber,
+                            'section_title' => $currentSectionHeadingText,
+                            'char_start' => 0,
+                            'char_end' => 0,
+                        ];
+                        $paragraphOrdinal++;
                     }
                 }
 
@@ -331,8 +373,9 @@ class DocumentTextExtractor
             $tables = $this->buildDocxTablesFromParagraphs($tableCellParagraphs, $rowParagraphIndexRange, $paragraphOffsets, $tableSectionHeading);
             $headings = $this->stampDocxElementCharOffsets($headings, $paragraphOffsets);
             $listItems = $this->stampDocxElementCharOffsets($listItems, $paragraphOffsets);
+            $textElements = $this->stampDocxTextElementCharOffsets($textElements, $paragraphOffsets);
 
-            return ['text' => $joinedText, 'tables' => $tables, 'headings' => $headings, 'list_items' => $listItems];
+            return ['text' => $joinedText, 'tables' => $tables, 'headings' => $headings, 'list_items' => $listItems, 'text_elements' => $textElements];
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
@@ -448,6 +491,33 @@ class DocumentTextExtractor
                 $offset = $paragraphOffsets[$element->documentOrder] ?? ['start' => 0, 'end' => 0];
 
                 return $element->withCharOffsets($offset['start'], $offset['end']);
+            },
+            $elements,
+        );
+    }
+
+    /**
+     * Purpose: Stamp final char_start/char_end onto the flat, plain-array text_elements list (see
+     * extractDocxTextAndTables()) — the array counterpart of stampDocxElementCharOffsets() for
+     * elements that are built as plain arrays rather than DTOs.
+     * Inputs: The elements (each carrying document_order) and the paragraph-index => [start, end]
+     * offset map.
+     * Returns: The same elements, in the same order, with real char offsets.
+     * Side effects: None.
+     *
+     * @param  list<array<string, mixed>>  $elements
+     * @param  array<int, array{start: int, end: int}>  $paragraphOffsets
+     * @return list<array<string, mixed>>
+     */
+    private function stampDocxTextElementCharOffsets(array $elements, array $paragraphOffsets): array
+    {
+        return array_map(
+            static function (array $element) use ($paragraphOffsets): array {
+                $offset = $paragraphOffsets[$element['document_order']] ?? ['start' => 0, 'end' => 0];
+                $element['char_start'] = $offset['start'];
+                $element['char_end'] = $offset['end'];
+
+                return $element;
             },
             $elements,
         );

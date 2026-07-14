@@ -3654,12 +3654,23 @@ export default function AiShow({
                                         : tai.no_responsible_user;
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
-                                    const hasVerifiedTableRowProvenance = Boolean(requirement.source_row_key);
-                                    const sourceRowTypeCode = hasVerifiedTableRowProvenance
+                                    // source_element_key is the source-kind-agnostic provenance signal
+                                    // (set for table_row, paragraph, and list_item alike); source_row_key
+                                    // is kept for backward compatibility with older persisted requirements.
+                                    const hasVerifiedSourceProvenance = Boolean(requirement.source_element_key || requirement.source_row_key);
+                                    const sourceRowTypeCode = hasVerifiedSourceProvenance
                                         ? (requirement.source_reference?.source_row_type_code ?? null)
                                         : null;
-                                    const sourceSectionTitle = hasVerifiedTableRowProvenance
+                                    const sourceSectionTitle = hasVerifiedSourceProvenance
                                         ? (requirement.source_reference?.source_section_title ?? null)
+                                        : null;
+                                    const sourceElementTypeLabels = {
+                                        paragraph: tai.source_element_type_paragraph,
+                                        list_item: tai.source_element_type_list_item,
+                                        table_row: tai.source_element_type_table_row,
+                                    };
+                                    const sourceLocatorLabel = hasVerifiedSourceProvenance
+                                        ? (sourceElementTypeLabels[requirement.source_element_type] ?? null)
                                         : null;
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
                                     const originalRequirementText = requirement.original_requirement_text ?? null;
@@ -3759,9 +3770,9 @@ export default function AiShow({
                                                                 </span>
                                                             ) : null}
                                                         </div>
-                                                        {sourceSectionTitle ? (
+                                                        {sourceSectionTitle || sourceLocatorLabel ? (
                                                             <div className="text-xs font-medium text-slate-500">
-                                                                {sourceSectionTitle}
+                                                                {[sourceSectionTitle, sourceLocatorLabel].filter(Boolean).join(' · ')}
                                                             </div>
                                                         ) : null}
                                                         <div className="text-base font-semibold leading-7 text-slate-950 break-words">

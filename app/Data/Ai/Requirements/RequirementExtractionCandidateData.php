@@ -54,6 +54,7 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
         public float $confidence,
         public array $warnings,
         public ?string $sourceRowKey = null,
+        public ?string $sourceElementKey = null,
     ) {}
 
     public static function fromPromptRow(array $row, SavedNoticeAiDocument $document, int $rowIndex): self
@@ -276,12 +277,72 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
                 'source_row_type_code' => $row->typeCellValue(),
                 'source_section_number' => $row->sectionNumber,
                 'source_section_title' => $row->sectionTitle,
+                'source_element_type' => 'table_row',
             ], static fn (mixed $value): bool => $value !== null)),
             interpretationRisk: $this->interpretationRisk,
             isRequirement: $this->isRequirement,
             confidence: $this->confidence,
             warnings: $this->warnings,
             sourceRowKey: $row->sourceRowKey,
+            // Kept in lockstep with the generalized source_element_key/source_element_type model
+            // (see withResolvedTextElement()) so table_row is expressible through the same
+            // unified field the frontend/API use for paragraph/list_item provenance — source_row_key
+            // itself is untouched above, purely for backward compatibility with existing consumers.
+            sourceElementKey: $row->sourceRowKey,
+        );
+    }
+
+    /**
+     * Purpose: Attach a verified paragraph/list-item match to this candidate — recovered by the
+     * backend via exact/substring normalized-text matching against the document's parsed
+     * text_elements (see DocumentTextExtractor::extractDocxTextAndTables()'s `text_elements` and
+     * RequirementCandidateExtractor::reconcileCandidatesWithTextElements()). The AI is never given
+     * these keys to echo back — unlike table rows, there is no 'ai_verified' origin here, only
+     * 'text_matched' — so there is no hallucination risk to guard against for this source kind.
+     * Overrides the candidate's requirement identifier with the element's own reconstructed Word
+     * number (list items only — plain paragraphs have none) so the persisted requirement number is
+     * grounded in the source document, not the AI's restatement of it.
+     * Inputs: The resolved text element (see text_elements shape) and how it was resolved.
+     * Returns: A new candidate with sourceElementKey set and source_reference enriched.
+     * Side effects: None.
+     */
+    public function withResolvedTextElement(array $element, string $origin): self
+    {
+        $identifierOverride = isset($element['number']) && is_string($element['number']) && $element['number'] !== ''
+            ? $element['number']
+            : null;
+
+        return new self(
+            sourceDocumentId: $this->sourceDocumentId,
+            sourceBlockId: $this->sourceBlockId,
+            sourceBlockIndex: $this->sourceBlockIndex,
+            requirementIdentifier: $identifierOverride ?? $this->requirementIdentifier,
+            parentReference: $this->parentReference,
+            requirementType: $this->requirementType,
+            obligationType: $this->obligationType,
+            extractionMethod: $this->extractionMethod,
+            originalText: $this->originalText,
+            normalizedText: $this->normalizedText,
+            comment: $this->comment,
+            evaluationNotes: $this->evaluationNotes,
+            responseExpectation: $this->responseExpectation,
+            expectedEvidence: $this->expectedEvidence,
+            keywords: $this->keywords,
+            domain: $this->domain,
+            relatedReferences: $this->relatedReferences,
+            sourceReference: array_merge($this->sourceReference, array_filter([
+                'source_element_key_origin' => $origin,
+                'source_element_type' => $element['element_type'] ?? null,
+                'source_element_number' => $identifierOverride,
+                'source_section_number' => $element['section_number'] ?? null,
+                'source_section_title' => $element['section_title'] ?? null,
+            ], static fn (mixed $value): bool => $value !== null)),
+            interpretationRisk: $this->interpretationRisk,
+            isRequirement: $this->isRequirement,
+            confidence: $this->confidence,
+            warnings: $this->warnings,
+            sourceRowKey: $this->sourceRowKey,
+            sourceElementKey: is_string($element['element_key'] ?? null) ? $element['element_key'] : null,
         );
     }
 
@@ -323,6 +384,7 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
             confidence: $this->confidence,
             warnings: [...$this->warnings, sprintf('source_row_key_rejected:%s', $claimedSourceRowKey)],
             sourceRowKey: null,
+            sourceElementKey: $this->sourceElementKey,
         );
     }
 
@@ -352,6 +414,7 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
             'confidence' => $this->confidence,
             'warnings' => $this->warnings,
             'source_row_key' => $this->sourceRowKey,
+            'source_element_key' => $this->sourceElementKey,
         ];
     }
 

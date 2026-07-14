@@ -55,6 +55,7 @@ class SavedNoticeAiDocument extends Model
         'processing_status',
         'extracted_text',
         'structured_tables',
+        'structured_text_elements',
         'text_extracted_at',
         'queued_at',
         'processing_started_at',
@@ -68,6 +69,7 @@ class SavedNoticeAiDocument extends Model
         return [
             'file_size_bytes' => 'integer',
             'structured_tables' => 'array',
+            'structured_text_elements' => 'array',
             'text_extracted_at' => 'datetime',
             'queued_at' => 'datetime',
             'processing_started_at' => 'datetime',
@@ -120,6 +122,52 @@ class SavedNoticeAiDocument extends Model
         }
 
         return $rows;
+    }
+
+    /**
+     * Purpose: Resolve this document's deterministically-parsed body-level requirement-source
+     * elements — plain paragraphs and list items (see DocumentTextExtractor::
+     * extractDocxTextAndTables()'s `text_elements`), if any were captured at upload time.
+     * Inputs: None.
+     * Returns: The document's text elements, or an empty array for non-DOCX documents/documents
+     * uploaded before this feature existed.
+     * Side effects: None.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function structuredTextElements(): array
+    {
+        $raw = $this->structured_text_elements;
+
+        return is_array($raw) ? $raw : [];
+    }
+
+    /**
+     * Purpose: Resolve the structured text elements whose position in this document's flat
+     * extracted_text falls within a given character range — used to attribute a paragraph/list-
+     * item element to the requirement-extraction chunk/window covering that range.
+     * Inputs: Inclusive/exclusive character range [start, end) within extracted_text.
+     * Returns: Matching elements, each translated to be relative to $start (mirroring
+     * DocxTableRowData::withOffset()) so callers can position them within the window's own text.
+     * Side effects: None.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function structuredTextElementsInRange(int $start, int $end): array
+    {
+        $elements = [];
+
+        foreach ($this->structuredTextElements() as $element) {
+            $charStart = (int) ($element['char_start'] ?? 0);
+
+            if ($charStart >= $start && $charStart < $end) {
+                $element['char_start'] = $charStart - $start;
+                $element['char_end'] = ((int) ($element['char_end'] ?? $charStart)) - $start;
+                $elements[] = $element;
+            }
+        }
+
+        return $elements;
     }
 
     public function savedNotice(): BelongsTo

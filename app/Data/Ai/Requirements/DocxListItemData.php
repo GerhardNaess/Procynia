@@ -23,6 +23,8 @@ final readonly class DocxListItemData implements JsonSerializable
         public ?string $number,
         public int $charStart,
         public int $charEnd,
+        public ?string $sectionNumber = null,
+        public ?string $sectionTitle = null,
     ) {}
 
     public static function fromArray(array $data): self
@@ -35,6 +37,8 @@ final readonly class DocxListItemData implements JsonSerializable
             number: isset($data['number']) ? (string) $data['number'] : null,
             charStart: (int) ($data['char_start'] ?? 0),
             charEnd: (int) ($data['char_end'] ?? 0),
+            sectionNumber: isset($data['section_number']) ? (string) $data['section_number'] : null,
+            sectionTitle: isset($data['section_title']) ? (string) $data['section_title'] : null,
         );
     }
 
@@ -48,6 +52,8 @@ final readonly class DocxListItemData implements JsonSerializable
             'number' => $this->number,
             'char_start' => $this->charStart,
             'char_end' => $this->charEnd,
+            'section_number' => $this->sectionNumber,
+            'section_title' => $this->sectionTitle,
         ];
     }
 
@@ -75,6 +81,8 @@ final readonly class DocxListItemData implements JsonSerializable
             number: $this->number,
             charStart: $charStart,
             charEnd: $charEnd,
+            sectionNumber: $this->sectionNumber,
+            sectionTitle: $this->sectionTitle,
         );
     }
 }

@@ -377,11 +377,13 @@ class AiController extends Controller
             // association instead of relying on flattened prose alone. Other formats keep the
             // existing plain-text path unchanged.
             $parsedTables = [];
+            $parsedTextElements = [];
 
             if ($extension === 'docx') {
                 $docxResult = $this->documentTextExtractor->extractDocxTextAndTables($absolutePath);
                 $extractedText = $docxResult['text'];
                 $parsedTables = $docxResult['tables'];
+                $parsedTextElements = $docxResult['text_elements'];
             } else {
                 $extractedText = $this->documentTextExtractor->extractText($absolutePath);
             }
@@ -403,6 +405,21 @@ class AiController extends Controller
                 $stampedTables = DocxTableData::manyWithDocumentId($parsedTables, $documentRecord->id);
                 $documentRecord->forceFill([
                     'structured_tables' => array_map(static fn (DocxTableData $table): array => $table->toArray(), $stampedTables),
+                ])->save();
+            }
+
+            if ($parsedTextElements !== []) {
+                // Document-scoped the same way DocxTableData::withDocumentId() scopes
+                // source_row_key — parsing happens before the document's DB id is known.
+                $stampedTextElements = array_map(
+                    static fn (array $element): array => [
+                        ...$element,
+                        'element_key' => sprintf('doc%d-%s', $documentRecord->id, $element['element_key']),
+                    ],
+                    $parsedTextElements,
+                );
+                $documentRecord->forceFill([
+                    'structured_text_elements' => $stampedTextElements,
                 ])->save();
             }
 

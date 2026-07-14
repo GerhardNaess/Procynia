@@ -25,6 +25,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
         public array $sourceReference = [],
         public array $extractionMetadata = [],
         public ?string $sourceRowKey = null,
+        public ?string $sourceElementKey = null,
+        public ?string $sourceElementType = null,
     ) {}
 
     /**
@@ -60,6 +62,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
             sourceReference: $sourceReference,
             extractionMetadata: self::buildExtractionMetadata($candidate, $extractionMetadata),
             sourceRowKey: self::normalizeNullableString($candidate->sourceRowKey),
+            sourceElementKey: self::normalizeNullableString($candidate->sourceElementKey),
+            sourceElementType: self::normalizeNullableString($sourceReference['source_element_type'] ?? null),
         );
     }
 
@@ -131,6 +135,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
             'source_row_key' => $this->sourceRowKey,
+            'source_element_key' => $this->sourceElementKey,
+            'source_element_type' => $this->sourceElementType,
             'original_candidate_snapshot' => $this->toSnapshotArray(),
             'current_requirement_snapshot' => $this->toSnapshotArray(),
             'requirement_type' => $this->requirementType,
@@ -163,6 +169,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
             'source_row_key' => $this->sourceRowKey,
+            'source_element_key' => $this->sourceElementKey,
+            'source_element_type' => $this->sourceElementType,
         ];
     }
 
@@ -185,6 +193,8 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'source_reference' => $this->sourceReference,
             'extraction_metadata' => $this->extractionMetadata,
             'source_row_key' => $this->sourceRowKey,
+            'source_element_key' => $this->sourceElementKey,
+            'source_element_type' => $this->sourceElementType,
         ];
     }
 
@@ -213,6 +223,9 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'source_row_identifier' => $sourceReference['source_row_identifier'] ?? null,
             'source_row_type_code' => $sourceReference['source_row_type_code'] ?? null,
             'source_row_key_rejected' => $sourceReference['source_row_key_rejected'] ?? null,
+            'source_element_key_origin' => $sourceReference['source_element_key_origin'] ?? null,
+            'source_element_type' => $sourceReference['source_element_type'] ?? null,
+            'source_element_number' => $sourceReference['source_element_number'] ?? null,
             'source_excerpt' => $sourceReference['source_excerpt'] ?? $sourceReference['source_reference_text'] ?? null,
             'source_reference_text' => $sourceReference['source_reference_text'] ?? $sourceReference['source_excerpt'] ?? null,
             'chunk_index' => $chunk?->chunk_index !== null ? (int) $chunk->chunk_index : null,

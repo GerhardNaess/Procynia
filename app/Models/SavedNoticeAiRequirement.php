@@ -161,6 +161,8 @@ class SavedNoticeAiRequirement extends Model
         'source_reference',
         'extraction_metadata',
         'source_row_key',
+        'source_element_key',
+        'source_element_type',
         'review_status',
         'work_status',
         'assigned_user_id',

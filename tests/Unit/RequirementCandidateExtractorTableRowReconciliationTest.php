@@ -87,6 +87,12 @@ class RequirementCandidateExtractorTableRowReconciliationTest extends TestCase
         $this->assertSame('M', $candidate->sourceReference['source_row_type_code']);
         $this->assertSame('2.1', $candidate->sourceReference['source_section_number']);
         $this->assertSame('Buying responsibility, not activities', $candidate->sourceReference['source_section_title']);
+        // The generalized source_element_key/type model (see RequirementCandidateExtractorTextElement
+        // ReconciliationTest) must also be populated for table_row, so the frontend/API can key off
+        // one unified field for every source kind — source_row_key itself is untouched, purely for
+        // backward compatibility with existing consumers.
+        $this->assertSame('doc501-tbl0-row0', $candidate->sourceElementKey);
+        $this->assertSame('table_row', $candidate->sourceReference['source_element_type']);
     }
 
     public function test_it_rejects_a_hallucinated_source_row_key_that_was_never_sent_to_the_ai(): void

@@ -231,7 +231,7 @@ class RequirementCandidateExtractor
      *                                             whichever window its char_start falls within, so structured rows are only sent alongside
      *                                             the specific call whose text actually contains them.
      */
-    public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null, array $tableRows = []): RequirementExtractionResultData
+    public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null, array $tableRows = [], array $textElements = []): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
         $startedAt = microtime(true);
@@ -270,6 +270,12 @@ class RequirementCandidateExtractor
                 $tableRows,
                 static fn (DocxTableRowData $row): bool => $row->charStart >= $windowMeta['window_start_position']
                     && $row->charStart < $windowMeta['window_end_position'],
+            ));
+
+            $windowTextElements = array_values(array_filter(
+                $textElements,
+                static fn (array $element): bool => ((int) ($element['char_start'] ?? 0)) >= $windowMeta['window_start_position']
+                    && ((int) ($element['char_start'] ?? 0)) < $windowMeta['window_end_position'],
             ));
 
             $requestResult = $this->performFullDocumentExtractionRequestForText(
@@ -324,6 +330,7 @@ class RequirementCandidateExtractor
                 $windowFilteredOutCount = $windowRawCandidateCount - $windowFilteredCandidateCount;
                 $windowCandidates = $this->mapCandidates($document, $filteredRows);
                 $windowCandidates = $this->reconcileCandidatesWithTableRows($windowCandidates, $windowTableRows);
+                $windowCandidates = $this->reconcileCandidatesWithTextElements($windowCandidates, $windowTextElements);
 
                 $rawCandidateCount += $windowRawCandidateCount;
                 $filteredCandidateCount += $windowFilteredCandidateCount;
@@ -2381,6 +2388,84 @@ class RequirementCandidateExtractor
         $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
 
         return rtrim($normalized, ". \t\n\r");
+    }
+
+    /**
+     * Purpose: Recover provenance for a candidate whose text originated from running-text body
+     * paragraphs or list items rather than a structured table row — these are never sent to the
+     * AI with a source key to echo back (see DocumentTextExtractor's `text_elements` doc comment),
+     * so the only verification available is exact/substring text matching against the document's
+     * own parsed elements. Only candidates not already resolved to a table row are considered.
+     * Inputs: The window's mapped candidates (already reconciled against table rows) and the
+     * window's structured text elements.
+     * Returns: The same candidates, each with sourceElementKey either recovered or left as-is.
+     * Side effects: None.
+     *
+     * @param  list<RequirementExtractionCandidateData>  $candidates
+     * @param  list<array<string, mixed>>  $windowTextElements
+     * @return list<RequirementExtractionCandidateData>
+     */
+    private function reconcileCandidatesWithTextElements(array $candidates, array $windowTextElements): array
+    {
+        if ($windowTextElements === []) {
+            return $candidates;
+        }
+
+        return array_map(function (RequirementExtractionCandidateData $candidate) use ($windowTextElements): RequirementExtractionCandidateData {
+            if ($candidate->sourceRowKey !== null) {
+                return $candidate;
+            }
+
+            $matchedElement = $this->matchTextElementByExactText($candidate, $windowTextElements);
+
+            return $matchedElement !== null
+                ? $candidate->withResolvedTextElement($matchedElement, 'text_matched')
+                : $candidate;
+        }, $candidates);
+    }
+
+    /**
+     * Purpose: Recover a source text element by exact (normalized) text match against the body
+     * paragraphs/list items sent to this window. A candidate matches an element when its own text
+     * equals the element's text OR is an exact (non-fuzzy) substring of it — the latter covers a
+     * single paragraph/list item legitimately containing more than one distinct requirement (the
+     * AI may split it, mirroring how multiple candidates can share one table row — see
+     * RequirementExtractionCandidateData class doc comment). Deliberately conservative: an
+     * ambiguous match (more than one element contains the candidate's text) is treated as no
+     * match, and a paraphrased/near-miss text never matches at all.
+     * Inputs: The candidate to match and the window's structured text elements.
+     * Returns: The uniquely-matching element, or null when there is no exact or an ambiguous match.
+     * Side effects: None.
+     *
+     * @param  list<array<string, mixed>>  $windowTextElements
+     */
+    private function matchTextElementByExactText(RequirementExtractionCandidateData $candidate, array $windowTextElements): ?array
+    {
+        $candidateNormalized = $this->normalizeTextForRowMatching($candidate->originalText);
+
+        if ($candidateNormalized === '') {
+            $candidateNormalized = $this->normalizeTextForRowMatching($candidate->normalizedText);
+        }
+
+        if ($candidateNormalized === '') {
+            return null;
+        }
+
+        $matches = [];
+
+        foreach ($windowTextElements as $element) {
+            $elementNormalized = $this->normalizeTextForRowMatching((string) ($element['text'] ?? ''));
+
+            if ($elementNormalized === '') {
+                continue;
+            }
+
+            if ($elementNormalized === $candidateNormalized || str_contains($elementNormalized, $candidateNormalized)) {
+                $matches[(string) ($element['element_key'] ?? '')] = $element;
+            }
+        }
+
+        return count($matches) === 1 ? array_values($matches)[0] : null;
     }
 
     private function fallbackResult(
