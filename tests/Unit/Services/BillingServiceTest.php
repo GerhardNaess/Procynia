@@ -2,7 +2,6 @@
 
 namespace Tests\Unit\Services;
 
-use App\Models\BillingEvent;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
@@ -13,15 +12,17 @@ use App\Models\Nationality;
 use App\Models\User;
 use App\Services\Billing\BillingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Tests\TestCase;
 use Mockery;
+use Tests\Concerns\UsesProjectPostgresConnection;
+use Tests\TestCase;
 
 class BillingServiceTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -537,42 +538,5 @@ class BillingServiceTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
-    }
-
-    private function projectEnv(string $key, string $default): string
-    {
-        $value = env($key);
-
-        if (is_string($value) && $value !== '') {
-            return $value;
-        }
-
-        return $default;
     }
 }

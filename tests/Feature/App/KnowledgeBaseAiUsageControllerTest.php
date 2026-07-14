@@ -16,10 +16,13 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class KnowledgeBaseAiUsageControllerTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -406,19 +409,5 @@ class KnowledgeBaseAiUsageControllerTest extends TestCase
             'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
             'is_primary' => false,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.host' => 'postgres',
-            'database.connections.pgsql.port' => 5432,
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.url' => null,
-        ]);
-
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
     }
 }

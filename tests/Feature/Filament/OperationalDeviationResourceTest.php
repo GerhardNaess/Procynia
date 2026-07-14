@@ -10,14 +10,16 @@ use App\Models\User;
 use Database\Seeders\OperationalDeviationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class OperationalDeviationResourceTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -381,22 +383,5 @@ class OperationalDeviationResourceTest extends TestCase
             'customer_id' => null,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => 'postgres',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => 'Opaque01',
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }

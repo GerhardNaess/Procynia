@@ -15,10 +15,13 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class ProcyniaHealthEndpointsTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -363,22 +366,6 @@ class ProcyniaHealthEndpointsTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
-        ]);
-    }
-
-    /**
-     * Purpose: Configure the application to use the project PostgreSQL test database.
-     * Inputs: None.
-     * Returns: None.
-     * Side effects: Resets the default connection to procynia_test.
-     */
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'cache.default' => 'array',
-            'session.driver' => 'array',
         ]);
     }
 }

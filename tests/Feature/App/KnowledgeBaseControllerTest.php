@@ -38,11 +38,14 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Mockery;
 use RuntimeException;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 use ZipArchive;
 
 class KnowledgeBaseControllerTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -6137,7 +6140,7 @@ XML;
 
     public function test_knowledge_document_legacy_mirror_fields_are_not_mass_assignable(): void
     {
-        $knowledgeItem = new KnowledgeItem();
+        $knowledgeItem = new KnowledgeItem;
 
         $this->assertFalse($knowledgeItem->isFillable('content_type'));
         $this->assertFalse($knowledgeItem->isFillable('is_active'));
@@ -8219,19 +8222,5 @@ XML;
                 && data_get($pending, 'reject_url') !== null
                 && data_get($approved, 'reject_url') === null;
         });
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.host' => env('DB_HOST', '127.0.0.1'),
-            'database.connections.pgsql.port' => (int) env('DB_PORT', 5432),
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.url' => null,
-        ]);
-
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
     }
 }

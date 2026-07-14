@@ -2,43 +2,47 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Filament\Pages\AdminNotifications;
 use App\Filament\Pages\BackupRecovery;
 use App\Filament\Pages\DoffinAutomaticImport;
-use App\Models\AdminPageHelp;
-use App\Filament\Pages\AdminNotifications;
 use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
 use App\Filament\Pages\QueueScheduler;
 use App\Filament\Pages\SystemStatus;
 use App\Filament\Resources\DoffinImportRunResource;
-use App\Filament\Resources\SyncLogResource;
-use App\Filament\Resources\SyncLogResource\Pages\ListSyncLogs;
 use App\Filament\Resources\OperationalRunbookResource;
 use App\Filament\Resources\OperationalRunbookResource\Pages\CreateOperationalRunbook;
 use App\Filament\Resources\OperationalRunbookResource\Pages\EditOperationalRunbook;
 use App\Filament\Resources\OperationalRunbookResource\Pages\ListOperationalRunbooks;
 use App\Filament\Resources\OperationalRunbookResource\Pages\ViewOperationalRunbook;
+use App\Filament\Resources\SyncLogResource;
+use App\Filament\Resources\SyncLogResource\Pages\ListSyncLogs;
+use App\Models\AdminPageHelp;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
-use App\Models\OperationalRunbookCategory;
-use App\Models\OperationalRunbookAttachment;
 use App\Models\OperationalRunbook;
+use App\Models\OperationalRunbookAttachment;
+use App\Models\OperationalRunbookCategory;
 use App\Models\User;
+use App\Services\Operations\QueueSchedulerHealthService;
+use App\Services\Operations\RuntimeStatusService;
 use Database\Seeders\OperatingProcedureSeeder;
-use Illuminate\Http\UploadedFile;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Filament\Notifications\Notification;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class DriftPagesTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -619,12 +623,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\TestJob', 'test' => true]),
-            'exception'  => 'RuntimeException: Something went wrong'."\n".'Stack trace line 1'."\n".'Stack trace line 2',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\TestJob', 'test' => true]),
+            'exception' => 'RuntimeException: Something went wrong'."\n".'Stack trace line 1'."\n".'Stack trace line 2',
+            'failed_at' => now(),
         ]);
 
         $this->actingAs($admin)
@@ -642,12 +646,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\ImportJob']),
-            'exception'  => 'ErrorException: Import failed',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\ImportJob']),
+            'exception' => 'ErrorException: Import failed',
+            'failed_at' => now(),
         ]);
 
         $this->actingAs($admin)
@@ -663,12 +667,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'ai-requirements',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\Ai\\GenerateRequirementsJob']),
-            'exception'  => 'TimeoutException: Job exceeded time limit',
-            'failed_at'  => now(),
+            'queue' => 'ai-requirements',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\Ai\\GenerateRequirementsJob']),
+            'exception' => 'TimeoutException: Job exceeded time limit',
+            'failed_at' => now(),
         ]);
 
         $response = $this->actingAs($admin)
@@ -692,12 +696,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
-            'exception'  => 'RuntimeException: Top-level message'."\n".'#0 /app/vendor/laravel/framework/src/Queue/Worker.php(123): call_user_func()'."\n".'#1 /app/vendor/laravel/framework/src/Queue/Worker.php(456): process()',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
+            'exception' => 'RuntimeException: Top-level message'."\n".'#0 /app/vendor/laravel/framework/src/Queue/Worker.php(123): call_user_func()'."\n".'#1 /app/vendor/laravel/framework/src/Queue/Worker.php(456): process()',
+            'failed_at' => now(),
         ]);
 
         $content = $this->actingAs($admin)
@@ -714,14 +718,14 @@ class DriftPagesTest extends TestCase
     {
         $admin = $this->internalAdmin();
 
-        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+        $this->mock(RuntimeStatusService::class, function ($mock) {
             $mock->shouldReceive('snapshot')->andReturn([
                 'failed_jobs_count' => 0,
-                'database'  => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
-                'redis'     => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
-                'queue'     => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
+                'database' => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
+                'redis' => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
+                'queue' => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
                 'scheduler' => ['available' => true, 'status_label' => 'Configured', 'task_count' => 0, 'tasks' => []],
-                'uptime'    => ['available' => false, 'label' => ''],
+                'uptime' => ['available' => false, 'label' => ''],
                 'cache_driver' => 'array', 'session_driver' => 'array',
                 'app_env' => 'testing', 'app_debug' => false,
                 'laravel_version' => '13.0.0', 'php_version' => PHP_VERSION,
@@ -730,7 +734,7 @@ class DriftPagesTest extends TestCase
             $mock->shouldReceive('recentFailedJobs')->andReturn([]);
         });
 
-        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+        $this->mock(QueueSchedulerHealthService::class, function ($mock) {
             $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
         });
 
@@ -757,7 +761,7 @@ class DriftPagesTest extends TestCase
     {
         $admin = $this->internalAdmin();
 
-        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+        $this->mock(RuntimeStatusService::class, function ($mock) {
             $mock->shouldReceive('snapshot')->andReturn([
                 'failed_jobs_count' => 0,
                 'database' => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
@@ -816,7 +820,7 @@ class DriftPagesTest extends TestCase
             $mock->shouldReceive('recentFailedJobs')->andReturn([]);
         });
 
-        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+        $this->mock(QueueSchedulerHealthService::class, function ($mock) {
             $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
         });
 
@@ -884,12 +888,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
-            'exception'  => 'RuntimeException: Something failed',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
+            'exception' => 'RuntimeException: Something failed',
+            'failed_at' => now(),
         ]);
 
         $this->actingAs($admin)
@@ -902,14 +906,14 @@ class DriftPagesTest extends TestCase
     {
         $admin = $this->internalAdmin();
 
-        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+        $this->mock(RuntimeStatusService::class, function ($mock) {
             $mock->shouldReceive('snapshot')->andReturn([
                 'failed_jobs_count' => 0,
-                'database'  => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
-                'redis'     => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
-                'queue'     => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
+                'database' => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
+                'redis' => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
+                'queue' => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
                 'scheduler' => ['available' => true, 'status_label' => 'Configured', 'task_count' => 0, 'tasks' => []],
-                'uptime'    => ['available' => false, 'label' => ''],
+                'uptime' => ['available' => false, 'label' => ''],
                 'cache_driver' => 'array', 'session_driver' => 'array',
                 'app_env' => 'testing', 'app_debug' => false,
                 'laravel_version' => '13.0.0', 'php_version' => PHP_VERSION,
@@ -918,7 +922,7 @@ class DriftPagesTest extends TestCase
             $mock->shouldReceive('recentFailedJobs')->andReturn([]);
         });
 
-        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+        $this->mock(QueueSchedulerHealthService::class, function ($mock) {
             $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
         });
 
@@ -937,21 +941,21 @@ class DriftPagesTest extends TestCase
         $table = (string) config('queue.failed.table', 'failed_jobs');
 
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\JobA']),
-            'exception'  => 'Exception: First failure',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\JobA']),
+            'exception' => 'Exception: First failure',
+            'failed_at' => now(),
         ]);
 
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'ai-requirements',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\JobB']),
-            'exception'  => 'Exception: Second failure',
-            'failed_at'  => now()->subMinutes(5),
+            'queue' => 'ai-requirements',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\JobB']),
+            'exception' => 'Exception: Second failure',
+            'failed_at' => now()->subMinutes(5),
         ]);
 
         $this->assertSame(2, (int) DB::table($table)->count());
@@ -970,12 +974,12 @@ class DriftPagesTest extends TestCase
 
         $table = (string) config('queue.failed.table', 'failed_jobs');
         DB::table($table)->insert([
-            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
-            'queue'      => 'default',
-            'payload'    => json_encode(['displayName' => 'App\\Jobs\\RefreshTestJob']),
-            'exception'  => 'Exception: Will be cleared',
-            'failed_at'  => now(),
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\RefreshTestJob']),
+            'exception' => 'Exception: Will be cleared',
+            'failed_at' => now(),
         ]);
 
         $component = Livewire::actingAs($admin)->test(SystemStatus::class);
@@ -1027,7 +1031,7 @@ class DriftPagesTest extends TestCase
         $table = (string) config('queue.failed.table', 'failed_jobs');
 
         $firstId = DB::table($table)->insertGetId([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
             'queue' => 'default',
             'payload' => json_encode(['displayName' => 'App\\Jobs\\JobA']),
@@ -1036,7 +1040,7 @@ class DriftPagesTest extends TestCase
         ]);
 
         $secondId = DB::table($table)->insertGetId([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'connection' => 'redis',
             'queue' => 'ai-requirements',
             'payload' => json_encode(['displayName' => 'App\\Jobs\\JobB']),
@@ -1131,22 +1135,5 @@ class DriftPagesTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
-            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
-            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
-            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
-            'database.connections.pgsql.password' => env('DB_PASSWORD', 'Opaque01'),
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }

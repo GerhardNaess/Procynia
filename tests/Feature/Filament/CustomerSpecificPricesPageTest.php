@@ -13,11 +13,13 @@ use App\Services\Billing\BillingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class CustomerSpecificPricesPageTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -121,22 +123,5 @@ class CustomerSpecificPricesPageTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
-            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
-            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
-            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
-            'database.connections.pgsql.password' => env('DB_PASSWORD', ''),
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }

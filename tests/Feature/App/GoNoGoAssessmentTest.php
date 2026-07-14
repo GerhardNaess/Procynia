@@ -14,10 +14,13 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class GoNoGoAssessmentTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     private bool $createdSavedNoticesTable = false;
 
     private bool $createdTemplatesTable = false;
@@ -507,53 +510,5 @@ class GoNoGoAssessmentTest extends TestCase
 
             $this->createdAnswersTable = true;
         }
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
-    }
-
-    private function projectEnv(string $key, string $default): string
-    {
-        static $values = null;
-
-        if (! is_array($values)) {
-            $values = [];
-
-            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $trimmed = trim($line);
-
-                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
-                    continue;
-                }
-
-                [$envKey, $envValue] = explode('=', $trimmed, 2);
-                $values[trim($envKey)] = trim($envValue, " \t\n\r\0\x0B\"'");
-            }
-        }
-
-        return (string) ($values[$key] ?? $default);
     }
 }

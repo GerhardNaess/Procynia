@@ -3,13 +3,19 @@
 namespace Tests\Unit\Ai;
 
 use App\Models\AiTokenEvent;
+use App\Models\Customer;
+use App\Models\Language;
+use App\Models\Nationality;
 use App\Services\Ai\AiTokenLogger;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class AiTokenLoggerProviderTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -32,13 +38,13 @@ class AiTokenLoggerProviderTest extends TestCase
         $customer = $this->createCustomer();
 
         $logger->record([
-            'customer_id'   => $customer->id,
+            'customer_id' => $customer->id,
             'operation_key' => 'test_op',
-            'model'         => 'gpt-4.1',
-            'provider'      => 'openai',
-            'input_tokens'  => 100,
+            'model' => 'gpt-4.1',
+            'provider' => 'openai',
+            'input_tokens' => 100,
             'output_tokens' => 50,
-            'total_tokens'  => 150,
+            'total_tokens' => 150,
         ]);
 
         $event = AiTokenEvent::query()->where('customer_id', $customer->id)->first();
@@ -48,19 +54,19 @@ class AiTokenLoggerProviderTest extends TestCase
 
     public function test_deployment_name_and_region_are_stored(): void
     {
-        $logger   = app(AiTokenLogger::class);
+        $logger = app(AiTokenLogger::class);
         $customer = $this->createCustomer();
 
         $logger->record([
-            'customer_id'     => $customer->id,
-            'operation_key'   => 'test_op',
-            'model'           => 'gpt-4.1',
-            'provider'        => 'azure_openai',
+            'customer_id' => $customer->id,
+            'operation_key' => 'test_op',
+            'model' => 'gpt-4.1',
+            'provider' => 'azure_openai',
             'deployment_name' => 'my-gpt4-deployment',
             'provider_region' => 'norwayeast',
-            'input_tokens'    => 200,
-            'output_tokens'   => 80,
-            'total_tokens'    => 280,
+            'input_tokens' => 200,
+            'output_tokens' => 80,
+            'total_tokens' => 280,
         ]);
 
         $event = AiTokenEvent::query()->where('customer_id', $customer->id)->first();
@@ -74,16 +80,16 @@ class AiTokenLoggerProviderTest extends TestCase
     {
         config(['services.openai.provider_key' => 'openai']);
 
-        $logger   = app(AiTokenLogger::class);
+        $logger = app(AiTokenLogger::class);
         $customer = $this->createCustomer();
 
         $logger->record([
-            'customer_id'   => $customer->id,
+            'customer_id' => $customer->id,
             'operation_key' => 'test_op',
-            'model'         => 'gpt-4.1',
-            'input_tokens'  => 50,
+            'model' => 'gpt-4.1',
+            'input_tokens' => 50,
             'output_tokens' => 25,
-            'total_tokens'  => 75,
+            'total_tokens' => 75,
         ]);
 
         $event = AiTokenEvent::query()->where('customer_id', $customer->id)->first();
@@ -93,16 +99,16 @@ class AiTokenLoggerProviderTest extends TestCase
 
     public function test_existing_token_logging_still_works_without_provider(): void
     {
-        $logger   = app(AiTokenLogger::class);
+        $logger = app(AiTokenLogger::class);
         $customer = $this->createCustomer();
 
         $logger->record([
-            'customer_id'   => $customer->id,
+            'customer_id' => $customer->id,
             'operation_key' => 'saved_notice_requirement_answer_draft',
-            'model'         => 'gpt-4.1',
-            'input_tokens'  => 1000,
+            'model' => 'gpt-4.1',
+            'input_tokens' => 1000,
             'output_tokens' => 400,
-            'total_tokens'  => 1400,
+            'total_tokens' => 1400,
         ]);
 
         $event = AiTokenEvent::query()->where('customer_id', $customer->id)->first();
@@ -110,30 +116,17 @@ class AiTokenLoggerProviderTest extends TestCase
         $this->assertSame(1400, $event->total_tokens);
     }
 
-    private function createCustomer(): \App\Models\Customer
+    private function createCustomer(): Customer
     {
-        $language    = \App\Models\Language::query()->firstOrCreate(['code' => 'no'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk']);
-        $nationality = \App\Models\Nationality::query()->firstOrCreate(['code' => 'NO'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO']);
+        $language = Language::query()->firstOrCreate(['code' => 'no'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk']);
+        $nationality = Nationality::query()->firstOrCreate(['code' => 'NO'], ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO']);
 
-        return \App\Models\Customer::query()->create([
-            'name'           => 'Provider Test AS',
-            'slug'           => 'provider-test-'.Str::lower(Str::random(6)),
-            'language_id'    => $language->id,
+        return Customer::query()->create([
+            'name' => 'Provider Test AS',
+            'slug' => 'provider-test-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
             'nationality_id' => $nationality->id,
-            'is_active'      => true,
+            'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.host' => env('DB_HOST', '127.0.0.1'),
-            'database.connections.pgsql.port' => (int) env('DB_PORT', 5432),
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.url' => null,
-        ]);
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
     }
 }

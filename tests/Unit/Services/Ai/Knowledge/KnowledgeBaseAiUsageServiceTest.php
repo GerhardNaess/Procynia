@@ -17,10 +17,13 @@ use App\Services\Ai\Knowledge\KnowledgeBaseAiUsageService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class KnowledgeBaseAiUsageServiceTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -316,20 +319,6 @@ class KnowledgeBaseAiUsageServiceTest extends TestCase
     // ------------------------------------------------------------------
     // Private fixture helpers
     // ------------------------------------------------------------------
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.host' => 'postgres',
-            'database.connections.pgsql.port' => 5432,
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.url' => null,
-        ]);
-
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
-    }
 
     /**
      * Creates a Customer with prerequisite language and nationality rows.

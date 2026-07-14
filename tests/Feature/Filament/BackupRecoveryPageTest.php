@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BackupRecovery;
+use App\Filament\Pages\SystemStatus;
 use App\Models\BackupRun;
 use App\Models\BackupSetting;
 use App\Models\Customer;
@@ -14,11 +15,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class BackupRecoveryPageTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -272,7 +275,7 @@ class BackupRecoveryPageTest extends TestCase
         BackupSetting::create(['backup_enabled' => false]);
 
         $this->actingAs($admin)
-            ->get(\App\Filament\Pages\SystemStatus::getUrl())
+            ->get(SystemStatus::getUrl())
             ->assertOk()
             ->assertSee('Backup er stoppet manuelt');
     }
@@ -308,22 +311,5 @@ class BackupRecoveryPageTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => 'postgres',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => 'Opaque01',
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }

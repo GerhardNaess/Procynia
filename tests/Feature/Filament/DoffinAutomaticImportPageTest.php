@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class DoffinAutomaticImportPageTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -35,13 +37,6 @@ class DoffinAutomaticImportPageTest extends TestCase
         DB::disconnect(DB::getDefaultConnection());
 
         parent::tearDown();
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        DB::purge();
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 
     public function test_internal_admin_can_open_the_page(): void

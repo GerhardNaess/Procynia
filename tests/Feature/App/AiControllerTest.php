@@ -56,11 +56,14 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Mockery;
 use RuntimeException;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 use ZipArchive;
 
 class AiControllerTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -9115,16 +9118,5 @@ class AiControllerTest extends TestCase
             ->count();
 
         $this->assertSame(0, $evidenceCount, 'No evidence rows should be created when draft generation is blocked.');
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-        ]);
-
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
     }
 }

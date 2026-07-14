@@ -37,10 +37,13 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class RequirementExtractionRunServiceTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -2846,16 +2849,5 @@ class RequirementExtractionRunServiceTest extends TestCase
             'confidence' => 0.95,
             'warnings' => [],
         ], $overrides);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-        ]);
-
-        DB::purge('pgsql');
-        DB::reconnect('pgsql');
     }
 }

@@ -13,11 +13,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class AiUsageGuardTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -353,38 +355,6 @@ class AiUsageGuardTest extends TestCase
     private function clearRateLimits(User $user, string $operationKey): void
     {
         RateLimiter::clear(sprintf('ai:user:%d:%s', $user->id, $operationKey));
-    }
-
-    /**
-     * Purpose: Switch the test case to the project's PostgreSQL connection.
-     * Inputs: None.
-     * Returns: None.
-     * Side effects: Reconfigures the default database connection for the test process.
-     */
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => 'postgres',
-                'port' => '5432',
-                'database' => 'procynia_test',
-                'username' => 'gehard',
-                'password' => 'Opaque01',
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
     }
 
     /**

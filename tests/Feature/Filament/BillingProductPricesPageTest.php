@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class BillingProductPricesPageTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -661,14 +663,14 @@ class BillingProductPricesPageTest extends TestCase
         $admin = $this->internalAdmin();
 
         $product = $this->createProduct([
-            'key'      => 'base_interval_help_'.Str::lower(Str::random(6)),
-            'name'     => 'Ultra interval help',
+            'key' => 'base_interval_help_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra interval help',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
         ]);
 
         $price = $this->createPrice($product, [
-            'key'      => 'ultra_interval_help_'.Str::lower(Str::random(8)),
-            'name'     => 'Ultra månedlig interval help',
+            'key' => 'ultra_interval_help_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig interval help',
             'interval' => BillingPrice::INTERVAL_MONTHLY,
         ]);
 
@@ -684,14 +686,14 @@ class BillingProductPricesPageTest extends TestCase
         $admin = $this->internalAdmin();
 
         $product = $this->createProduct([
-            'key'      => 'base_amount_help_'.Str::lower(Str::random(6)),
-            'name'     => 'Ultra amount help',
+            'key' => 'base_amount_help_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra amount help',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
         ]);
 
         $price = $this->createPrice($product, [
-            'key'      => 'ultra_amount_help_'.Str::lower(Str::random(8)),
-            'name'     => 'Ultra månedlig amount help',
+            'key' => 'ultra_amount_help_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig amount help',
             'interval' => BillingPrice::INTERVAL_MONTHLY,
         ]);
 
@@ -707,14 +709,14 @@ class BillingProductPricesPageTest extends TestCase
         $admin = $this->internalAdmin();
 
         $product = $this->createProduct([
-            'key'      => 'base_tierkey_help_'.Str::lower(Str::random(6)),
-            'name'     => 'Ultra tier key help',
+            'key' => 'base_tierkey_help_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra tier key help',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
         ]);
 
         $price = $this->createPrice($product, [
-            'key'      => 'ultra_tierkey_help_'.Str::lower(Str::random(8)),
-            'name'     => 'Ultra månedlig tier key help',
+            'key' => 'ultra_tierkey_help_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig tier key help',
             'interval' => BillingPrice::INTERVAL_MONTHLY,
             'tier_key' => 'ultra',
         ]);
@@ -731,14 +733,14 @@ class BillingProductPricesPageTest extends TestCase
         $admin = $this->internalAdmin();
 
         $product = $this->createProduct([
-            'key'      => 'base_currency_help_'.Str::lower(Str::random(6)),
-            'name'     => 'Ultra currency help',
+            'key' => 'base_currency_help_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra currency help',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
         ]);
 
         $price = $this->createPrice($product, [
-            'key'      => 'ultra_currency_help_'.Str::lower(Str::random(8)),
-            'name'     => 'Ultra månedlig currency help',
+            'key' => 'ultra_currency_help_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig currency help',
             'interval' => BillingPrice::INTERVAL_MONTHLY,
         ]);
 
@@ -754,18 +756,18 @@ class BillingProductPricesPageTest extends TestCase
         $admin = $this->internalAdmin();
 
         $product = $this->createProduct([
-            'key'      => 'base_helpertext_'.Str::lower(Str::random(6)),
-            'name'     => 'Ultra helpertext',
+            'key' => 'base_helpertext_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra helpertext',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
         ]);
 
         $price = $this->createPrice($product, [
-            'key'                => 'ultra_helpertext_'.Str::lower(Str::random(8)),
-            'name'               => 'Ultra månedlig helpertext',
-            'interval'           => BillingPrice::INTERVAL_MONTHLY,
-            'unit_amount'        => 649000,
+            'key' => 'ultra_helpertext_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig helpertext',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
             'included_ai_offers' => 0,
-            'is_active'          => true,
+            'is_active' => true,
         ]);
 
         $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
@@ -904,22 +906,5 @@ class BillingProductPricesPageTest extends TestCase
             'interval' => BillingPrice::INTERVAL_MONTHLY,
             ...$attributes,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
-            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
-            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
-            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
-            'database.connections.pgsql.password' => env('DB_PASSWORD', ''),
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }

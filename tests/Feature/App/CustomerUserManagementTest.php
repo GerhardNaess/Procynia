@@ -2,25 +2,26 @@
 
 namespace Tests\Feature\App;
 
-use App\Models\Customer;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
+use App\Models\Customer;
 use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
-use App\Models\CustomerBillingLine;
-use App\Models\CustomerUserServiceLevel;
 use App\Services\Billing\BillingService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class CustomerUserManagementTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -1232,7 +1233,7 @@ class CustomerUserManagementTest extends TestCase
     private function createUserServicePrice(Customer $customer, string $key, string $name, array $features): BillingPrice
     {
         $product = BillingProduct::query()->updateOrCreate(
-            ['key' => 'product_' . $key],
+            ['key' => 'product_'.$key],
             [
                 'name' => $name,
                 'description' => 'Brukernivå for kundens abonnement.',
@@ -1281,42 +1282,5 @@ class CustomerUserManagementTest extends TestCase
         return $this->actingAs($user)
             ->withSession(['_token' => 'test-token'])
             ->patch($uri, ['_token' => 'test-token', ...$data]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
-    }
-
-    private function projectEnv(string $key, string $default): string
-    {
-        $value = env($key);
-
-        if (is_string($value) && $value !== '') {
-            return $value;
-        }
-
-        return $default;
     }
 }

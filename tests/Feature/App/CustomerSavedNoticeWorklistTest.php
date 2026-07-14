@@ -4,10 +4,10 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\Department;
-use App\Models\Notice;
-use App\Models\NoticeDocument;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\Notice;
+use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticeInfoItem;
@@ -15,15 +15,18 @@ use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Testing\TestResponse;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class CustomerSavedNoticeWorklistTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     private bool $createdSavedNoticesTable = false;
 
     private bool $createdBidSubmissionsTable = false;
@@ -2932,7 +2935,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ] as $historyType => $expectedTitle) {
             $page = $this->inertiaPage(
                 $this->actingAs($context['admin'])
-                    ->get('/app/notices?mode=history&history_type=' . $historyType),
+                    ->get('/app/notices?mode=history&history_type='.$historyType),
             );
 
             $this->assertSame($historyType, $page['props']['filters']['history_type']);
@@ -3638,8 +3641,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
             ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
             ->post(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), [
-            'comment' => 'Viewer comment should fail.',
-        ])
+                'comment' => 'Viewer comment should fail.',
+            ])
             ->assertForbidden();
 
         $page = $this->inertiaPage(
@@ -4392,8 +4395,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ?string $contactPersonEmail = null,
         ?string $notes = null,
         ?string $externalUrl = null,
-    ): SavedNotice
-    {
+    ): SavedNotice {
         $sourceType = in_array($sourceType, SavedNotice::SOURCE_TYPES, true)
             ? $sourceType
             : SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE;
@@ -4874,53 +4876,5 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         });
 
         $this->createdSavedNoticePhaseCommentsTable = true;
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
-    }
-
-    private function projectEnv(string $key, string $default): string
-    {
-        static $values = null;
-
-        if (! is_array($values)) {
-            $values = [];
-
-            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $trimmed = trim($line);
-
-                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
-                    continue;
-                }
-
-                [$envKey, $envValue] = explode('=', $trimmed, 2);
-                $values[$envKey] = trim($envValue, " \t\n\r\0\x0B\"'");
-            }
-        }
-
-        return $values[$key] ?? $default;
     }
 }

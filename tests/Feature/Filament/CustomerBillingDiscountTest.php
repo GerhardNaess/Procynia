@@ -12,11 +12,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class CustomerBillingDiscountTest extends TestCase
 {
     use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
     protected function setUp(): void
     {
@@ -155,7 +157,7 @@ class CustomerBillingDiscountTest extends TestCase
     {
         return User::query()->create([
             'name' => 'Procynia Admin',
-            'email' => 'procynia.admin+' . Str::lower(Str::random(6)) . '@example.test',
+            'email' => 'procynia.admin+'.Str::lower(Str::random(6)).'@example.test',
             'password' => bcrypt('SecretPass123!'),
             'role' => User::ROLE_SUPER_ADMIN,
             'customer_id' => null,
@@ -177,25 +179,10 @@ class CustomerBillingDiscountTest extends TestCase
 
         return Customer::query()->create([
             'name' => $name,
-            'slug' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
-    }
-
-    private function useProjectPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
-            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
-            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
-            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
-            'database.connections.pgsql.password' => env('DB_PASSWORD', ''),
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
     }
 }

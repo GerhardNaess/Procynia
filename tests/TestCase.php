@@ -4,12 +4,16 @@ namespace Tests;
 
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
 {
     /**
-     * The only database targets allowed during automated tests.
+     * The only database targets allowed during automated tests. This is the single source of
+     * truth for test-database safety — Tests\Concerns\UsesProjectPostgresConnection reuses it
+     * (via assertConnectionIsSafeTestDatabase()) rather than keeping its own copy, so there is
+     * exactly one place that decides what counts as "a test database".
      *
      * @var array<string, list<string>>
      */
@@ -109,6 +113,58 @@ abstract class TestCase extends BaseTestCase
 
         if ($defaultConnection === 'pgsql' && $databaseName === 'procynia') {
             throw new RuntimeException('Refusing to run tests against the real procynia database.');
+        }
+    }
+
+    /**
+     * Purpose: Fail fast if a live database connection does not resolve to an explicitly allowed
+     * test database — checked against the ACTIVE connection itself (via a live `current_database()`
+     * query), not just config or environment values, so a stale PDO handle or a misconfigured
+     * fallback can never silently let a test run — let alone migrate or write — against the real
+     * development database. This is the check Tests\Concerns\UsesProjectPostgresConnection calls
+     * immediately after establishing/reconnecting a connection, before any other test code runs.
+     * Inputs: The connection name to verify (e.g. "pgsql").
+     * Returns: None.
+     * Side effects: Opens the connection if not already open (a lightweight `select` query).
+     */
+    public static function assertConnectionIsSafeTestDatabase(string $connectionName): void
+    {
+        $driver = (string) config("database.connections.{$connectionName}.driver", $connectionName);
+        $allowedDatabases = self::SAFE_TEST_DATABASES[$connectionName] ?? self::SAFE_TEST_DATABASES[$driver] ?? [];
+
+        if ($allowedDatabases === []) {
+            throw new RuntimeException(sprintf(
+                'Refusing to run tests on connection [%s] — it is not in the known-safe test connection list.',
+                $connectionName,
+            ));
+        }
+
+        $configuredDatabase = trim((string) config("database.connections.{$connectionName}.database", ''));
+
+        if (! in_array($configuredDatabase, $allowedDatabases, true)) {
+            throw new RuntimeException(sprintf(
+                'Refusing to run tests against connection [%s] configured for database [%s]. Allowed: %s.',
+                $connectionName,
+                $configuredDatabase !== '' ? $configuredDatabase : 'n/a',
+                implode(', ', $allowedDatabases),
+            ));
+        }
+
+        if ($driver === 'sqlite') {
+            // :memory: has no live "current database" concept to query — the config check above
+            // is the whole check for this driver.
+            return;
+        }
+
+        $liveDatabase = trim((string) DB::connection($connectionName)->selectOne('select current_database() as db')->db);
+
+        if (! in_array($liveDatabase, $allowedDatabases, true)) {
+            throw new RuntimeException(sprintf(
+                'Refusing to run tests — live connection [%s] reports current_database() = [%s], not an allowed test database (%s). A config value can lie about which database is actually connected; this check cannot.',
+                $connectionName,
+                $liveDatabase !== '' ? $liveDatabase : 'n/a',
+                implode(', ', $allowedDatabases),
+            ));
         }
     }
 }
