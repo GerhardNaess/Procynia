@@ -2,11 +2,11 @@
 
 namespace Tests\Unit;
 
+use Illuminate\Database\Connection;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use PDO;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -26,10 +26,13 @@ use Tests\TestCase;
  *
  * Inputs: None.
  * Returns: None.
- * Side effects: None on the real 'procynia' database — the negative-case test constructs an
- * isolated inner test case whose RefreshDatabase migration hook is overridden to be inert (it
- * never calls the real migrator), so even if the guard had a bug, this test cannot itself trigger
- * a migrate:fresh against any database.
+ * Side effects: None on any real database — the negative-case test never opens a connection to
+ * 'procynia' (or anywhere else). It substitutes a connection DOUBLE (a minimal
+ * Illuminate\Database\Connection subclass whose selectOne() returns a canned, deliberately
+ * disallowed database name) for the "pgsql" connection before the guard runs, so the LIVE check
+ * sees exactly the disagreement it exists to catch, entirely in-process. The migration hook is
+ * additionally overridden to be inert (it never calls the real migrator), so even if the guard
+ * had a bug, this test cannot itself trigger a migrate:fresh against any database.
  */
 class RefreshDatabaseRealLifecycleSafetyTest extends TestCase
 {
@@ -68,17 +71,29 @@ class RefreshDatabaseRealLifecycleSafetyTest extends TestCase
             public bool $refreshTestDatabaseWasReached = false;
 
             /**
-             * Injects the exact failure mode behind the incident — config still correctly says
-             * procynia_test, but the LIVE PDO is actually talking to the real database (e.g. a
-             * stale handle established before a config change) — immediately before the real
-             * guard runs, so the guard sees precisely what a genuinely corrupted boot would
-             * produce, in the same call it would run in for every real test.
+             * Injects the failure mode behind the incident — config still correctly says
+             * procynia_test, but the LIVE connection disagrees (e.g. a stale PDO handle
+             * established before a config change) — immediately before the real guard runs, so
+             * the guard sees precisely what a genuinely corrupted boot would produce. Uses a
+             * connection DOUBLE (never a real PDO/network connection, to any database) whose
+             * selectOne() returns a canned, deliberately-disallowed database name — this is
+             * sufficient to exercise the exact code path assertConnectionIsSafeTestDatabase()
+             * uses (`DB::connection($name)->selectOne('select current_database() as db')->db`)
+             * without ever opening a socket anywhere.
              */
             protected function guardAgainstUnsafeTestingDatabase(Application $app): void
             {
-                $rawPdo = new PDO('pgsql:host=postgres;port=5432;dbname=procynia', 'gehard', 'Opaque01');
                 $defaultConnection = (string) $app['config']->get('database.default');
-                $app->make('db')->connection($defaultConnection)->setPdo($rawPdo);
+                $database = $app->make('db');
+
+                $database->purge($defaultConnection);
+                $database->extend($defaultConnection, fn (): Connection => new class(fn () => throw new RuntimeException('This connection double must never actually connect anywhere.'), 'procynia_test', '', ['driver' => 'pgsql']) extends Connection
+                {
+                    public function selectOne($query, $bindings = [], $useReadPdo = true)
+                    {
+                        return (object) ['db' => 'not_an_allowed_test_database'];
+                    }
+                });
 
                 parent::guardAgainstUnsafeTestingDatabase($app);
             }
@@ -105,7 +120,7 @@ class RefreshDatabaseRealLifecycleSafetyTest extends TestCase
             $this->fail('Expected a RuntimeException to be thrown before RefreshDatabase could run.');
         } catch (RuntimeException $exception) {
             $this->assertStringContainsString('live connection', $exception->getMessage());
-            $this->assertStringContainsString('procynia', $exception->getMessage());
+            $this->assertStringContainsString('not_an_allowed_test_database', $exception->getMessage());
         }
 
         $this->assertFalse(
