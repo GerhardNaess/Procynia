@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Data\Ai\Requirements\DocxHeadingData;
+use App\Data\Ai\Requirements\DocxListItemData;
 use App\Data\Ai\Requirements\DocxTableCellData;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\DocxTableRowData;
@@ -95,21 +97,25 @@ class DocumentTextExtractor
     }
 
     /**
-     * Purpose: Extract DOCX text alongside deterministically-parsed <w:tbl> table structure, so
-     * requirement extraction can use canonical structured rows (source_row_key, original headers,
-     * cell values) instead of relying on flattened prose to preserve column/value association.
+     * Purpose: Extract DOCX text alongside a deterministic, generic model of the document's
+     * canonical source elements — tables (with rows/cells), headings, and list items — each
+     * carrying a stable source key, document order, reconstructed Word auto-numbering (any
+     * numFmt: decimal, lower/upperLetter, lower/upperRoman, decimalZero, ordinal — resolved
+     * generically from the document's own numbering.xml/styles.xml, never hardcoded to any
+     * specific numId, style name, or language), and char_start/char_end within the same flat
+     * text extractText()/extractDocxText() would produce. This is the server-authoritative
+     * source of provenance for requirement extraction — never the AI's restatement of it.
      * Inputs: Absolute filesystem path to a DOCX file.
-     * Returns: The same flat text extractText()/extractDocxText() would produce, plus the
-     * document's tables with rows positioned via char_start/char_end within that same text.
+     * Returns: text, tables, headings, list_items — see above.
      * Side effects: Opens the ZIP archive and parses XML. Used only by the requirement
      * extraction upload path (AiController::storeDocuments()) — extractText()/extractStructuredText()
      * and their existing callers (Enterprise Wiki, Knowledge Base ingest) are untouched.
      *
-     * @return array{text: string, tables: list<DocxTableData>}
+     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>}
      */
     public function extractDocxTextAndTables(string $path): array
     {
-        $empty = ['text' => '', 'tables' => []];
+        $empty = ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => []];
 
         if (! is_file($path) || ! is_readable($path)) {
             return $empty;
@@ -123,19 +129,24 @@ class DocumentTextExtractor
 
         $xml = $zip->getFromName('word/document.xml');
         $stylesXml = $zip->getFromName('word/styles.xml');
+        $numberingXml = $zip->getFromName('word/numbering.xml');
         $zip->close();
 
         if (! is_string($xml) || trim($xml) === '') {
             return $empty;
         }
 
-        return $this->parseWordXmlTextAndTables($xml, is_string($stylesXml) ? $stylesXml : null);
+        return $this->parseWordXmlTextAndTables(
+            $xml,
+            is_string($stylesXml) ? $stylesXml : null,
+            is_string($numberingXml) ? $numberingXml : null,
+        );
     }
 
     /**
-     * @return array{text: string, tables: list<DocxTableData>}
+     * @return array{text: string, tables: list<DocxTableData>, headings: list<DocxHeadingData>, list_items: list<DocxListItemData>}
      */
-    private function parseWordXmlTextAndTables(string $xml, ?string $stylesXml = null): array
+    private function parseWordXmlTextAndTables(string $xml, ?string $stylesXml = null, ?string $numberingXml = null): array
     {
         $previousLibxmlState = libxml_use_internal_errors(true);
 
@@ -143,25 +154,46 @@ class DocumentTextExtractor
             $dom = new DOMDocument;
 
             if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
-                return ['text' => '', 'tables' => []];
+                return ['text' => '', 'tables' => [], 'headings' => [], 'list_items' => []];
             }
 
             $xpath = new DOMXPath($dom);
             $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
             $styleMap = $this->extractDocxStyleMap($stylesXml);
+            $styleNumberingMap = $this->extractDocxStyleNumberingMap($stylesXml);
+            $numberingDefs = $this->extractDocxNumberingDefinitions($numberingXml);
+            /** @var array<string, array<int, int>> $numberingCounters numId => [ilvl => current value] */
+            $numberingCounters = [];
 
             $paragraphs = [];
             /** @var array<int, int> $tableOrderByObjectId spl_object_id(w:tbl) => table order index */
             $tableOrderByObjectId = [];
+            // spl_object_id() is only unique while the object is alive — docxTableCellAncestry()
+            // creates transient parentNode wrapper objects on every call, and once nothing else
+            // references an earlier <w:tbl>/<w:tr> wrapper, PHP can garbage-collect it and reuse
+            // its id for a LATER, entirely different table/row. Without holding these arrays, a
+            // document with more than a handful of tables silently collapsed dozens of distinct
+            // tables down to a handful of merged, cross-contaminated ones (confirmed empirically:
+            // 50 real <w:tbl> elements collapsed to 6 apparent ones). Keeping a strong reference
+            // here is the fix — it is the entire purpose of these two arrays.
+            $tableObjectKeepAlive = [];
             /** @var array<int, array<int, int>> $rowOrderByTable tableIndex => [spl_object_id(w:tr) => row order index] */
             $rowOrderByTable = [];
+            $rowObjectKeepAlive = [];
             /** @var array<int, array<int, array<int, list<string>>>> $tableCellParagraphs tableIndex => rowIndex => colIndex => paragraph texts */
             $tableCellParagraphs = [];
             /** @var array<string, array{0: int, 1: int}> $rowParagraphIndexRange "tableIndex:rowIndex" => [minParagraphIndex, maxParagraphIndex] */
             $rowParagraphIndexRange = [];
-            /** @var array<int, string> $tableSectionHeading tableIndex => nearest preceding heading text */
+            /** @var array<int, array{text: ?string, number: ?string}> $tableSectionHeading tableIndex => nearest preceding heading */
             $tableSectionHeading = [];
-            $currentSectionHeading = null;
+            $currentSectionHeadingText = null;
+            $currentSectionHeadingNumber = null;
+            /** @var list<DocxHeadingData> $headings canonical heading source elements, in document order */
+            $headings = [];
+            /** @var list<DocxListItemData> $listItems canonical list-item source elements, in document order */
+            $listItems = [];
+            $headingOrdinal = 0;
+            $listItemOrdinal = 0;
 
             foreach ($xpath->query('//w:p') as $paragraph) {
                 $textNodes = $xpath->query('.//w:t', $paragraph);
@@ -174,6 +206,31 @@ class DocumentTextExtractor
                 }
 
                 $paragraphText = $this->normalizeWhitespace(implode(' ', $parts));
+
+                $styleId = null;
+                $styleNode = $xpath->query('.//w:pPr/w:pStyle', $paragraph);
+
+                if ($styleNode !== false && $styleNode->length > 0) {
+                    $styleId = (string) $styleNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+                }
+
+                $resolvedStyle = $styleMap[$styleId] ?? $styleId;
+
+                // Word auto-numbering (e.g. a "Req. No." table cell styled as a heading level
+                // with no literal text at all — the number only exists via numPr + numbering.xml,
+                // never as a <w:t> value) is resolved for every paragraph up front, in document
+                // order, so the shared per-list counters stay correct regardless of whether the
+                // paragraph turns out to be a heading, a table cell, or neither.
+                $numberingRef = $this->resolveDocxParagraphNumbering($paragraph, $xpath, $styleId, $styleNumberingMap);
+                $renderedNumber = $numberingRef !== null
+                    ? $this->renderDocxNumberingValue($numberingRef, $numberingDefs, $numberingCounters)
+                    : null;
+
+                // Only substitutes when the paragraph's own text is empty — a heading always has
+                // real title text, so this only ever fires for auto-numbered-but-textless cells.
+                if ($paragraphText === '' && $renderedNumber !== null) {
+                    $paragraphText = $renderedNumber;
+                }
 
                 // Table ancestry/column registration happens BEFORE the blank-text skip below,
                 // so a genuinely blank cell (e.g. the empty "Response instruction"/"Y/N"/
@@ -189,19 +246,25 @@ class DocumentTextExtractor
 
                     if (! array_key_exists($tableObjectId, $tableOrderByObjectId)) {
                         $tableOrderByObjectId[$tableObjectId] = count($tableOrderByObjectId);
+                        $tableObjectKeepAlive[] = $table;
                     }
 
                     $tableIndex = $tableOrderByObjectId[$tableObjectId];
 
                     if (! array_key_exists($tableIndex, $tableSectionHeading)) {
-                        $tableSectionHeading[$tableIndex] = $currentSectionHeading;
+                        $tableSectionHeading[$tableIndex] = [
+                            'text' => $currentSectionHeadingText,
+                            'number' => $currentSectionHeadingNumber,
+                        ];
                     }
 
                     $rowOrderByTable[$tableIndex] ??= [];
+                    $rowObjectKeepAlive[$tableIndex] ??= [];
                     $rowObjectId = spl_object_id($tableRow);
 
                     if (! array_key_exists($rowObjectId, $rowOrderByTable[$tableIndex])) {
                         $rowOrderByTable[$tableIndex][$rowObjectId] = count($rowOrderByTable[$tableIndex]);
+                        $rowObjectKeepAlive[$tableIndex][] = $tableRow;
                     }
 
                     $rowIndex = $rowOrderByTable[$tableIndex][$rowObjectId];
@@ -223,18 +286,36 @@ class DocumentTextExtractor
                 } elseif ($paragraphText !== '') {
                     // Heading tracking only considers body-level paragraphs (not inside a table
                     // cell) — a styled heading inside a table cell is not a document section.
-                    $styleId = null;
-                    $styleNode = $xpath->query('.//w:pPr/w:pStyle', $paragraph);
-
-                    if ($styleNode !== false && $styleNode->length > 0) {
-                        $styleId = (string) $styleNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
-                    }
-
-                    $resolvedStyle = $styleMap[$styleId] ?? $styleId;
                     $level = $this->resolveDocxHeadingLevel($styleId, $resolvedStyle);
+                    $paragraphIndex = count($paragraphs);
 
                     if ($level !== null) {
-                        $currentSectionHeading = $paragraphText;
+                        $currentSectionHeadingText = $paragraphText;
+                        $currentSectionHeadingNumber = $renderedNumber;
+
+                        $headings[] = new DocxHeadingData(
+                            sourceKey: sprintf('heading-%d', $headingOrdinal),
+                            documentOrder: $paragraphIndex,
+                            level: $level,
+                            text: $paragraphText,
+                            number: $renderedNumber,
+                            charStart: 0,
+                            charEnd: 0,
+                        );
+                        $headingOrdinal++;
+                    } elseif ($numberingRef !== null) {
+                        // Auto-numbered body paragraph that isn't a recognized document heading —
+                        // a list item (e.g. a lettered/numbered clause inside body text).
+                        $listItems[] = new DocxListItemData(
+                            sourceKey: sprintf('listitem-%d', $listItemOrdinal),
+                            documentOrder: $paragraphIndex,
+                            ilvl: $numberingRef['ilvl'],
+                            text: $paragraphText,
+                            number: $renderedNumber,
+                            charStart: 0,
+                            charEnd: 0,
+                        );
+                        $listItemOrdinal++;
                     }
                 }
 
@@ -248,8 +329,10 @@ class DocumentTextExtractor
             $joinedText = $this->normalizeBlockText(implode("\n\n", $paragraphs));
             $paragraphOffsets = $this->locateParagraphOffsets($paragraphs, $joinedText);
             $tables = $this->buildDocxTablesFromParagraphs($tableCellParagraphs, $rowParagraphIndexRange, $paragraphOffsets, $tableSectionHeading);
+            $headings = $this->stampDocxElementCharOffsets($headings, $paragraphOffsets);
+            $listItems = $this->stampDocxElementCharOffsets($listItems, $paragraphOffsets);
 
-            return ['text' => $joinedText, 'tables' => $tables];
+            return ['text' => $joinedText, 'tables' => $tables, 'headings' => $headings, 'list_items' => $listItems];
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
@@ -343,6 +426,34 @@ class DocumentTextExtractor
     }
 
     /**
+     * Purpose: Stamp final char_start/char_end onto canonical heading/list-item source elements
+     * once every paragraph's offset within the joined text is known — offsets can't be computed
+     * while paragraphs are still being collected, so elements are built with placeholder [0, 0]
+     * and back-filled here from their recorded documentOrder (paragraph index).
+     * Inputs: The elements (each exposing documentOrder and withCharOffsets()) and the full
+     * paragraph-index => [start, end] offset map.
+     * Returns: The same elements, in the same order, with real char offsets.
+     * Side effects: None.
+     *
+     * @template T of DocxHeadingData|DocxListItemData
+     *
+     * @param  list<T>  $elements
+     * @param  array<int, array{start: int, end: int}>  $paragraphOffsets
+     * @return list<T>
+     */
+    private function stampDocxElementCharOffsets(array $elements, array $paragraphOffsets): array
+    {
+        return array_map(
+            static function (DocxHeadingData|DocxListItemData $element) use ($paragraphOffsets): DocxHeadingData|DocxListItemData {
+                $offset = $paragraphOffsets[$element->documentOrder] ?? ['start' => 0, 'end' => 0];
+
+                return $element->withCharOffsets($offset['start'], $offset['end']);
+            },
+            $elements,
+        );
+    }
+
+    /**
      * Purpose: Build DocxTableData objects from the raw per-cell paragraph texts collected while
      * walking the document. The first (lowest-index) row of each table is treated as the header
      * row; its cell text becomes each data cell's original_header/normalized_column_key.
@@ -354,7 +465,7 @@ class DocumentTextExtractor
      * @param  array<int, array<int, array<int, list<string>>>>  $tableCellParagraphs
      * @param  array<string, array{0: int, 1: int}>  $rowParagraphIndexRange
      * @param  array<int, array{start: int, end: int}>  $paragraphOffsets
-     * @param  array<int, string|null>  $tableSectionHeading  tableIndex => nearest preceding heading text
+     * @param  array<int, array{text: ?string, number: ?string}>  $tableSectionHeading  tableIndex => nearest preceding heading
      * @return list<DocxTableData>
      */
     private function buildDocxTablesFromParagraphs(
@@ -385,9 +496,13 @@ class DocumentTextExtractor
                 $headerLabels[$columnIndex] = trim(implode(' ', $cellParagraphTexts));
             }
 
-            [$sectionNumber, $sectionTitle] = $this->splitDocxSectionHeading($tableSectionHeading[$tableIndex] ?? null);
+            $sectionHeading = $tableSectionHeading[$tableIndex] ?? ['text' => null, 'number' => null];
+            [$fallbackSectionNumber, $sectionTitle] = $this->splitDocxSectionHeading($sectionHeading['text'] ?? null);
+            // The resolved Word auto-number (from numbering.xml) is authoritative when available;
+            // the regex-derived number is only a fallback for documents that type section numbers
+            // literally instead of relying on Word's own numbering.
+            $sectionNumber = $sectionHeading['number'] ?? $fallbackSectionNumber;
 
-            $usedColumnKeys = [];
             $dataRows = [];
             $dataRowOrdinal = 0;
 
@@ -404,6 +519,13 @@ class DocumentTextExtractor
                 $charEnd = $paragraphOffsets[$maxParagraphIndex]['end'] ?? $charStart;
 
                 $dataCells = [];
+                // Reset per row, not per table — this only disambiguates multiple blank/duplicate
+                // headers within the SAME row. Declaring it once for the whole table was a bug:
+                // it made every row after the first pick up an incrementing suffix (req_no_2,
+                // req_no_3, ...) on its normalized_column_key, silently breaking any lookup by
+                // column key (e.g. identifierCellValue()/typeCellValue()) for every row but the
+                // first in each table.
+                $usedColumnKeys = [];
 
                 foreach ($cells as $columnIndex => $cellParagraphTexts) {
                     $originalHeader = $headerLabels[$columnIndex] ?? null;
@@ -3644,6 +3766,406 @@ class DocumentTextExtractor
         $normalized = preg_replace('/[^[:alnum:]]+/u', '', mb_strtolower(trim($value), 'UTF-8'));
 
         return is_string($normalized) ? $normalized : mb_strtolower(trim($value), 'UTF-8');
+    }
+
+    /**
+     * Purpose: Map each paragraph style that carries its OWN numbering reference (e.g. Word's
+     * built-in "Overskrift1"–"Overskrift9"/"Heading 1"–"Heading 9" styles, each embedding
+     * <w:pPr><w:numPr>) to its numId/ilvl, so a paragraph using that style — even with no
+     * per-paragraph <w:numPr> override — resolves to the same numbering as Word would render.
+     * Inputs: Raw optional styles.xml content.
+     * Returns: styleId => ['num_id' => string, 'ilvl' => int].
+     * Side effects: Parses XML in memory.
+     *
+     * @return array<string, array{num_id: string, ilvl: int}>
+     */
+    private function extractDocxStyleNumberingMap(?string $stylesXml): array
+    {
+        if (! is_string($stylesXml) || trim($stylesXml) === '') {
+            return [];
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument;
+
+            if (! $dom->loadXML($stylesXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+            $map = [];
+
+            foreach ($xpath->query('//w:style[@w:type="paragraph"]') as $styleNode) {
+                $styleId = (string) $styleNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'styleId')?->nodeValue;
+
+                if ($styleId === '') {
+                    continue;
+                }
+
+                $numPrNodes = $xpath->query('./w:pPr/w:numPr', $styleNode);
+
+                if ($numPrNodes === false || $numPrNodes->length === 0) {
+                    continue;
+                }
+
+                $numPrNode = $numPrNodes->item(0);
+                $numIdNodes = $xpath->query('./w:numId', $numPrNode);
+
+                if ($numIdNodes === false || $numIdNodes->length === 0) {
+                    continue;
+                }
+
+                $numId = (string) $numIdNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+
+                if ($numId === '') {
+                    continue;
+                }
+
+                $ilvlNodes = $xpath->query('./w:ilvl', $numPrNode);
+                $ilvl = $ilvlNodes !== false && $ilvlNodes->length > 0
+                    ? (int) ($ilvlNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? '0')
+                    : 0;
+
+                $map[$styleId] = ['num_id' => $numId, 'ilvl' => $ilvl];
+            }
+
+            return $map;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Parse word/numbering.xml into the level definitions and numId->abstractNumId
+     * mapping needed to render Word's own auto-numbering (e.g. "2.1", "2.1.1") for a paragraph,
+     * instead of relying on any literal number typed into the paragraph text (which frequently
+     * doesn't exist at all — the number is purely a rendering of the numbering definition).
+     * Inputs: Raw optional numbering.xml content.
+     * Returns: num_to_abstract (numId => abstractNumId), num_overrides (numId => [ilvl => start]
+     * from <w:lvlOverride><w:startOverride>), abstract_levels (abstractNumId => [ilvl =>
+     * ['num_fmt' => ?string, 'lvl_text' => ?string, 'start' => int]]).
+     * Side effects: Parses XML in memory.
+     *
+     * @return array{
+     *     num_to_abstract: array<string, string>,
+     *     num_overrides: array<string, array<int, int>>,
+     *     abstract_levels: array<string, array<int, array{num_fmt: ?string, lvl_text: ?string, start: int}>>,
+     * }
+     */
+    private function extractDocxNumberingDefinitions(?string $numberingXml): array
+    {
+        $empty = ['num_to_abstract' => [], 'num_overrides' => [], 'abstract_levels' => []];
+
+        if (! is_string($numberingXml) || trim($numberingXml) === '') {
+            return $empty;
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument;
+
+            if (! $dom->loadXML($numberingXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return $empty;
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+            $abstractLevels = [];
+
+            foreach ($xpath->query('//w:abstractNum') as $abstractNumNode) {
+                $abstractNumId = (string) $abstractNumNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'abstractNumId')?->nodeValue;
+
+                if ($abstractNumId === '') {
+                    continue;
+                }
+
+                $levels = [];
+
+                foreach ($xpath->query('./w:lvl', $abstractNumNode) as $lvlNode) {
+                    $ilvl = (int) ($lvlNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'ilvl')?->nodeValue ?? '0');
+
+                    $numFmtNodes = $xpath->query('./w:numFmt', $lvlNode);
+                    $numFmt = $numFmtNodes !== false && $numFmtNodes->length > 0
+                        ? (string) $numFmtNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue
+                        : null;
+
+                    $lvlTextNodes = $xpath->query('./w:lvlText', $lvlNode);
+                    $lvlText = $lvlTextNodes !== false && $lvlTextNodes->length > 0
+                        ? (string) $lvlTextNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue
+                        : null;
+
+                    $startNodes = $xpath->query('./w:start', $lvlNode);
+                    $start = $startNodes !== false && $startNodes->length > 0
+                        ? (int) ($startNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? '1')
+                        : 1;
+
+                    $levels[$ilvl] = [
+                        'num_fmt' => $numFmt !== '' ? $numFmt : null,
+                        'lvl_text' => $lvlText !== '' ? $lvlText : null,
+                        'start' => $start,
+                    ];
+                }
+
+                $abstractLevels[$abstractNumId] = $levels;
+            }
+
+            $numToAbstract = [];
+            $numOverrides = [];
+
+            foreach ($xpath->query('//w:num') as $numNode) {
+                $numId = (string) $numNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'numId')?->nodeValue;
+
+                if ($numId === '') {
+                    continue;
+                }
+
+                $abstractIdNodes = $xpath->query('./w:abstractNumId', $numNode);
+
+                if ($abstractIdNodes === false || $abstractIdNodes->length === 0) {
+                    continue;
+                }
+
+                $numToAbstract[$numId] = (string) $abstractIdNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+
+                foreach ($xpath->query('./w:lvlOverride', $numNode) as $overrideNode) {
+                    $overrideIlvl = (int) ($overrideNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'ilvl')?->nodeValue ?? '0');
+                    $startOverrideNodes = $xpath->query('./w:startOverride', $overrideNode);
+
+                    if ($startOverrideNodes !== false && $startOverrideNodes->length > 0) {
+                        $numOverrides[$numId][$overrideIlvl] = (int) ($startOverrideNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? '1');
+                    }
+                }
+            }
+
+            return [
+                'num_to_abstract' => $numToAbstract,
+                'num_overrides' => $numOverrides,
+                'abstract_levels' => $abstractLevels,
+            ];
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Resolve which numId/ilvl (if any) a paragraph's own numbering comes from — a
+     * direct <w:pPr><w:numPr> override on the paragraph itself takes precedence, falling back to
+     * the paragraph's style's own numPr (see extractDocxStyleNumberingMap()).
+     * Inputs: The paragraph element, its DOMXPath, its resolved style id, and the style numbering map.
+     * Returns: ['num_id' => string, 'ilvl' => int], or null when the paragraph has no numbering.
+     * Side effects: None.
+     *
+     * @param  array<string, array{num_id: string, ilvl: int}>  $styleNumberingMap
+     * @return array{num_id: string, ilvl: int}|null
+     */
+    private function resolveDocxParagraphNumbering(DOMElement $paragraph, DOMXPath $xpath, ?string $styleId, array $styleNumberingMap): ?array
+    {
+        $directNumPrNodes = $xpath->query('./w:pPr/w:numPr', $paragraph);
+
+        if ($directNumPrNodes !== false && $directNumPrNodes->length > 0) {
+            $numPrNode = $directNumPrNodes->item(0);
+            $numIdNodes = $xpath->query('./w:numId', $numPrNode);
+
+            if ($numIdNodes !== false && $numIdNodes->length > 0) {
+                $numId = (string) $numIdNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+
+                if ($numId !== '') {
+                    $ilvlNodes = $xpath->query('./w:ilvl', $numPrNode);
+                    $ilvl = $ilvlNodes !== false && $ilvlNodes->length > 0
+                        ? (int) ($ilvlNodes->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? '0')
+                        : 0;
+
+                    return ['num_id' => $numId, 'ilvl' => $ilvl];
+                }
+            }
+        }
+
+        return $styleId !== null ? ($styleNumberingMap[$styleId] ?? null) : null;
+    }
+
+    /**
+     * Purpose: Render a paragraph's Word auto-number (e.g. "2.1", "2.1.1") from its resolved
+     * numId/ilvl, advancing the shared per-list counters exactly as Word would when displaying
+     * the document — incrementing the paragraph's own level and resetting every deeper level,
+     * regardless of whether this paragraph is a heading or a table cell (they can share the same
+     * list, as in the real ANNEX 01A document, where "Req. No." cells are Heading-3-styled
+     * paragraphs with no literal text at all).
+     * Inputs: The paragraph's resolved numbering reference, the parsed numbering definitions, and
+     * the mutable per-numId/ilvl counters (updated in place, in document order).
+     * Returns: The rendered number (e.g. "2.1.1"), or null when the level isn't decimal-formatted
+     * or its abstract numbering definition can't be resolved.
+     * Side effects: Mutates $counters.
+     *
+     * @param  array{num_id: string, ilvl: int}  $numberingRef
+     * @param  array{num_to_abstract: array<string, string>, num_overrides: array<string, array<int, int>>, abstract_levels: array<string, array<int, array{num_fmt: ?string, lvl_text: ?string, start: int}>>}  $numberingDefs
+     * @param  array<string, array<int, int>>  $counters
+     */
+    private function renderDocxNumberingValue(array $numberingRef, array $numberingDefs, array &$counters): ?string
+    {
+        $numId = $numberingRef['num_id'];
+        $ilvl = $numberingRef['ilvl'];
+
+        $abstractNumId = $numberingDefs['num_to_abstract'][$numId] ?? null;
+
+        if ($abstractNumId === null) {
+            return null;
+        }
+
+        $levelDef = $numberingDefs['abstract_levels'][$abstractNumId][$ilvl] ?? null;
+
+        if ($levelDef === null || ! $this->isRenderableDocxNumberingFormat($levelDef['num_fmt'] ?? 'decimal')) {
+            // 'bullet'/'none' (and anything we don't recognize) have no sequential numeric
+            // meaning — there is nothing honest to render for this paragraph's own level.
+            return null;
+        }
+
+        $start = $numberingDefs['num_overrides'][$numId][$ilvl] ?? $levelDef['start'];
+
+        $counters[$numId] ??= [];
+
+        if (! array_key_exists($ilvl, $counters[$numId])) {
+            $counters[$numId][$ilvl] = $start;
+        } else {
+            $counters[$numId][$ilvl]++;
+        }
+
+        foreach (array_keys($counters[$numId]) as $existingIlvl) {
+            if ($existingIlvl > $ilvl) {
+                unset($counters[$numId][$existingIlvl]);
+            }
+        }
+
+        $lvlText = $levelDef['lvl_text'] ?? ('%'.($ilvl + 1));
+        $rendered = $lvlText;
+
+        // Each ancestor level is substituted using ITS OWN format, not the paragraph's own level
+        // — a single list can legitimately mix formats per level (e.g. "1.a", "1.b", "2.a" is
+        // decimal at level 0, lowerLetter at level 1), and OOXML puts no constraint against it.
+        for ($level = 0; $level <= $ilvl; $level++) {
+            $levelValue = $counters[$numId][$level] ?? ($numberingDefs['abstract_levels'][$abstractNumId][$level]['start'] ?? 1);
+            $levelFormat = $numberingDefs['abstract_levels'][$abstractNumId][$level]['num_fmt'] ?? 'decimal';
+            $rendered = str_replace('%'.($level + 1), $this->formatDocxNumberingCounterValue($levelValue, $levelFormat), $rendered);
+        }
+
+        return $rendered;
+    }
+
+    /**
+     * Purpose: Determine whether a w:numFmt value has a sequential numeric rendering at all —
+     * 'bullet'/'none' (and unrecognized values, treated conservatively the same way) don't.
+     * Inputs: The raw w:numFmt value (or null, treated as 'decimal' — the common case where a
+     * level definition omits it).
+     * Returns: Whether formatDocxNumberingCounterValue() can produce a meaningful value.
+     * Side effects: None.
+     */
+    private function isRenderableDocxNumberingFormat(?string $numFmt): bool
+    {
+        return in_array($numFmt, [
+            'decimal', 'decimalZero', 'lowerLetter', 'upperLetter', 'lowerRoman', 'upperRoman', 'ordinal',
+        ], true);
+    }
+
+    /**
+     * Purpose: Render one level's counter value in its own w:numFmt — the generic building block
+     * that makes multi-level, mixed-format numbering (e.g. "A.3.4", "3.2 (a)") possible without
+     * hardcoding any specific pattern.
+     * Inputs: The current 1-based counter value and the level's w:numFmt (decimal when omitted).
+     * Returns: The formatted string for this one level (never includes surrounding lvlText).
+     * Side effects: None.
+     */
+    private function formatDocxNumberingCounterValue(int $value, ?string $numFmt): string
+    {
+        return match ($numFmt) {
+            'decimalZero' => sprintf('%02d', $value),
+            'lowerLetter' => $this->docxNumberingLetterSequence($value, false),
+            'upperLetter' => $this->docxNumberingLetterSequence($value, true),
+            'lowerRoman' => $this->docxNumberingRomanNumeral($value, false),
+            'upperRoman' => $this->docxNumberingRomanNumeral($value, true),
+            'ordinal' => $this->docxNumberingOrdinal($value),
+            default => (string) $value,
+        };
+    }
+
+    /**
+     * Purpose: Word's own lowerLetter/upperLetter numbering — a REPEATING single-letter sequence
+     * (a, b, ..., z, aa, bb, ..., zz, aaa, ...), not a base-26 sequential one (a, b, ..., z, aa,
+     * ab, ac, ...) the way spreadsheet column names work. Getting this wrong would silently
+     * mislabel every list item past "z".
+     * Inputs: A 1-based counter value and whether to uppercase the result.
+     * Returns: The rendered letter sequence, or '' for a non-positive value.
+     * Side effects: None.
+     */
+    private function docxNumberingLetterSequence(int $value, bool $uppercase): string
+    {
+        if ($value < 1) {
+            return '';
+        }
+
+        $repeatCount = intdiv($value - 1, 26) + 1;
+        $letter = chr(ord('a') + (($value - 1) % 26));
+
+        $sequence = str_repeat($letter, $repeatCount);
+
+        return $uppercase ? strtoupper($sequence) : $sequence;
+    }
+
+    /**
+     * Purpose: Render a positive integer as a Roman numeral, for w:numFmt lowerRoman/upperRoman.
+     * Inputs: A 1-based counter value and whether to uppercase the result.
+     * Returns: The Roman numeral, or '' for a non-positive value (Roman numerals have no zero).
+     * Side effects: None.
+     */
+    private function docxNumberingRomanNumeral(int $value, bool $uppercase): string
+    {
+        if ($value < 1) {
+            return '';
+        }
+
+        $symbolsByValue = [
+            1000 => 'm', 900 => 'cm', 500 => 'd', 400 => 'cd',
+            100 => 'c', 90 => 'xc', 50 => 'l', 40 => 'xl',
+            10 => 'x', 9 => 'ix', 5 => 'v', 4 => 'iv', 1 => 'i',
+        ];
+
+        $remaining = $value;
+        $roman = '';
+
+        foreach ($symbolsByValue as $symbolValue => $symbol) {
+            while ($remaining >= $symbolValue) {
+                $roman .= $symbol;
+                $remaining -= $symbolValue;
+            }
+        }
+
+        return $uppercase ? strtoupper($roman) : $roman;
+    }
+
+    /**
+     * Purpose: Render an English ordinal (1st, 2nd, 3rd, 4th, ...) for w:numFmt 'ordinal'.
+     * Inputs: A counter value.
+     * Returns: The ordinal string.
+     * Side effects: None.
+     */
+    private function docxNumberingOrdinal(int $value): string
+    {
+        if ($value % 100 >= 11 && $value % 100 <= 13) {
+            return $value.'th';
+        }
+
+        return $value.match ($value % 10) {
+            1 => 'st',
+            2 => 'nd',
+            3 => 'rd',
+            default => 'th',
+        };
     }
 
     /**

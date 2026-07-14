@@ -280,6 +280,687 @@ XML;
         }
     }
 
+    public function test_it_keeps_the_same_normalized_column_key_across_every_row_in_a_table(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Type</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.1</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.2</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>2.1.3</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>M</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+    </w:body>
+</w:document>
+XML;
+
+            $zip->addFromString('word/document.xml', $xml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(1, $result['tables']);
+            $table = $result['tables'][0];
+            $this->assertCount(3, $table->rows);
+
+            // Regression guard: normalized_column_key must stay stable ("req_no"/"type") across
+            // every row — it must never accumulate a disambiguation suffix ("req_no_2", ...) just
+            // because a earlier row already used that key. That suffixing is only meant to
+            // disambiguate multiple blank/duplicate headers within the SAME row.
+            foreach ($table->rows as $row) {
+                $this->assertSame('req_no', $row->cells[0]->normalizedColumnKey);
+                $this->assertSame('type', $row->cells[1]->normalizedColumnKey);
+            }
+
+            $this->assertSame('2.1.1', $table->rows[0]->identifierCellValue());
+            $this->assertSame('2.1.2', $table->rows[1]->identifierCellValue());
+            $this->assertSame('2.1.3', $table->rows[2]->identifierCellValue());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_keeps_many_tables_distinct_and_uncontaminated(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $tableCount = 30;
+            $bodyParts = [];
+
+            for ($i = 1; $i <= $tableCount; $i++) {
+                $bodyParts[] = sprintf(
+                    '<w:p><w:r><w:t>Heading %1$d</w:t></w:r></w:p>'
+                    .'<w:tbl>'
+                    .'<w:tr><w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc></w:tr>'
+                    .'<w:tr><w:tc><w:p><w:r><w:t>%1$d.1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Text for table %1$d.</w:t></w:r></w:p></w:tc></w:tr>'
+                    .'</w:tbl>',
+                    $i,
+                );
+            }
+
+            $documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                .'<w:body>'.implode('', $bodyParts).'</w:body></w:document>';
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            // Regression guard for a real bug: docxTableCellAncestry() creates transient DOM
+            // wrapper objects while walking parentNode. Without holding a live reference, PHP can
+            // free an earlier <w:tbl>/<w:tr> wrapper and reuse its spl_object_id for a LATER,
+            // unrelated table/row — silently merging distinct tables and cross-contaminating
+            // their rows. Confirmed against the real ANNEX 01A document: 50 real tables collapsed
+            // to 6 apparent ones before the fix (holding a strong reference in
+            // $tableObjectKeepAlive/$rowObjectKeepAlive).
+            $this->assertCount(
+                $tableCount,
+                $result['tables'],
+                'Every authored table must remain distinct — a lower count means table/row identity is being corrupted and content from different tables is being merged.',
+            );
+
+            foreach ($result['tables'] as $index => $table) {
+                $expectedOrdinal = $index + 1;
+                $this->assertCount(1, $table->rows, "table {$index} should have exactly one data row");
+                $this->assertSame($expectedOrdinal.'.1', $table->rows[0]->identifierCellValue());
+                $this->assertSame("Text for table {$expectedOrdinal}.", $table->rows[0]->cells[1]->value);
+            }
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_resolves_word_auto_numbering_for_headings_and_textless_table_cells(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            // Mirrors the real ANNEX 01A document exactly: Overskrift1/2/3 each embed their own
+            // numPr (no per-paragraph override needed), all sharing numId=1, and the "Req. No."
+            // table cells are Overskrift3-styled paragraphs with NO literal text at all — the
+            // number only exists via the numbering definition.
+            $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift1"/></w:pPr><w:r><w:t>Chapter title</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift2"/></w:pPr><w:r><w:t>Buying responsibility, not activities</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:pPr><w:pStyle w:val="Overskrift3"/></w:pPr></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>First requirement text.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:pPr><w:pStyle w:val="Overskrift3"/></w:pPr></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Second requirement text.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift2"/></w:pPr><w:r><w:t>Second section</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:pPr><w:pStyle w:val="Overskrift3"/></w:pPr></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Third requirement text.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift1"/></w:pPr><w:r><w:t>Second chapter title</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift2"/></w:pPr><w:r><w:t>First section of second chapter</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:pPr><w:pStyle w:val="Overskrift3"/></w:pPr></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Fourth requirement text.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+    </w:body>
+</w:document>
+XML;
+
+            $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Overskrift1">
+        <w:name w:val="heading 1"/>
+        <w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr>
+    </w:style>
+    <w:style w:type="paragraph" w:styleId="Overskrift2">
+        <w:name w:val="heading 2"/>
+        <w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr>
+    </w:style>
+    <w:style w:type="paragraph" w:styleId="Overskrift3">
+        <w:name w:val="heading 3"/>
+        <w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="1"/></w:numPr></w:pPr>
+    </w:style>
+</w:styles>
+XML;
+
+            $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="34">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+        <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2.%3"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="34"/></w:num>
+</w:numbering>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/styles.xml', $stylesXml);
+            $zip->addFromString('word/numbering.xml', $numberingXml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(3, $result['tables']);
+
+            // Chapter title = H1 #1 -> "1"; "Buying responsibility..." = H2 #1 under it -> "1.1".
+            $firstTable = $result['tables'][0];
+            $this->assertSame('1.1', $firstTable->sectionNumber);
+            $this->assertSame('Buying responsibility, not activities', $firstTable->sectionTitle);
+            $this->assertSame('1.1.1', $firstTable->rows[0]->identifierCellValue());
+            $this->assertSame('1.1.2', $firstTable->rows[1]->identifierCellValue());
+
+            // "Second section" = H2 #2 under the same H1 -> "1.2".
+            $secondTable = $result['tables'][1];
+            $this->assertSame('1.2', $secondTable->sectionNumber);
+            $this->assertSame('1.2.1', $secondTable->rows[0]->identifierCellValue());
+
+            // A new top-level (ilvl 0) heading must reset the deeper-level counters back to
+            // their start value — "2.1", not "2.3" (continuing) or "1.1" (no advance at all).
+            $thirdTable = $result['tables'][2];
+            $this->assertSame('2.1', $thirdTable->sectionNumber);
+            $this->assertSame('2.1.1', $thirdTable->rows[0]->identifierCellValue());
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /**
+     * Builds a minimal .docx fixture from raw XML parts and returns its path. Callers are
+     * responsible for unlinking it.
+     */
+    private function buildDocxFixture(string $documentXml, ?string $stylesXml = null, ?string $numberingXml = null): string
+    {
+        $path = $this->tempDocumentPath('docx');
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+        $zip->addFromString('word/document.xml', $documentXml);
+
+        if ($stylesXml !== null) {
+            $zip->addFromString('word/styles.xml', $stylesXml);
+        }
+
+        if ($numberingXml !== null) {
+            $zip->addFromString('word/numbering.xml', $numberingXml);
+        }
+
+        $zip->close();
+
+        return $path;
+    }
+
+    public function test_it_collects_headings_as_canonical_source_elements_with_stable_keys_and_document_order(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Some intro text.</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Chapter One</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Body text under chapter one.</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Section one point one</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+</w:styles>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, $stylesXml, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(2, $result['headings']);
+
+            $first = $result['headings'][0];
+            $this->assertSame('heading-0', $first->sourceKey);
+            $this->assertSame(1, $first->documentOrder);
+            $this->assertSame(1, $first->level);
+            $this->assertSame('Chapter One', $first->text);
+            $this->assertSame('1', $first->number);
+            $this->assertGreaterThanOrEqual(0, $first->charStart);
+            $this->assertGreaterThan($first->charStart, $first->charEnd);
+
+            $second = $result['headings'][1];
+            $this->assertSame('heading-1', $second->sourceKey);
+            $this->assertSame(3, $second->documentOrder);
+            $this->assertSame(2, $second->level);
+            $this->assertSame('Section one point one', $second->text);
+            $this->assertSame('1.1', $second->number);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_collects_multi_level_list_items_with_mixed_formats_as_canonical_source_elements(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>First top item</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Sub item a</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Sub item b</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Second top item</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%1."/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, null, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(4, $result['list_items']);
+            $numbers = array_map(static fn ($item) => $item->number, $result['list_items']);
+            $this->assertSame(['A.', 'A.1', 'A.2', 'B.'], $numbers);
+            $this->assertSame([0, 1, 1, 0], array_map(static fn ($item) => $item->ilvl, $result['list_items']));
+
+            foreach ($result['list_items'] as $index => $item) {
+                $this->assertSame('listitem-'.$index, $item->sourceKey);
+            }
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_renders_letter_and_roman_numbering_formats(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>lower letter 1</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>lower letter 2</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>upper roman 1</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>upper roman 2</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="3"/></w:numPr></w:pPr><w:r><w:t>decimal zero 1</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1)"/></w:lvl>
+    </w:abstractNum>
+    <w:abstractNum w:abstractNumId="2">
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="upperRoman"/><w:lvlText w:val="%2."/></w:lvl>
+    </w:abstractNum>
+    <w:abstractNum w:abstractNumId="3">
+        <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="decimalZero"/><w:lvlText w:val="%3"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+    <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+    <w:num w:numId="3"><w:abstractNumId w:val="3"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, null, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $numbers = array_map(static fn ($item) => $item->number, $result['list_items']);
+            $this->assertSame(['a)', 'b)', 'I.', 'II.', '01'], $numbers);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_renders_repeating_letter_sequences_past_z_like_word_does(): void
+    {
+        $paragraphs = [];
+
+        for ($i = 0; $i < 28; $i++) {
+            $paragraphs[] = '<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Item '.$i.'</w:t></w:r></w:p>';
+        }
+
+        $documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            .'<w:body>'.implode('', $paragraphs).'</w:body></w:document>';
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, null, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $numbers = array_map(static fn ($item) => $item->number, $result['list_items']);
+            // Word repeats the letter (a, b, ..., z, aa, bb) rather than incrementing like a
+            // spreadsheet column (a, b, ..., z, aa, ab, ac) — getting this wrong would silently
+            // mislabel every 27th+ item.
+            $this->assertSame('z', $numbers[25]);
+            $this->assertSame('aa', $numbers[26]);
+            $this->assertSame('bb', $numbers[27]);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_honors_an_explicit_start_override_for_a_specific_num_instance(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Restarted item</w:t></w:r></w:p>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Next item</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1">
+        <w:abstractNumId w:val="1"/>
+        <w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride>
+    </w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, null, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $numbers = array_map(static fn ($item) => $item->number, $result['list_items']);
+            $this->assertSame(['5', '6'], $numbers);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_does_not_render_a_number_for_bullet_or_none_formatted_levels(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>Bulleted item</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="&#8226;"/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, null, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            // A bulleted paragraph is still structurally a list item — it just has no
+            // sequential number to reconstruct. Capturing it with number=null (rather than
+            // dropping it) keeps the canonical model honest: "this is a list item with no
+            // renderable number" is a real, meaningful state, not the absence of an element.
+            $this->assertCount(1, $result['list_items']);
+            $this->assertNull($result['list_items'][0]->number);
+            $this->assertSame('Bulleted item', $result['list_items'][0]->text);
+            $this->assertStringContainsString('Bulleted item', $result['text']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_handles_a_document_with_no_numbering_at_all_gracefully(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Just a plain paragraph.</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>A heading with no numbering definition</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr><w:tc><w:p><w:r><w:t>Col A</w:t></w:r></w:p></w:tc></w:tr>
+            <w:tr><w:tc><w:p><w:r><w:t>Value 1</w:t></w:r></w:p></w:tc></w:tr>
+        </w:tbl>
+    </w:body>
+</w:document>
+XML;
+
+        // No word/numbering.xml at all, and no word/styles.xml either — resolveDocxHeadingLevel()
+        // must still classify "Heading1" by style ID alone, and everything else must degrade to
+        // "no number" rather than throwing.
+        $path = $this->buildDocxFixture($documentXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(1, $result['headings']);
+            $this->assertSame(1, $result['headings'][0]->level);
+            $this->assertNull($result['headings'][0]->number);
+            $this->assertCount(0, $result['list_items']);
+            $this->assertCount(1, $result['tables']);
+            $this->assertNull($result['tables'][0]->sectionNumber);
+            $this->assertSame('A heading with no numbering definition', $result['tables'][0]->sectionTitle);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_recognizes_both_norwegian_and_english_heading_style_names(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:pStyle w:val="Overskrift1"/></w:pPr><w:r><w:t>Norsk overskrift</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>English heading</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Overskrift1"><w:name w:val="overskrift 1"/></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>
+</w:styles>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, $stylesXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $result = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertCount(2, $result['headings']);
+            $this->assertSame(1, $result['headings'][0]->level);
+            $this->assertSame('Norsk overskrift', $result['headings'][0]->text);
+            $this->assertSame(1, $result['headings'][1]->level);
+            $this->assertSame('English heading', $result['headings'][1]->text);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_produces_identical_results_on_repeated_parsing_of_the_same_document(): void
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Determinism chapter</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Determinism section</w:t></w:r></w:p>
+        <w:tbl>
+            <w:tr>
+                <w:tc><w:p><w:r><w:t>Req. No.</w:t></w:r></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>Requirement text</w:t></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+                <w:tc><w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr></w:p></w:tc>
+                <w:tc><w:p><w:r><w:t>The system shall be deterministic.</w:t></w:r></w:p></w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>A list item</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $stylesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>
+</w:styles>
+XML;
+
+        $numberingXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>
+        <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl>
+        <w:lvl w:ilvl="2"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2.%3"/></w:lvl>
+    </w:abstractNum>
+    <w:abstractNum w:abstractNumId="2">
+        <w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerRoman"/><w:lvlText w:val="%1."/></w:lvl>
+    </w:abstractNum>
+    <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+    <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+</w:numbering>
+XML;
+
+        $path = $this->buildDocxFixture($documentXml, $stylesXml, $numberingXml);
+
+        try {
+            $extractor = new DocumentTextExtractor;
+            $first = $extractor->extractDocxTextAndTables($path);
+            $second = $extractor->extractDocxTextAndTables($path);
+
+            $this->assertSame($first['text'], $second['text']);
+            $this->assertEquals($first['tables'], $second['tables']);
+            $this->assertEquals($first['headings'], $second['headings']);
+            $this->assertEquals($first['list_items'], $second['list_items']);
+
+            // Not just structurally equal — the actual stable identity fields must match too.
+            $this->assertSame(
+                array_map(static fn ($r) => $r->sourceRowKey, $first['tables'][0]->rows),
+                array_map(static fn ($r) => $r->sourceRowKey, $second['tables'][0]->rows),
+            );
+            $this->assertSame(
+                array_map(static fn ($h) => $h->sourceKey, $first['headings']),
+                array_map(static fn ($h) => $h->sourceKey, $second['headings']),
+            );
+            $this->assertSame($first['tables'][0]->rows[0]->identifierCellValue(), '1.1.1');
+            $this->assertSame($second['tables'][0]->rows[0]->identifierCellValue(), '1.1.1');
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function test_it_extracts_structured_docx_blocks_with_heading_levels(): void
     {
         $path = $this->tempDocumentPath('docx');

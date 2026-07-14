@@ -186,4 +186,163 @@ class RequirementCandidateExtractorTableRowReconciliationTest extends TestCase
         $this->assertNull($candidate->sourceRowKey);
         $this->assertArrayNotHasKey('source_row_key_origin', $candidate->sourceReference);
     }
+
+    /**
+     * A single table row's requirement-text cell can genuinely contain more than one distinct
+     * requirement (the AI is explicitly allowed to split it — see class doc comment on
+     * RequirementCandidateExtractor). Both resulting candidates legitimately share the same
+     * source_row_key; this must not be treated as ambiguous or rejected.
+     */
+    public function test_it_allows_multiple_candidates_to_share_the_same_verified_source_row_key(): void
+    {
+        $document = new SavedNoticeAiDocument;
+        $document->forceFill([
+            'id' => 505,
+            'saved_notice_id' => 605,
+            'original_filename' => 'reconciliation-split-row.docx',
+            'extracted_text' => 'The Contractor shall deliver documentation. The Contractor shall also notify the Customer.',
+        ]);
+
+        $row = $this->buildRow(
+            'doc505-tbl0-row0',
+            '2.1.1',
+            'The Contractor shall deliver documentation. The Contractor shall also notify the Customer.',
+        );
+
+        config()->set('services.openai.api_key', 'test-key');
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_split_row_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'candidates' => [
+                        [
+                            'requirement_identifier' => null,
+                            'parent_reference' => null,
+                            'original_text' => 'The Contractor shall deliver documentation.',
+                            'source_reference_text' => null,
+                            'source_row_key' => 'doc505-tbl0-row0',
+                            'is_requirement' => true,
+                            'confidence' => 0.95,
+                        ],
+                        [
+                            'requirement_identifier' => null,
+                            'parent_reference' => null,
+                            'original_text' => 'The Contractor shall also notify the Customer.',
+                            'source_reference_text' => null,
+                            'source_row_key' => 'doc505-tbl0-row0',
+                            'is_requirement' => true,
+                            'confidence' => 0.93,
+                        ],
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => ['input_tokens' => 100, 'output_tokens' => 40, 'total_tokens' => 140],
+            ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-split-row', [$row]);
+
+        $this->assertTrue($result->ok);
+        $this->assertCount(2, $result->candidates);
+
+        foreach ($result->candidates as $candidate) {
+            $this->assertSame('doc505-tbl0-row0', $candidate->sourceRowKey);
+            $this->assertSame('ai_verified', $candidate->sourceReference['source_row_key_origin']);
+            $this->assertSame('2.1.1', $candidate->requirementIdentifier);
+        }
+    }
+
+    /**
+     * A table with no recognizable identifier column (e.g. no "Req. No." / "ID" style header) —
+     * identifierCellValue() must return null, and enrichment must leave the AI's own (possibly
+     * empty) identifier alone rather than overriding it with something wrong or empty-string.
+     */
+    public function test_it_does_not_override_the_identifier_when_the_row_has_no_recognizable_id_column(): void
+    {
+        $document = new SavedNoticeAiDocument;
+        $document->forceFill([
+            'id' => 506,
+            'saved_notice_id' => 606,
+            'original_filename' => 'reconciliation-no-id-column.docx',
+            'extracted_text' => 'Free-text requirement with no identifier column at all.',
+        ]);
+
+        $row = new DocxTableRowData(
+            sourceRowKey: 'doc506-tbl0-row0',
+            tableIndex: 0,
+            rowIndex: 0,
+            charStart: 0,
+            charEnd: 55,
+            cells: [
+                new DocxTableCellData(0, 'Description', 'description', 'Free-text requirement with no identifier column at all.'),
+                new DocxTableCellData(1, 'Owner', 'owner', 'Contractor'),
+            ],
+            sectionNumber: null,
+            sectionTitle: null,
+        );
+
+        $this->fakeCandidateResponse([
+            'requirement_identifier' => 'AI-GUESS-1',
+            'parent_reference' => null,
+            'original_text' => 'Free-text requirement with no identifier column at all.',
+            'source_reference_text' => null,
+            'source_row_key' => 'doc506-tbl0-row0',
+            'is_requirement' => true,
+            'confidence' => 0.9,
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-no-id-column', [$row]);
+
+        $this->assertTrue($result->ok);
+        $this->assertCount(1, $result->candidates);
+        $candidate = $result->candidates[0];
+
+        $this->assertSame('doc506-tbl0-row0', $candidate->sourceRowKey);
+        $this->assertSame('ai_verified', $candidate->sourceReference['source_row_key_origin']);
+        // No identifier column to be authoritative about — the AI's own identifier must survive
+        // untouched, not be overwritten with null/empty.
+        $this->assertSame('AI-GUESS-1', $candidate->requirementIdentifier);
+        $this->assertArrayNotHasKey('source_row_identifier', $candidate->sourceReference);
+    }
+
+    /**
+     * Reinforces "no fuzzy acceptance of hallucinated provenance": a near-miss text (one word
+     * different from the row's actual cell value) must NOT be treated as a match. Only an exact
+     * (post-normalization) match recovers a source_row_key — anything less must stay unattributed
+     * rather than guessed.
+     */
+    public function test_it_does_not_fuzzy_match_a_near_miss_text_against_a_row(): void
+    {
+        $document = new SavedNoticeAiDocument;
+        $document->forceFill([
+            'id' => 507,
+            'saved_notice_id' => 607,
+            'original_filename' => 'reconciliation-near-miss.docx',
+            'extracted_text' => 'The Contractor shall deliver documentation within 10 days.',
+        ]);
+
+        $row = $this->buildRow('doc507-tbl0-row0', '2.1.1', 'The Contractor shall deliver documentation within 10 days.');
+
+        $this->fakeCandidateResponse([
+            'requirement_identifier' => null,
+            'parent_reference' => null,
+            // Paraphrased, not verbatim — differs from the row's cell text by more than
+            // trailing punctuation/whitespace, so no confident match should be made.
+            'original_text' => 'The Contractor must deliver documentation within 10 days.',
+            'source_reference_text' => null,
+            'is_requirement' => true,
+            'confidence' => 0.9,
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-near-miss', [$row]);
+
+        $this->assertTrue($result->ok);
+        $this->assertCount(1, $result->candidates);
+        $candidate = $result->candidates[0];
+
+        $this->assertNull($candidate->sourceRowKey);
+        $this->assertArrayNotHasKey('source_row_key_origin', $candidate->sourceReference);
+    }
 }
