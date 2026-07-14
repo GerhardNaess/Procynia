@@ -145,7 +145,46 @@ class RequirementWikiAnswerControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('wiki_answer.coverage_status', 'full');
         $response->assertJsonPath('wiki_answer.text', 'Dokumentasjon leveres innen ti dager.');
-        $response->assertJsonPath('wiki_answer.sources.0.claim_id', $claim->id);
+        $response->assertJsonPath('wiki_answer.sources.0.claim_ids', [$claim->id]);
+    }
+
+    public function test_wiki_answer_sources_are_deduplicated_by_page_id_through_the_real_endpoint(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-006', 'Wiki answer dedup');
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon innen ti dager.',
+        ]);
+
+        $firstClaim = $this->createApprovedClaim($context['customer'], 'Dokumentasjon leveres innen ti dager i henhold til avtalen.');
+        $secondClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $firstClaim->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $firstClaim->enterprise_wiki_page_version_id,
+            'claim_text' => 'Fristen på ti dager gjelder all dokumentasjon knyttet til leveransen.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+        ]);
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->andReturn([
+                'coverage_status' => 'full',
+                'answer_text' => 'Dokumentasjon leveres innen ti dager.',
+                'missing_summary' => null,
+                'used_claim_keys' => ['claim-'.$firstClaim->id, 'claim-'.$secondClaim->id],
+            ]));
+
+        $response = $this->actingAs($context['user'])->postJson(
+            "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
+        );
+
+        $response->assertOk();
+        $sources = $response->json('wiki_answer.sources');
+        $this->assertCount(1, $sources, 'Two claims from the same Wiki page must never appear as two sources.');
+        $this->assertEqualsCanonicalizing([$firstClaim->id, $secondClaim->id], $sources[0]['claim_ids']);
     }
 
     public function test_the_ai_case_view_exposes_the_wiki_answer_generate_url_and_payload(): void

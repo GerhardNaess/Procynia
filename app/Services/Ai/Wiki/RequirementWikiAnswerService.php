@@ -36,8 +36,47 @@ class RequirementWikiAnswerService
     /** Tokens shorter than this are treated as noise and ignored for relevance scoring. */
     private const MIN_TOKEN_LENGTH = 4;
 
-    /** At most this many of the highest-scoring candidate claims are ever sent to the AI. */
-    private const MAX_CANDIDATE_CLAIMS = 12;
+    /**
+     * At most this many of the highest-scoring candidate claims are ever sent to the AI. Raised
+     * from an earlier 12 after a real-world example showed 29-49 claims clearing the relevance
+     * bar (depending on tokenization) for one requirement — 12 was cutting off genuinely relevant
+     * material via an arbitrary tie-break, not because 12 is inherently the right ceiling. 20 stays
+     * a small, bounded slice of the customer's Wiki (typically well under 5% of eligible claims),
+     * not "most of the Wiki" being sent — see RequirementWikiAnswerServiceTest for the token-count
+     * assertion that keeps this honest.
+     */
+    private const MAX_CANDIDATE_CLAIMS = 20;
+
+    /**
+     * Common Norwegian inflectional suffixes stripped from the END of a token before matching —
+     * longest first, so "hendelsene" strips to "hendels" via "ene" rather than stopping at "en".
+     * Deliberately simple (not a full stemmer): this only exists to stop a plural/definite form in
+     * a claim ("prosesser"/"prosessene") from missing a singular/definite form in the requirement
+     * ("prosessen"), which is a real, observed cause of under-matching — not a general-purpose NLP
+     * component.
+     */
+    private const INFLECTIONAL_SUFFIXES = ['ene', 'ens', 'en', 'er', 'et'];
+
+    /**
+     * Small, explicit Norwegian/English terminology groups for common Wiki/ITIL vocabulary — each
+     * group's members are treated as interchangeable for relevance scoring only (a requirement
+     * written in English ITIL terms must still match a claim phrased in Norwegian, and vice versa).
+     * Deliberately a short, hand-picked list, not a general synonym dictionary or embedding lookup.
+     *
+     * @var list<list<string>>
+     */
+    private const TERMINOLOGY_GROUPS = [
+        ['incident', 'hendelse'],
+        ['change', 'endring'],
+        ['service', 'tjeneste'],
+        ['requirement', 'krav'],
+        ['supplier', 'leverandør'],
+        ['vendor', 'leverandør'],
+        ['security', 'sikkerhet'],
+        ['availability', 'tilgjengelighet'],
+        ['deployment', 'utrulling'],
+        ['release', 'utgivelse'],
+    ];
 
     public function __construct(
         private readonly RequirementWikiAnswerAiClient $aiClient,
@@ -164,6 +203,16 @@ class RequirementWikiAnswerService
     }
 
     /**
+     * Purpose: Tokenize text into a normalized, deduplicated set of meaningful words for relevance
+     * scoring — lowercased, split on non-letter/non-digit boundaries (which already normalizes
+     * hyphens/punctuation), short (noise) tokens dropped, common Norwegian inflectional suffixes
+     * stripped (see INFLECTIONAL_SUFFIXES), and known Norwegian/English ITIL-terminology synonyms
+     * expanded in place (see TERMINOLOGY_GROUPS) so a requirement written in one language/term
+     * still matches a claim using the other.
+     * Inputs: Raw text.
+     * Returns: A deduplicated list of normalized tokens.
+     * Side effects: None.
+     *
      * @return list<string>
      */
     private function tokenize(string $text): array
@@ -176,26 +225,95 @@ class RequirementWikiAnswerService
             fn (string $token): bool => mb_strlen($token, 'UTF-8') >= self::MIN_TOKEN_LENGTH,
         );
 
-        return array_values(array_unique($tokens));
+        $stemmed = array_map(fn (string $token): string => $this->stemToken($token), $tokens);
+        $expanded = $this->expandTerminologySynonyms($stemmed);
+
+        return array_values(array_unique($expanded));
     }
 
     /**
+     * Purpose: Strip one trailing Norwegian inflectional suffix from a token, longest match first.
+     * Inputs: A lowercased token.
+     * Returns: The stemmed token, or the original token when no suffix applies or stripping it
+     *          would leave an unreasonably short (likely wrong) stem.
+     * Side effects: None.
+     */
+    private function stemToken(string $token): string
+    {
+        foreach (self::INFLECTIONAL_SUFFIXES as $suffix) {
+            $suffixLength = mb_strlen($suffix, 'UTF-8');
+
+            if (mb_strlen($token, 'UTF-8') <= $suffixLength + 3) {
+                continue;
+            }
+
+            if (mb_substr($token, -$suffixLength, null, 'UTF-8') === $suffix) {
+                return mb_substr($token, 0, -$suffixLength, 'UTF-8');
+            }
+        }
+
+        return $token;
+    }
+
+    /**
+     * Purpose: Expand a token list with known Norwegian/English terminology synonyms.
+     * Inputs: A list of (already stemmed) tokens.
+     * Returns: The same tokens plus, for each token that is a member of a TERMINOLOGY_GROUPS
+     *          group, every other member of that group.
+     * Side effects: None.
+     *
+     * @param  list<string>  $tokens
+     * @return list<string>
+     */
+    private function expandTerminologySynonyms(array $tokens): array
+    {
+        $expanded = $tokens;
+
+        foreach ($tokens as $token) {
+            foreach (self::TERMINOLOGY_GROUPS as $group) {
+                if (in_array($token, $group, true)) {
+                    $expanded = [...$expanded, ...$group];
+                }
+            }
+        }
+
+        return $expanded;
+    }
+
+    /**
+     * Purpose: Convert candidate claims into the requirement's Wiki-answer sources, one entry per
+     * distinct Wiki page (never per claim) — the stable identity for deduplication is
+     * enterprise_wiki_page_id, never the display title, since two different approved pages could
+     * legitimately share a title.
+     * Inputs: The claims actually used for (or sent as candidates for) the answer.
+     * Returns: One source entry per distinct page, each listing every claim id from that page that
+     *          contributed, in encounter order.
+     * Side effects: None.
+     *
      * @param  Collection<int|string, EnterpriseWikiClaim>  $claims
-     * @return list<array{enterprise_wiki_page_id: int, page_title: string, page_slug: string, page_type: string, claim_id: int, claim_text: string}>
+     * @return list<array{enterprise_wiki_page_id: int, page_title: string, page_slug: string, page_type: string, claim_ids: list<int>}>
      */
     private function sourcesPayload(Collection $claims): array
     {
-        return $claims
-            ->map(fn (EnterpriseWikiClaim $claim): array => [
-                'enterprise_wiki_page_id' => $claim->page->id,
-                'page_title' => $claim->page->title,
-                'page_slug' => $claim->page->slug,
-                'page_type' => $claim->page->page_type,
-                'claim_id' => $claim->id,
-                'claim_text' => (string) $claim->claim_text,
-            ])
-            ->values()
-            ->all();
+        $byPageId = [];
+
+        foreach ($claims as $claim) {
+            $pageId = $claim->page->id;
+
+            if (! isset($byPageId[$pageId])) {
+                $byPageId[$pageId] = [
+                    'enterprise_wiki_page_id' => $pageId,
+                    'page_title' => $claim->page->title,
+                    'page_slug' => $claim->page->slug,
+                    'page_type' => $claim->page->page_type,
+                    'claim_ids' => [],
+                ];
+            }
+
+            $byPageId[$pageId]['claim_ids'][] = $claim->id;
+        }
+
+        return array_values($byPageId);
     }
 
     private function persist(SavedNoticeAiRequirement $requirement, array $attributes, ?int $userId): SavedNoticeAiRequirementWikiAnswer

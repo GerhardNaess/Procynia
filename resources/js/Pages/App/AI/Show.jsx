@@ -2030,6 +2030,9 @@ export default function AiShow({
     const [answerDraftError, setAnswerDraftError] = useState(null);
     const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
     const [wikiAnswerError, setWikiAnswerError] = useState(null);
+    // Right column tab switcher: 'answer_draft' (existing, default) or 'wiki_answer' (Fase 9,
+    // fully separate answer engine — never shares state with the answer-draft tab).
+    const [rightPanelTab, setRightPanelTab] = useState('answer_draft');
     const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
     const [answerDraftMissingKnowledgeDetailsExpanded, setAnswerDraftMissingKnowledgeDetailsExpanded] = useState(false);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
@@ -2311,6 +2314,19 @@ export default function AiShow({
     const activeRequirementDisplayIdentifier = activeRequirement?.current_requirement_identifier
         ?? activeRequirement?.requirement_identifier
         ?? '—';
+    // Derived directly from requirementRows (never a separate local state map) so switching the
+    // active requirement always shows that requirement's own Wiki answer — no stale carry-over.
+    const activeRequirementWikiAnswer = activeRequirement?.wiki_answer ?? null;
+    const activeRequirementWikiAnswerCoverageLabels = {
+        full: tai.wiki_answer_coverage_full,
+        partial: tai.wiki_answer_coverage_partial,
+        none: tai.wiki_answer_coverage_none,
+    };
+    const activeRequirementWikiAnswerCoverageClassName = {
+        full: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+        partial: 'bg-amber-50 text-amber-700 ring-amber-200',
+        none: 'bg-slate-100 text-slate-600 ring-slate-200',
+    }[activeRequirementWikiAnswer?.coverage_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200';
     const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
     const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
     const activeRequirementMissingKnowledgeSummary = typeof activeRequirementMissingKnowledge?.missing_knowledge_summary === 'string'
@@ -3835,52 +3851,13 @@ export default function AiShow({
                                                             </span>
                                                         </div>
                                                         {hasWikiAnswer ? (
-                                                            <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
-                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                                        {tai.wiki_answer_title}
-                                                                    </span>
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${wikiAnswerCoverageClassName}`}>
-                                                                        {wikiAnswerCoverageLabels[wikiAnswer.coverage_status] ?? wikiAnswer.coverage_status_label}
-                                                                    </span>
-                                                                </div>
-                                                                {wikiAnswer.text ? (
-                                                                    <div className="text-sm leading-6 text-slate-800 break-words">
-                                                                        {wikiAnswer.text}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="text-sm leading-6 text-slate-500">
-                                                                        {tai.wiki_answer_none_message}
-                                                                    </div>
-                                                                )}
-                                                                {wikiAnswer.missing_summary ? (
-                                                                    <div className="text-xs leading-5 text-amber-700">
-                                                                        <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {wikiAnswer.missing_summary}
-                                                                    </div>
-                                                                ) : null}
-                                                                {Array.isArray(wikiAnswer.sources) && wikiAnswer.sources.length > 0 ? (
-                                                                    <div className="space-y-1">
-                                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
-                                                                            {tai.wiki_answer_sources_title}
-                                                                        </div>
-                                                                        <div className="flex flex-wrap gap-1.5">
-                                                                            {wikiAnswer.sources.map((source, sourceIndex) => (
-                                                                                <span
-                                                                                    key={`${requirement.id}-wiki-source-${source.claim_id ?? sourceIndex}`}
-                                                                                    title={source.claim_text ?? ''}
-                                                                                    className="inline-flex rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600"
-                                                                                >
-                                                                                    {source.page_title ?? source.page_slug ?? '—'}
-                                                                                </span>
-                                                                            ))}
-                                                                        </div>
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        ) : null}
-                                                        {wikiAnswerError?.requirementId === requirement.id ? (
-                                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
-                                                                {wikiAnswerError.message}
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700">
+                                                                    {tai.wiki_answer_ready_badge}
+                                                                </span>
+                                                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${wikiAnswerCoverageClassName}`}>
+                                                                    {wikiAnswerCoverageLabels[wikiAnswer.coverage_status] ?? wikiAnswer.coverage_status_label}
+                                                                </span>
                                                             </div>
                                                         ) : null}
                                                     </div>
@@ -3915,17 +3892,6 @@ export default function AiShow({
                                                                     className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {tai.create_answer}
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        void requestWikiAnswerGeneration(requirement);
-                                                                    }}
-                                                                    disabled={requirementUpdatesLocked || wikiAnswerGeneratingRequirementId === requirement.id}
-                                                                    title={tai.generate_wiki_answer_for_requirement}
-                                                                    className="inline-flex rounded-full border border-violet-300 bg-white px-3 py-1 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                >
-                                                                    {wikiAnswerGeneratingRequirementId === requirement.id ? tai.generating_wiki_answer : tai.generate_wiki_answer}
                                                                 </button>
                                                             </>
                                                         ) : approvalStatus === 'rejected' ? (
@@ -4597,7 +4563,36 @@ export default function AiShow({
                                 </p>
                             </div>
 
-                            {!activeRequirement ? (
+                            <div className="flex gap-2 border-b border-slate-200 pb-2" role="tablist">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={rightPanelTab === 'answer_draft'}
+                                    onClick={() => setRightPanelTab('answer_draft')}
+                                    className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                                        rightPanelTab === 'answer_draft'
+                                            ? 'bg-violet-600 text-white'
+                                            : 'text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {tai.answer_draft_tab_label}
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={rightPanelTab === 'wiki_answer'}
+                                    onClick={() => setRightPanelTab('wiki_answer')}
+                                    className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                                        rightPanelTab === 'wiki_answer'
+                                            ? 'bg-violet-600 text-white'
+                                            : 'text-slate-500 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {tai.wiki_answer_tab_label}
+                                </button>
+                            </div>
+
+                            {rightPanelTab === 'answer_draft' && (!activeRequirement ? (
                                 canUseAiOffer ? (
                                     <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                         <div className="text-lg font-semibold text-slate-900">
@@ -5134,6 +5129,117 @@ export default function AiShow({
                                         </div>
                                     ) : null}
                                 </div>
+                            ))}
+
+                            {rightPanelTab === 'wiki_answer' && (
+                                !activeRequirement ? (
+                                    canUseAiOffer ? (
+                                        <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
+                                            <div className="text-lg font-semibold text-slate-900">
+                                                {tai.wiki_answer_select_requirement_title}
+                                            </div>
+                                            <p className="mt-2 text-sm text-slate-500">
+                                                {tai.wiki_answer_select_requirement_description}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <AiAccessNotice aiText={tai} billingHref={billingHref} />
+                                    )
+                                ) : !canUseAiOffer ? (
+                                    <AiAccessNotice aiText={tai} billingHref={billingHref} />
+                                ) : (
+                                    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
+                                                {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => { void requestWikiAnswerGeneration(activeRequirement); }}
+                                                disabled={
+                                                    !activeRequirement.wiki_answer_generate_url
+                                                    || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                }
+                                                className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                    ? tai.generating_wiki_answer
+                                                    : (activeRequirementWikiAnswer?.coverage_status ? tai.wiki_answer_regenerate : tai.generate_wiki_answer)}
+                                            </button>
+                                        </div>
+
+                                        {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
+                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                                {tai.generating_wiki_answer}
+                                            </div>
+                                        ) : null}
+
+                                        {wikiAnswerError?.requirementId === activeRequirement.id ? (
+                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                {wikiAnswerError.message}
+                                            </div>
+                                        ) : null}
+
+                                        {!activeRequirementWikiAnswer?.coverage_status ? (
+                                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-sm leading-6 text-slate-500">
+                                                {tai.wiki_answer_not_generated_yet}
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
+                                                        {activeRequirementWikiAnswerCoverageLabels[activeRequirementWikiAnswer.coverage_status] ?? activeRequirementWikiAnswer.coverage_status_label}
+                                                    </span>
+                                                    {activeRequirementWikiAnswer.generated_at ? (
+                                                        <span className="text-xs text-slate-400">
+                                                            {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
+                                                                day: '2-digit',
+                                                                month: 'short',
+                                                                year: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            }).format(new Date(activeRequirementWikiAnswer.generated_at))}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+
+                                                {activeRequirementWikiAnswer.text ? (
+                                                    <div className="whitespace-pre-line text-sm leading-7 text-slate-800">
+                                                        {activeRequirementWikiAnswer.text}
+                                                    </div>
+                                                ) : (
+                                                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm leading-6 text-slate-500">
+                                                        {tai.wiki_answer_none_message}
+                                                    </div>
+                                                )}
+
+                                                {activeRequirementWikiAnswer.missing_summary ? (
+                                                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                                        <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {activeRequirementWikiAnswer.missing_summary}
+                                                    </div>
+                                                ) : null}
+
+                                                {Array.isArray(activeRequirementWikiAnswer.sources) && activeRequirementWikiAnswer.sources.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                            {tai.wiki_answer_sources_title}
+                                                        </div>
+                                                        <ul className="space-y-1.5">
+                                                            {activeRequirementWikiAnswer.sources.map((source) => (
+                                                                <li
+                                                                    key={`wiki-source-page-${source.enterprise_wiki_page_id}`}
+                                                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                                                >
+                                                                    {source.page_title ?? source.page_slug ?? '—'}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
                             )}
                         </div>
                     </section>

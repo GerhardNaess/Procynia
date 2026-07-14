@@ -163,7 +163,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->assertSame('Dokumentasjon leveres innen ti dager.', $answer->answer_text);
         $this->assertNull($answer->missing_summary);
         $this->assertCount(1, $answer->sources);
-        $this->assertSame($claim->id, $answer->sources[0]['claim_id']);
+        $this->assertSame([$claim->id], $answer->sources[0]['claim_ids']);
         $this->assertSame($user->id, $answer->generated_by_user_id);
         $this->assertNotNull($answer->generated_at);
     }
@@ -265,6 +265,158 @@ class RequirementWikiAnswerServiceTest extends TestCase
             SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
             $requirement->wikiAnswer()->first()->coverage_status,
         );
+    }
+
+    public function test_it_deduplicates_wiki_page_sources_by_page_id_even_when_multiple_claims_from_the_same_page_are_used(): void
+    {
+        $customer = $this->createCustomer();
+        $requirement = $this->createRequirement($customer, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+
+        $firstClaim = $this->createApprovedClaim($customer, 'Dokumentasjon leveres innen ti dager i henhold til avtalen.', [
+            'page' => ['title' => 'Leveranseprosess'],
+        ]);
+        $secondClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $firstClaim->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $firstClaim->enterprise_wiki_page_version_id,
+            'claim_text' => 'Dokumentasjonen leveres i henhold til avtalt frist på ti dager.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+        ]);
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->andReturn([
+                'coverage_status' => 'full',
+                'answer_text' => 'Dokumentasjon leveres innen ti dager.',
+                'missing_summary' => null,
+                'used_claim_keys' => ['claim-'.$firstClaim->id, 'claim-'.$secondClaim->id],
+            ]));
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertCount(1, $answer->sources, 'Two claims from the same page must collapse into one source entry.');
+        $this->assertSame($firstClaim->enterprise_wiki_page_id, $answer->sources[0]['enterprise_wiki_page_id']);
+        $this->assertEqualsCanonicalizing(
+            [$firstClaim->id, $secondClaim->id],
+            $answer->sources[0]['claim_ids'],
+        );
+    }
+
+    /**
+     * Real-world regression: a requirement phrased "...dokumentasjon innen ti dager" must still
+     * match a claim phrased with different Norwegian inflections ("dokumentasjonen"/"leveransene")
+     * — the deterministic token-overlap rule must not be defeated by plural/definite suffixes alone.
+     */
+    public function test_it_matches_claims_despite_norwegian_inflectional_differences(): void
+    {
+        $customer = $this->createCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv leveransene og dokumentasjonen for prosjektet.');
+
+        $claim = $this->createApprovedClaim(
+            $customer,
+            'Leveransen og dokumentasjon knyttet til prosjektet beskrives i eget vedlegg.',
+        );
+
+        $captured = null;
+        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('generateAnswer')
+                ->once()
+                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
+                    $captured = $candidates;
+
+                    return [
+                        'coverage_status' => 'full',
+                        'answer_text' => 'Svar.',
+                        'missing_summary' => null,
+                        'used_claim_keys' => array_column($candidates, 'claim_key'),
+                    ];
+                });
+        });
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertNotNull($captured);
+        $this->assertSame(['claim-'.$claim->id], array_column($captured, 'claim_key'));
+    }
+
+    /**
+     * Real-world regression: a requirement written with the English ITIL term "incident" must
+     * still match a claim written with the Norwegian equivalent "hendelse" (and vice versa) via
+     * the small, explicit terminology map — not just literal token equality.
+     */
+    public function test_it_matches_claims_via_known_norwegian_english_terminology_synonyms(): void
+    {
+        $customer = $this->createCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv rutinen for incident håndtering i drift.');
+
+        $claim = $this->createApprovedClaim(
+            $customer,
+            'Rutinen for hendelseshåndtering i drift dekker eskalering og oppfølging.',
+        );
+
+        $captured = null;
+        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('generateAnswer')
+                ->once()
+                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
+                    $captured = $candidates;
+
+                    return [
+                        'coverage_status' => 'full',
+                        'answer_text' => 'Svar.',
+                        'missing_summary' => null,
+                        'used_claim_keys' => array_column($candidates, 'claim_key'),
+                    ];
+                });
+        });
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertNotNull($captured);
+        $this->assertSame(['claim-'.$claim->id], array_column($captured, 'claim_key'));
+    }
+
+    /**
+     * Guards against sending "most of the Wiki" to the AI: even with a large eligible pool, only a
+     * small, bounded slice (MAX_CANDIDATE_CLAIMS) is ever sent — see RequirementWikiAnswerService's
+     * class constant doc comment for why 20 was chosen.
+     */
+    public function test_it_never_sends_more_than_a_small_bounded_slice_of_the_customers_wiki_to_the_ai(): void
+    {
+        $customer = $this->createCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv leverandørens rutine for endringshåndtering og tjenestenivå.');
+
+        $totalClaims = 30;
+
+        for ($i = 0; $i < $totalClaims; $i++) {
+            $this->createApprovedClaim(
+                $customer,
+                "Leverandørens rutine for endringshåndtering og tjenestenivå dekker punkt {$i}.",
+            );
+        }
+
+        $captured = null;
+        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('generateAnswer')
+                ->once()
+                ->andReturnUsing(function (string $identifier, string $text, array $candidates, string $language) use (&$captured): array {
+                    $captured = $candidates;
+
+                    return [
+                        'coverage_status' => 'full',
+                        'answer_text' => 'Svar.',
+                        'missing_summary' => null,
+                        'used_claim_keys' => [],
+                    ];
+                });
+        });
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertNotNull($captured);
+        $this->assertLessThanOrEqual(20, count($captured));
+        $this->assertLessThan($totalClaims, count($captured), 'The whole eligible pool must not be sent to the AI.');
     }
 
     public function test_it_throws_when_candidates_exist_but_wiki_ai_generation_is_disabled(): void
