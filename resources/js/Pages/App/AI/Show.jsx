@@ -2028,6 +2028,8 @@ export default function AiShow({
     const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
     const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
+    const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
+    const [wikiAnswerError, setWikiAnswerError] = useState(null);
     const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
     const [answerDraftMissingKnowledgeDetailsExpanded, setAnswerDraftMissingKnowledgeDetailsExpanded] = useState(false);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
@@ -2688,6 +2690,38 @@ export default function AiShow({
             setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke generere svarutkast.'));
         } finally {
             setAnswerDraftGeneratingRequirementId(null);
+        }
+    };
+
+    // Entirely separate from requestAnswerDraftGeneration above: a different endpoint, a
+    // different persisted answer (requirement.wiki_answer, not answer_draft), and no shared
+    // state — generating a Wiki answer never touches the existing answer-draft state or flow.
+    const requestWikiAnswerGeneration = async (requirement) => {
+        if (!requirement || !requirement.wiki_answer_generate_url) {
+            return;
+        }
+
+        if (wikiAnswerGeneratingRequirementId !== null) {
+            return;
+        }
+
+        setWikiAnswerError(null);
+        setWikiAnswerGeneratingRequirementId(requirement.id);
+
+        try {
+            const response = await window.axios.post(requirement.wiki_answer_generate_url, {}, { timeout: 120000 });
+            const wikiAnswer = response?.data?.wiki_answer ?? null;
+
+            setRequirementRows((currentRows) =>
+                currentRows.map((row) => (row.id === requirement.id ? { ...row, wiki_answer: wikiAnswer } : row))
+            );
+        } catch (error) {
+            setWikiAnswerError({
+                requirementId: requirement.id,
+                message: extractAxiosErrorMessage(error, tai.wiki_answer_error_default),
+            });
+        } finally {
+            setWikiAnswerGeneratingRequirementId(null);
         }
     };
 
@@ -3672,6 +3706,20 @@ export default function AiShow({
                                     const sourceLocatorLabel = hasVerifiedSourceProvenance
                                         ? (sourceElementTypeLabels[requirement.source_element_type] ?? null)
                                         : null;
+                                    // Wiki-svar is a separate, additional answer alongside the existing
+                                    // "Lag svar" flow above — it never reads from or writes to answer_draft_*.
+                                    const wikiAnswer = requirement.wiki_answer ?? null;
+                                    const hasWikiAnswer = Boolean(wikiAnswer?.coverage_status);
+                                    const wikiAnswerCoverageLabels = {
+                                        full: tai.wiki_answer_coverage_full,
+                                        partial: tai.wiki_answer_coverage_partial,
+                                        none: tai.wiki_answer_coverage_none,
+                                    };
+                                    const wikiAnswerCoverageClassName = {
+                                        full: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+                                        partial: 'bg-amber-50 text-amber-700 ring-amber-200',
+                                        none: 'bg-slate-100 text-slate-600 ring-slate-200',
+                                    }[wikiAnswer?.coverage_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200';
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
                                     const originalRequirementText = requirement.original_requirement_text ?? null;
                                     const hasOriginalDifference = Boolean(
@@ -3786,6 +3834,55 @@ export default function AiShow({
                                                                 {tai.revisions_prefix} {revisionCount}
                                                             </span>
                                                         </div>
+                                                        {hasWikiAnswer ? (
+                                                            <div className="rounded-2xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                                        {tai.wiki_answer_title}
+                                                                    </span>
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${wikiAnswerCoverageClassName}`}>
+                                                                        {wikiAnswerCoverageLabels[wikiAnswer.coverage_status] ?? wikiAnswer.coverage_status_label}
+                                                                    </span>
+                                                                </div>
+                                                                {wikiAnswer.text ? (
+                                                                    <div className="text-sm leading-6 text-slate-800 break-words">
+                                                                        {wikiAnswer.text}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-sm leading-6 text-slate-500">
+                                                                        {tai.wiki_answer_none_message}
+                                                                    </div>
+                                                                )}
+                                                                {wikiAnswer.missing_summary ? (
+                                                                    <div className="text-xs leading-5 text-amber-700">
+                                                                        <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {wikiAnswer.missing_summary}
+                                                                    </div>
+                                                                ) : null}
+                                                                {Array.isArray(wikiAnswer.sources) && wikiAnswer.sources.length > 0 ? (
+                                                                    <div className="space-y-1">
+                                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                                            {tai.wiki_answer_sources_title}
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            {wikiAnswer.sources.map((source, sourceIndex) => (
+                                                                                <span
+                                                                                    key={`${requirement.id}-wiki-source-${source.claim_id ?? sourceIndex}`}
+                                                                                    title={source.claim_text ?? ''}
+                                                                                    className="inline-flex rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                                                                                >
+                                                                                    {source.page_title ?? source.page_slug ?? '—'}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : null}
+                                                        {wikiAnswerError?.requirementId === requirement.id ? (
+                                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+                                                                {wikiAnswerError.message}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                     <div className="flex flex-wrap gap-2">
                                                         {canOpenAnswerWorkspace ? (
@@ -3818,6 +3915,17 @@ export default function AiShow({
                                                                     className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {tai.create_answer}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        void requestWikiAnswerGeneration(requirement);
+                                                                    }}
+                                                                    disabled={requirementUpdatesLocked || wikiAnswerGeneratingRequirementId === requirement.id}
+                                                                    title={tai.generate_wiki_answer_for_requirement}
+                                                                    className="inline-flex rounded-full border border-violet-300 bg-white px-3 py-1 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {wikiAnswerGeneratingRequirementId === requirement.id ? tai.generating_wiki_answer : tai.generate_wiki_answer}
                                                                 </button>
                                                             </>
                                                         ) : approvalStatus === 'rejected' ? (

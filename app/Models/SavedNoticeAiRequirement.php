@@ -234,6 +234,17 @@ class SavedNoticeAiRequirement extends Model
     }
 
     /**
+     * Purpose: Resolve the persisted Enterprise Wiki-based answer for this requirement, if any.
+     * Inputs: None.
+     * Returns: The single related Wiki-answer row — entirely separate from answer_draft_*.
+     * Side effects: None.
+     */
+    public function wikiAnswer(): HasOne
+    {
+        return $this->hasOne(SavedNoticeAiRequirementWikiAnswer::class, 'saved_notice_ai_requirement_id');
+    }
+
+    /**
      * Purpose: Resolve the persisted evidence rows for this requirement candidate.
      * Inputs: None.
      * Returns: The related evidence collection query.

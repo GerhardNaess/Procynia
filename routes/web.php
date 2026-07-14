@@ -1,40 +1,41 @@
 <?php
 
-use App\Http\Controllers\PublicRegistrationController;
+use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
+use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\BillingController;
+use App\Http\Controllers\App\CustomerEnvironmentController;
+use App\Http\Controllers\App\DashboardController;
+use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\GoNoGoAssessmentController;
 use App\Http\Controllers\App\GoNoGoTemplateController;
-use App\Http\Controllers\App\DashboardController;
-use App\Http\Controllers\App\AiController;
-use App\Http\Controllers\Ops\QueueSchedulerHealthController;
-use App\Http\Controllers\App\KnowledgeVocabularyController;
-use App\Http\Controllers\App\KnowledgeBaseController;
-use App\Http\Controllers\App\KnowledgeBaseAiUsageController;
-use App\Http\Controllers\App\KnowledgeBaseSettingsController;
-use App\Http\Controllers\App\CustomerEnvironmentController;
-use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\InfoCenterController;
-use App\Http\Controllers\App\UserNotificationController;
-use App\Http\Controllers\App\UserController;
-use App\Http\Controllers\App\WatchProfileController;
+use App\Http\Controllers\App\KnowledgeBaseAiUsageController;
+use App\Http\Controllers\App\KnowledgeBaseController;
+use App\Http\Controllers\App\KnowledgeBaseSettingsController;
+use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\UserController;
+use App\Http\Controllers\App\UserNotificationController;
+use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiSourceController;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Health\DocumentHealthController;
 use App\Http\Controllers\Health\IntegrationHealthController;
 use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
-use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
+use App\Http\Controllers\Ops\QueueSchedulerHealthController;
+use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Models\Language;
 use App\Models\Nationality;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use Inertia\Response;
 
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
 
@@ -79,7 +80,7 @@ Route::name('public.')->group(function (): void {
     Route::get('/betingelser', fn () => Inertia::render('Public/Terms'))->name('terms');
     Route::get('/personvern', fn () => Inertia::render('Public/Privacy'))->name('privacy');
     Route::get('/faq', fn () => Inertia::render('Public/Faq'))->name('faq');
-    Route::get('/registrer', function (): \Inertia\Response {
+    Route::get('/registrer', function (): Response {
         $locale = app()->getLocale();
 
         $languageOptions = Language::query()
@@ -223,6 +224,8 @@ Route::prefix('app')
             ->name('ai.requirements.answer-draft.generate');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/answer-draft', [AiController::class, 'updateRequirementAnswerDraft'])
             ->name('ai.requirements.answer-draft.update');
+        Route::post('/ai/{savedNotice}/requirements/{requirement}/wiki-answer', [AiController::class, 'generateRequirementWikiAnswer'])
+            ->name('ai.requirements.wiki-answer.generate');
         Route::post('/ai/{savedNotice}/evidence/refresh', [AiController::class, 'refreshEvidence'])
             ->name('ai.evidence.refresh');
         Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])

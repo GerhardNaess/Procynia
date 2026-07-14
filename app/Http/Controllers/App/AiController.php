@@ -15,6 +15,7 @@ use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementAssessment;
+use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\DocumentPreviewService;
@@ -31,6 +32,7 @@ use App\Services\Ai\Retrieval\KnowledgeMetadataMapService;
 use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
+use App\Services\Ai\Wiki\RequirementWikiAnswerService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
@@ -101,6 +103,7 @@ class AiController extends Controller
         private readonly RequirementResponsibilityTaskService $requirementResponsibilityTaskService,
         private readonly AiUsageGuard $aiUsageGuard,
         private readonly RequirementWordExportService $requirementWordExportService,
+        private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
     ) {}
 
     /**
@@ -1228,6 +1231,64 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Generate (or regenerate) the Wiki-based answer for one visible requirement
+     * candidate, using only Enterprise Wiki content approved and available for this customer.
+     * Entirely separate from generateRequirementAnswerDraft() — reads/writes none of the
+     * existing answer_draft_* state.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted Wiki-answer payload.
+     * Side effects: Writes one saved_notice_ai_requirement_wiki_answers row for the requirement.
+     */
+    public function generateRequirementWikiAnswer(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
+            $record->customer()->firstOrFail(),
+            $request->user(),
+            AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_WIKI_ANSWER,
+        );
+
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
+        }
+
+        $languageCode = $this->customerContext->resolveLanguageCode();
+
+        try {
+            $wikiAnswer = $this->requirementWikiAnswerService->generate(
+                $ownedRequirement,
+                (int) $record->customer_id,
+                $languageCode,
+                $request->user()?->id,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('[PROCYNIA][WIKI_ANSWER] Wiki answer generation failed.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $ownedRequirement->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return response()->json([
+                'requirement_id' => $ownedRequirement->id,
+                'error' => 'Kunne ikke generere Wiki-svar. Prøv igjen senere.',
+            ], 422);
+        }
+
+        return response()->json(array_merge(
+            $this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement),
+            ['warning' => $usageWarning],
+        ));
+    }
+
+    /**
      * Purpose: Synchronize the selected answer basis items for one visible requirement candidate.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A JSON response with the persisted selection payload.
@@ -1845,6 +1906,11 @@ class AiController extends Controller
                     'savedNotice' => $requirement->saved_notice_id,
                     'requirement' => $requirement->id,
                 ]),
+                'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
+                'wiki_answer_generate_url' => route('app.ai.requirements.wiki-answer.generate', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
                 'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
                 'evidence' => $this->aiRequirementEvidencePayload($requirement),
                 'knowledge_sources_sent_to_ai' => $this->aiRequirementKnowledgeSourcesPayload($requirement),
@@ -1968,6 +2034,53 @@ class AiController extends Controller
         return [
             'requirement_id' => $requirement->id,
             'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement, $judgeStatus, $coverageSummary),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one persisted Wiki-answer row into a compact frontend payload.
+     * Inputs: A requirement's Wiki-answer row, or null when none has been generated yet.
+     * Returns: A frontend-ready Wiki-answer array — always present, even when null, so the
+     * frontend can render an empty "not generated yet" state without a separate presence check.
+     * Side effects: None.
+     */
+    private function aiRequirementWikiAnswerPayload(?SavedNoticeAiRequirementWikiAnswer $wikiAnswer): array
+    {
+        if ($wikiAnswer === null) {
+            return [
+                'coverage_status' => null,
+                'coverage_status_label' => null,
+                'text' => null,
+                'missing_summary' => null,
+                'sources' => [],
+                'generated_at' => null,
+            ];
+        }
+
+        return [
+            'coverage_status' => $wikiAnswer->coverage_status,
+            'coverage_status_label' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_STATUS_LABELS[$wikiAnswer->coverage_status]
+                ?? $wikiAnswer->coverage_status,
+            'text' => $wikiAnswer->answer_text,
+            'missing_summary' => $wikiAnswer->missing_summary,
+            'sources' => is_array($wikiAnswer->sources) ? $wikiAnswer->sources : [],
+            'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one persisted Wiki-answer row into a JSON response payload.
+     * Inputs: The Wiki-answer row and the requirement it belongs to.
+     * Returns: A JSON response payload for the Wiki-answer generation endpoint.
+     * Side effects: None.
+     */
+    private function aiRequirementWikiAnswerResponsePayload(
+        SavedNoticeAiRequirementWikiAnswer $wikiAnswer,
+        SavedNoticeAiRequirement $requirement,
+    ): array {
+        return [
+            'requirement_id' => $requirement->id,
+            'wiki_answer' => $this->aiRequirementWikiAnswerPayload($wikiAnswer),
         ];
     }
 

@@ -27,6 +27,8 @@ class AiUsageGuard
 
     public const OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT = 'saved_notice_requirement_answer_draft';
 
+    public const OPERATION_SAVED_NOTICE_REQUIREMENT_WIKI_ANSWER = 'saved_notice_requirement_wiki_answer';
+
     public const OPERATION_SAVED_NOTICE_EVIDENCE_REFRESH = 'saved_notice_evidence_refresh';
 
     public const OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH = 'saved_notice_assessment_refresh';
@@ -136,8 +138,7 @@ class AiUsageGuard
         int $operationCount,
         int $currentAttempts,
         int $userLimitPerMinute,
-    ): void
-    {
+    ): void {
         Log::warning('[PROCYNIA][AI_USAGE_GUARD] AI operation shows unusually high tempo.', [
             'customer_id' => (int) $customer->id,
             'user_id' => (int) $user->id,
@@ -171,5 +172,4 @@ class AiUsageGuard
     {
         return sprintf('ai:user:%d:%s', $userId, $operationKey);
     }
-
 }

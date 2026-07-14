@@ -38,6 +38,7 @@ class RequirementLoader
                 'evidence.knowledgeItemChunk',
                 'evidence.knowledgeItemVersion',
                 'answerBasisItems',
+                'wikiAnswer',
                 'revisions.changedBy',
             ])
             ->withCount('revisions')
@@ -75,6 +76,7 @@ class RequirementLoader
                 'evidence.knowledgeItemChunk',
                 'evidence.knowledgeItemVersion',
                 'answerBasisItems',
+                'wikiAnswer',
             ])
             ->orderByRaw('CASE WHEN saved_notice_ai_document_id IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('saved_notice_ai_document_id')
