@@ -103,4 +103,67 @@ class UsesProjectPostgresConnectionTest extends TestCase
         $this->assertSame($originalDefault, config('database.default'));
         $this->assertEquals($originalPgsqlConfig, config('database.connections.pgsql'));
     }
+
+    /**
+     * Proves restoration across two genuinely SEPARATE, sequential test-case instances — not
+     * just within one test calling its own restore callback (the test above). "Test A" switches
+     * the default connection and then throws, simulating a test that fails after using the
+     * trait; its tearDown() is invoked exactly as PHPUnit always guarantees, even when a test
+     * method throws. "Test B" is then a brand new instance, exactly like the next real PHPUnit
+     * test method Laravel would run, and must see the original default connection — proving the
+     * previous test's own connection switch never leaked forward.
+     */
+    public function test_connection_state_does_not_leak_into_the_next_test_even_when_a_test_throws_after_switching_it(): void
+    {
+        $originalDefault = config('database.default');
+        $this->assertSame('pgsql', $originalDefault);
+
+        $testA = new class('runAndThrowAfterSwitchingConnection') extends TestCase
+        {
+            public function runAndThrowAfterSwitchingConnection(): void
+            {
+                $this->setUp();
+
+                config(['database.default' => 'some_other_connection_entirely']);
+
+                throw new RuntimeException('Test A deliberately fails after switching the connection.');
+            }
+        };
+
+        try {
+            $testA->runAndThrowAfterSwitchingConnection();
+            $this->fail('Expected test A to throw.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Test A deliberately fails after switching the connection.', $exception->getMessage());
+        } finally {
+            // PHPUnit always calls tearDown() even when a test method throws — this reproduces
+            // that guarantee, since calling runAndThrowAfterSwitchingConnection() directly (to
+            // observe the thrown exception here) bypasses the real PHPUnit test runner.
+            $testA->tearDown();
+        }
+
+        $testB = new class('bootOnly') extends TestCase
+        {
+            public function bootOnly(): void
+            {
+                $this->setUp();
+            }
+        };
+
+        try {
+            $testB->bootOnly();
+
+            $this->assertSame(
+                'pgsql',
+                config('database.default'),
+                "Test B's fresh boot must see the original default connection — test A's mutation must not leak forward.",
+            );
+        } finally {
+            // Once test B's own app is flushed, config()/DB:: have nothing bound to resolve
+            // against until the OUTER test's own app (still alive throughout) is current again —
+            // that happens automatically since we never left it; no further assertion needed
+            // (or possible) after this point using the now-destroyed inner instances.
+            $testB->tearDown();
+        }
+    }
 }

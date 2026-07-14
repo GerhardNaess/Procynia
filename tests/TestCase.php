@@ -77,7 +77,22 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
-     * Refuse to run the test suite unless it uses an explicit safe test database.
+     * Purpose: Refuse to run the test suite unless it uses an explicit safe test database —
+     * checked BOTH via config AND via a live query against the actual connection, for the
+     * DEFAULT connection, for every single test. This runs inside createApplication(), which
+     * Illuminate\Foundation\Testing\Concerns\InteractsWithTestCaseLifecycle::
+     * setUpTheTestEnvironment() calls (via refreshApplication()) before setUpTraits() — the
+     * method that runs RefreshDatabase/DatabaseMigrations/DatabaseTruncation. That ordering is
+     * what makes this check run before any migration, truncation, or factory write a test could
+     * perform, for the whole suite, not just tests that opt into
+     * Tests\Concerns\UsesProjectPostgresConnection (whose own live check runs later, inside an
+     * individual test's own setUp(), and therefore cannot protect the ~110 other test files that
+     * use RefreshDatabase directly against the default connection without ever touching that
+     * trait).
+     * Inputs: The booted Application instance.
+     * Returns: None.
+     * Side effects: Runs a live `select current_database()` query (via
+     * assertConnectionIsSafeTestDatabase()) unless the default connection is sqlite.
      */
     protected function guardAgainstUnsafeTestingDatabase(Application $app): void
     {
@@ -114,6 +129,12 @@ abstract class TestCase extends BaseTestCase
         if ($defaultConnection === 'pgsql' && $databaseName === 'procynia') {
             throw new RuntimeException('Refusing to run tests against the real procynia database.');
         }
+
+        // Config can say the right thing while the actual connection resolves elsewhere (a
+        // stale PDO handle, a misconfigured fallback in some unrelated helper, ...). This is the
+        // check that closes that gap for the ENTIRE suite: every test's createApplication() call
+        // reaches this line before setUpTraits() can run any migration/truncation.
+        self::assertConnectionIsSafeTestDatabase($defaultConnection);
     }
 
     /**

@@ -12,20 +12,23 @@ use App\Services\Doffin\DoffinNoticeParser;
 use App\Services\Doffin\DoffinPersistenceService;
 use App\Services\Doffin\DoffinPublicClient;
 use App\Services\Doffin\DoffinSupplierHarvestService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 class DoffinSupplierHarvestServiceTest extends TestCase
 {
+    use UsesProjectPostgresConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
 
-        $this->useTestingPostgresConnection();
+        $this->useProjectPostgresConnection();
         DB::beginTransaction();
     }
 
@@ -205,7 +208,7 @@ class DoffinSupplierHarvestServiceTest extends TestCase
         $service->processNotice($run, '2026-200011');
         $service->processNotice($run, '2026-200012');
 
-        $this->assertSame(1, \App\Models\DoffinSupplier::query()->count());
+        $this->assertSame(1, DoffinSupplier::query()->count());
         $this->assertDatabaseHas('doffin_suppliers', [
             'supplier_name' => 'Supplier Without Org',
             'organization_number' => null,
@@ -327,23 +330,6 @@ class DoffinSupplierHarvestServiceTest extends TestCase
             $noticeParser ?? app(DoffinNoticeParser::class),
             $persistenceService ?? app(DoffinPersistenceService::class),
         );
-    }
-
-    private function useTestingPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => '127.0.0.1',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => '',
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 
     private function successfulNoticeDetail(string $noticeId, string $supplierName): array
