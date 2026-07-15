@@ -9,7 +9,9 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
+use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
+use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
 use Illuminate\Support\Facades\DB;
@@ -22,10 +24,11 @@ use Tests\TestCase;
 /**
  * Purpose: Verify the Fase 9 "Generer Wiki-svar" endpoint reuses the existing tenant-safety
  * pattern (visibleAiSavedNotice + aiRequirements()->whereKey()), persists separately from the
- * existing answer-draft flow, and exposes the new URL/payload — including page citations and
- * discovery provenance — on the AI case view. Exercises the REAL RequirementWikiResearchService/
- * RequirementWikiAnswerService through the HTTP route; only the two OpenAI-calling boundaries
- * (RequirementWikiResearchAiClient, RequirementWikiAnswerAiClient) are faked.
+ * existing answer-draft flow, and exposes the new URL/payload — including page citations, alignment
+ * classification, and discovery provenance — on the AI case view. Exercises the REAL
+ * RequirementWikiResearchService/RequirementWikiAnswerService through the HTTP route; only the
+ * OpenAI-calling boundaries (RequirementWikiResearchAiClient, RequirementWikiAnswerAiClient,
+ * RequirementWikiAlignmentAiClient, RequirementWikiAnswerRevisionAiClient) are faked.
  * Inputs: None.
  * Returns: None.
  * Side effects: None.
@@ -55,7 +58,7 @@ class RequirementWikiAnswerControllerTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_generates_and_persists_a_none_coverage_wiki_answer_when_no_wiki_content_exists(): void
+    public function test_it_generates_a_none_coverage_best_practice_wiki_answer_when_no_wiki_content_exists(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-001', 'Wiki answer case');
@@ -66,7 +69,16 @@ class RequirementWikiAnswerControllerTest extends TestCase
         ]);
 
         $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('selectNextAction'));
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
+        // Zero Wiki candidates still produces a real best-practice expert draft — the answer
+        // client IS called, just with an empty page set, and alignment is deterministic (no
+        // possible_conflict can exist without any Wiki content to conflict with).
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn (string $identifier, string $text, array $pages, string $language): bool => $pages === [])
+            ->andReturn(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Anbefalt fremgangsmåte basert på beste praksis.', 'used_page_ids' => []]]]));
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
 
         $response = $this->actingAs($context['user'])->postJson(
             "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
@@ -75,6 +87,7 @@ class RequirementWikiAnswerControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('requirement_id', $requirement->id);
         $response->assertJsonPath('wiki_answer.coverage_status', SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE);
+        $response->assertJsonPath('wiki_answer.text', 'Anbefalt fremgangsmåte basert på beste praksis.');
         $this->assertDatabaseCount('saved_notice_ai_requirement_wiki_answers', 1);
     }
 
@@ -110,6 +123,11 @@ class RequirementWikiAnswerControllerTest extends TestCase
             'answer_draft_generated_at' => now(),
         ])->save();
 
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->andReturn(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Beste praksis.', 'used_page_ids' => []]]]));
+
         $this->actingAs($context['user'])->postJson(
             "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
         )->assertOk();
@@ -141,11 +159,21 @@ class RequirementWikiAnswerControllerTest extends TestCase
             ->shouldReceive('generateAnswer')
             ->once()
             ->andReturn([
-                'coverage_status' => 'full',
-                'answer_sections' => [['text' => 'Problem Management gjennomfører rotårsaksanalyse.', 'page_ids' => [$page->id]]],
-                'missing_summary' => null,
-                'used_page_ids' => [$page->id],
+                'answer_sections' => [['key' => 'S1', 'heading' => 'Problem Management', 'text' => 'Problem Management gjennomfører rotårsaksanalyse.', 'used_page_ids' => [$page->id]]],
             ]));
+
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->once()
+            ->andReturn([[
+                'section_key' => 'S1',
+                'alignment_status' => 'aligned',
+                'supporting_page_ids' => [$page->id],
+                'supported_points' => ['Rotårsaksanalyse er dokumentert.'],
+                'uncovered_points' => [],
+                'conflict_summary' => null,
+                'review_note' => null,
+            ]]));
 
         $response = $this->actingAs($context['user'])->postJson(
             "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
@@ -156,7 +184,10 @@ class RequirementWikiAnswerControllerTest extends TestCase
         $response->assertJsonPath('wiki_answer.text', 'Problem Management gjennomfører rotårsaksanalyse.');
         $response->assertJsonPath('wiki_answer.sources.0.enterprise_wiki_page_id', $page->id);
         $response->assertJsonPath('wiki_answer.sections.0.page_titles.0', 'Problem Management');
+        $response->assertJsonPath('wiki_answer.sections.0.alignment_status', 'aligned');
         $response->assertJsonPath('wiki_answer.main_pages.0.enterprise_wiki_page_id', $page->id);
+        $response->assertJsonPath('wiki_answer.alignment_summary.aligned', 1);
+        $response->assertJsonPath('wiki_answer.has_possible_conflict', false);
 
         $answer = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->firstOrFail();
         $this->assertSame(RequirementWikiAnswerService::ENGINE_VERSION, $answer->engine_version);
@@ -201,11 +232,21 @@ class RequirementWikiAnswerControllerTest extends TestCase
             ->shouldReceive('generateAnswer')
             ->once()
             ->andReturn([
-                'coverage_status' => 'full',
-                'answer_sections' => [['text' => 'Svar basert på begge sider.', 'page_ids' => [$mainPage->id, $linkedPage->id]]],
-                'missing_summary' => null,
-                'used_page_ids' => [$mainPage->id, $linkedPage->id],
+                'answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar basert på begge sider.', 'used_page_ids' => [$mainPage->id, $linkedPage->id]]],
             ]));
+
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->once()
+            ->andReturn([[
+                'section_key' => 'S1',
+                'alignment_status' => 'aligned',
+                'supporting_page_ids' => [$mainPage->id, $linkedPage->id],
+                'supported_points' => [],
+                'uncovered_points' => [],
+                'conflict_summary' => null,
+                'review_note' => null,
+            ]]));
 
         $response = $this->actingAs($context['user'])->postJson(
             "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",

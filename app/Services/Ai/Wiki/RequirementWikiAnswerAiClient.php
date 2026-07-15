@@ -8,20 +8,26 @@ use RuntimeException;
 
 /**
  * Writes the final requirement answer from an already-validated Wiki research context (see
- * RequirementWikiResearchService) — never finds pages itself, never introduces content outside
- * what it was actually given. Research (page discovery/reading) and answer-writing are
- * deliberately separate operations with separate schemas: this client only ever sees pages that
- * were ALREADY read, and cites them by page_id, never by claim_id.
+ * RequirementWikiResearchService) as an experienced subject-matter expert — never finds pages
+ * itself, never introduces content outside what it was actually given plus recognized professional
+ * best practice. Research (page discovery/reading) and answer-writing are deliberately separate
+ * operations with separate schemas: this client only ever sees pages that were ALREADY read, and
+ * cites them by page_id per answer section, never by claim_id.
+ *
+ * BALANCED MODEL (Fase 9 alignment correction): the Wiki is the first-priority source, but a
+ * genuinely strong expert answer may need established professional best practice the Wiki does not
+ * document. This client is explicitly allowed to supplement with such best practice — it must never
+ * invent company-specific facts (certifications, tools, SLAs, existing roles/org structure, named
+ * internal processes, guarantees) that aren't grounded in a page's VERIFIED FACTS, but it may
+ * describe undocumented best practice as a recommended/suggested approach. Whether each section
+ * ends up Wiki-grounded, partially grounded, or pure best practice is NOT decided here — that
+ * judgment belongs to RequirementWikiAlignmentAiClient, run afterwards against this client's output.
+ * This client therefore no longer emits coverage_status/missing_summary at all; those are computed
+ * downstream (RequirementWikiAnswerService) from the alignment result, never self-reported by the
+ * model that wrote the answer.
  *
  * Follows the same established Wiki AI client conventions as WikiPageClaimExtractionAiClient:
  * fixed model, ENTERPRISE_WIKI_AI_ENABLED gate, shared EnterpriseWikiResponsesDecoder.
- *
- * COVERAGE CONTRACT (unchanged from the original Fase 9 design, now scoped to pages instead of
- * claims): coverage_status is one of 'full' (the read pages fully answer the requirement),
- * 'partial' (they address part of it — missing_summary must describe the gap), or 'none' (they do
- * not provide enough to answer at all — answer_sections/used_page_ids must then be empty; the
- * model must never invent an answer when coverage is 'none', and this rule is enforced in
- * normalize(), never left to the model to honor on its own).
  */
 class RequirementWikiAnswerAiClient
 {
@@ -44,19 +50,20 @@ class RequirementWikiAnswerAiClient
     }
 
     /**
-     * Purpose: Write the requirement answer from the pages actually read during research.
+     * Purpose: Write the requirement answer as structured sections, using pages read during
+     *          research as first priority and recognized best practice to fill genuine gaps.
      * Inputs: The requirement identifier/text and the pages that were read (each carrying its own
      *         content_markdown/content_mode/selected_headings, and the approved, non-conflicting
      *         claim texts that ground any concrete commitments on that page — see
-     *         RequirementWikiResearchService's supporting_claim_ids).
-     * Returns: {coverage_status, answer_sections, missing_summary, used_page_ids} — every
-     *          answer_sections[].page_ids is guaranteed to be a subset of the page_ids actually
-     *          passed in, coverage 'none' is guaranteed to carry no sections/used_page_ids, and
-     *          'full'/'partial' are guaranteed to have at least one valid cited page.
+     *         RequirementWikiResearchService's supporting_claim_ids). May be an empty list when the
+     *         Wiki had no relevant pages at all — the model still writes a best-practice draft.
+     * Returns: {answer_sections} — every section's used_page_ids is guaranteed to be a subset of
+     *          the page_ids actually passed in; a section may legitimately have an empty
+     *          used_page_ids when it is mainly best practice.
      * Side effects: None (one OpenAI call).
      *
      * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
-     * @return array{coverage_status: string, answer_sections: list<array{text: string, page_ids: list<int>}>, missing_summary: ?string, used_page_ids: list<int>}
+     * @return array{answer_sections: list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>}
      *
      * @throws RuntimeException on API error, empty response, invalid JSON, or a malformed/inconsistent schema result
      */
@@ -70,10 +77,6 @@ class RequirementWikiAnswerAiClient
             throw new RuntimeException('RequirementWikiAnswerAiClient: wiki AI generation is not enabled.');
         }
 
-        if ($pages === []) {
-            throw new RuntimeException('RequirementWikiAnswerAiClient: no pages were provided to answer from.');
-        }
-
         $payload = $this->buildPayload($requirementIdentifier, $requirementText, $pages, $this->languageName($languageCode));
         $response = $this->openAiClient->createResponse($payload);
         $decoded = $this->responsesDecoder->decode($response, 'RequirementWikiAnswerAiClient');
@@ -83,35 +86,15 @@ class RequirementWikiAnswerAiClient
 
     /**
      * @param  list<int>  $allowedPageIds
-     * @return array{coverage_status: string, answer_sections: list<array{text: string, page_ids: list<int>}>, missing_summary: ?string, used_page_ids: list<int>}
+     * @return array{answer_sections: list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>}
      */
     private function normalize(array $decoded, array $allowedPageIds): array
     {
-        $coverageStatus = $decoded['coverage_status'] ?? null;
-
-        if (! is_string($coverageStatus) || ! in_array($coverageStatus, ['full', 'partial', 'none'], true)) {
-            throw new RuntimeException('RequirementWikiAnswerAiClient: response coverage_status was missing or invalid.');
-        }
-
-        $missingSummary = $decoded['missing_summary'] ?? null;
-        $missingSummary = is_string($missingSummary) ? trim($missingSummary) : null;
-        $missingSummary = $missingSummary !== '' ? $missingSummary : null;
-
-        // The anti-fabrication guarantee: 'none' can never carry sections or cited pages, no
-        // matter what the model returned — this is enforced here, not left as a model instruction.
-        if ($coverageStatus === 'none') {
-            return [
-                'coverage_status' => 'none',
-                'answer_sections' => [],
-                'missing_summary' => $missingSummary,
-                'used_page_ids' => [],
-            ];
-        }
-
         $rawSections = $decoded['answer_sections'] ?? [];
         $rawSections = is_array($rawSections) ? $rawSections : [];
 
         $validSections = [];
+        $usedKeys = [];
 
         foreach ($rawSections as $rawSection) {
             if (! is_array($rawSection)) {
@@ -124,42 +107,36 @@ class RequirementWikiAnswerAiClient
                 continue;
             }
 
-            $sectionPageIds = $rawSection['page_ids'] ?? [];
+            $heading = is_string($rawSection['heading'] ?? null) ? trim($rawSection['heading']) : '';
+
+            $key = is_string($rawSection['key'] ?? null) ? trim($rawSection['key']) : '';
+
+            // A section is never dropped for having a blank/duplicate key — a stable synthetic key
+            // is assigned instead, since the key only needs to uniquely identify the section for
+            // the downstream alignment/revision steps, not to be model-authored.
+            if ($key === '' || isset($usedKeys[$key])) {
+                $key = 'S'.(count($validSections) + 1);
+            }
+
+            $usedKeys[$key] = true;
+
+            $sectionPageIds = $rawSection['used_page_ids'] ?? [];
             $sectionPageIds = is_array($sectionPageIds) ? $sectionPageIds : [];
             $sectionPageIds = array_values(array_unique(array_intersect(
                 array_map(static fn (mixed $id): int => (int) $id, $sectionPageIds),
                 $allowedPageIds,
             )));
 
-            // A section citing no page that was actually read cannot be kept — every claim in the
-            // answer must trace back to a page the research step actually validated and read.
-            if ($sectionPageIds === []) {
-                continue;
-            }
-
-            $validSections[] = ['text' => $text, 'page_ids' => $sectionPageIds];
+            // Unlike the earlier claim-based model, a section is NOT required to cite a page — it
+            // may be legitimate, undocumented best practice, and is kept as-is (see class docblock).
+            $validSections[] = ['key' => $key, 'heading' => $heading, 'text' => $text, 'used_page_ids' => $sectionPageIds];
         }
 
         if ($validSections === []) {
-            throw new RuntimeException('RequirementWikiAnswerAiClient: response reported coverage but produced no section citing an actually-read page.');
+            throw new RuntimeException('RequirementWikiAnswerAiClient: response produced no usable answer sections.');
         }
 
-        // used_page_ids is derived from the validated sections, never trusted verbatim from the
-        // model's own output — this is the authoritative citation set.
-        $usedPageIds = [];
-
-        foreach ($validSections as $section) {
-            foreach ($section['page_ids'] as $pageId) {
-                $usedPageIds[$pageId] = true;
-            }
-        }
-
-        return [
-            'coverage_status' => $coverageStatus,
-            'answer_sections' => $validSections,
-            'missing_summary' => $missingSummary,
-            'used_page_ids' => array_values(array_keys($usedPageIds)),
-        ];
+        return ['answer_sections' => $validSections];
     }
 
     /**
@@ -167,25 +144,27 @@ class RequirementWikiAnswerAiClient
      */
     private function buildPayload(string $requirementIdentifier, string $requirementText, array $pages, string $languageName): array
     {
-        $pagesBlock = implode("\n\n---\n\n", array_map(
-            static function (array $page): string {
-                $lines = [
-                    sprintf('PAGE_ID: %d', $page['page_id']),
-                    sprintf('TITLE: %s', $page['title']),
-                    sprintf('TYPE: %s', $page['page_type']),
-                    sprintf('CONTENT (%s):', $page['content_mode'] === 'full' ? 'full page' : 'selected sections: '.implode(', ', $page['selected_headings'])),
-                    $page['content_markdown'],
-                ];
+        $pagesBlock = $pages === []
+            ? '(none — the Wiki had no relevant approved pages for this requirement; write the answer using recognized professional best practice only, per the rules below.)'
+            : implode("\n\n---\n\n", array_map(
+                static function (array $page): string {
+                    $lines = [
+                        sprintf('PAGE_ID: %d', $page['page_id']),
+                        sprintf('TITLE: %s', $page['title']),
+                        sprintf('TYPE: %s', $page['page_type']),
+                        sprintf('CONTENT (%s):', $page['content_mode'] === 'full' ? 'full page' : 'selected sections: '.implode(', ', $page['selected_headings'])),
+                        $page['content_markdown'],
+                    ];
 
-                if ($page['claim_texts'] !== []) {
-                    $lines[] = 'VERIFIED FACTS for this page (use these — and only these — for any concrete SLA, response time, metric, frequency, role, tool, certification, guarantee, or commitment you state):';
-                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['claim_texts']));
-                }
+                    if ($page['claim_texts'] !== []) {
+                        $lines[] = 'VERIFIED FACTS for this page (use these — and only these — for any concrete SLA, response time, metric, frequency, role, tool, certification, guarantee, or commitment you state):';
+                        $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['claim_texts']));
+                    }
 
-                return implode("\n", $lines);
-            },
-            $pages,
-        ));
+                    return implode("\n", $lines);
+                },
+                $pages,
+            ));
 
         $userText = implode("\n\n", array_filter([
             'REQUIREMENT IDENTIFIER: '.($requirementIdentifier !== '' ? $requirementIdentifier : '(none)'),
@@ -232,30 +211,33 @@ class RequirementWikiAnswerAiClient
     private function developerPrompt(string $languageName): string
     {
         return implode("\n", [
-            'You write the supplier\'s (leverandørens) tender response to a single procurement requirement. Your ONLY source of knowledge is the Wiki pages below — read each one carefully before writing.',
+            'You are an experienced subject-matter expert writing the supplier\'s (leverandørens) tender response to a single procurement requirement. Write a professional, usable, directly applicable answer.',
             "Answer language: {$languageName}.",
             '',
-            'How to use the pages:',
-            '- Read every page provided in full and use its actual content_markdown — its headings, paragraphs and explanations — as your basis, not just isolated facts.',
+            'Priority of knowledge:',
+            '- Read every Wiki page provided in full and use its actual content_markdown — its headings, paragraphs and explanations — as your FIRST-PRIORITY basis, not just isolated facts.',
             '- Synthesize across ALL relevant pages into one coherent answer. When pages describe connected process steps (e.g. one page hands off to another), explain that connection if the pages document it.',
             '- Use knowledge discovered by following the pages\' own Wiki links/backlinks exactly the same way as pages found directly — a page is a page, however it was found.',
-            '- Every answer_sections entry must list the page_ids of the pages that actually support that section. Never cite a page_id that was not provided to you.',
+            '- When the Wiki pages do not give sufficient coverage for part of the requirement, you MAY supplement with established, professionally recognized best practice for this subject area, so the answer remains strong and complete rather than short or evasive. This is expected and encouraged, not a fallback to avoid.',
+            '- Write one coherent, flowing expert answer — not a list of disconnected fragments. Use concrete professional terminology where relevant. Avoid repetition and generic marketing filler.',
             '',
-            'Voice and content:',
-            '- Write as the supplier answering the tender requirement directly — a real bid response in flowing, professional paragraphs, not a list, not a description of the pages.',
+            'Sections and citations:',
+            '- Break the answer into answer_sections, each with a short internal key (e.g. "S1"), a short heading describing its topic, and its text.',
+            '- Each section\'s used_page_ids must list the page_ids of the Wiki pages that actually ground that section\'s content. Never cite a page_id that was not provided to you.',
+            '- A section built mainly from best practice, with no real Wiki grounding, should have an EMPTY used_page_ids — do not force a citation onto a page that doesn\'t actually support the section, and do not omit or water down good best-practice content just because no page supports it.',
+            '',
+            'Protecting against invented company facts — this is the one hard boundary on best practice:',
+            '- Never state as an existing fact about the vendor: a specific certification, a specific tool, an SLA or response time, an existing role or organizational structure, a named internal process, or a guaranteed outcome — UNLESS a page\'s VERIFIED FACTS (or its own documented content) actually supports it.',
+            '- When best practice would normally include such a specific claim but no page supports it, phrase it generically instead: as a recommended method, a suggested approach, relevant professional practice, or a solution to be clarified/adapted for the specific delivery — never as something the vendor already has or does.',
+            '- This restraint applies ONLY to concrete vendor-specific claims like the ones above — do not make the rest of the answer generic or overly cautious because of it. Explain and recommend best practice confidently; simply don\'t dress it up as an existing company fact.',
+            '- Never use words like "guarantees", "always", or "ensures" for anything not explicitly supported by a page.',
+            '',
+            'Voice:',
+            '- Write as the supplier answering the tender requirement directly — a real bid response in flowing, professional paragraphs, not a description of the pages or of best practice as a concept.',
             '- Never mention that you are an AI, that this is a Wiki, a database, retrieval, claims, or any internal process — write only the tender response text itself.',
-            '- Use only information stated in the provided pages. Never use general/external ITIL or industry knowledge to fill a gap the pages do not cover.',
-            '- Never turn a general process description into a specific delivery commitment the pages do not state.',
-            '- Never add advisory services, ownership, reporting duties, roles, or responsibilities unless the pages document them.',
-            '- Never use words like "guarantees", "always", or "ensures" unless the pages explicitly support that certainty.',
-            '- Concrete specifics — SLAs, response times, metrics, frequencies, named roles, tools, certifications, guarantees, or contractual commitments — must be grounded in the VERIFIED FACTS listed under a page. If a page has no VERIFIED FACTS for something specific, do not state it as a specific.',
-            '- Do not pad the answer with marketing filler to make it longer. Length should follow from how much the pages actually document, not from a target word count.',
+            '- Do not pad the answer with marketing filler to make it longer. Length should follow from how rich the actual basis is — Wiki content plus genuinely relevant best practice — not from a target word count.',
             '',
-            'Coverage rules:',
-            '- Set coverage_status to "full" only when the pages together fully answer the requirement, with no necessary assumptions. Use as many short paragraphs (answer_sections) as the material naturally supports — typically 2 to 4 when the basis is rich, fewer when it is not.',
-            '- Set coverage_status to "partial" when the pages give a real, useful answer but one or more essential parts of the requirement are not documented. Write the section(s) for what IS documented first, then set missing_summary to a concrete, specific description of what is missing. Never present partial coverage as full compliance.',
-            '- Set coverage_status to "none" when the pages do not provide enough to answer the requirement at all. In this case return an empty answer_sections array and leave used_page_ids empty — never invent or guess an answer.',
-            '- Return only JSON matching the schema. No text before or after JSON.',
+            'Return only JSON matching the schema. No text before or after JSON.',
         ]);
     }
 
@@ -264,37 +246,25 @@ class RequirementWikiAnswerAiClient
         return [
             'type' => 'object',
             'properties' => [
-                'coverage_status' => [
-                    'type' => 'string',
-                    'enum' => ['full', 'partial', 'none'],
-                ],
                 'answer_sections' => [
                     'type' => 'array',
                     'items' => [
                         'type' => 'object',
                         'properties' => [
+                            'key' => ['type' => 'string'],
+                            'heading' => ['type' => 'string'],
                             'text' => ['type' => 'string'],
-                            'page_ids' => [
+                            'used_page_ids' => [
                                 'type' => 'array',
                                 'items' => ['type' => 'integer'],
                             ],
                         ],
-                        'required' => ['text', 'page_ids'],
+                        'required' => ['key', 'heading', 'text', 'used_page_ids'],
                         'additionalProperties' => false,
                     ],
                 ],
-                'missing_summary' => [
-                    'anyOf' => [
-                        ['type' => 'string'],
-                        ['type' => 'null'],
-                    ],
-                ],
-                'used_page_ids' => [
-                    'type' => 'array',
-                    'items' => ['type' => 'integer'],
-                ],
             ],
-            'required' => ['coverage_status', 'answer_sections', 'missing_summary', 'used_page_ids'],
+            'required' => ['answer_sections'],
             'additionalProperties' => false,
         ];
     }

@@ -9,10 +9,11 @@ use RuntimeException;
 use Tests\TestCase;
 
 /**
- * Purpose: Verify the final-answer AI client receives Wiki PAGES as its primary context (not a
- * flat claim list), instructs the model to actually read them, forbids general model knowledge and
- * undocumented delivery commitments, and enforces the page-citation/anti-fabrication contract in
- * PHP rather than trusting the model's own compliance.
+ * Purpose: Verify the final-answer AI client receives Wiki PAGES as its first-priority context
+ * (not a flat claim list), is explicitly allowed to supplement with best practice, protects against
+ * invented company-specific facts, and no longer self-reports coverage_status/missing_summary or
+ * forces a section to cite a page — those judgments now belong to RequirementWikiAlignmentAiClient
+ * and RequirementWikiAnswerService, run after this client.
  * Inputs: None.
  * Returns: None.
  * Side effects: None.
@@ -69,7 +70,7 @@ class RequirementWikiAnswerAiClientTest extends TestCase
             $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
                 $captured = $payload;
 
-                return $this->response(['coverage_status' => 'none', 'answer_sections' => [], 'missing_summary' => null, 'used_page_ids' => []]);
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => 'Problem Management', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
             });
         });
 
@@ -91,163 +92,151 @@ class RequirementWikiAnswerAiClientTest extends TestCase
             $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
                 $captured = $payload;
 
-                return $this->response(['coverage_status' => 'none', 'answer_sections' => [], 'missing_summary' => null, 'used_page_ids' => []]);
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]]);
             });
         });
 
         app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
 
         $developerPrompt = data_get($captured, 'input.0.content.0.text');
-        $this->assertStringContainsString('Read every page provided in full', $developerPrompt);
+        $this->assertStringContainsString('Read every Wiki page provided in full', $developerPrompt);
     }
 
-    public function test_prompt_forbids_general_model_knowledge_and_undocumented_commitments(): void
+    public function test_prompt_permits_best_practice_but_forbids_invented_company_facts(): void
     {
         $captured = null;
         $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
             $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
                 $captured = $payload;
 
-                return $this->response(['coverage_status' => 'none', 'answer_sections' => [], 'missing_summary' => null, 'used_page_ids' => []]);
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]]);
             });
         });
 
         app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
 
         $developerPrompt = data_get($captured, 'input.0.content.0.text');
-        $this->assertStringContainsString('Never use general/external ITIL or industry knowledge', $developerPrompt);
-        $this->assertStringContainsString('Never turn a general process description into a specific delivery commitment', $developerPrompt);
-        $this->assertStringContainsString('Never add advisory services, ownership, reporting duties', $developerPrompt);
-        $this->assertStringContainsString('must be grounded in the VERIFIED FACTS', $developerPrompt);
+        $this->assertStringContainsString('you MAY supplement with established, professionally recognized best practice', $developerPrompt);
+        $this->assertStringContainsString('a specific certification, a specific tool, an SLA or response time, an existing role or organizational structure, a named internal process, or a guaranteed outcome', $developerPrompt);
+        $this->assertStringContainsString('recommended method, a suggested approach, relevant professional practice, or a solution to be clarified/adapted', $developerPrompt);
+        $this->assertStringContainsString('do not make the rest of the answer generic or overly cautious because of it', $developerPrompt);
     }
 
-    public function test_an_answer_can_cite_more_than_one_page(): void
+    public function test_it_can_generate_an_answer_with_zero_pages_using_best_practice_only(): void
     {
-        $client = $this->clientReturning([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar basert på begge sider.', 'page_ids' => [101, 102]]],
-            'missing_summary' => null,
-            'used_page_ids' => [101, 102],
-        ]);
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
 
-        $result = $client->generateAnswer('1.1', 'text', $this->twoPages(), 'no');
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => 'Anbefalt tilnærming', 'text' => 'Beste praksis-svar uten Wiki-støtte.', 'used_page_ids' => []]]]);
+            });
+        });
 
-        $this->assertSame(['101', '102'], array_map('strval', $result['answer_sections'][0]['page_ids']));
-        $this->assertEqualsCanonicalizing([101, 102], $result['used_page_ids']);
+        $result = app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', [], 'no');
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringContainsString('write the answer using recognized professional best practice only', $userText);
+        $this->assertSame('Beste praksis-svar uten Wiki-støtte.', $result['answer_sections'][0]['text']);
+        $this->assertSame([], $result['answer_sections'][0]['used_page_ids']);
     }
 
-    public function test_an_unknown_page_id_is_filtered_out_of_a_section(): void
+    public function test_a_section_can_have_an_empty_used_page_ids_and_is_not_dropped(): void
     {
         $client = $this->clientReturning([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar.', 'page_ids' => [101, 999]]],
-            'missing_summary' => null,
-            'used_page_ids' => [101, 999],
-        ]);
-
-        $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
-
-        $this->assertSame([101], $result['answer_sections'][0]['page_ids']);
-        $this->assertSame([101], $result['used_page_ids']);
-    }
-
-    public function test_a_page_that_was_never_provided_cannot_be_cited_at_all(): void
-    {
-        $client = $this->clientReturning([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar.', 'page_ids' => [999]]],
-            'missing_summary' => null,
-            'used_page_ids' => [999],
-        ]);
-
-        $this->expectException(RuntimeException::class);
-
-        $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
-    }
-
-    public function test_used_page_ids_are_derived_from_validated_sections_not_trusted_verbatim(): void
-    {
-        $client = $this->clientReturning([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar.', 'page_ids' => [101]]],
-            'missing_summary' => null,
-            // The model claims 102 was used, but no section actually cites it.
-            'used_page_ids' => [101, 102],
-        ]);
-
-        $result = $client->generateAnswer('1.1', 'text', $this->twoPages(), 'no');
-
-        $this->assertSame([101], $result['used_page_ids']);
-    }
-
-    public function test_used_page_ids_are_deduplicated(): void
-    {
-        $client = $this->clientReturning([
-            'coverage_status' => 'full',
             'answer_sections' => [
-                ['text' => 'Del en.', 'page_ids' => [101]],
-                ['text' => 'Del to.', 'page_ids' => [101, 102]],
+                ['key' => 'S1', 'heading' => 'Wiki-forankret', 'text' => 'Wiki-basert avsnitt.', 'used_page_ids' => [101]],
+                ['key' => 'S2', 'heading' => 'Beste praksis', 'text' => 'Beste praksis-avsnitt uten sidehenvisning.', 'used_page_ids' => []],
             ],
-            'missing_summary' => null,
-            'used_page_ids' => [],
+        ]);
+
+        $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $this->assertCount(2, $result['answer_sections']);
+        $this->assertSame([], $result['answer_sections'][1]['used_page_ids']);
+        $this->assertSame('Beste praksis-avsnitt uten sidehenvisning.', $result['answer_sections'][1]['text']);
+    }
+
+    public function test_an_answer_can_cite_more_than_one_page_in_one_section(): void
+    {
+        $client = $this->clientReturning([
+            'answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar basert på begge sider.', 'used_page_ids' => [101, 102]]],
         ]);
 
         $result = $client->generateAnswer('1.1', 'text', $this->twoPages(), 'no');
 
-        $this->assertEqualsCanonicalizing([101, 102], $result['used_page_ids']);
+        $this->assertEqualsCanonicalizing([101, 102], $result['answer_sections'][0]['used_page_ids']);
     }
 
-    public function test_none_coverage_always_forces_empty_sections_and_used_page_ids(): void
+    public function test_an_unknown_page_id_is_filtered_out_of_a_section_without_dropping_it(): void
     {
         $client = $this->clientReturning([
-            'coverage_status' => 'none',
-            'answer_sections' => [['text' => 'Jeg dikter opp et svar likevel.', 'page_ids' => [101]]],
-            'missing_summary' => null,
-            'used_page_ids' => [101],
+            'answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101, 999]]],
         ]);
 
         $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
 
-        $this->assertSame('none', $result['coverage_status']);
-        $this->assertSame([], $result['answer_sections']);
-        $this->assertSame([], $result['used_page_ids']);
+        $this->assertSame([101], $result['answer_sections'][0]['used_page_ids']);
     }
 
-    public function test_partial_coverage_keeps_sections_and_missing_summary(): void
+    public function test_a_page_that_was_never_provided_cannot_be_cited_but_the_section_is_kept(): void
     {
         $client = $this->clientReturning([
-            'coverage_status' => 'partial',
-            'answer_sections' => [['text' => 'Delvis svar.', 'page_ids' => [101]]],
-            'missing_summary' => 'Wiki-en dokumenterer ikke responstider.',
-            'used_page_ids' => [101],
+            'answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar uten gyldig sidehenvisning.', 'used_page_ids' => [999]]],
         ]);
 
         $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
 
-        $this->assertSame('partial', $result['coverage_status']);
-        $this->assertSame('Delvis svar.', $result['answer_sections'][0]['text']);
-        $this->assertSame('Wiki-en dokumenterer ikke responstider.', $result['missing_summary']);
+        $this->assertSame([], $result['answer_sections'][0]['used_page_ids']);
+        $this->assertSame('Svar uten gyldig sidehenvisning.', $result['answer_sections'][0]['text']);
     }
 
-    public function test_full_coverage_with_no_valid_cited_page_is_rejected(): void
+    public function test_a_blank_or_duplicate_key_is_replaced_with_a_synthetic_one(): void
     {
         $client = $this->clientReturning([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar uten gyldig sidehenvisning.', 'page_ids' => [999]]],
-            'missing_summary' => null,
-            'used_page_ids' => [],
+            'answer_sections' => [
+                ['key' => '', 'heading' => '', 'text' => 'Første.', 'used_page_ids' => []],
+                ['key' => 'S1', 'heading' => '', 'text' => 'Andre.', 'used_page_ids' => []],
+            ],
         ]);
+
+        $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $keys = array_column($result['answer_sections'], 'key');
+        $this->assertCount(2, array_unique($keys));
+        foreach ($keys as $key) {
+            $this->assertNotSame('', $key);
+        }
+    }
+
+    public function test_response_no_longer_carries_a_coverage_status_field(): void
+    {
+        $client = $this->clientReturning([
+            'answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]],
+        ]);
+
+        $result = $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $this->assertArrayNotHasKey('coverage_status', $result);
+        $this->assertArrayNotHasKey('missing_summary', $result);
+    }
+
+    public function test_throws_when_no_usable_answer_sections_are_produced(): void
+    {
+        $client = $this->clientReturning(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => '', 'used_page_ids' => []]]]);
 
         $this->expectException(RuntimeException::class);
 
         $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
     }
 
-    public function test_throws_when_no_pages_are_provided(): void
+    public function test_throws_when_ai_generation_is_disabled(): void
     {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+
         $this->expectException(RuntimeException::class);
 
-        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', [], 'no');
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
     }
 
     private function clientReturning(array $body): RequirementWikiAnswerAiClient

@@ -2056,6 +2056,8 @@ class AiController extends Controller
                 'sections' => [],
                 'main_pages' => [],
                 'discovered_pages' => [],
+                'alignment_summary' => null,
+                'has_possible_conflict' => null,
                 'engine_version' => null,
                 'generated_at' => null,
             ];
@@ -2064,12 +2066,21 @@ class AiController extends Controller
         $sources = is_array($wikiAnswer->sources) ? $wikiAnswer->sources : [];
         $researchTrace = is_array($wikiAnswer->research_trace) ? $wikiAnswer->research_trace : null;
         $answer = is_array($researchTrace['answer'] ?? null) ? $researchTrace['answer'] : null;
+        $alignmentTrace = is_array($wikiAnswer->alignment_trace) ? $wikiAnswer->alignment_trace : null;
 
         $pageTitleById = [];
 
         foreach ($sources as $source) {
             if (isset($source['enterprise_wiki_page_id'])) {
                 $pageTitleById[$source['enterprise_wiki_page_id']] = $source['page_title'] ?? null;
+            }
+        }
+
+        $alignmentBySectionKey = [];
+
+        foreach (($alignmentTrace['sections'] ?? []) as $alignmentSection) {
+            if (is_array($alignmentSection) && is_string($alignmentSection['section_key'] ?? null)) {
+                $alignmentBySectionKey[$alignmentSection['section_key']] = $alignmentSection;
             }
         }
 
@@ -2080,16 +2091,63 @@ class AiController extends Controller
                 continue;
             }
 
-            $sectionPageIds = is_array($section['page_ids'] ?? null) ? $section['page_ids'] : [];
+            // 'used_page_ids' is the current (wiki_reader_alignment_v3) field name; 'page_ids' is
+            // kept as a fallback so rows persisted by the prior engine version (wiki_reader_v2)
+            // still render their citations correctly.
+            $sectionPageIds = is_array($section['used_page_ids'] ?? null)
+                ? $section['used_page_ids']
+                : (is_array($section['page_ids'] ?? null) ? $section['page_ids'] : []);
+
+            $sectionKey = is_string($section['key'] ?? null) ? $section['key'] : null;
+            $alignment = $sectionKey !== null ? ($alignmentBySectionKey[$sectionKey] ?? null) : null;
+            $alignmentStatus = is_string($alignment['alignment_status'] ?? null) ? $alignment['alignment_status'] : null;
+            $supportingPageIds = is_array($alignment['supporting_page_ids'] ?? null) ? $alignment['supporting_page_ids'] : [];
 
             $sections[] = [
+                'key' => $sectionKey,
+                'heading' => is_string($section['heading'] ?? null) ? $section['heading'] : null,
                 'text' => (string) ($section['text'] ?? ''),
                 'page_ids' => $sectionPageIds,
                 'page_titles' => array_values(array_filter(array_map(
                     static fn (mixed $pageId): ?string => $pageTitleById[$pageId] ?? null,
                     $sectionPageIds,
                 ))),
+                'alignment_status' => $alignmentStatus,
+                'alignment_status_label' => $alignmentStatus !== null
+                    ? (SavedNoticeAiRequirementWikiAnswer::ALIGNMENT_STATUS_LABELS[$alignmentStatus] ?? $alignmentStatus)
+                    : null,
+                'supporting_page_ids' => $supportingPageIds,
+                'supporting_page_titles' => array_values(array_filter(array_map(
+                    static fn (mixed $pageId): ?string => $pageTitleById[$pageId] ?? null,
+                    $supportingPageIds,
+                ))),
+                'supported_points' => is_array($alignment['supported_points'] ?? null) ? $alignment['supported_points'] : [],
+                'uncovered_points' => is_array($alignment['uncovered_points'] ?? null) ? $alignment['uncovered_points'] : [],
+                'conflict_summary' => is_string($alignment['conflict_summary'] ?? null) ? $alignment['conflict_summary'] : null,
+                'review_note' => is_string($alignment['review_note'] ?? null) ? $alignment['review_note'] : null,
+                'revised' => (bool) ($alignment['revised'] ?? false),
             ];
+        }
+
+        $alignmentSummary = null;
+
+        if ($alignmentTrace !== null) {
+            $counts = [
+                SavedNoticeAiRequirementWikiAnswer::ALIGNMENT_STATUS_ALIGNED => 0,
+                SavedNoticeAiRequirementWikiAnswer::ALIGNMENT_STATUS_PARTIALLY_ALIGNED => 0,
+                SavedNoticeAiRequirementWikiAnswer::ALIGNMENT_STATUS_BEST_PRACTICE => 0,
+                SavedNoticeAiRequirementWikiAnswer::ALIGNMENT_STATUS_POSSIBLE_CONFLICT => 0,
+            ];
+
+            foreach (($alignmentTrace['sections'] ?? []) as $alignmentSection) {
+                $status = is_array($alignmentSection) ? ($alignmentSection['alignment_status'] ?? null) : null;
+
+                if (is_string($status) && array_key_exists($status, $counts)) {
+                    $counts[$status]++;
+                }
+            }
+
+            $alignmentSummary = array_merge($counts, ['total' => array_sum($counts)]);
         }
 
         return [
@@ -2108,6 +2166,8 @@ class AiController extends Controller
                 $sources,
                 static fn (array $source): bool => ($source['selection_type'] ?? null) === 'wikilink',
             )),
+            'alignment_summary' => $alignmentSummary,
+            'has_possible_conflict' => $wikiAnswer->has_possible_conflict,
             'engine_version' => $wikiAnswer->engine_version,
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
         ];

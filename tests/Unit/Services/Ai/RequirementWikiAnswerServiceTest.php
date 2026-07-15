@@ -6,7 +6,9 @@ use App\Models\Customer;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
+use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
 use App\Services\Ai\Wiki\RequirementWikiResearchService;
 use Illuminate\Support\Facades\DB;
@@ -18,11 +20,13 @@ use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * Purpose: Verify RequirementWikiAnswerService's own orchestration — combining a (mocked)
- * research context with a (mocked) final-answer result, assembling answer_text from validated
- * sections, building the sources/research_trace/engine_version persistence payload, and never
- * touching the existing answer-draft flow. Research (page discovery) and answer-writing behavior
- * themselves are covered by RequirementWikiResearchServiceTest/RequirementWikiAnswerAiClientTest.
+ * Purpose: Verify RequirementWikiAnswerService's own orchestration — the balanced-model correction
+ * that lets an expert draft (RequirementWikiAnswerAiClient) supplement Wiki knowledge with best
+ * practice, classifies each section's grounding via RequirementWikiAlignmentAiClient, computes
+ * coverage_status itself (never trusting a self-reported value from either AI client), and runs at
+ * most one automatic revision pass via RequirementWikiAnswerRevisionAiClient when — and only when —
+ * a section is flagged possible_conflict. Research (page discovery) and per-client prompt/schema
+ * behavior are covered by RequirementWikiResearchServiceTest / RequirementWiki*AiClientTest.
  * Inputs: None.
  * Returns: None.
  * Side effects: None.
@@ -52,25 +56,23 @@ class RequirementWikiAnswerServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_persists_research_trace_and_engine_version(): void
+    public function test_it_persists_research_trace_alignment_trace_and_engine_version(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
         $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
-        $this->mockAnswerClient([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svaret.', 'page_ids' => [$page->id]]],
-            'missing_summary' => null,
-            'used_page_ids' => [$page->id],
-        ]);
+        $this->mockAnswerClient([$this->section('S1', 'Svaret.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertIsArray($answer->research_trace);
         $this->assertArrayHasKey('research', $answer->research_trace);
         $this->assertArrayHasKey('answer', $answer->research_trace);
+        $this->assertIsArray($answer->alignment_trace);
+        $this->assertArrayHasKey('sections', $answer->alignment_trace);
         $this->assertSame(RequirementWikiAnswerService::ENGINE_VERSION, $answer->engine_version);
     }
 
@@ -82,10 +84,12 @@ class RequirementWikiAnswerServiceTest extends TestCase
         DB::table('saved_notice_ai_requirement_wiki_answers')->insert([
             'saved_notice_ai_requirement_id' => $requirement->id,
             'coverage_status' => 'full',
-            'answer_text' => 'Gammelt svar fra før research_trace fantes.',
+            'answer_text' => 'Gammelt svar fra før alignment_trace fantes.',
             'sources' => json_encode([['enterprise_wiki_page_id' => 1, 'page_title' => 'Gammel side', 'page_slug' => 'gammel', 'page_type' => 'article', 'claim_ids' => [1]]]),
             'research_trace' => null,
             'engine_version' => null,
+            'alignment_trace' => null,
+            'has_possible_conflict' => null,
             'generated_at' => now(),
             'created_at' => now(),
             'updated_at' => now(),
@@ -93,92 +97,289 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
         $loaded = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->firstOrFail();
 
-        $this->assertSame('Gammelt svar fra før research_trace fantes.', $loaded->answer_text);
+        $this->assertSame('Gammelt svar fra før alignment_trace fantes.', $loaded->answer_text);
         $this->assertNull($loaded->research_trace);
         $this->assertNull($loaded->engine_version);
+        $this->assertNull($loaded->alignment_trace);
+        $this->assertNull($loaded->has_possible_conflict);
         $this->assertIsArray($loaded->sources);
     }
 
-    public function test_full_coverage_assembles_the_answer_text_from_validated_sections(): void
+    public function test_all_sections_aligned_gives_full_coverage(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
-        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
         $this->mockAnswerClient([
-            'coverage_status' => 'full',
-            'answer_sections' => [
-                ['text' => 'Første avsnitt.', 'page_ids' => [$page->id]],
-                ['text' => 'Andre avsnitt.', 'page_ids' => [$page->id]],
-            ],
-            'missing_summary' => null,
-            'used_page_ids' => [$page->id],
+            $this->section('S1', 'Første avsnitt.', [$page->id]),
+            $this->section('S2', 'Andre avsnitt.', [$page->id]),
+        ]);
+        $this->mockAlignmentClient([
+            $this->assessment('S1', 'aligned', [$page->id]),
+            $this->assessment('S2', 'aligned', [$page->id]),
         ]);
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertSame('full', $answer->coverage_status);
         $this->assertSame("Første avsnitt.\n\nAndre avsnitt.", $answer->answer_text);
+        $this->assertFalse($answer->has_possible_conflict);
         $this->assertCount(1, $answer->sources);
         $this->assertSame($page->id, $answer->sources[0]['enterprise_wiki_page_id']);
     }
 
-    public function test_partial_coverage_keeps_answer_text_and_missing_summary(): void
+    public function test_a_mix_of_aligned_and_best_practice_gives_partial_coverage(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
-        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
         $this->mockAnswerClient([
-            'coverage_status' => 'partial',
-            'answer_sections' => [['text' => 'Delvis svar.', 'page_ids' => [$page->id]]],
-            'missing_summary' => 'Wiki-en dekker ikke responstider.',
-            'used_page_ids' => [$page->id],
+            $this->section('S1', 'Wiki-forankret avsnitt.', [$page->id]),
+            $this->section('S2', 'Beste praksis-avsnitt.', []),
+        ]);
+        $this->mockAlignmentClient([
+            $this->assessment('S1', 'aligned', [$page->id]),
+            $this->assessment('S2', 'best_practice'),
         ]);
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertSame('partial', $answer->coverage_status);
-        $this->assertSame('Delvis svar.', $answer->answer_text);
-        $this->assertSame('Wiki-en dekker ikke responstider.', $answer->missing_summary);
     }
 
-    public function test_none_coverage_from_zero_pages_read_never_calls_the_answer_client(): void
+    public function test_only_best_practice_sections_give_none_coverage(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Beste praksis-svar.', [])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('none', $answer->coverage_status);
+    }
+
+    public function test_none_coverage_never_forces_the_answer_text_to_null(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Et fortsatt nyttig ekspertutkast basert på beste praksis.', [])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('none', $answer->coverage_status);
+        $this->assertSame('Et fortsatt nyttig ekspertutkast basert på beste praksis.', $answer->answer_text);
+        $this->assertNotNull($answer->answer_text);
+    }
+
+    public function test_zero_pages_read_still_generates_a_best_practice_draft_via_the_answer_client(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
-        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('generateAnswer'));
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn (string $identifier, string $text, array $pages, string $language): bool => $pages === [])
+            ->andReturn(['answer_sections' => [$this->section('S1', 'Beste praksis uten Wiki-treff.', [])]]));
+        // No Wiki pages were read at all — alignment is deterministic (best_practice for every
+        // section), so the alignment AI client must never be called for this run.
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertSame('none', $answer->coverage_status);
-        $this->assertNull($answer->answer_text);
+        $this->assertSame('Beste praksis uten Wiki-treff.', $answer->answer_text);
         $this->assertSame([], $answer->sources);
+        $this->assertFalse($answer->has_possible_conflict);
     }
 
-    public function test_none_coverage_from_the_answer_client_forces_null_answer_text(): void
+    public function test_possible_conflict_triggers_exactly_one_revision_and_one_re_alignment(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv ansvar for prosessen.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Etter etablering eier Kunden prosessen videre.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Leverandøren eier prosessen videre.', [])]);
+
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->twice()
+            ->andReturn(
+                [$this->assessment('S1', 'possible_conflict', [], [], [], 'Svaret sier Leverandøren eier prosessen; Wiki-en sier Kunden gjør det.')],
+                [$this->assessment('S1', 'aligned', [$page->id])],
+            ));
+
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('reviseSections')
+            ->once()
+            ->andReturn(['S1' => ['heading' => '', 'text' => 'Kunden eier prosessen videre etter etablering.', 'used_page_ids' => [$page->id]]]));
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('Kunden eier prosessen videre etter etablering.', $answer->answer_text);
+        $this->assertSame('full', $answer->coverage_status);
+        $this->assertFalse($answer->has_possible_conflict);
+        $this->assertTrue($answer->alignment_trace['sections'][0]['revised']);
+        $this->assertSame('possible_conflict', $answer->alignment_trace['sections'][0]['alignment_status_before_revision']);
+    }
+
+    public function test_a_conflict_that_persists_after_revision_is_kept_and_flagged(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv ansvar for prosessen.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Etter etablering eier Kunden prosessen videre.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Leverandøren eier prosessen videre.', [])]);
+
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->twice()
+            ->andReturn(
+                [$this->assessment('S1', 'possible_conflict', [], [], [], 'Første konfliktbeskrivelse.')],
+                [$this->assessment('S1', 'possible_conflict', [], [], [], 'Fortsatt konflikt etter revisjon.')],
+            ));
+
+        // Even though the revision did not resolve the conflict, exactly one revision call is
+        // made — there is no repair loop.
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('reviseSections')
+            ->once()
+            ->andReturn(['S1' => ['heading' => '', 'text' => 'Justert tekst som fortsatt kan avvike.', 'used_page_ids' => []]]));
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertTrue($answer->has_possible_conflict);
+        $this->assertSame('Justert tekst som fortsatt kan avvike.', $answer->answer_text);
+        $this->assertSame('possible_conflict', $answer->alignment_trace['sections'][0]['alignment_status']);
+        $this->assertNotNull($answer->alignment_trace['sections'][0]['conflict_summary']);
+    }
+
+    public function test_best_practice_sections_never_trigger_a_revision(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
-        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Beste praksis.', [])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'best_practice')]);
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+    }
+
+    public function test_partially_aligned_sections_never_trigger_a_revision(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Delvis forankret.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'partially_aligned', [$page->id])]);
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+    }
+
+    public function test_only_conflicted_sections_are_sent_to_revision_and_others_are_preserved(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv prosessene.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Etter etablering eier Kunden prosessen videre.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
         $this->mockAnswerClient([
-            'coverage_status' => 'none',
-            'answer_sections' => [],
-            'missing_summary' => null,
-            'used_page_ids' => [],
+            $this->section('S1', 'Uendret avsnitt som skal bevares.', [$page->id]),
+            $this->section('S2', 'Leverandøren eier prosessen videre.', []),
         ]);
+
+        $capturedRevisionInput = null;
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->twice()
+            ->andReturn(
+                [
+                    $this->assessment('S1', 'aligned', [$page->id]),
+                    $this->assessment('S2', 'possible_conflict', [], [], [], 'Motstrid om eierskap.'),
+                ],
+                [
+                    $this->assessment('S1', 'aligned', [$page->id]),
+                    $this->assessment('S2', 'aligned', [$page->id]),
+                ],
+            ));
+
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, function (MockInterface $mock) use (&$capturedRevisionInput, $page): void {
+            $mock->shouldReceive('reviseSections')
+                ->once()
+                ->andReturnUsing(function (string $identifier, string $text, array $sectionsToRevise) use (&$capturedRevisionInput, $page): array {
+                    $capturedRevisionInput = $sectionsToRevise;
+
+                    return ['S2' => ['heading' => '', 'text' => 'Kunden eier prosessen videre.', 'used_page_ids' => [$page->id]]];
+                });
+        });
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
-        $this->assertSame('none', $answer->coverage_status);
-        $this->assertNull($answer->answer_text);
-        $this->assertSame([], $answer->sources);
+        $this->assertCount(1, $capturedRevisionInput);
+        $this->assertSame('S2', $capturedRevisionInput[0]['key']);
+        $this->assertSame("Uendret avsnitt som skal bevares.\n\nKunden eier prosessen videre.", $answer->answer_text);
+    }
+
+    public function test_a_possible_conflict_alongside_an_aligned_section_does_not_by_itself_force_none(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv prosessene.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([
+            $this->section('S1', 'Wiki-forankret avsnitt.', [$page->id]),
+            $this->section('S2', 'Mulig avvikende avsnitt.', []),
+        ]);
+
+        // Revision resolves S2 to aligned, so the final gradable set is [aligned, aligned] -> full,
+        // and has_possible_conflict is false — this exercises the "no residual conflict" branch of
+        // the same rule the two dedicated conflict tests above exercise for the opposite outcome.
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')
+            ->twice()
+            ->andReturn(
+                [
+                    $this->assessment('S1', 'aligned', [$page->id]),
+                    $this->assessment('S2', 'possible_conflict', [], [], [], 'Mulig avvik.'),
+                ],
+                [
+                    $this->assessment('S1', 'aligned', [$page->id]),
+                    $this->assessment('S2', 'aligned', [$page->id]),
+                ],
+            ));
+
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('reviseSections')
+            ->once()
+            ->andReturn(['S2' => ['heading' => '', 'text' => 'Korrigert avsnitt.', 'used_page_ids' => [$page->id]]]));
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('full', $answer->coverage_status);
+        $this->assertFalse($answer->has_possible_conflict);
     }
 
     public function test_it_never_reads_or_writes_the_existing_answer_draft_columns(): void
@@ -191,6 +392,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         ])->save();
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
+        $this->mockAnswerClient([$this->section('S1', 'Beste praksis.', [])]);
 
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
@@ -205,15 +407,12 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [], 'no_relevant_candidates'));
+        $this->mockAnswerClient([$this->section('S1', 'Første generering.', [])]);
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
-        $this->mockAnswerClient([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Nytt svar.', 'page_ids' => [$page->id]]],
-            'missing_summary' => null,
-            'used_page_ids' => [$page->id],
-        ]);
+        $this->mockAnswerClient([$this->section('S1', 'Nytt svar.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $count = SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->count();
@@ -239,12 +438,8 @@ class RequirementWikiAnswerServiceTest extends TestCase
         ];
 
         $this->mockResearchService($this->fakeResearchContext($requirement, $pages));
-        $this->mockAnswerClient([
-            'coverage_status' => 'full',
-            'answer_sections' => [['text' => 'Svar.', 'page_ids' => [$directPage->id, $linkedPage->id]]],
-            'missing_summary' => null,
-            'used_page_ids' => [$directPage->id, $linkedPage->id],
-        ]);
+        $this->mockAnswerClient([$this->section('S1', 'Svar.', [$directPage->id, $linkedPage->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$directPage->id, $linkedPage->id])]);
 
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
@@ -269,16 +464,47 @@ class RequirementWikiAnswerServiceTest extends TestCase
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
     }
 
+    private function section(string $key, string $text, array $usedPageIds, string $heading = ''): array
+    {
+        return ['key' => $key, 'heading' => $heading, 'text' => $text, 'used_page_ids' => $usedPageIds];
+    }
+
+    private function assessment(
+        string $key,
+        string $status,
+        array $supportingPageIds = [],
+        array $supportedPoints = [],
+        array $uncoveredPoints = [],
+        ?string $conflictSummary = null,
+        ?string $reviewNote = null,
+    ): array {
+        return [
+            'section_key' => $key,
+            'alignment_status' => $status,
+            'supporting_page_ids' => $supportingPageIds,
+            'supported_points' => $supportedPoints,
+            'uncovered_points' => $uncoveredPoints,
+            'conflict_summary' => $conflictSummary,
+            'review_note' => $reviewNote,
+        ];
+    }
+
     private function mockResearchService(array $context): void
     {
         $this->mock(RequirementWikiResearchService::class, fn (MockInterface $mock) => $mock
             ->shouldReceive('research')->once()->andReturn($context));
     }
 
-    private function mockAnswerClient(array $result): void
+    private function mockAnswerClient(array $sections): void
     {
         $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('generateAnswer')->once()->andReturn($result));
+            ->shouldReceive('generateAnswer')->once()->andReturn(['answer_sections' => $sections]));
+    }
+
+    private function mockAlignmentClient(array $sections): void
+    {
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('assessAlignment')->once()->andReturn($sections));
     }
 
     private function fakePage(int $pageId, string $title): array
