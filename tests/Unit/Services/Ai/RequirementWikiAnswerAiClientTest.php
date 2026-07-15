@@ -120,6 +120,11 @@ class RequirementWikiAnswerAiClientTest extends TestCase
         $this->assertStringContainsString('a specific certification, a specific tool, an SLA or response time, an existing role or organizational structure, a named internal process, or a guaranteed outcome', $developerPrompt);
         $this->assertStringContainsString('recommended method, a suggested approach, relevant professional practice, or a solution to be clarified/adapted', $developerPrompt);
         $this->assertStringContainsString('do not make the rest of the answer generic or overly cautious because of it', $developerPrompt);
+        $this->assertStringContainsString('Every section must contribute new information', $developerPrompt);
+        $this->assertStringContainsString('overview should focus on framework and governance', $developerPrompt);
+        $this->assertStringContainsString('incident-related sections should focus on incident handling', $developerPrompt);
+        $this->assertStringContainsString('problem-related sections should focus on root-cause analysis and permanent actions', $developerPrompt);
+        $this->assertStringContainsString('Avoid repeating CMDB, monitoring, traceability, Change Enablement, and continuous improvement', $developerPrompt);
     }
 
     public function test_it_can_generate_an_answer_with_zero_pages_using_best_practice_only(): void
