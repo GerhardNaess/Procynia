@@ -124,23 +124,24 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertSame('full', $answer->coverage_status);
+        $this->assertCount(2, $answer->alignment_trace['sections']);
         $this->assertSame("Første avsnitt.\n\nAndre avsnitt.", $answer->answer_text);
         $this->assertFalse($answer->has_possible_conflict);
         $this->assertCount(1, $answer->sources);
         $this->assertSame($page->id, $answer->sources[0]['enterprise_wiki_page_id']);
     }
 
-    public function test_a_three_section_answer_can_end_after_the_problem_management_section_without_a_summary_block(): void
+    public function test_a_three_section_answer_can_end_after_the_last_needed_section_without_a_summary_block(): void
     {
         $customer = $this->createWikiCustomer();
-        $requirement = $this->createRequirement($customer, 'Beskriv ITIL-systemet.');
-        $page = $this->createWikiPageWithVersion($customer, 'ITIL system', 'Innhold.');
+        $requirement = $this->createRequirement($customer, 'Beskriv en prosesskjede.');
+        $page = $this->createWikiPageWithVersion($customer, 'Prosess', 'Innhold.');
 
-        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'ITIL system')]));
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Prosess')]));
         $this->mockAnswerClient([
-            $this->section('S1', 'Oversikt over Leverandørens ITIL-system.', [$page->id]),
-            $this->section('S2', 'Incident Management.', [$page->id]),
-            $this->section('S3', 'Problem Management.', [$page->id]),
+            $this->section('S1', 'Første fagavsnitt.', [$page->id]),
+            $this->section('S2', 'Andre fagavsnitt.', [$page->id]),
+            $this->section('S3', 'Tredje fagavsnitt.', [$page->id]),
         ]);
         $this->mockAlignmentClient([
             $this->assessment('S1', 'aligned', [$page->id]),
@@ -153,7 +154,37 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->assertSame('full', $answer->coverage_status);
         $this->assertSame(3, count($answer->alignment_trace['sections']));
         $this->assertSame(
-            "Oversikt over Leverandørens ITIL-system.\n\nIncident Management.\n\nProblem Management.",
+            "Første fagavsnitt.\n\nAndre fagavsnitt.\n\nTredje fagavsnitt.",
+            $answer->answer_text,
+        );
+    }
+
+    public function test_a_four_section_answer_can_end_after_the_last_needed_section_without_a_summary_block(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv en utvidet prosesskjede.');
+        $page = $this->createWikiPageWithVersion($customer, 'Prosess', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Prosess')]));
+        $this->mockAnswerClient([
+            $this->section('S1', 'Første fagavsnitt.', [$page->id]),
+            $this->section('S2', 'Andre fagavsnitt.', [$page->id]),
+            $this->section('S3', 'Tredje fagavsnitt.', [$page->id]),
+            $this->section('S4', 'Fjerde fagavsnitt.', [$page->id]),
+        ]);
+        $this->mockAlignmentClient([
+            $this->assessment('S1', 'aligned', [$page->id]),
+            $this->assessment('S2', 'aligned', [$page->id]),
+            $this->assessment('S3', 'aligned', [$page->id]),
+            $this->assessment('S4', 'aligned', [$page->id]),
+        ]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('full', $answer->coverage_status);
+        $this->assertCount(4, $answer->alignment_trace['sections']);
+        $this->assertSame(
+            "Første fagavsnitt.\n\nAndre fagavsnitt.\n\nTredje fagavsnitt.\n\nFjerde fagavsnitt.",
             $answer->answer_text,
         );
     }
@@ -230,6 +261,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
 
         $this->assertSame('none', $answer->coverage_status);
+        $this->assertCount(1, $answer->alignment_trace['sections']);
         $this->assertSame('Beste praksis uten Wiki-treff.', $answer->answer_text);
         $this->assertSame([], $answer->sources);
         $this->assertFalse($answer->has_possible_conflict);
