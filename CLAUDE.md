@@ -78,6 +78,13 @@ php artisan queue:work --queue=supplier-harvests,default
 composer setup
 ```
 
+## Test regime
+
+- Prefer targeted tests for the files and flows that changed.
+- Do not rerun the full Wiki suite after routine changes just to inspect aggregate counts.
+- Tests that normally take more than 15 minutes require a clear milestone, a broad architecture change, a concrete regression suspicion, or an explicit user request.
+- Stop a broad suite once it has answered the current question; do not continue only because the final numbers are interesting.
+
 ### Vite hot mode and `public/hot`
 
 - `public/hot` is a local Vite dev artifact created when `npm run dev` or `composer dev` starts the Vite dev server.
