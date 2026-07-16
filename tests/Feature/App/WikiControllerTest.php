@@ -2182,6 +2182,32 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_index_source_latest_ingest_run_includes_progress_fields(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Fremdriftsside');
+        $this->createIngestRunPage($run, $page);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document, $run): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            $latestRun = data_get($source, 'latest_ingest_run');
+
+            return data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES
+                && data_get($latestRun, 'last_progress_at') !== null
+                && data_get($latestRun, 'updated_at') !== null
+                && data_get($latestRun, 'pages_count') === 1
+                && data_get($latestRun, 'sections_count') === 0
+                && data_get($latestRun, 'lint_count') === 0;
+        });
+    }
+
     public function test_index_decision_only_run_not_leaked_to_other_customer(): void
     {
         $customer = $this->createCustomer('Eigen kunde');
@@ -3107,7 +3133,12 @@ class WikiControllerTest extends TestCase
                 && $found['source_document_filename'] === $doc->original_filename
                 && isset($found['pages_count'])
                 && isset($found['sections_count'])
-                && isset($found['lint_count']);
+                && isset($found['lint_count'])
+                && isset($found['updated_at'])
+                && isset($found['last_progress_at'])
+                && $found['pages_count'] === 1
+                && $found['sections_count'] === 0
+                && $found['lint_count'] === 0;
         });
     }
 

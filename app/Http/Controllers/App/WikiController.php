@@ -173,6 +173,10 @@ class WikiController extends Controller
             EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
             EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
         ];
+        $lintCountSub = DB::table('enterprise_wiki_lint_findings')
+            ->selectRaw('count(*)')
+            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
 
         $srcSearch = trim((string) $request->query('src_q', ''));
         $srcStatus = in_array($request->query('src_status'), $allowedDocStatuses, true)
@@ -195,6 +199,9 @@ class WikiController extends Controller
 
         $allRuns = $documents->isNotEmpty()
             ? EnterpriseWikiIngestRun::query()
+                ->select('enterprise_wiki_ingest_runs.*')
+                ->selectSub($lintCountSub, 'lint_count')
+                ->withCount(['sections', 'pages'])
                 ->where('customer_id', $customerId)
                 ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
                 ->whereIn('source_id', $documents->pluck('id'))
@@ -232,9 +239,14 @@ class WikiController extends Controller
                 'created_at' => $latestRuns[$doc->id]->created_at,
                 'started_at' => $latestRuns[$doc->id]->started_at,
                 'finished_at' => $latestRuns[$doc->id]->finished_at,
+                'updated_at' => $latestRuns[$doc->id]->updated_at,
+                'last_progress_at' => $latestRuns[$doc->id]->updated_at,
                 'maintainer_decision_json' => $latestRuns[$doc->id]->maintainer_decision_json,
                 'maintainer_decision_status' => $latestRuns[$doc->id]->maintainer_decision_status,
                 'maintainer_decision_generated_at' => $latestRuns[$doc->id]->maintainer_decision_generated_at,
+                'pages_count' => (int) ($latestRuns[$doc->id]->pages_count ?? 0),
+                'sections_count' => (int) ($latestRuns[$doc->id]->sections_count ?? 0),
+                'lint_count' => (int) ($latestRuns[$doc->id]->lint_count ?? 0),
             ] : null,
             'generated_pages' => ($pagesPerDocument->get($doc->id) ?? collect())
                 ->map(fn($page) => [
@@ -327,6 +339,8 @@ class WikiController extends Controller
                 'created_at' => $run->created_at,
                 'started_at' => $run->started_at,
                 'finished_at' => $run->finished_at,
+                'updated_at' => $run->updated_at,
+                'last_progress_at' => $run->updated_at,
             ])->all(),
             'runs_filters' => [
                 'status' => $runStatus,

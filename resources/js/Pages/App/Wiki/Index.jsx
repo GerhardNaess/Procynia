@@ -1,5 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 
@@ -103,6 +103,284 @@ const IN_PROGRESS_STATUSES = [
     'decision_only',
 ];
 
+const ACTIVE_WIKI_RUN_STATUSES = [
+    'running',
+    'sections_planned',
+    'maintainer_decision',
+    'applying',
+    'generating_pages',
+    'generating_concept_entity_pages',
+    'verification_linking',
+    'qa',
+];
+
+const RUN_TIMELINE_STEPS = [
+    { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
+    { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
+    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Anvendelse' },
+    { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
+    { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
+    { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },
+];
+
+function isActiveWikiRun(run) {
+    return !!run && ACTIVE_WIKI_RUN_STATUSES.includes(run.status);
+}
+
+function formatRelativeProgress(value, locale) {
+    if (!value) return null;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+
+    const diffMinutes = Math.round((Date.now() - date.getTime()) / 60000);
+    const absMinutes = Math.abs(diffMinutes);
+
+    if (absMinutes < 60) {
+        return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-diffMinutes, 'minute');
+    }
+
+    const diffHours = Math.round(diffMinutes / 60);
+    if (Math.abs(diffHours) < 24) {
+        return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-diffHours, 'hour');
+    }
+
+    return `kl. ${formatTime(value, locale)}`;
+}
+
+function getIngestActivityCopy(run, tw) {
+    if (!run) {
+        return null;
+    }
+
+    const map = {
+        queued: {
+            label: tw.ingest_activity_queued ?? 'Venter i kø',
+            detail: tw.ingest_activity_queued ?? 'Venter i kø',
+            tone: 'waiting',
+        },
+        running: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_planning ?? 'Dokumentet struktureres',
+            tone: 'active',
+        },
+        sections_planned: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_planning ?? 'Dokumentet struktureres',
+            tone: 'active',
+        },
+        maintainer_decision: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_decision ?? 'Vedlikeholdersbeslutning behandles',
+            tone: 'active',
+        },
+        applying: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_applying ?? 'Anvender beslutning',
+            tone: 'active',
+        },
+        generating_pages: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_generating_pages ?? 'Oppretter Wiki-sider',
+            waiting: tw.ingest_activity_generating_pages_waiting ?? 'Venter på at sidejobbene blir ferdige',
+            tone: 'active',
+        },
+        generating_concept_entity_pages: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_generating_pages ?? 'Oppretter Wiki-sider',
+            waiting: tw.ingest_activity_generating_pages_waiting ?? 'Venter på at sidejobbene blir ferdige',
+            tone: 'active',
+        },
+        verification_linking: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_verifying ?? 'Verifiserer kilder og lenker',
+            waiting: tw.ingest_activity_verifying_waiting ?? 'Venter på at kontrolljobbene blir ferdige',
+            tone: 'active',
+        },
+        qa: {
+            label: tw.ingest_activity_active ?? 'Arbeid pågår',
+            detail: tw.ingest_activity_qa ?? 'Kvalitetssikrer innholdet',
+            tone: 'active',
+        },
+        completed: {
+            label: tw.ingest_activity_completed ?? 'Fullført',
+            detail: tw.ingest_activity_completed ?? 'Fullført',
+            tone: 'done',
+        },
+        failed: {
+            label: tw.ingest_activity_failed ?? 'Feilet',
+            detail: tw.ingest_activity_failed ?? 'Feilet',
+            tone: 'error',
+        },
+        escalated: {
+            label: tw.ingest_activity_escalated ?? 'Eskalert',
+            detail: tw.ingest_activity_escalated ?? 'Eskalert',
+            tone: 'warning',
+        },
+        decision_only: {
+            label: tw.ingest_activity_decision_only ?? 'Beslutning lagret',
+            detail: tw.ingest_activity_decision_only ?? 'Beslutning lagret',
+            tone: 'decision',
+        },
+    };
+
+    return map[run.status] ?? {
+        label: run.status,
+        detail: run.status,
+        tone: 'waiting',
+    };
+}
+
+function getRunTimelineState(run, stepIndex) {
+    if (!run) return 'empty';
+    if (run.status === 'decision_only') {
+        return stepIndex === 0 ? 'done' : 'empty';
+    }
+
+    const currentIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === run.status
+        || (step.key === 'queued' && ['queued', 'running', 'sections_planned'].includes(run.status))
+        || (step.key === 'generating_pages' && run.status === 'generating_concept_entity_pages'));
+
+    if (run.status === 'completed') {
+        return 'done';
+    }
+
+    if (run.status === 'failed' || run.status === 'escalated') {
+        if (currentIndex === -1) {
+            return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'error';
+        }
+        if (stepIndex < currentIndex) return 'done';
+        if (stepIndex === currentIndex) return 'error';
+        return 'empty';
+    }
+
+    if (currentIndex === -1) return 'empty';
+    if (stepIndex < currentIndex) return 'done';
+    if (stepIndex === currentIndex) {
+        return run.status === 'queued' ? 'waiting' : 'active';
+    }
+    return 'empty';
+}
+
+function RunTimeline({ run, tw }) {
+    if (!run || run.status === 'decision_only') {
+        return null;
+    }
+
+    return (
+        <ol className="mt-2 flex flex-wrap gap-1.5">
+            {RUN_TIMELINE_STEPS.map((step, index) => {
+                const state = getRunTimelineState(run, index);
+                const stateCls = state === 'done'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : state === 'active'
+                        ? 'border-violet-200 bg-violet-50 text-violet-700'
+                        : state === 'error'
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-400';
+                const dotCls = state === 'done'
+                    ? 'bg-emerald-500'
+                    : state === 'active'
+                        ? 'bg-violet-500 animate-pulse'
+                        : state === 'error'
+                            ? 'bg-rose-500'
+                            : 'bg-slate-300';
+                return (
+                    <li
+                        key={step.key}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${stateCls}`}
+                    >
+                        <span className={`h-2 w-2 rounded-full ${dotCls}`} aria-hidden="true" />
+                        {tw[step.labelKey] ?? step.fallback}
+                    </li>
+                );
+            })}
+        </ol>
+    );
+}
+
+function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false }) {
+    if (!run) return null;
+
+    const activity = getIngestActivityCopy(run, tw);
+    const isActive = isActiveWikiRun(run);
+    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
+    const progressLabel = formatRelativeProgress(progressAt, locale);
+    const lastProgressLabel = progressLabel
+        ? `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${progressLabel}`
+        : null;
+    const staleMinutes = progressAt ? Math.max(0, Math.round((Date.now() - new Date(progressAt).getTime()) / 60000)) : null;
+    const seemsStalled = isActive && staleMinutes !== null && staleMinutes >= 15;
+    const counters = [];
+
+    if (showCounters) {
+        if ((run.pages_count ?? 0) > 0) {
+            counters.push(`${run.pages_count} ${tw.runs_col_pages ?? 'Sider'}`);
+        }
+        if ((run.sections_count ?? 0) > 0) {
+            counters.push(`${run.sections_count} ${tw.runs_col_sections ?? 'Seksjoner'}`);
+        }
+        if ((run.lint_count ?? 0) > 0) {
+            counters.push(`${run.lint_count} ${tw.runs_col_lint ?? 'Funn'}`);
+        }
+    }
+
+    return (
+        <div className="mt-2 space-y-1.5" aria-live={isActive ? 'polite' : 'off'}>
+            <div className="flex flex-wrap items-center gap-2">
+                {activity?.tone === 'active' ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                        <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
+                        {activity.label}
+                    </span>
+                ) : (
+                    <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            activity?.tone === 'done'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : activity?.tone === 'error'
+                                    ? 'bg-rose-50 text-rose-700'
+                                    : activity?.tone === 'warning'
+                                        ? 'bg-amber-50 text-amber-700'
+                                        : activity?.tone === 'decision'
+                                            ? 'bg-violet-50 text-violet-700'
+                                            : 'bg-slate-100 text-slate-500'
+                        }`}
+                    >
+                        {activity?.label ?? run.status}
+                    </span>
+                )}
+                {seemsStalled && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
+                    </span>
+                )}
+            </div>
+
+            <p className="text-[11px] leading-4 text-slate-500">
+                {activity?.detail ?? run.status}
+                {activity?.waiting ? ` · ${activity.waiting}` : ''}
+            </p>
+
+            {showCounters && counters.length > 0 && (
+                <p className="text-[11px] leading-4 text-slate-400">
+                    {counters.join(' · ')}
+                </p>
+            )}
+
+            {lastProgressLabel && (
+                <p className="text-[11px] leading-4 text-slate-400">
+                    {lastProgressLabel}
+                </p>
+            )}
+
+            {showTimeline && (
+                <RunTimeline run={run} tw={tw} />
+            )}
+        </div>
+    );
+}
+
 function ingestStatusLabel(status, qaStatus = null) {
     if (status === 'completed' && qaStatus === 'passed') {
         return 'Fullført / bestått';
@@ -152,7 +430,6 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
-    const startedAt = run.started_at ? formatTime(run.started_at, locale) : null;
     const errorMessage = run.qa_last_error ?? run.error_message;
     return (
         <div className="space-y-1.5">
@@ -170,13 +447,11 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             </div>
             {run.status === 'queued' && (
                 <p className="text-[11px] leading-4 text-slate-400">
-                    {queuedSince ? `I kø siden ${queuedSince} · ` : ''}Sjekk at{' '}
-                    <span className="font-mono">enterprise-wiki</span> worker kjører.
+                    {queuedSince ? `I kø siden ${queuedSince} · ` : ''}
+                    {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
             )}
-                {startedAt && (
-                    <p className="text-[11px] text-slate-400">Startet {startedAt}</p>
-                )}
+            <RunActivityBlock run={run} tw={tw} locale={locale} showCounters />
             {run.status === 'failed' && errorMessage && (
                 <p
                     className="line-clamp-2 wrap-break-word text-[11px] leading-4 text-rose-500"
@@ -1328,6 +1603,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 <span className={`${BADGE} ${statusCls}`}>
                                                     {ingestStatusLabel(run.status, run.qa_status)}
                                                 </span>
+                                                <RunActivityBlock run={run} tw={tw} locale={locale} showTimeline />
                                             </td>
                                             <td className="px-4 py-3">
                                                 {run.maintainer_decision_status === 'applied' ? (
@@ -1567,6 +1843,21 @@ export default function WikiIndex({
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
+    const visibleRuns = activeTab === 'sources' ? sources : activeTab === 'runs' ? runs : [];
+    const hasActiveWikiRun = visibleRuns.some(isActiveWikiRun) || visibleRuns.some((run) => run?.status === 'queued');
+
+    useEffect(() => {
+        if (!hasActiveWikiRun || !['sources', 'runs'].includes(activeTab)) {
+            return undefined;
+        }
+
+        const only = activeTab === 'sources' ? ['sources'] : ['runs'];
+        const interval = window.setInterval(() => {
+            router.reload({ only, preserveScroll: true });
+        }, 5000);
+
+        return () => window.clearInterval(interval);
+    }, [activeTab, hasActiveWikiRun]);
 
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>
