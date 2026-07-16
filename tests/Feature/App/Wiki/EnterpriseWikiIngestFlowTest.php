@@ -20,6 +20,7 @@ use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -190,6 +191,7 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
             $articleMock,
+            app(EnterpriseWikiDocumentWikiAnswerStalenessService::class),
         );
 
         // ─── Stage 5: Assert final state ─────────────────────────────────────
@@ -273,6 +275,7 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
             $articleMock,
+            app(EnterpriseWikiDocumentWikiAnswerStalenessService::class),
         );
 
         // KnowledgeItemVersion unchanged

@@ -15,6 +15,10 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
 {
     public const STALE_REASON_SOURCE_DOCUMENT_DELETED = 'source_document_deleted';
 
+    public const STALE_REASON_WIKI_PAGE_UPDATED = 'wiki_page_updated';
+
+    public const STALE_REASON_WIKI_PAGE_DELETED = 'wiki_page_deleted';
+
     public const COVERAGE_FULL = 'full';
 
     public const COVERAGE_PARTIAL = 'partial';

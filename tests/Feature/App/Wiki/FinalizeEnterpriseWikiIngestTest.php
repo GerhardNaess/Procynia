@@ -19,6 +19,7 @@ use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -373,6 +374,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
             app(WikiArticleAiClient::class),
+            app(EnterpriseWikiDocumentWikiAnswerStalenessService::class),
         );
     }
 

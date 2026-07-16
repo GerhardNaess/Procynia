@@ -40,6 +40,7 @@ class EnterpriseWikiLinkSemanticRepairService
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ) {}
 
     /**
@@ -175,6 +176,7 @@ class EnterpriseWikiLinkSemanticRepairService
             $this->validateRevision($run, $page, $markdown, $revision['markdown'], $diagnosis);
 
             $newVersion = $this->writeNewCurrentVersion($page->id, $revision['markdown']);
+            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
             $this->buildPageLinksService->materializeWikilinksForPage($page, $run->id);
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_APPLIED, null, $newVersion->id);

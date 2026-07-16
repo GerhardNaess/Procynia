@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -28,6 +29,7 @@ class EnterpriseWikiSemanticRepairService
 {
     public function __construct(
         private readonly WikiSemanticReviserAiClient $aiClient,
+        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ) {}
 
     /**
@@ -141,13 +143,17 @@ class EnterpriseWikiSemanticRepairService
                 ->where('is_current', true)
                 ->update(['is_current' => false, 'updated_at' => now()]);
 
-            return EnterpriseWikiPageVersion::create([
+            $version = EnterpriseWikiPageVersion::create([
                 'enterprise_wiki_page_id' => $pageId,
                 'version_number'          => $versionNumber,
                 'is_current'              => true,
                 'content_markdown'        => $content,
                 'generated_by_model'      => WikiSemanticReviserAiClient::MODEL . '/semantic-repair',
             ]);
+
+            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
+
+            return $version;
         });
     }
 

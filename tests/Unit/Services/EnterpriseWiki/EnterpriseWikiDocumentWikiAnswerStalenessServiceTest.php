@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
@@ -218,6 +219,149 @@ class EnterpriseWikiDocumentWikiAnswerStalenessServiceTest extends TestCase
         $answer->refresh();
         $this->assertFalse($answer->isStale());
         $this->assertSame('Svar som fortsatt er forankret i en annen kilde.', $answer->answer_text);
+    }
+
+    public function test_marks_answers_stale_when_a_used_wiki_page_is_updated(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $savedNotice = $this->createSavedNotice($customer->id);
+        $aiDocument = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($aiDocument, 'Beskriv prosessen.');
+        $requirement = $this->createRequirement($savedNotice, $aiDocument, $chunk);
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', "# Problem Management\n\nInnhold om Problem Management.");
+
+        $answer = SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Eksisterende Wiki-svar.',
+            'sources' => [[
+                'enterprise_wiki_page_id' => $page->id,
+                'page_title' => $page->title,
+                'page_slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ]],
+            'research_trace' => [
+                'research' => [
+                    'pages' => [[
+                        'page_id' => $page->id,
+                        'title' => $page->title,
+                        'page_type' => $page->page_type,
+                        'slug' => $page->slug,
+                        'selection_type' => 'direct_search',
+                        'discovered_from_page_id' => null,
+                        'discovered_from_title' => null,
+                        'link_direction' => null,
+                        'content_mode' => 'full',
+                        'content_markdown' => "# Problem Management\n\nInnhold om Problem Management.",
+                        'selected_headings' => [],
+                        'supporting_claim_ids' => [],
+                        'round_read' => 1,
+                    ]],
+                ],
+                'answer' => ['answer_sections' => []],
+            ],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'has_possible_conflict' => false,
+            'generated_at' => now(),
+        ]);
+
+        $currentVersion = $page->currentVersion()->firstOrFail();
+        $currentVersion->update(['is_current' => false]);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => $currentVersion->version_number + 1,
+            'is_current' => true,
+            'content_markdown' => "# Problem Management\n\nOppdatert innhold om Problem Management.",
+            'generated_by_model' => 'manual-update',
+        ]);
+
+        $service = app(EnterpriseWikiDocumentWikiAnswerStalenessService::class);
+
+        $preview = $service->previewWikiPageChangeImpact($page);
+        $this->assertSame(1, $preview['stale_wiki_answer_count']);
+        $this->assertSame(1, $preview['changed_page_count']);
+
+        $result = $service->markAnswersStaleForWikiPageChange($page);
+        $this->assertSame(1, $result['stale_wiki_answer_count']);
+
+        $answer->refresh();
+        $this->assertTrue($answer->isStale());
+        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::STALE_REASON_WIKI_PAGE_UPDATED, $answer->stale_reason);
+        $this->assertSame('wiki_page', $answer->stale_context['stale_subject_type']);
+        $this->assertSame([$page->id], $answer->stale_context['changed_page_ids']);
+        $this->assertSame([$page->title], $answer->stale_context['changed_page_titles']);
+        $this->assertNotSame($answer->stale_context['research_snapshot_hash'], $answer->stale_context['current_snapshot_hash']);
+
+        $repeat = $service->markAnswersStaleForWikiPageChange($page);
+        $this->assertSame(0, $repeat['stale_wiki_answer_count']);
+    }
+
+    public function test_does_not_mark_answers_stale_when_a_used_wiki_page_snapshot_is_unchanged(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $savedNotice = $this->createSavedNotice($customer->id);
+        $aiDocument = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($aiDocument, 'Beskriv prosessen.');
+        $requirement = $this->createRequirement($savedNotice, $aiDocument, $chunk);
+        $page = $this->createWikiPageWithVersion($customer, 'Incident Management', "# Incident Management\n\nInnhold om Incident Management.");
+
+        $answer = SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Uendret Wiki-svar.',
+            'sources' => [[
+                'enterprise_wiki_page_id' => $page->id,
+                'page_title' => $page->title,
+                'page_slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ]],
+            'research_trace' => [
+                'research' => [
+                    'pages' => [[
+                        'page_id' => $page->id,
+                        'title' => $page->title,
+                        'page_type' => $page->page_type,
+                        'slug' => $page->slug,
+                        'selection_type' => 'direct_search',
+                        'discovered_from_page_id' => null,
+                        'discovered_from_title' => null,
+                        'link_direction' => null,
+                        'content_mode' => 'full',
+                        'content_markdown' => "# Incident Management\n\nInnhold om Incident Management.",
+                        'selected_headings' => [],
+                        'supporting_claim_ids' => [],
+                        'round_read' => 1,
+                    ]],
+                ],
+                'answer' => ['answer_sections' => []],
+            ],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'has_possible_conflict' => false,
+            'generated_at' => now(),
+        ]);
+
+        $service = app(EnterpriseWikiDocumentWikiAnswerStalenessService::class);
+        $preview = $service->previewWikiPageChangeImpact($page);
+
+        $this->assertSame(0, $preview['stale_wiki_answer_count']);
+        $this->assertSame(0, $preview['changed_page_count']);
+
+        $result = $service->markAnswersStaleForWikiPageChange($page);
+
+        $this->assertSame(0, $result['stale_wiki_answer_count']);
+        $answer->refresh();
+        $this->assertFalse($answer->isStale());
+        $this->assertSame('Uendret Wiki-svar.', $answer->answer_text);
     }
 
     private function createSavedNotice(int $customerId): SavedNotice

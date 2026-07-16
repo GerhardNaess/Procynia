@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -36,12 +37,16 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
         $this->queue = 'enterprise-wiki';
     }
 
-    public function handle(EnterpriseWikiIngestService $service, WikiArticleAiClient $articleClient): void
+    public function handle(
+        EnterpriseWikiIngestService $service,
+        WikiArticleAiClient $articleClient,
+        EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+    ): void
     {
         // All work — including DB reads and the AI call — happens inside one transaction
         // with the run row locked. This prevents two concurrent finalize instances from both
         // deciding to finalize the same run when the last sections complete at nearly the same time.
-        DB::transaction(function () use ($articleClient): void {
+        DB::transaction(function () use ($articleClient, $wikiAnswerStalenessService): void {
             $run = EnterpriseWikiIngestRun::query()
                 ->lockForUpdate()
                 ->find($this->runId);
@@ -162,6 +167,8 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 'content_markdown' => $markdown,
                 'is_current' => true,
             ]);
+
+            $wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageVersion->enterprise_wiki_page_id);
 
             EnterpriseWikiPage::query()
                 ->where('id', $run->enterprise_wiki_page_id)

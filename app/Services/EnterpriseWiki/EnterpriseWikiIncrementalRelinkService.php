@@ -50,6 +50,7 @@ class EnterpriseWikiIncrementalRelinkService
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly WikiLinkRevisionAiClient $aiClient,
+        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ) {}
 
     /**
@@ -247,6 +248,7 @@ class EnterpriseWikiIncrementalRelinkService
             }
 
             $newVersion = $this->writeNewCurrentVersion($candidate->id, $revisedMarkdown);
+            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($candidate->id);
             $this->buildPageLinksService->materializeWikilinksForPage($candidate, $run->id);
 
             return $this->finalize(

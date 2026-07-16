@@ -40,6 +40,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiWikilinkCanonicalizer $wikilinkCanonicalizer,
+        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ) {}
 
     /**
@@ -255,6 +256,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             }
 
             $version = $this->writeNewCurrentVersion($page->id, $markdown);
+            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
 
             $pivot->update([
                 'generated_page_version_id' => $version->id,
@@ -356,13 +358,15 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->where('is_current', true)
             ->update(['is_current' => false]);
 
-        return EnterpriseWikiPageVersion::query()->create([
+        $version = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $pageId,
             'version_number'          => $next,
             'is_current'              => true,
             'content_markdown'        => $markdown,
             'generated_by_model'      => WikiPageContentAiClient::MODEL,
         ]);
+
+        return $version;
     }
 
     private function pageHasVersion(int $pageId): bool

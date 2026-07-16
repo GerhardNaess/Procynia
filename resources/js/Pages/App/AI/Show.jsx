@@ -2325,9 +2325,36 @@ export default function AiShow({
     const activeRequirementWikiAnswer = activeRequirement?.wiki_answer ?? null;
     const activeRequirementWikiAnswerText = normalizeWikiAnswerText(activeRequirementWikiAnswer?.text ?? '');
     const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
-    const activeRequirementWikiAnswerStaleDocumentName = typeof activeRequirementWikiAnswer?.stale_context?.deleted_document_name === 'string'
-        ? activeRequirementWikiAnswer.stale_context.deleted_document_name.trim()
-        : '';
+    const activeRequirementWikiAnswerStaleContext = activeRequirementWikiAnswer?.stale_context ?? null;
+    const activeRequirementWikiAnswerStaleSubjectName = (() => {
+        const explicitName = typeof activeRequirementWikiAnswerStaleContext?.stale_subject_name === 'string'
+            ? activeRequirementWikiAnswerStaleContext.stale_subject_name.trim()
+            : '';
+
+        if (explicitName !== '') {
+            return explicitName;
+        }
+
+        const deletedDocumentName = typeof activeRequirementWikiAnswerStaleContext?.deleted_document_name === 'string'
+            ? activeRequirementWikiAnswerStaleContext.deleted_document_name.trim()
+            : '';
+
+        if (deletedDocumentName !== '') {
+            return deletedDocumentName;
+        }
+
+        const changedPageTitles = Array.isArray(activeRequirementWikiAnswerStaleContext?.changed_page_titles)
+            ? activeRequirementWikiAnswerStaleContext.changed_page_titles
+                .map((title) => String(title ?? '').trim())
+                .filter((title) => title !== '')
+            : [];
+
+        return changedPageTitles.join(' · ');
+    })();
+    const activeRequirementWikiAnswerStaleReason = String(activeRequirementWikiAnswer?.stale_reason ?? '').trim();
+    const activeRequirementWikiAnswerStaleSubjectPrefix = activeRequirementWikiAnswerStaleReason.startsWith('wiki_page')
+        ? tai.wiki_answer_stale_page_prefix
+        : tai.wiki_answer_stale_document_prefix;
     const activeRequirementWikiAnswerSources = dedupeWikiAnswerSourcesByPageId(activeRequirementWikiAnswer?.sources ?? []);
     const activeRequirementWikiAnswerCoverageLabels = {
         full: tai.wiki_answer_coverage_full,
@@ -5305,9 +5332,9 @@ export default function AiShow({
                                                             <p className="mt-1">
                                                                 {tai.wiki_answer_stale_message}
                                                             </p>
-                                                            {activeRequirementWikiAnswerStaleDocumentName !== '' ? (
+                                                            {activeRequirementWikiAnswerStaleSubjectName !== '' ? (
                                                                 <p className="mt-1 text-xs text-amber-700">
-                                                                    {tai.wiki_answer_stale_document_prefix} {activeRequirementWikiAnswerStaleDocumentName}
+                                                                    {activeRequirementWikiAnswerStaleSubjectPrefix} {activeRequirementWikiAnswerStaleSubjectName}
                                                                 </p>
                                                             ) : null}
                                                         </div>
