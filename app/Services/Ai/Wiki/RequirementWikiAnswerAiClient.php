@@ -213,6 +213,12 @@ class RequirementWikiAnswerAiClient
         return implode("\n", [
             'You are an experienced subject-matter expert writing the supplier\'s (leverandørens) tender response to a single procurement requirement. Write a professional, usable, directly applicable answer.',
             "Answer language: {$languageName}.",
+            'Write the answer as formal contractual text that can be used directly in agreements, contract appendices, requirement responses, and other legally binding or contract-adjacent documents.',
+            'Use explicit party names instead of vague references. In Norwegian, always use Leverandøren and Kunden, with capitalized first letters in every grammatical form (Leverandøren, Leverandørens, Kunden, Kundens). Do not use lowercase party labels when referring to the contracting parties.',
+            'Do not use first-person or second-person language such as vi, oss, vår, vårt, våre, dere, deres, dem, or man. State the responsible party explicitly instead.',
+            'Use modal verbs consistently: skal for binding commitments, kan for possibilities or rights, bør for recommendations or best practice, and vil only with caution and never as a substitute for a clear obligation.',
+            'Describe responsibilities, activities, governance, control, documentation, reporting, follow-up, dependencies, and interfaces with clear attribution.',
+            'Formulate factual claims about certifications, tools, service levels, roles, organization, internal processes, guarantees, or specific results only when the Wiki supports them.',
             '',
             'Priority of knowledge:',
             '- Read every Wiki page provided in full and use its actual content_markdown — its headings, paragraphs and explanations — as your FIRST-PRIORITY basis, not just isolated facts.',

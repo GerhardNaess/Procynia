@@ -131,6 +131,28 @@ class RequirementWikiAnswerAiClientTest extends TestCase
         $this->assertStringNotContainsString('Problem Management section', $developerPrompt);
     }
 
+    public function test_prompt_requires_formal_contract_language_and_explicit_parties(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $developerPrompt = data_get($captured, 'input.0.content.0.text');
+        $this->assertStringContainsString('formal contractual text', $developerPrompt);
+        $this->assertStringContainsString('Leverandøren and Kunden', $developerPrompt);
+        $this->assertStringContainsString('Do not use first-person or second-person language', $developerPrompt);
+        $this->assertStringContainsString('skal for binding commitments, kan for possibilities or rights, bør for recommendations or best practice', $developerPrompt);
+        $this->assertStringContainsString('Describe responsibilities, activities, governance, control, documentation, reporting, follow-up, dependencies, and interfaces with clear attribution', $developerPrompt);
+        $this->assertStringContainsString('Formulate factual claims about certifications, tools, service levels, roles, organization, internal processes, guarantees, or specific results only when the Wiki supports them', $developerPrompt);
+    }
+
     public function test_it_can_generate_an_answer_with_zero_pages_using_best_practice_only(): void
     {
         $captured = null;
