@@ -9,8 +9,14 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\SavedNotice;
+use App\Models\SavedNoticeAiDocument;
+use App\Models\SavedNoticeAiDocumentChunk;
+use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -597,6 +603,68 @@ class WikiSourceControllerTest extends TestCase
         $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
     }
 
+    public function test_delete_marks_existing_wiki_answers_stale_and_preview_reports_them(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $savedNotice = $this->createSavedNotice($customer->id);
+        $aiDocument = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($aiDocument, 'Beskriv prosessen.');
+        $requirement = $this->createRequirement($savedNotice, $aiDocument, $chunk);
+        $answer = SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Eksisterende Wiki-svar.',
+            'sources' => [[
+                'enterprise_wiki_page_id' => $page->id,
+                'page_title' => $page->title,
+                'page_slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ]],
+            'research_trace' => ['research' => ['pages' => []], 'answer' => ['answer_sections' => []]],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'model' => 'gpt-4.1-mini',
+            'has_possible_conflict' => false,
+            'generated_at' => now(),
+        ]);
+
+        $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
+        $preview->assertOk();
+        $preview->assertJsonPath('stale_wiki_answer_count', 1);
+        $preview->assertJsonPath('impacted_claim_count', 0);
+        $preview->assertJsonPath('impacted_source_reference_count', 0);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+
+        $answer->refresh();
+        $this->assertNotNull($answer->stale_at);
+        $this->assertSame(SavedNoticeAiRequirementWikiAnswer::STALE_REASON_SOURCE_DOCUMENT_DELETED, $answer->stale_reason);
+        $this->assertSame('test.pdf', $answer->stale_context['deleted_document_name']);
+        $this->assertSame('Eksisterende Wiki-svar.', $answer->answer_text);
+    }
+
     public function test_delete_rejects_document_with_queued_ingest_run(): void
     {
         Storage::fake('local');
@@ -673,6 +741,71 @@ class WikiSourceControllerTest extends TestCase
             'extracted_text' => $status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED
                 ? 'Testtekst for ingest.'
                 : null,
+        ]);
+    }
+
+    private function createSavedNotice(int $customerId): SavedNotice
+    {
+        return SavedNotice::query()->create([
+            'customer_id' => $customerId,
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'source_type' => SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE,
+            'external_id' => 'wiki-delete-'.Str::random(10),
+            'title' => 'Wiki delete test',
+            'buyer_name' => 'Procynia',
+            'external_url' => 'https://example.invalid',
+            'summary' => 'Kort oppsummering',
+            'publication_date' => '2026-03-20 00:00:00',
+            'deadline' => '2026-04-20 00:00:00',
+            'status' => 'ACTIVE',
+            'cpv_code' => '72000000',
+        ]);
+    }
+
+    private function createAiDocument(SavedNotice $savedNotice): SavedNoticeAiDocument
+    {
+        return SavedNoticeAiDocument::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'original_filename' => 'analysis.pdf',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/analysis.pdf', $savedNotice->id),
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_UPLOADED,
+        ]);
+    }
+
+    private function createAiDocumentChunk(SavedNoticeAiDocument $document, string $content): SavedNoticeAiDocumentChunk
+    {
+        return SavedNoticeAiDocumentChunk::query()->create([
+            'saved_notice_ai_document_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => $content,
+            'char_start' => 0,
+            'char_end' => mb_strlen($content, 'UTF-8'),
+            'word_count' => count(preg_split('/\s+/u', trim($content)) ?: []),
+        ]);
+    }
+
+    private function createRequirement(
+        SavedNotice $savedNotice,
+        SavedNoticeAiDocument $document,
+        SavedNoticeAiDocumentChunk $chunk,
+    ): SavedNoticeAiRequirement
+    {
+        return SavedNoticeAiRequirement::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_ai_document_chunk_id' => $chunk->id,
+            'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_APPROVED,
+            'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
+            'requirement_identifier' => 'REQ-1',
+            'requirement_text' => 'Beskriv prosessen.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'extraction_method' => SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+            'published_at' => now(),
         ]);
     }
 

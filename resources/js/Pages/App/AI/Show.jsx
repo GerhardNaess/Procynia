@@ -2324,6 +2324,10 @@ export default function AiShow({
     // active requirement always shows that requirement's own Wiki answer — no stale carry-over.
     const activeRequirementWikiAnswer = activeRequirement?.wiki_answer ?? null;
     const activeRequirementWikiAnswerText = normalizeWikiAnswerText(activeRequirementWikiAnswer?.text ?? '');
+    const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
+    const activeRequirementWikiAnswerStaleDocumentName = typeof activeRequirementWikiAnswer?.stale_context?.deleted_document_name === 'string'
+        ? activeRequirementWikiAnswer.stale_context.deleted_document_name.trim()
+        : '';
     const activeRequirementWikiAnswerSources = dedupeWikiAnswerSourcesByPageId(activeRequirementWikiAnswer?.sources ?? []);
     const activeRequirementWikiAnswerCoverageLabels = {
         full: tai.wiki_answer_coverage_full,
@@ -5290,6 +5294,24 @@ export default function AiShow({
                                                     <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
                                                         {tai.wiki_answer_documentation_and_compliance_title}
                                                     </div>
+                                                    {activeRequirementWikiAnswerIsStale ? (
+                                                        <div
+                                                            data-testid="wiki-answer-stale-warning"
+                                                            className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"
+                                                        >
+                                                            <div className="font-semibold">
+                                                                {tai.wiki_answer_stale_title}
+                                                            </div>
+                                                            <p className="mt-1">
+                                                                {tai.wiki_answer_stale_message}
+                                                            </p>
+                                                            {activeRequirementWikiAnswerStaleDocumentName !== '' ? (
+                                                                <p className="mt-1 text-xs text-amber-700">
+                                                                    {tai.wiki_answer_stale_document_prefix} {activeRequirementWikiAnswerStaleDocumentName}
+                                                                </p>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : null}
                                                     <div className="mt-3 flex flex-wrap items-center gap-2">
                                                         <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
                                                             {activeRequirementWikiAnswerCoverageLabels[activeRequirementWikiAnswer.coverage_status] ?? activeRequirementWikiAnswer.coverage_status_label}

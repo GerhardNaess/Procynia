@@ -13,6 +13,7 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Services\DocumentTextExtractor;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
@@ -35,6 +36,7 @@ class WikiSourceController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
+        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -159,6 +161,7 @@ class WikiSourceController extends Controller
         }
 
         [$soleSourcePageIds, $sharedPageIds] = $this->classifyPages($runs->pluck('id'));
+        $staleImpact = $this->wikiAnswerStalenessService->previewDeletionImpact($document, $runs->pluck('id'), $soleSourcePageIds);
 
         return response()->json([
             'blocked' => false,
@@ -166,6 +169,9 @@ class WikiSourceController extends Controller
             'run_count' => $runs->count(),
             'sole_source_page_count' => $soleSourcePageIds->count(),
             'shared_page_count' => $sharedPageIds->count(),
+            'stale_wiki_answer_count' => $staleImpact['stale_wiki_answer_count'],
+            'impacted_claim_count' => $staleImpact['impacted_claim_count'],
+            'impacted_source_reference_count' => $staleImpact['impacted_source_reference_count'],
         ]);
     }
 
@@ -190,8 +196,11 @@ class WikiSourceController extends Controller
 
         $runIds = $runs->pluck('id');
         [$soleSourcePageIds] = $this->classifyPages($runIds);
+        $staleImpact = $this->wikiAnswerStalenessService->previewDeletionImpact($document, $runIds, $soleSourcePageIds);
 
         DB::transaction(function () use ($document, $runIds, $soleSourcePageIds): void {
+            $this->wikiAnswerStalenessService->markAnswersStaleForDeletedDocument($document, $runIds, $soleSourcePageIds);
+
             // Delete lint findings for sole-source pages
             if ($soleSourcePageIds->isNotEmpty()) {
                 EnterpriseWikiLintFinding::query()
@@ -245,6 +254,7 @@ class WikiSourceController extends Controller
             'document_id' => $document->id,
             'customer_id' => $customerId,
             'sole_source_pages_deleted' => $soleSourcePageIds->count(),
+            'stale_wiki_answers_marked' => $staleImpact['stale_wiki_answer_count'],
         ]);
 
         return redirect()->route('app.wiki.index')

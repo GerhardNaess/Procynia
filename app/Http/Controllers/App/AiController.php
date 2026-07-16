@@ -2060,6 +2060,10 @@ class AiController extends Controller
                 'has_possible_conflict' => null,
                 'engine_version' => null,
                 'generated_at' => null,
+                'is_stale' => null,
+                'stale_at' => null,
+                'stale_reason' => null,
+                'stale_context' => null,
             ];
         }
 
@@ -2170,6 +2174,10 @@ class AiController extends Controller
             'has_possible_conflict' => $wikiAnswer->has_possible_conflict,
             'engine_version' => $wikiAnswer->engine_version,
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
+            'is_stale' => $wikiAnswer->isStale(),
+            'stale_at' => optional($wikiAnswer->stale_at)?->toIso8601String(),
+            'stale_reason' => $wikiAnswer->stale_reason,
+            'stale_context' => $wikiAnswer->stale_context,
         ];
     }
 

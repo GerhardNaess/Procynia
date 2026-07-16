@@ -480,6 +480,48 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->assertSame('Nytt svar.', $requirement->wikiAnswer()->first()->answer_text);
     }
 
+    public function test_regenerating_a_stale_answer_clears_the_stale_markers(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+
+        SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Gammelt svar.',
+            'sources' => [[
+                'enterprise_wiki_page_id' => $page->id,
+                'page_title' => $page->title,
+                'page_slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'selection_type' => 'direct_search',
+                'discovered_from_page_id' => null,
+                'discovered_from_title' => null,
+                'link_direction' => null,
+                'supporting_claim_ids' => [],
+            ]],
+            'research_trace' => ['research' => ['pages' => []], 'answer' => ['answer_sections' => []]],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'has_possible_conflict' => false,
+            'stale_at' => now(),
+            'stale_reason' => SavedNoticeAiRequirementWikiAnswer::STALE_REASON_SOURCE_DOCUMENT_DELETED,
+            'stale_context' => ['deleted_document_name' => 'deleted-source.pdf'],
+            'generated_at' => now(),
+        ]);
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Nytt svar.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertNull($answer->stale_at);
+        $this->assertNull($answer->stale_reason);
+        $this->assertNull($answer->stale_context);
+        $this->assertSame('Nytt svar.', $answer->answer_text);
+    }
+
     public function test_sources_carry_discovery_provenance_for_pages_actually_cited(): void
     {
         $customer = $this->createWikiCustomer();

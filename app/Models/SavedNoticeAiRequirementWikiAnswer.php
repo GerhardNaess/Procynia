@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SavedNoticeAiRequirementWikiAnswer extends Model
 {
+    public const STALE_REASON_SOURCE_DOCUMENT_DELETED = 'source_document_deleted';
+
     public const COVERAGE_FULL = 'full';
 
     public const COVERAGE_PARTIAL = 'partial';
@@ -59,6 +61,9 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         'engine_version',
         'alignment_trace',
         'has_possible_conflict',
+        'stale_at',
+        'stale_reason',
+        'stale_context',
         'model',
         'generated_by_user_id',
         'generated_at',
@@ -71,6 +76,8 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
             'research_trace' => 'array',
             'alignment_trace' => 'array',
             'has_possible_conflict' => 'boolean',
+            'stale_at' => 'datetime',
+            'stale_context' => 'array',
             'generated_at' => 'datetime',
         ];
     }
@@ -83,5 +90,10 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
     public function generatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'generated_by_user_id');
+    }
+
+    public function isStale(): bool
+    {
+        return $this->stale_at !== null;
     }
 }

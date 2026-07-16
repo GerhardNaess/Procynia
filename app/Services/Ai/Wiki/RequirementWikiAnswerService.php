@@ -121,6 +121,9 @@ class RequirementWikiAnswerService
             'alignment_trace' => $this->buildAlignmentTrace($answerSections, $alignmentBefore, $alignmentFinal, $revisionInfo, $coverageStatus, $hasPossibleConflict),
             'has_possible_conflict' => $hasPossibleConflict,
             'engine_version' => self::ENGINE_VERSION,
+            'stale_at' => null,
+            'stale_reason' => null,
+            'stale_context' => null,
         ], $userId);
     }
 

@@ -288,6 +288,43 @@ class RequirementWikiAnswerControllerTest extends TestCase
         });
     }
 
+    public function test_the_ai_case_view_exposes_stale_wiki_answer_state(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-008', 'Wiki answer stale state');
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon innen ti dager.',
+        ]);
+
+        SavedNoticeAiRequirementWikiAnswer::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'coverage_status' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_FULL,
+            'answer_text' => 'Eksisterende svar.',
+            'sources' => [],
+            'research_trace' => ['research' => ['pages' => []], 'answer' => ['answer_sections' => []]],
+            'alignment_trace' => ['sections' => [], 'coverage_status' => 'full', 'has_possible_conflict' => false, 'revision' => ['attempted' => false, 'section_keys' => []]],
+            'stale_at' => now(),
+            'stale_reason' => SavedNoticeAiRequirementWikiAnswer::STALE_REASON_SOURCE_DOCUMENT_DELETED,
+            'stale_context' => ['deleted_document_name' => 'deleted-source.pdf'],
+            'generated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($context['user'])->get("/app/ai/{$savedNotice->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($requirement): bool {
+            $requirements = data_get($page, 'props.requirements', []);
+            $row = collect($requirements)->firstWhere('id', $requirement->id);
+
+            return $row !== null
+                && data_get($row, 'wiki_answer.is_stale') === true
+                && data_get($row, 'wiki_answer.stale_reason') === SavedNoticeAiRequirementWikiAnswer::STALE_REASON_SOURCE_DOCUMENT_DELETED
+                && data_get($row, 'wiki_answer.stale_context.deleted_document_name') === 'deleted-source.pdf';
+        });
+    }
+
     private function customerAdminContext(string $customerName = 'Wiki Answer Controller Test AS'): array
     {
         $customer = $this->createWikiCustomer($customerName);
