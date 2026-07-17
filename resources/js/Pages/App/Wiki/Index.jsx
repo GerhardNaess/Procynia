@@ -2145,7 +2145,7 @@ export default function WikiIndex({
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>
             <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur sm:flex-row sm:items-start sm:justify-between">
+                <section className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm overflow-visible sm:flex-row sm:items-start sm:justify-between">
                     <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
