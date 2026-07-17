@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale) {
     if (!value) return '—';
@@ -409,6 +410,125 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
             )}
         </div>
     );
+}
+
+function getWikiPagesHelpSections(tw) {
+    return [
+        {
+            title: tw.page_help_section_workflow ?? 'Arbeidsflyten',
+            items: [
+                {
+                    title: tw.page_help_item_workflow_source_title ?? 'Kildedokumentet kommer først',
+                    text: tw.page_help_item_workflow_source_text ?? 'Et kildedokument lastes opp og blir grunnlaget for en ny Wiki-side.',
+                },
+                {
+                    title: tw.page_help_item_workflow_owner_title ?? 'Dokumenteier følger dokumentet',
+                    text: tw.page_help_item_workflow_owner_text ?? 'Dokumentet får en Dokumenteier som har faglig ansvar for kildegrunnlaget. Den samme personen kan eie flere dokumenter.',
+                },
+                {
+                    title: tw.page_help_item_workflow_wiki_title ?? 'Wiki-siden bygges og kontrolleres',
+                    text: tw.page_help_item_workflow_wiki_text ?? 'Procynia genererer Wiki-sider og påstander, kobler dem til riktige kilder og kjører claims, kvalitetskontroll og QA før materialet tas i bruk.',
+                },
+            ],
+        },
+        {
+            title: tw.page_help_section_owner ?? 'Hva er en Dokumenteier?',
+            items: [
+                {
+                    title: tw.page_help_item_owner_definition_title ?? 'Faglig ansvar for kildedokumentet',
+                    text: tw.page_help_item_owner_definition_text ?? 'Dokumenteieren er personen som har det faglige ansvaret for et kildedokument. Dokumenteieren kan være en annen person enn den som lastet opp dokumentet.',
+                },
+                {
+                    title: tw.page_help_item_owner_page_title ?? 'Godkjenner den konkrete sideversjonen',
+                    text: tw.page_help_item_owner_page_text ?? 'Dokumenteieren vurderer den konkrete Wiki-sideversjonen som bygger på dokumentet. Godkjenningen betyr ikke at alt materiale er riktig automatisk.',
+                },
+                {
+                    title: tw.page_help_item_owner_scope_title ?? 'Dokumenteiergodkjenning er ikke det samme som QA',
+                    text: tw.page_help_item_owner_scope_text ?? 'Claim-verifikasjon sjekker om en påstand har kildestøtte. QA kontrollerer kvaliteten på tvers av Wiki-materialet. Dokumenteiergodkjenning er den faglige vurderingen fra personen som eier kildedokumentet.',
+                },
+            ],
+        },
+        {
+            title: tw.page_help_section_multiple ?? 'Hvorfor kan en side ha flere eiere?',
+            items: [
+                {
+                    title: tw.page_help_item_multiple_sources_title ?? 'En side kan bygge på flere dokumenter',
+                    text: tw.page_help_item_multiple_sources_text ?? 'Når en Wiki-side bygger på flere kildedokumenter, får siden flere Dokumenteiere fordi hvert dokument har sin egen ansvarlige eier.',
+                },
+                {
+                    title: tw.page_help_item_multiple_one_title ?? 'Én eier per dokument',
+                    text: tw.page_help_item_multiple_one_text ?? 'Når samme person eier flere dokumenter som støtter samme side, får personen normalt én samlet godkjenningsoppgave. Sporbarheten til hvert dokument beholdes.',
+                },
+                {
+                    title: tw.page_help_item_multiple_status_title ?? 'Samlet status viser hvor langt siden har kommet',
+                    text: tw.page_help_item_multiple_status_text ?? 'Hvis en side har flere eiere, kan noen være godkjent og andre fortsatt avvente. Siden blir ikke fullt eiergodkjent før alle nødvendige eiere har godkjent sitt kildegrunnlag.',
+                },
+            ],
+        },
+        {
+            title: tw.page_help_section_statuses ?? 'Hva betyr statusene?',
+            items: [
+                {
+                    title: tw.page_help_item_status_article_title ?? 'Artikkelstatus og Dokumenteierstatus er forskjellige',
+                    text: tw.page_help_item_status_article_text ?? 'Artikkelstatus beskriver selve Wiki-siden. Dokumenteierstatus beskriver om de ansvarlige for kildedokumentene har godkjent materialet. En side kan være Godkjent som artikkel og samtidig vente på Dokumenteiergodkjenning.',
+                },
+                {
+                    title: tw.page_help_item_status_draft_title ?? 'Utkast',
+                    text: tw.page_help_item_status_draft_text ?? 'Siden er opprettet, men ikke ferdig behandlet ennå.',
+                },
+                {
+                    title: tw.page_help_item_status_approved_title ?? 'Godkjent',
+                    text: tw.page_help_item_status_approved_text ?? 'Siden har bestått den eksisterende artikkel- eller kvalitetsgodkjenningen.',
+                },
+                {
+                    title: tw.page_help_item_status_sync_title ?? 'Avventer synkronisering',
+                    text: tw.page_help_item_status_sync_text ?? 'Kildedokumentet har Dokumenteier, men godkjenningsoppgaven for Wiki-siden er ennå ikke ferdig opprettet eller oppdatert. Dette er en teknisk mellomtilstand.',
+                },
+                {
+                    title: tw.page_help_item_status_missing_owner_title ?? 'Mangler Dokumenteier',
+                    text: tw.page_help_item_status_missing_owner_text ?? 'Siden bruker minst ett kildedokument som ikke har en gyldig, aktiv Dokumenteier.',
+                },
+                {
+                    title: tw.page_help_item_status_rejected_title ?? 'Avvist',
+                    text: tw.page_help_item_status_rejected_text ?? 'Minst én nødvendig Dokumenteier har avvist materialet. Materialet kan ikke fullføres før avviket er behandlet.',
+                },
+            ],
+        },
+        {
+            title: tw.page_help_section_changes ?? 'Når innhold eller eier endrer seg',
+            items: [
+                {
+                    title: tw.page_help_item_changes_content_title ?? 'Vesentlige endringer kan kreve ny godkjenning',
+                    text: tw.page_help_item_changes_content_text ?? 'En godkjenning gjelder en konkret Wiki-sideversjon. Hvis innholdet endrer seg vesentlig, kan siden trenge ny vurdering.',
+                },
+                {
+                    title: tw.page_help_item_changes_owner_title ?? 'Nytt kildegrunnlag kan gi nye godkjenningsoppgaver',
+                    text: tw.page_help_item_changes_owner_text ?? 'Hvis et dokument får ny eier eller nytt innhold, oppdateres hvem som skal godkjenne de sidene som faktisk bruker dokumentet.',
+                },
+                {
+                    title: tw.page_help_item_changes_history_title ?? 'Historikken beholdes',
+                    text: tw.page_help_item_changes_history_text ?? 'Tidligere godkjenninger blir ikke slettet. Gamle beslutninger skal fortsatt være synlige som historikk.',
+                },
+            ],
+        },
+        {
+            title: tw.page_help_section_actions ?? 'Hva bør du gjøre?',
+            items: [
+                {
+                    title: tw.page_help_item_actions_sources_title ?? 'Kontroller kildedokumentene først',
+                    text: tw.page_help_item_actions_sources_text ?? 'Gå til Kildedokumenter, kontroller at hvert dokument har riktig Dokumenteier, og rett dokumenter som mangler eier.',
+                },
+                {
+                    title: tw.page_help_item_actions_pages_title ?? 'Bruk Wiki-sider for å godkjenne materialet',
+                    text: tw.page_help_item_actions_pages_text ?? 'Åpne Wiki-sider, kontroller innhold og kilder, og velg Godkjenn eller Avvis når du vurderer materialet som bygger på dokumentet.',
+                },
+                {
+                    title: tw.page_help_item_actions_qa_title ?? 'La QA og Dokumenteier gjøre ulike jobber',
+                    text: tw.page_help_item_actions_qa_text ?? 'QA kontrollerer kvaliteten på tvers av Wiki-materialet. Dokumenteiergodkjenning bekrefter at materialet er riktig forankret i det aktuelle kildegrunnlaget. Den ene erstatter ikke den andre.',
+                },
+            ],
+        },
+    ];
 }
 
 function ingestStatusLabel(status, qaStatus = null) {
@@ -1987,7 +2107,6 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
 
 export default function WikiIndex({
     active_tab: activeTab = 'pages',
-    help_url: helpUrl = '/app/wiki/help',
     pages = [],
     pages_meta: pagesMeta = null,
     pages_filters: pagesFilters = null,
@@ -2008,6 +2127,7 @@ export default function WikiIndex({
     const locale = document.documentElement.lang || 'no';
     const visibleRuns = activeTab === 'sources' ? sources : activeTab === 'runs' ? runs : [];
     const hasActiveWikiRun = visibleRuns.some(isActiveWikiRun) || visibleRuns.some((run) => run?.status === 'queued');
+    const pageHelpSections = activeTab === 'pages' ? getWikiPagesHelpSections(tw) : [];
 
     useEffect(() => {
         if (!hasActiveWikiRun || !['sources', 'runs'].includes(activeTab)) {
@@ -2027,25 +2147,23 @@ export default function WikiIndex({
             <div className="space-y-6">
                 <section className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur sm:flex-row sm:items-start sm:justify-between">
                     <div className="space-y-1.5">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                            {tw.index_title ?? 'Wiki'}
-                        </h1>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                                {tw.index_title ?? 'Wiki'}
+                            </h1>
+                            {activeTab === 'pages' && (
+                                <PageHelpButton
+                                    buttonLabel={tw.page_help_button ?? 'Hjelp'}
+                                    title={tw.page_help_title ?? 'Slik fungerer Wiki-sider'}
+                                    intro={tw.page_help_intro ?? 'Wiki-sidene bygges fra virksomhetens kildedokumenter. Dokumenteiere, kildegrunnlag, godkjenninger og kvalitetskontroll sørger for at innholdet er faglig forankret og sporbarheten beholdes.'}
+                                    sections={pageHelpSections}
+                                />
+                            )}
+                        </div>
                         <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                             {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
                         </p>
                     </div>
-
-                    <Link
-                        href={helpUrl}
-                        className="inline-flex items-center gap-2 self-start rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-violet-200 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                    >
-                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4 shrink-0">
-                            <circle cx="10" cy="10" r="8.25" stroke="currentColor" strokeWidth="1.5" />
-                            <path d="M10 13.5v.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            <path d="M8.9 7.4a1.5 1.5 0 1 1 2.2 1.32c-.8.39-1.35.98-1.35 1.78v.43" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        {tw.help_button ?? 'Slik fungerer Wiki-sider'}
-                    </Link>
                 </section>
 
                 <TabBar activeTab={activeTab} lintHealth={lintHealth} tw={tw} />

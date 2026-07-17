@@ -6,32 +6,37 @@ use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
-class WikiHelpControllerTest extends TestCase
+class WikiPageHelpTest extends TestCase
 {
-    use RefreshDatabase;
+    use UsesProjectPostgresConnection;
 
-    public function test_wiki_help_page_renders_explainer_content(): void
+    protected function setUp(): void
     {
-        $customer = $this->createCustomer();
-        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        parent::setUp();
 
-        $response = $this->actingAs($user)->get('/app/wiki/help');
-
-        $response->assertOk();
-        $response->assertViewHas('page', function (array $page): bool {
-            return data_get($page, 'component') === 'App/Wiki/Help'
-                && data_get($page, 'props.help.title') === 'Slik fungerer Wiki-sider'
-                && data_get($page, 'props.help.sections.0.title') === 'Fra kildedokument til Wiki-side'
-                && data_get($page, 'props.back_url') === route('app.wiki.index');
-        });
+        $this->useProjectPostgresConnection();
+        DB::beginTransaction();
     }
 
-    public function test_wiki_index_exposes_help_link_url(): void
+    protected function tearDown(): void
     {
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        DB::disconnect(DB::getDefaultConnection());
+
+        parent::tearDown();
+    }
+
+    public function test_wiki_index_exposes_page_help_translation_keys(): void
+    {
+        $locale = app()->getLocale();
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
 
@@ -40,8 +45,16 @@ class WikiHelpControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/Wiki/Index'
-                && data_get($page, 'props.help_url') === route('app.wiki.help');
+                && data_get($page, 'props.active_tab') === 'pages';
         });
+
+        $this->assertSame('Slik fungerer Wiki-sider', trans('procynia.wiki.page_help_title'));
+        $this->assertSame('Avventer synkronisering', trans('procynia.wiki.page_help_item_status_sync_title'));
+
+        app()->setLocale('en');
+        $this->assertSame('How Wiki pages work', trans('procynia.wiki.page_help_title'));
+        $this->assertSame('Awaiting sync', trans('procynia.wiki.page_help_item_status_sync_title'));
+        app()->setLocale($locale);
     }
 
     private function createCustomer(string $name = 'Testkunde AS'): Customer

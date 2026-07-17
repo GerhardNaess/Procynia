@@ -19,7 +19,6 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
-use App\Http\Controllers\App\WikiHelpController;
 use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
@@ -311,7 +310,6 @@ Route::prefix('app')
         // Enterprise Wiki (fase 2-3, 4A)
         Route::prefix('/wiki')->name('wiki.')->group(function (): void {
             Route::get('/', [WikiController::class, 'index'])->name('index');
-            Route::get('/help', [WikiHelpController::class, 'index'])->name('help');
             Route::post('/sources', [WikiSourceController::class, 'store'])->name('sources.store');
             Route::post('/sources/{document}/ingest', [WikiSourceController::class, 'ingest'])->name('sources.ingest');
             Route::patch('/sources/{document}/owner', [WikiSourceController::class, 'updateOwner'])->name('sources.owner.update');
