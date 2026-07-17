@@ -1987,6 +1987,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
 
 export default function WikiIndex({
     active_tab: activeTab = 'pages',
+    help_url: helpUrl = '/app/wiki/help',
     pages = [],
     pages_meta: pagesMeta = null,
     pages_filters: pagesFilters = null,
@@ -2024,13 +2025,27 @@ export default function WikiIndex({
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>
             <div className="space-y-6">
-                <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        {tw.index_title ?? 'Wiki'}
-                    </h1>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
-                    </p>
+                <section className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm backdrop-blur sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1.5">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                            {tw.index_title ?? 'Wiki'}
+                        </h1>
+                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                            {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
+                        </p>
+                    </div>
+
+                    <Link
+                        href={helpUrl}
+                        className="inline-flex items-center gap-2 self-start rounded-full border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-violet-200 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                    >
+                        <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4 shrink-0">
+                            <circle cx="10" cy="10" r="8.25" stroke="currentColor" strokeWidth="1.5" />
+                            <path d="M10 13.5v.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            <path d="M8.9 7.4a1.5 1.5 0 1 1 2.2 1.32c-.8.39-1.35.98-1.35 1.78v.43" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        {tw.help_button ?? 'Slik fungerer Wiki-sider'}
+                    </Link>
                 </section>
 
                 <TabBar activeTab={activeTab} lintHealth={lintHealth} tw={tw} />

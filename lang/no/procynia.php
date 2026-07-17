@@ -2991,6 +2991,115 @@ return [
         'nav' => 'Wiki',
         'index_title' => 'Wiki',
         'index_description' => 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.',
+        'help_button' => 'Slik fungerer Wiki-sider',
+        'help_title' => 'Slik fungerer Wiki-sider',
+        'help_intro' => 'Denne siden forklarer hvordan kildedokumenter blir til Wiki-sider, hvordan Dokumenteier godkjenner materialet, og hvorfor noen statuser kan vise at systemet fortsatt synkroniserer.',
+        'help_back_to_wiki' => 'Til Wiki-sider',
+        'help' => [
+            'title' => 'Slik fungerer Wiki-sider',
+            'intro' => 'Når du laster opp et kildedokument, bygger Procynia opp en Wiki-side med faglig innhold, kontrollpunkter og godkjenningsoppgaver. Siden viser både hva som er ferdig, og hva som fortsatt må godkjennes.',
+            'back_to_wiki' => 'Til Wiki-sider',
+            'sections' => [
+                [
+                    'title' => 'Fra kildedokument til Wiki-side',
+                    'items' => [
+                        [
+                            'title' => '1. Dokumentet lastes inn',
+                            'text' => 'Kildedokumentet gir grunnlaget for den nye Wiki-siden. Innholdet leses inn og brukes til å bygge et faglig utkast.',
+                        ],
+                        [
+                            'title' => '2. Siden struktureres',
+                            'text' => 'Procynia deler opp innholdet i faglige deler, påstander og kontrollpunkter slik at siden blir lett å lese og kontrollere.',
+                        ],
+                        [
+                            'title' => '3. Påstander og kvalitetskontroll',
+                            'text' => 'Systemet sjekker at påstandene på siden faktisk kan spores tilbake til kildegrunnlaget, og at materialet holder ønsket kvalitet før det går videre.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Dokumenteier og godkjenning',
+                    'items' => [
+                        [
+                            'title' => 'Hva Dokumenteieren godkjenner',
+                            'text' => 'Dokumenteieren godkjenner at Wiki-siden bruker dokumentet riktig og at innholdet er forankret i det dokumentet faktisk sier.',
+                        ],
+                        [
+                            'title' => 'Godkjenningsoppgaven',
+                            'text' => 'Når en Wiki-side bruker et dokument, kan Dokumenteieren få en godkjenningsoppgave. Den viser at materialet venter på vurdering før det kan regnes som godkjent.',
+                        ],
+                        [
+                            'title' => 'Godkjent materiale',
+                            'text' => 'Når Dokumenteieren godkjenner, blir siden stående som godkjent materiale for virksomheten. Hvis siden senere endres, kan en ny vurdering bli nødvendig.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Hvorfor flere eiere?',
+                    'items' => [
+                        [
+                            'title' => 'Én side kan bygge på flere dokumenter',
+                            'text' => 'En Wiki-side kan bruke mer enn ett kildedokument. Da følger flere Dokumenteiere med fordi hver av dem eier sitt kildegrunnlag.',
+                        ],
+                        [
+                            'title' => 'Hver eier vurderer sitt grunnlag',
+                            'text' => 'Hvis en side bygger på flere kilder, kan én eier være klar mens en annen fortsatt venter. Statusen viser da samlet hvor langt siden har kommet.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Hva statusene betyr',
+                    'items' => [
+                        [
+                            'title' => 'Artikkelstatus og Dokumenteierstatus er to ulike ting',
+                            'text' => 'En Wiki-side kan være et utkast, under gjennomgang eller godkjent. Samtidig kan Dokumenteieren være avventer, godkjent eller avvist. De to statusene sier derfor noe om ulike deler av arbeidsflyten.',
+                        ],
+                        [
+                            'title' => 'Avventer synkronisering',
+                            'text' => 'Denne statusen betyr at systemet ikke helt har fått oppdatert sammenhengen mellom sideinnholdet og godkjenningsgrunnlaget ennå. Det betyr ikke nødvendigvis at innholdet er feil, bare at oppdateringen ikke er ferdig.',
+                        ],
+                        [
+                            'title' => 'Mangler Dokumenteier',
+                            'text' => 'Det betyr at et kildedokument ennå ikke har fått en ansvarlig Dokumenteier, og at siden derfor mangler et fullstendig godkjenningsgrunnlag.',
+                        ],
+                        [
+                            'title' => 'Avvist',
+                            'text' => 'Dokumenteieren mener at materialet ikke kan godkjennes slik det står, og siden må justeres før den kan gå videre.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Når noe endrer seg',
+                    'items' => [
+                        [
+                            'title' => 'Endret dokumentinnhold',
+                            'text' => 'Hvis et kildedokument endrer seg, kan det påvirke hvilke Wiki-sider som fortsatt er riktig forankret i dokumentet. Da må godkjenningene vurderes på nytt.',
+                        ],
+                        [
+                            'title' => 'Ny eller endret Dokumenteier',
+                            'text' => 'Hvis eierskapet på et dokument endrer seg, må systemet oppdatere hvilke personer som skal få godkjenningsoppgaver for de sidene som bruker dokumentet.',
+                        ],
+                        [
+                            'title' => 'Behandlingskjøringen oppdateres',
+                            'text' => 'Når grunnlaget endrer seg, kan behandlingskjøringen og statusene oppdateres slik at siden viser det som faktisk er godkjent nå.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Kort huskeregel',
+                    'items' => [
+                        [
+                            'title' => 'Kildegrunnlag først, godkjenning etterpå',
+                            'text' => 'Først laster du opp dokumentet. Deretter bygges Wiki-siden, kontrolleres og godkjennes av Dokumenteier før materialet regnes som klart.',
+                        ],
+                        [
+                            'title' => 'Statusene skal hjelpe deg å forstå hvor siden står',
+                            'text' => 'Bruk statusene til å se om siden er ferdig, venter på godkjenning, eller trenger oppdatering etter endringer i kildedokumentene.',
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'status_approved' => 'Godkjent',
         'status_draft' => 'Utkast',
         'status_pending_review' => 'Til gjennomgang',

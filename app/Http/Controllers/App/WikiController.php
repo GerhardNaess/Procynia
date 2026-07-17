@@ -62,6 +62,7 @@ class WikiController extends Controller
 
         $props = [
             'active_tab' => $tab,
+            'help_url' => route('app.wiki.help'),
             'lint_health' => $lintHealth,
             'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),

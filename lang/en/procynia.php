@@ -2991,6 +2991,115 @@ return [
         'nav' => 'Wiki',
         'index_title' => 'Wiki',
         'index_description' => 'Structured knowledge about the company, generated from approved content.',
+        'help_button' => 'How Wiki pages work',
+        'help_title' => 'How Wiki pages work',
+        'help_intro' => 'This page explains how source documents become Wiki pages, how Document Owners approve the material, and why some statuses can show that the system is still synchronizing.',
+        'help_back_to_wiki' => 'Back to Wiki pages',
+        'help' => [
+            'title' => 'How Wiki pages work',
+            'intro' => 'When you upload a source document, Procynia builds a Wiki page with subject matter content, control points, and approval tasks. The page shows both what is already finished and what still needs approval.',
+            'back_to_wiki' => 'Back to Wiki pages',
+            'sections' => [
+                [
+                    'title' => 'From source document to Wiki page',
+                    'items' => [
+                        [
+                            'title' => '1. The document is loaded',
+                            'text' => 'The source document provides the basis for the new Wiki page. Its content is read and used to build a subject-matter draft.',
+                        ],
+                        [
+                            'title' => '2. The page is structured',
+                            'text' => 'Procynia splits the content into subject-matter sections, claims, and control points so the page is easy to read and review.',
+                        ],
+                        [
+                            'title' => '3. Claims and quality control',
+                            'text' => 'The system checks that the claims on the page can actually be traced back to the source basis, and that the material meets the expected quality before it moves on.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Document Owner and approval',
+                    'items' => [
+                        [
+                            'title' => 'What the Document Owner approves',
+                            'text' => 'The Document Owner approves that the Wiki page uses the document correctly and that the content is grounded in what the document actually says.',
+                        ],
+                        [
+                            'title' => 'The approval task',
+                            'text' => 'When a Wiki page uses a document, the Document Owner can receive an approval task. It shows that the material is waiting for review before it can be treated as approved.',
+                        ],
+                        [
+                            'title' => 'Approved material',
+                            'text' => 'When the Document Owner approves, the page remains approved material for the company. If the page changes later, a new review may be needed.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Why multiple owners?',
+                    'items' => [
+                        [
+                            'title' => 'One page can use several documents',
+                            'text' => 'A Wiki page can use more than one source document. In that case, more than one Document Owner is involved because each person owns their own source basis.',
+                        ],
+                        [
+                            'title' => 'Each owner reviews their own basis',
+                            'text' => 'If a page is built from multiple sources, one owner can be ready while another is still waiting. The status then shows where the page stands overall.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'What the statuses mean',
+                    'items' => [
+                        [
+                            'title' => 'Article status and Document Owner status are different things',
+                            'text' => 'A Wiki page can be a draft, under review, or approved. At the same time, the Document Owner can be pending, approved, or rejected. The two statuses therefore describe different parts of the workflow.',
+                        ],
+                        [
+                            'title' => 'Awaiting sync',
+                            'text' => 'This status means the system has not yet fully updated the link between the page content and the approval basis. It does not necessarily mean the content is wrong, only that the update is not finished yet.',
+                        ],
+                        [
+                            'title' => 'Missing Document Owner',
+                            'text' => 'This means a source document does not yet have an assigned Document Owner, so the page does not have a complete approval basis yet.',
+                        ],
+                        [
+                            'title' => 'Rejected',
+                            'text' => 'The Document Owner believes the material cannot be approved as it stands, and the page must be adjusted before it can move on.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'When something changes',
+                    'items' => [
+                        [
+                            'title' => 'Changed document content',
+                            'text' => 'If a source document changes, it can affect which Wiki pages are still correctly grounded in that document. The approvals then need to be reviewed again.',
+                        ],
+                        [
+                            'title' => 'New or changed Document Owner',
+                            'text' => 'If ownership on a document changes, the system must update which people should receive approval tasks for the pages that use that document.',
+                        ],
+                        [
+                            'title' => 'The workflow is updated',
+                            'text' => 'When the basis changes, the processing run and the statuses can be updated so the page reflects what is actually approved now.',
+                        ],
+                    ],
+                ],
+                [
+                    'title' => 'Quick rule of thumb',
+                    'items' => [
+                        [
+                            'title' => 'Source basis first, approval second',
+                            'text' => 'First you upload the document. Then the Wiki page is built, checked, and approved by the Document Owner before the material is considered ready.',
+                        ],
+                        [
+                            'title' => 'The statuses should help you understand where the page stands',
+                            'text' => 'Use the statuses to see whether the page is finished, waiting for approval, or needs an update after changes in the source documents.',
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'status_approved' => 'Approved',
         'status_draft' => 'Draft',
         'status_pending_review' => 'Pending review',
