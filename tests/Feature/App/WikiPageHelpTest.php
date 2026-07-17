@@ -57,6 +57,29 @@ class WikiPageHelpTest extends TestCase
         app()->setLocale($locale);
     }
 
+    public function test_wiki_sources_tab_exposes_sources_page_help_translation_keys(): void
+    {
+        $locale = app()->getLocale();
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/Wiki/Index'
+                && data_get($page, 'props.active_tab') === 'sources';
+        });
+
+        $this->assertSame('Slik fungerer Kildedokumenter', trans('procynia.wiki.sources_page_help_title'));
+        $this->assertSame('Faglig grunnlag for Wiki', trans('procynia.wiki.sources_page_help_item_what_title'));
+
+        app()->setLocale('en');
+        $this->assertSame('How source documents work', trans('procynia.wiki.sources_page_help_title'));
+        $this->assertSame('Grounding for Wiki content', trans('procynia.wiki.sources_page_help_item_what_title'));
+        app()->setLocale($locale);
+    }
+
     private function createCustomer(string $name = 'Testkunde AS'): Customer
     {
         $language = Language::query()->firstOrCreate(

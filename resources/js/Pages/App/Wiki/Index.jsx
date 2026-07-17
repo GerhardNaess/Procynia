@@ -531,6 +531,146 @@ function getWikiPagesHelpSections(tw) {
     ];
 }
 
+function getWikiSourcesHelpSections(tw) {
+    return [
+        {
+            title: tw.sources_page_help_section_what ?? 'Hva er kildedokumenter?',
+            items: [
+                {
+                    title: tw.sources_page_help_item_what_title ?? 'Faglig grunnlag for Wiki',
+                    text: tw.sources_page_help_item_what_text ?? 'Kildedokumenter er dokumenter Procynia bruker som faglig grunnlag for Wiki-sider, påstander og kildehenvisninger. Dokumentet beholdes som sporbar kilde og blir ikke automatisk tatt i bruk bare fordi det er lastet opp.',
+                },
+                {
+                    title: tw.sources_page_help_item_what_ai_title ?? 'Teksten trekkes ut og analyseres',
+                    text: tw.sources_page_help_item_what_ai_text ?? 'Når et dokument lastes opp, leser Procynia teksten, analyserer innholdet og gjør det klart for videre Wiki-behandling. Bare materiale som faktisk bruker dokumentet, får det som kilde.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_workflow ?? 'Arbeidsflyten',
+            items: [
+                {
+                    title: tw.sources_page_help_item_workflow_upload_title ?? 'Last opp dokumentet',
+                    text: tw.sources_page_help_item_workflow_upload_text ?? 'Du laster opp et kildedokument og velger Dokumenteier hvis du har rettigheter til det.',
+                },
+                {
+                    title: tw.sources_page_help_item_workflow_process_title ?? 'Dokumentet behandles først',
+                    text: tw.sources_page_help_item_workflow_process_text ?? 'Procynia trekker ut og analyserer dokumentet før det kan brukes som grunnlag for nye Wiki-sider.',
+                },
+                {
+                    title: tw.sources_page_help_item_workflow_wiki_title ?? 'Deretter kan Wiki-materiale genereres',
+                    text: tw.sources_page_help_item_workflow_wiki_text ?? 'Når dokumentet er klart, kan du starte Wiki-utkast. De genererte sidene kobles til de faktiske kildene og går videre til claims, kvalitetskontroll, QA og Dokumenteiergodkjenning.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_owner ?? 'Dokumenteier',
+            items: [
+                {
+                    title: tw.sources_page_help_item_owner_definition_title ?? 'Faglig ansvar for dokumentet',
+                    text: tw.sources_page_help_item_owner_definition_text ?? 'Dokumenteieren er personen som har det faglige ansvaret for kildedokumentet. Dokumenteieren kan være en annen person enn den som lastet opp dokumentet.',
+                },
+                {
+                    title: tw.sources_page_help_item_owner_scope_title ?? 'Én eier per dokument',
+                    text: tw.sources_page_help_item_owner_scope_text ?? 'Ett kildedokument har én Dokumenteier. Én person kan eie flere dokumenter, og bare aktive og kvalifiserte brukere i samme kundemiljø kan velges.',
+                },
+                {
+                    title: tw.sources_page_help_item_owner_approval_title ?? 'Eierskap er ikke godkjenning',
+                    text: tw.sources_page_help_item_owner_approval_text ?? 'Å velge Dokumenteier godkjenner ikke Wiki-materialet automatisk. Dokumenteieren må senere vurdere den konkrete Wiki-sideversjonen som bygger på dokumentet.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_columns ?? 'Kolonnene i listen',
+            items: [
+                {
+                    title: tw.sources_page_help_item_columns_filename_title ?? 'Filnavn',
+                    text: tw.sources_page_help_item_columns_filename_text ?? 'Navnet på det opplastede kildedokumentet.',
+                },
+                {
+                    title: tw.sources_page_help_item_columns_status_title ?? 'Status',
+                    text: tw.sources_page_help_item_columns_status_text ?? 'Viser hvor langt selve dokumentbehandlingen har kommet, for eksempel Behandles, Ekstrahert eller Feilet.',
+                },
+                {
+                    title: tw.sources_page_help_item_columns_wiki_title ?? 'Wiki-status',
+                    text: tw.sources_page_help_item_columns_wiki_text ?? 'Viser status og fremdrift for Wiki-behandlingen som er knyttet til dokumentet, for eksempel I kø, Kjører, Genererer sider, Verifisering og lenking, QA eller Fullført / bestått.',
+                },
+                {
+                    title: tw.sources_page_help_item_columns_owner_title ?? 'Dokumenteier',
+                    text: tw.sources_page_help_item_columns_owner_text ?? 'Viser hvem som har det faglige ansvaret for dokumentet.',
+                },
+                {
+                    title: tw.sources_page_help_item_columns_actions_title ?? 'Handlinger',
+                    text: tw.sources_page_help_item_columns_actions_text ?? 'Her finner du handlinger som å lage Wiki-utkast, åpne kjøringer, se originaldokumentet eller slette dokumentet.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_statuses ?? 'Hva betyr statusene?',
+            items: [
+                {
+                    title: tw.sources_page_help_item_status_uploaded_title ?? 'Lastet opp',
+                    text: tw.sources_page_help_item_status_uploaded_text ?? 'Dokumentet er mottatt, men behandlingen er ikke ferdig.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_processing_title ?? 'Behandles',
+                    text: tw.sources_page_help_item_status_processing_text ?? 'Procynia trekker ut eller analyserer innholdet.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_extracted_title ?? 'Ekstrahert',
+                    text: tw.sources_page_help_item_status_extracted_text ?? 'Teksten er hentet ut, og dokumentet er klart for videre Wiki-behandling.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_completed_title ?? 'Fullført',
+                    text: tw.sources_page_help_item_status_completed_text ?? 'Den aktuelle behandlingen er ferdig.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_failed_title ?? 'Feilet',
+                    text: tw.sources_page_help_item_status_failed_text ?? 'Behandlingen stoppet på grunn av en feil. Åpne kjøringsinformasjonen for en forklaring og eventuell ny handling.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_owner_title ?? 'Avventer Dokumenteier',
+                    text: tw.sources_page_help_item_status_owner_text ?? 'Dokumentet mangler en gyldig Dokumenteier, eller eierstatusen er ennå ikke synkronisert til Wiki-sidene som bruker dokumentet.',
+                },
+                {
+                    title: tw.sources_page_help_item_status_approval_title ?? 'Avventer godkjenning',
+                    text: tw.sources_page_help_item_status_approval_text ?? 'Wiki-materialet er under arbeid og venter på nødvendige godkjenninger før det kan tas i bruk.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_changes ?? 'Når dokumentet endrer seg',
+            items: [
+                {
+                    title: tw.sources_page_help_item_changes_owner_title ?? 'Ny eier gir nye oppgaver',
+                    text: tw.sources_page_help_item_changes_owner_text ?? 'Når Dokumenteier endres, oppdateres hvem som skal godkjenne de Wiki-sidene som faktisk bruker dokumentet. Historikken beholdes.',
+                },
+                {
+                    title: tw.sources_page_help_item_changes_delete_title ?? 'Sletting viser konsekvenser først',
+                    text: tw.sources_page_help_item_changes_delete_text ?? 'Før du sletter et dokument, viser Procynia hvilke Wiki-sider, claims og lagrede Wiki-svar som kan bli påvirket. Et dokument kan være én av flere kilder, så ikke alt materiale forsvinner nødvendigvis.',
+                },
+            ],
+        },
+        {
+            title: tw.sources_page_help_section_actions ?? 'Hva bør du gjøre?',
+            items: [
+                {
+                    title: tw.sources_page_help_item_actions_upload_title ?? 'Ved nytt dokument',
+                    text: tw.sources_page_help_item_actions_upload_text ?? 'Last opp dokumentet, velg riktig Dokumenteier og følg behandlingen under Kjøringer til det er klart for Wiki-generering.',
+                },
+                {
+                    title: tw.sources_page_help_item_actions_fail_title ?? 'Når behandlingen feiler',
+                    text: tw.sources_page_help_item_actions_fail_text ?? 'Åpne kjøringen, les den forståelige feilteksten og kontroller dokumentformat og innhold før du prøver igjen.',
+                },
+                {
+                    title: tw.sources_page_help_item_actions_delete_title ?? 'Når dokumentet skal slettes',
+                    text: tw.sources_page_help_item_actions_delete_text ?? 'Les konsekvensanalysen nøye og kontroller hvilke Wiki-sider og svar som berøres før du bekrefter slettingen.',
+                },
+            ],
+        },
+    ];
+}
+
 function ingestStatusLabel(status, qaStatus = null) {
     if (status === 'completed' && qaStatus === 'passed') {
         return 'Fullført / bestått';
@@ -2127,7 +2267,19 @@ export default function WikiIndex({
     const locale = document.documentElement.lang || 'no';
     const visibleRuns = activeTab === 'sources' ? sources : activeTab === 'runs' ? runs : [];
     const hasActiveWikiRun = visibleRuns.some(isActiveWikiRun) || visibleRuns.some((run) => run?.status === 'queued');
-    const pageHelpSections = activeTab === 'pages' ? getWikiPagesHelpSections(tw) : [];
+    const wikiHelpContent = activeTab === 'pages'
+        ? {
+            title: tw.page_help_title ?? 'Slik fungerer Wiki-sider',
+            intro: tw.page_help_intro ?? 'Wiki-sidene bygges fra virksomhetens kildedokumenter. Dokumenteiere, kildegrunnlag, godkjenninger og kvalitetskontroll sørger for at innholdet er faglig forankret og sporbarheten beholdes.',
+            sections: getWikiPagesHelpSections(tw),
+        }
+        : activeTab === 'sources'
+            ? {
+                title: tw.sources_page_help_title ?? 'Slik fungerer Kildedokumenter',
+                intro: tw.sources_page_help_intro ?? 'Kildedokumenter er grunnlaget for Enterprise Wiki. Her laster du opp dokumenter, velger Dokumenteier, følger behandlingen og ser hvilke Wiki-sider som bruker dokumentet.',
+                sections: getWikiSourcesHelpSections(tw),
+            }
+            : null;
 
     useEffect(() => {
         if (!hasActiveWikiRun || !['sources', 'runs'].includes(activeTab)) {
@@ -2151,12 +2303,12 @@ export default function WikiIndex({
                             <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                 {tw.index_title ?? 'Wiki'}
                             </h1>
-                            {activeTab === 'pages' && (
+                            {wikiHelpContent && (
                                 <PageHelpButton
                                     buttonLabel={tw.page_help_button ?? 'Hjelp'}
-                                    title={tw.page_help_title ?? 'Slik fungerer Wiki-sider'}
-                                    intro={tw.page_help_intro ?? 'Wiki-sidene bygges fra virksomhetens kildedokumenter. Dokumenteiere, kildegrunnlag, godkjenninger og kvalitetskontroll sørger for at innholdet er faglig forankret og sporbarheten beholdes.'}
-                                    sections={pageHelpSections}
+                                    title={wikiHelpContent.title}
+                                    intro={wikiHelpContent.intro}
+                                    sections={wikiHelpContent.sections}
                                 />
                             )}
                         </div>
