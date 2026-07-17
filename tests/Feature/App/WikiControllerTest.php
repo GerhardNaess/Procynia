@@ -840,6 +840,29 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_sources_tab_includes_document_owner_data_and_options(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $owner->id])->save();
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document, $owner): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            $options = data_get($inertia, 'props.document_owner_options', []);
+
+            return $source !== null
+                && (int) data_get($source, 'owner_user_id') === $owner->id
+                && data_get($source, 'owner_name') === $owner->name
+                && collect($options)->contains(fn (array $option) => (int) $option['id'] === $owner->id);
+        });
+    }
+
     // =========================================================================
     // Phase 4A-9: generated pages per source
     // =========================================================================

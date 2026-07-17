@@ -1064,9 +1064,21 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
 
 // ─── Sources tab ─────────────────────────────────────────────────────────────
 
-function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAvailable, tw, locale }) {
+function SourcesTab({
+    sources,
+    sourcesFilters,
+    sourcesStoreUrl,
+    documentOwnerOptions = [],
+    wikiGenerationAvailable,
+    tw,
+    locale,
+}) {
     const srcFilters = sourcesFilters ?? {};
     const [srcSearchInput, setSrcSearchInput] = useState(srcFilters.search ?? '');
+    const { auth = {} } = usePage().props;
+    const currentUser = auth.user ?? {};
+    const canAssignDocumentOwner = Boolean(currentUser.can_assign_enterprise_wiki_document_owner);
+    const ownerOptions = documentOwnerOptions ?? [];
 
     const navigateSources = (overrides) => {
         router.get('/app/wiki', {
@@ -1083,11 +1095,51 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
     };
 
     const fileInputRef = useRef(null);
-    const uploadForm = useForm({ file: null });
+    const uploadForm = useForm({
+        file: null,
+        owner_user_id: String(currentUser.id ?? ''),
+    });
     const [ingestingIds, setIngestingIds] = useState(new Set());
     const [decisionView, setDecisionView] = useState(null);
+    const [ownerDrafts, setOwnerDrafts] = useState({});
+    const [savingOwnerIds, setSavingOwnerIds] = useState(new Set());
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
+
+    const handleOwnerChange = (sourceId, value) => {
+        setOwnerDrafts((prev) => ({
+            ...prev,
+            [sourceId]: value,
+        }));
+    };
+
+    const handleOwnerSave = (source) => {
+        if (!source || !canAssignDocumentOwner) return;
+
+        const currentValue = ownerDrafts[source.id] ?? String(source.owner_user_id ?? '');
+        const normalized = String(currentValue ?? '').trim();
+
+        if (normalized === String(source.owner_user_id ?? '')) {
+            return;
+        }
+
+        setSavingOwnerIds((prev) => new Set(prev).add(source.id));
+
+        router.patch(
+            `/app/wiki/sources/${source.id}/owner`,
+            { owner_user_id: normalized === '' ? null : Number(normalized) },
+            {
+                preserveScroll: true,
+                onFinish: () => {
+                    setSavingOwnerIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(source.id);
+                        return next;
+                    });
+                },
+            },
+        );
+    };
 
     const [deletePreview, setDeletePreview] = useState(null);
 
@@ -1127,6 +1179,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
             forceFormData: true,
             onSuccess: () => {
                 uploadForm.reset();
+                uploadForm.setData('owner_user_id', String(currentUser.id ?? ''));
                 if (fileInputRef.current) fileInputRef.current.value = '';
             },
         });
@@ -1210,6 +1263,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                     <col style={{ width: '130px' }} />
                                     <col style={{ width: '120px' }} />
                                     <col style={{ width: '220px' }} />
+                                    <col style={{ width: '260px' }} />
                                     <col style={{ width: '56px' }} />
                                     <col style={{ width: '210px' }} />
                                 </colgroup>
@@ -1219,6 +1273,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                         <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                         <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
                                         <th className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
+                                        <th className="px-4 py-3">{tw.source_col_owner ?? 'Dokumenteier'}</th>
                                         <th className="px-4 py-3 text-center">{tw.source_col_source ?? 'Kilde'}</th>
                                         <th className="px-4 py-3 text-right">{tw.source_col_actions ?? 'Handlinger'}</th>
                                     </tr>
@@ -1227,6 +1282,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                     {sources.map((source) => {
                                         const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
                                         const canDelete = !isInProgress;
+                                        const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
                                         <tr key={source.id} className="text-sm">
                                             <td className="overflow-hidden px-4 py-3 align-top">
@@ -1267,6 +1323,38 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                                             </li>
                                                         ))}
                                                     </ul>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 align-top">
+                                                {canAssignDocumentOwner ? (
+                                                    <div className="space-y-2">
+                                                        <select
+                                                            value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
+                                                            onChange={(event) => handleOwnerChange(source.id, event.target.value)}
+                                                            className={`${SELECT_CLS} w-full`}
+                                                        >
+                                                            <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
+                                                            {ownerOptions.map((option) => (
+                                                                <option key={option.id} value={option.id}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            type="button"
+                                                            disabled={savingOwnerIds.has(source.id)}
+                                                            onClick={() => handleOwnerSave(source)}
+                                                            className="inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            {savingOwnerIds.has(source.id)
+                                                                ? (tw.document_owner_saving ?? 'Lagrer eier...')
+                                                                : (tw.document_owner_save ?? 'Lagre eier')}
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                        {sourceOwnerLabel}
+                                                    </span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 align-top text-center">
@@ -1370,6 +1458,32 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                 ) : null}
                             </div>
 
+                            {canAssignDocumentOwner ? (
+                                <div className="space-y-1.5">
+                                    <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="wiki-source-owner">
+                                        {tw.document_owner_label ?? 'Dokumenteier'}
+                                    </label>
+                                    <select
+                                        id="wiki-source-owner"
+                                        value={uploadForm.data.owner_user_id}
+                                        onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
+                                        className={`${SELECT_CLS} w-full max-w-sm`}
+                                    >
+                                        <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
+                                        {ownerOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {uploadForm.errors.owner_user_id ? (
+                                        <p className="text-sm text-rose-600">{uploadForm.errors.owner_user_id}</p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <input type="hidden" name="owner_user_id" value={uploadForm.data.owner_user_id} />
+                            )}
+
                             <button
                                 type="submit"
                                 disabled={!uploadForm.data.file || uploadForm.processing}
@@ -1420,6 +1534,12 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                     <div className="flex justify-between">
                                         <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Ingest-kjøringer som slettes'}</dt>
                                         <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
+                                        <dd className="font-semibold text-slate-800">
+                                            {deletePreview.data.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
+                                        </dd>
                                     </div>
                                     <div className="flex justify-between">
                                         <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Wiki-sider som slettes'}</dt>
@@ -1831,6 +1951,7 @@ export default function WikiIndex({
     pages_filters: pagesFilters = null,
     sources = [],
     sources_filters: sourcesFilters = null,
+    document_owner_options: documentOwnerOptions = [],
     runs = [],
     runs_filters: runsFilters = null,
     quality_findings: qualityFindings = [],
@@ -1887,6 +2008,7 @@ export default function WikiIndex({
                         sources={sources}
                         sourcesFilters={sourcesFilters}
                         sourcesStoreUrl={sourcesStoreUrl}
+                        documentOwnerOptions={documentOwnerOptions}
                         wikiGenerationAvailable={wikiGenerationAvailable}
                         tw={tw}
                         locale={locale}

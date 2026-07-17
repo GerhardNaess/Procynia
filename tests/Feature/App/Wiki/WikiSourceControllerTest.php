@@ -212,6 +212,83 @@ class WikiSourceControllerTest extends TestCase
         $this->assertSame($user->id, $doc->uploaded_by_user_id);
     }
 
+    public function test_uploaded_document_defaults_to_uploaded_user_as_owner_when_no_owner_is_sent(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($user)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('owner-default.pdf', 64, 'application/pdf'),
+        ]);
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+
+        $this->assertSame($user->id, $doc->owner_user_id);
+        $this->assertTrue($doc->owner->is($user));
+    }
+
+    public function test_system_owner_can_change_document_owner(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $bidManager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($owner)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $bidManager->id,
+            ])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $fresh = $document->fresh('owner');
+        $this->assertSame($bidManager->id, $fresh->owner_user_id);
+        $this->assertTrue($fresh->owner->is($bidManager));
+    }
+
+    public function test_document_owner_update_rejects_foreign_customer_user(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer('Egen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignOwner = $this->createUser($otherCustomer, User::BID_ROLE_BID_MANAGER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($owner)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $foreignOwner->id,
+            ])
+            ->assertSessionHasErrors(['owner_user_id']);
+
+        $this->assertNull($document->fresh()->owner_user_id);
+    }
+
+    public function test_contributor_cannot_change_document_owner(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
+
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($contributor)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $contributor->id,
+            ])
+            ->assertForbidden();
+
+        $this->assertNull($document->fresh()->owner_user_id);
+    }
+
     public function test_file_hash_sha256_is_set_on_document(): void
     {
         Storage::fake('local');
@@ -649,6 +726,7 @@ class WikiSourceControllerTest extends TestCase
 
         $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
         $preview->assertOk();
+        $preview->assertJsonPath('document_owner_name', null);
         $preview->assertJsonPath('stale_wiki_answer_count', 1);
         $preview->assertJsonPath('impacted_claim_count', 0);
         $preview->assertJsonPath('impacted_source_reference_count', 0);

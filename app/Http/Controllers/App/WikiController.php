@@ -184,6 +184,7 @@ class WikiController extends Controller
 
         $docQuery = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
+            ->with('owner:id,name,email,is_active')
             ->orderByDesc('created_at');
 
         if ($srcSearch !== '') {
@@ -230,6 +231,10 @@ class WikiController extends Controller
             'id' => $doc->id,
             'original_filename' => $doc->original_filename,
             'document_status' => $doc->document_status,
+            'owner_user_id' => $doc->owner_user_id,
+            'owner_name' => $doc->owner?->name,
+            'owner_email' => $doc->owner?->email,
+            'owner_is_active' => $doc->owner?->is_active,
             'created_at' => $doc->created_at,
             'latest_ingest_run' => $latestRuns->has($doc->id) ? [
                 'status' => $latestRuns[$doc->id]->status,
@@ -260,6 +265,7 @@ class WikiController extends Controller
 
         return [
             'sources' => $sources,
+            'document_owner_options' => $this->documentOwnerOptionsForCustomer($customerId),
             'sources_filters' => [
                 'search' => $srcSearch,
                 'status' => $srcStatus,
@@ -706,5 +712,32 @@ class WikiController extends Controller
         }
 
         return $statuses;
+    }
+
+    /**
+     * Purpose: Build the selectable document owner options for one customer.
+     * Inputs: The customer id.
+     * Returns: A stable list of active customer-scoped user options.
+     * Side effects: None.
+     */
+    private function documentOwnerOptionsForCustomer(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+            ->with('customer:id,permission_settings')
+            ->get(['id', 'name', 'email', 'role', 'bid_role', 'is_qa', 'customer_id', 'is_active'])
+            ->filter(fn (User $user): bool => $user->canBeEnterpriseWikiDocumentOwner())
+            ->sortBy([
+                ['name', 'asc'],
+                ['id', 'asc'],
+            ])
+            ->map(static fn (User $user): array => [
+                'id' => $user->id,
+                'label' => sprintf('%s · %s', $user->name, $user->email),
+            ])
+            ->values()
+            ->all();
     }
 }

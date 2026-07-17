@@ -296,6 +296,30 @@ class User extends Authenticatable implements FilamentUser
             && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa());
     }
 
+    public function canBeEnterpriseWikiDocumentOwner(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa());
+    }
+
+    public function canAssignEnterpriseWikiDocumentOwner(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa());
+    }
+
     public static function customerRoleForBidRole(string $bidRole): string
     {
         return in_array($bidRole, [self::BID_ROLE_SYSTEM_OWNER, self::BID_ROLE_BID_MANAGER], true)

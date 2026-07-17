@@ -22,6 +22,7 @@ class EnterpriseWikiDocument extends Model
     protected $fillable = [
         'customer_id',
         'uploaded_by_user_id',
+        'owner_user_id',
         'original_filename',
         'file_path',
         'file_hash_sha256',
@@ -34,6 +35,7 @@ class EnterpriseWikiDocument extends Model
         return [
             'customer_id' => 'integer',
             'uploaded_by_user_id' => 'integer',
+            'owner_user_id' => 'integer',
         ];
     }
 
@@ -45,5 +47,10 @@ class EnterpriseWikiDocument extends Model
     public function uploadedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'uploaded_by_user_id');
+    }
+
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
     }
 }

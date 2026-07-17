@@ -97,6 +97,8 @@ class CustomerEnvironmentController extends Controller
             Customer::PERMISSION_CREATE_USERS,
             Customer::PERMISSION_VIEW_ALL_CASES,
             Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
+            Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER,
+            Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER,
         ];
 
         $validated = $request->validate([
@@ -152,6 +154,16 @@ class CustomerEnvironmentController extends Controller
                 'key' => Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
                 'label' => 'Godkjenne Wiki-påstander',
                 'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_CLAIMS],
+            ],
+            [
+                'key' => Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER,
+                'label' => __('procynia.wiki.permission_can_be_document_owner'),
+                'roles' => $settings[Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER],
+            ],
+            [
+                'key' => Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER,
+                'label' => __('procynia.wiki.permission_assign_document_owner'),
+                'roles' => $settings[Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER],
             ],
         ];
 

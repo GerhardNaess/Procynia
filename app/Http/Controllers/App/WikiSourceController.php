@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\User;
 use App\Services\DocumentTextExtractor;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
@@ -46,9 +47,14 @@ class WikiSourceController extends Controller
 
         $validated = $request->validate([
             'file' => ['required', 'file', 'mimes:pdf,docx', 'max:20480'],
+            'owner_user_id' => ['sometimes', 'nullable', 'integer'],
         ]);
 
         $file = $validated['file'];
+        $ownerUserId = $this->resolveOwnerUserIdForCustomer(
+            $customerId,
+            (int) ($validated['owner_user_id'] ?? $user?->id ?? 0),
+        );
         $fileHash = (string) hash_file('sha256', $file->getRealPath());
 
         $duplicate = EnterpriseWikiDocument::query()
@@ -81,10 +87,11 @@ class WikiSourceController extends Controller
             $absolutePath = Storage::disk('local')->path($storedPath);
             $extractedText = trim($this->documentTextExtractor->extractText($absolutePath));
 
-            $document = DB::transaction(function () use ($customerId, $user, $file, $storedPath, $fileHash, $extractedText): EnterpriseWikiDocument {
+            $document = DB::transaction(function () use ($customerId, $user, $ownerUserId, $file, $storedPath, $fileHash, $extractedText): EnterpriseWikiDocument {
                 return EnterpriseWikiDocument::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $user?->id,
+                    'owner_user_id' => $ownerUserId,
                     'original_filename' => $file->getClientOriginalName(),
                     'file_path' => $storedPath,
                     'file_hash_sha256' => $fileHash,
@@ -113,6 +120,40 @@ class WikiSourceController extends Controller
 
         return redirect()->route('app.wiki.index')
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
+    }
+
+    public function updateOwner(Request $request, EnterpriseWikiDocument $document): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        abort_unless($user?->canAssignEnterpriseWikiDocumentOwner() ?? false, 403);
+
+        $validated = $request->validate([
+            'owner_user_id' => ['nullable', 'integer'],
+        ]);
+
+        $ownerUserId = array_key_exists('owner_user_id', $validated) && $validated['owner_user_id'] !== null
+            ? $this->resolveOwnerUserIdForCustomer($customerId, (int) $validated['owner_user_id'])
+            : null;
+
+        $document->forceFill([
+            'owner_user_id' => $ownerUserId,
+        ])->save();
+
+        Log::info('[PROCYNIA][WIKI_SOURCE] Updated wiki document owner.', [
+            'document_id' => $document->id,
+            'customer_id' => $customerId,
+            'owner_user_id' => $ownerUserId,
+            'updated_by_user_id' => $user?->id,
+        ]);
+
+        return redirect()->route('app.wiki.index', ['tab' => 'sources'])
+            ->with('success', 'Dokumenteier oppdatert.');
     }
 
     public function download(EnterpriseWikiDocument $document): BinaryFileResponse
@@ -166,6 +207,7 @@ class WikiSourceController extends Controller
         return response()->json([
             'blocked' => false,
             'document_name' => $document->original_filename,
+            'document_owner_name' => $document->owner?->name,
             'run_count' => $runs->count(),
             'sole_source_page_count' => $soleSourcePageIds->count(),
             'shared_page_count' => $sharedPageIds->count(),
@@ -345,5 +387,23 @@ class WikiSourceController extends Controller
         $soleSourcePageIds = $allPageIds->diff($sharedPageIds)->values();
 
         return [$soleSourcePageIds, $sharedPageIds];
+    }
+
+    private function resolveOwnerUserIdForCustomer(int $customerId, int $ownerUserId): int
+    {
+        $owner = User::query()
+            ->whereKey($ownerUserId)
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->with('customer:id,permission_settings')
+            ->first();
+
+        if ($owner === null || ! $owner->canBeEnterpriseWikiDocumentOwner()) {
+            throw ValidationException::withMessages([
+                'owner_user_id' => __('procynia.wiki.document_owner_invalid'),
+            ]);
+        }
+
+        return $owner->id;
     }
 }

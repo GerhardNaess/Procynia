@@ -257,14 +257,44 @@ class CustomerQaAccessTest extends TestCase
             $rowKeys = collect(data_get($settings, 'permission_rows', []))->pluck('key')->all();
             $approveRow = collect(data_get($settings, 'permission_rows', []))
                 ->firstWhere('key', Customer::PERMISSION_APPROVE_WIKI_CLAIMS);
+            $canBeOwnerRow = collect(data_get($settings, 'permission_rows', []))
+                ->firstWhere('key', Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER);
+            $assignOwnerRow = collect(data_get($settings, 'permission_rows', []))
+                ->firstWhere('key', Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER);
 
             return in_array('qa', $roleValues, true)
                 && in_array(Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $rowKeys, true)
                 && in_array('system_owner', $approveRow['roles'] ?? [], true)
                 && in_array('qa', $approveRow['roles'] ?? [], true)
                 && ! in_array('bid_manager', $approveRow['roles'] ?? [], true)
-                && ! in_array('contributor', $approveRow['roles'] ?? [], true);
+                && ! in_array('contributor', $approveRow['roles'] ?? [], true)
+                && in_array(Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER, $rowKeys, true)
+                && in_array(Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $rowKeys, true)
+                && in_array('system_owner', $canBeOwnerRow['roles'] ?? [], true)
+                && in_array('bid_manager', $canBeOwnerRow['roles'] ?? [], true)
+                && in_array('contributor', $canBeOwnerRow['roles'] ?? [], true)
+                && ! in_array('qa', $canBeOwnerRow['roles'] ?? [], true)
+                && in_array('system_owner', $assignOwnerRow['roles'] ?? [], true)
+                && in_array('bid_manager', $assignOwnerRow['roles'] ?? [], true)
+                && ! in_array('contributor', $assignOwnerRow['roles'] ?? [], true)
+                && ! in_array('qa', $assignOwnerRow['roles'] ?? [], true);
         });
+    }
+
+    public function test_default_customer_permission_settings_include_enterprise_wiki_document_owner_permissions(): void
+    {
+        $customer = $this->createCustomer();
+
+        $settings = $customer->resolvedPermissionSettings();
+
+        $this->assertSame(
+            ['system_owner', 'bid_manager', 'contributor'],
+            $settings[Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER],
+        );
+        $this->assertSame(
+            ['system_owner', 'bid_manager'],
+            $settings[Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER],
+        );
     }
 
     public function test_system_owner_can_configure_qa_column_through_existing_permissions_mechanism(): void

@@ -19,11 +19,17 @@ class Customer extends Model
 
     public const PERMISSION_APPROVE_WIKI_CLAIMS = 'approve_wiki_claims';
 
+    public const PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'be_enterprise_wiki_document_owner';
+
+    public const PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'assign_enterprise_wiki_document_owner';
+
     public const DEFAULT_PERMISSION_SETTINGS = [
         self::PERMISSION_CREATE_DEPARTMENTS => ['system_owner'],
         self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_APPROVE_WIKI_CLAIMS => ['system_owner', 'qa'],
+        self::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager', 'contributor'],
+        self::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager'],
     ];
 
     public const PLAN_FREE = 'free';

@@ -61,6 +61,23 @@ class EnterpriseWikiDocumentTest extends TestCase
         $this->assertTrue($document->uploadedBy->is($user));
     }
 
+    public function test_document_owner_relation_is_nullable(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, owner: null);
+
+        $this->assertNull($document->owner);
+    }
+
+    public function test_document_owner_relation_resolves_when_set(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer);
+        $document = $this->createDocument($customer, owner: $owner);
+
+        $this->assertTrue($document->owner->is($owner));
+    }
+
     public function test_document_has_no_column_referencing_knowledge_items(): void
     {
         $document = new EnterpriseWikiDocument;
@@ -147,11 +164,12 @@ class EnterpriseWikiDocumentTest extends TestCase
         ]);
     }
 
-    private function createDocument(Customer $customer, ?User $uploadedBy = null): EnterpriseWikiDocument
+    private function createDocument(Customer $customer, ?User $uploadedBy = null, ?User $owner = null): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
             'customer_id' => $customer->id,
             'uploaded_by_user_id' => $uploadedBy?->id,
+            'owner_user_id' => $owner?->id,
             'original_filename' => 'test.docx',
             'file_path' => 'wiki-documents/'.$customer->id.'/'.Str::random(16).'.docx',
             'file_hash_sha256' => hash('sha256', Str::random(32)),
