@@ -671,6 +671,141 @@ function getWikiSourcesHelpSections(tw) {
     ];
 }
 
+function getWikiRunsHelpSections(tw) {
+    return [
+        {
+            title: tw.runs_page_help_section_what ?? 'Hva er en behandlingskjøring?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_what_title ?? 'En samlet prosess',
+                    text: tw.runs_page_help_item_what_text ?? 'En behandlingskjøring er en samlet prosess som behandler ett eller flere kildedokumenter og bygger eller oppdaterer Enterprise Wiki-materiale. En kjøring opprettes når Wiki-behandling startes, og hver kjøring har egen status og fremdrift.',
+                },
+                {
+                    title: tw.runs_page_help_item_what_separate_title ?? 'Skilt fra vanlige svarutkast',
+                    text: tw.runs_page_help_item_what_separate_text ?? 'Kjøringer er separat fra den vanlige svarmotoren og vanlige svarutkast. De produserer Wiki-materiale, claims og kontrollgrunnlag, ikke ordinære kravsvar.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_when ?? 'Når opprettes en kjøring?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_when_start_title ?? 'Når Wiki-behandling startes',
+                    text: tw.runs_page_help_item_when_start_text ?? 'En kjøring kan opprettes når brukeren velger Lag Wiki-utkast for et kildedokument, eller når eksisterende Wiki-materiale må behandles på nytt eller gjenopprettes gjennom eksisterende UI.',
+                },
+                {
+                    title: tw.runs_page_help_item_when_scope_title ?? 'Én kjøring kan dekke mer enn ett steg',
+                    text: tw.runs_page_help_item_when_scope_text ?? 'En kjøring kan være knyttet til ett bestemt dokument eller en større Wiki-behandling. Hvilke steg som vises, avhenger av hvilken behandling kjøringen utfører.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_progress ?? 'Hvordan lese fremdriften?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_progress_status_title ?? 'Status',
+                    text: tw.runs_page_help_item_progress_status_text ?? 'Status viser den overordnede tilstanden til kjøringen, for eksempel Venter, Behandles, Genererer Wiki-sider, Avventer QA, Avventer godkjenning fra Dokumenteier, Fullført eller Feilet.',
+                },
+                {
+                    title: tw.runs_page_help_item_progress_activity_title ?? 'Aktivitet',
+                    text: tw.runs_page_help_item_progress_activity_text ?? 'Aktivitet viser hva kjøringen arbeider med akkurat nå. Den er mer nyttig enn status alene når behandlingen er i gang.',
+                },
+                {
+                    title: tw.runs_page_help_item_progress_bar_title ?? 'Fremdrift og siste fremdrift',
+                    text: tw.runs_page_help_item_progress_bar_text ?? 'Fremdrift viser hvor mye av den kjente behandlingen som er fullført. Siste fremdrift viser når kjøringen sist rapporterte faktisk fremgang.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_statuses ?? 'Hva betyr statusene?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_status_queued_title ?? 'Venter',
+                    text: tw.runs_page_help_item_status_queued_text ?? 'Kjøringen er opprettet, men behandlingen har ikke startet ennå.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_running_title ?? 'Behandles',
+                    text: tw.runs_page_help_item_status_running_text ?? 'Procynia arbeider aktivt med kjøringen.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_pages_title ?? 'Genererer Wiki-sider',
+                    text: tw.runs_page_help_item_status_pages_text ?? 'Wiki-sider eller sideversjoner bygges fra kildedokumentene.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_verify_title ?? 'Kontrollerer påstander',
+                    text: tw.runs_page_help_item_status_verify_text ?? 'Påstander og kildegrunnlag verifiseres, og lenker og relasjoner bygges.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_qa_title ?? 'Kvalitetskontroll',
+                    text: tw.runs_page_help_item_status_qa_text ?? 'Systemet kontrollerer struktur, dekning, kildegrunnlag og øvrige kvalitetskrav.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_owner_title ?? 'Avventer godkjenning fra Dokumenteier',
+                    text: tw.runs_page_help_item_status_owner_text ?? 'Kjøringen har kommet langt, men én eller flere Dokumenteiere må fortsatt godkjenne materialet. Dette er ikke en teknisk feil, men en menneskelig beslutning som gjenstår.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_rejected_title ?? 'Avvist av Dokumenteier',
+                    text: tw.runs_page_help_item_status_rejected_text ?? 'Minst én nødvendig Dokumenteier har avvist materialet. Kjøringen kan ikke fullføres før avviket er behandlet.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_missing_owner_title ?? 'Mangler Dokumenteier',
+                    text: tw.runs_page_help_item_status_missing_owner_text ?? 'Et brukt kildedokument mangler en gyldig, aktiv Dokumenteier.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_completed_title ?? 'Fullført',
+                    text: tw.runs_page_help_item_status_completed_text ?? 'Alle nødvendige behandlingssteg og ferdigkontroller er fullført.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_failed_title ?? 'Feilet',
+                    text: tw.runs_page_help_item_status_failed_text ?? 'Behandlingen stoppet på grunn av en feil. Feilmeldingen skal beskrive problemet på vanlig språk, uten at interne jobb- eller exception-navn er nødvendig.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_escalated_title ?? 'Eskalert',
+                    text: tw.runs_page_help_item_status_escalated_text ?? 'Noe krevde ekstra oppfølging, og kjøringen trenger videre håndtering før den kan regnes som avsluttet.',
+                },
+                {
+                    title: tw.runs_page_help_item_status_decision_only_title ?? 'Beslutning lagret',
+                    text: tw.runs_page_help_item_status_decision_only_text ?? 'Kjøringen er brukt til å registrere en beslutning uten å starte den fulle behandlingsflyten.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_workflow ?? 'Aktiv behandling eller venter på en person?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_workflow_active_title ?? 'Aktiv behandling',
+                    text: tw.runs_page_help_item_workflow_active_text ?? 'Procynia arbeider med analyse, generering, claims, lenker, kildekontroll og kvalitetskontroll. Mens en kjøring er aktiv, oppdaterer Procynia visningen automatisk slik at ny fremdrift blir synlig uten at siden må lastes på nytt.',
+                },
+                {
+                    title: tw.runs_page_help_item_workflow_waiting_title ?? 'Venter på menneskelig handling',
+                    text: tw.runs_page_help_item_workflow_waiting_text ?? 'Kjøringen kan vente på QA, Dokumenteiergodkjenning eller tildeling av manglende Dokumenteier. Da er den ikke nødvendigvis stoppet av en feil, men venter på neste kontroll eller beslutning.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_actions ?? 'Hva skal jeg gjøre?',
+            items: [
+                {
+                    title: tw.runs_page_help_item_actions_active_title ?? 'Når en kjøring er aktiv',
+                    text: tw.runs_page_help_item_actions_active_text ?? 'Kontroller aktivitet og siste fremdrift, og la behandlingen fortsette dersom tallene fortsatt oppdateres.',
+                },
+                {
+                    title: tw.runs_page_help_item_actions_qa_title ?? 'Når kjøringen venter på QA',
+                    text: tw.runs_page_help_item_actions_qa_text ?? 'Åpne relevant kvalitets- eller QA-visning og fullfør den autoriserte kontrollen.',
+                },
+                {
+                    title: tw.runs_page_help_item_actions_owner_title ?? 'Når kjøringen venter på Dokumenteier',
+                    text: tw.runs_page_help_item_actions_owner_text ?? 'Dokumenteieren åpner den aktuelle Wiki-siden, kontrollerer materiale og kilder, og velger Godkjenn eller Avvis.',
+                },
+                {
+                    title: tw.runs_page_help_item_actions_fail_title ?? 'Når kjøringen feiler',
+                    text: tw.runs_page_help_item_actions_fail_text ?? 'Les den brukerrettede feilforklaringen, kontroller hvilket dokument og steg som er berørt, og bruk eventuell eksisterende ny behandling i UI-et dersom det finnes.',
+                },
+            ],
+        },
+    ];
+}
+
 function ingestStatusLabel(status, qaStatus = null) {
     if (status === 'completed' && qaStatus === 'passed') {
         return 'Fullført / bestått';
@@ -2279,7 +2414,13 @@ export default function WikiIndex({
                 intro: tw.sources_page_help_intro ?? 'Kildedokumenter er grunnlaget for Enterprise Wiki. Her laster du opp dokumenter, velger Dokumenteier, følger behandlingen og ser hvilke Wiki-sider som bruker dokumentet.',
                 sections: getWikiSourcesHelpSections(tw),
             }
-            : null;
+            : activeTab === 'runs'
+                ? {
+                    title: tw.runs_page_help_title ?? 'Slik fungerer Kjøringer',
+                    intro: tw.runs_page_help_intro ?? 'Kjøringer viser hvordan kildedokumenter behandles og blir til Wiki-materiale. Her kan du følge fremdrift, se hvilket steg behandlingen er på, og finne forståelige forklaringer dersom noe stopper eller venter på godkjenning.',
+                    sections: getWikiRunsHelpSections(tw),
+                }
+                : null;
 
     useEffect(() => {
         if (!hasActiveWikiRun || !['sources', 'runs'].includes(activeTab)) {

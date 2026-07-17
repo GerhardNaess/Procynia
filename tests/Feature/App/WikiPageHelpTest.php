@@ -80,6 +80,29 @@ class WikiPageHelpTest extends TestCase
         app()->setLocale($locale);
     }
 
+    public function test_wiki_runs_tab_exposes_runs_page_help_translation_keys(): void
+    {
+        $locale = app()->getLocale();
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/Wiki/Index'
+                && data_get($page, 'props.active_tab') === 'runs';
+        });
+
+        $this->assertSame('Slik fungerer Kjøringer', trans('procynia.wiki.runs_page_help_title'));
+        $this->assertSame('Venter', trans('procynia.wiki.runs_page_help_item_status_queued_title'));
+
+        app()->setLocale('en');
+        $this->assertSame('How runs work', trans('procynia.wiki.runs_page_help_title'));
+        $this->assertSame('Pending', trans('procynia.wiki.runs_page_help_item_status_queued_title'));
+        app()->setLocale($locale);
+    }
+
     private function createCustomer(string $name = 'Testkunde AS'): Customer
     {
         $language = Language::query()->firstOrCreate(
