@@ -8,10 +8,12 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
@@ -29,6 +31,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiPageTraversalService $traversal,
         private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
+        private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
     ) {}
 
     public function index(Request $request): Response
@@ -444,10 +447,107 @@ class WikiController extends Controller
         $page = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->where('slug', $slug)
-            ->whereIn('status', $this->visibleStatuses($user))
             ->first() ?? abort(404);
 
         $currentVersion = $page->currentVersion()->first();
+
+        $canViewPendingPage = $page->status === EnterpriseWikiPage::STATUS_APPROVED
+            || $user?->isSystemOwner()
+            || $user?->isBidManager()
+            || $user?->canApproveWikiClaims()
+            || (
+                $currentVersion !== null
+                && $user instanceof User
+                && $user->is_active
+                && $this->documentOwnerApprovalService->isRequiredDocumentOwnerForPageVersion($currentVersion, $user)
+            );
+
+        abort_unless($canViewPendingPage, 404);
+
+        $documentOwnerApprovals = [];
+        $documentOwnerApprovalSummary = [
+            'total' => 0,
+            'pending' => 0,
+            'approved' => 0,
+            'rejected' => 0,
+            'missing_owner' => 0,
+            'ready' => true,
+            'message' => null,
+        ];
+
+        if ($currentVersion !== null) {
+            $approvalRows = $this->documentOwnerApprovalService->syncForPageVersion($currentVersion);
+
+            $sourceDocumentIds = $approvalRows
+                ->flatMap(fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval) => is_array($approval->source_document_ids) ? $approval->source_document_ids : [])
+                ->map(static fn (mixed $value): int => (int) $value)
+                ->filter(static fn (int $value): bool => $value > 0)
+                ->unique()
+                ->values();
+
+            $sourceDocuments = $sourceDocumentIds->isNotEmpty()
+                ? EnterpriseWikiDocument::query()
+                    ->where('customer_id', $customerId)
+                    ->whereIn('id', $sourceDocumentIds)
+                    ->with('owner:id,name,email,is_active')
+                    ->get()
+                    ->keyBy('id')
+                : collect();
+
+            $documentOwnerApprovals = $approvalRows->map(function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval) use ($sourceDocuments, $user): array {
+                $documentIds = is_array($approval->source_document_ids) ? $approval->source_document_ids : [];
+                $documents = collect($documentIds)
+                    ->map(fn (mixed $id): array => [
+                        'id' => (int) $id,
+                        'original_filename' => $sourceDocuments->get((int) $id)?->original_filename,
+                        'owner_name' => $sourceDocuments->get((int) $id)?->owner?->name,
+                        'owner_user_id' => $sourceDocuments->get((int) $id)?->owner_user_id,
+                    ])
+                    ->values()
+                    ->all();
+
+                return [
+                    'id' => $approval->id,
+                    'approval_status' => $approval->approval_status,
+                    'approval_comment' => $approval->approval_comment,
+                    'decided_at' => $approval->decided_at,
+                    'decided_by_name' => $approval->decidedBy?->name,
+                    'is_override' => $approval->is_override,
+                    'override_reason' => $approval->override_reason,
+                    'document_owner_user_id' => $approval->document_owner_user_id,
+                    'document_owner_name' => $approval->documentOwner?->name,
+                    'document_owner_email' => $approval->documentOwner?->email,
+                    'document_owner_is_active' => $approval->documentOwner?->is_active,
+                    'source_document_ids' => $documentIds,
+                    'source_documents' => $documents,
+                    'can_decide' => $user instanceof User && $this->documentOwnerApprovalService->canDecide($approval, $user),
+                ];
+            })->all();
+
+            $documentOwnerApprovalSummary = [
+                'total' => $approvalRows->count(),
+                'pending' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)->count(),
+                'approved' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED)->count(),
+                'rejected' => $approvalRows->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED)->count(),
+                'missing_owner' => $approvalRows
+                    ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
+                    ->whereNull('document_owner_user_id')
+                    ->count(),
+                'ready' => $approvalRows->whereIn('approval_status', [
+                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
+                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
+                ])->isEmpty(),
+                'message' => null,
+            ];
+
+            if (! $documentOwnerApprovalSummary['ready']) {
+                $documentOwnerApprovalSummary['message'] = $documentOwnerApprovalSummary['missing_owner'] > 0
+                    ? 'Kildedokument mangler Dokumenteier'
+                    : ($documentOwnerApprovalSummary['rejected'] > 0
+                        ? 'Avvist av Dokumenteier'
+                        : 'Avventer godkjenning fra Dokumenteier');
+            }
+        }
 
         $claimSummary = [
             'total' => 0,
@@ -586,6 +686,8 @@ class WikiController extends Controller
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks'       => $backlinks,
+            'document_owner_approvals' => $documentOwnerApprovals,
+            'document_owner_approval_summary' => $documentOwnerApprovalSummary,
         ]);
     }
 

@@ -64,6 +64,7 @@ const INGEST_STATUS_STYLES = {
     generating_pages: 'bg-sky-100 text-sky-700',
     verification_linking: 'bg-cyan-100 text-cyan-700',
     qa: 'bg-fuchsia-100 text-fuchsia-700',
+    awaiting_document_owner_approval: 'bg-amber-100 text-amber-700',
     completed: 'bg-emerald-100 text-emerald-700',
     failed: 'bg-rose-100 text-rose-700',
     escalated: 'bg-amber-100 text-amber-700',
@@ -85,6 +86,7 @@ const INGEST_STATUS_LABELS = {
     generating_pages: 'Genererer sider',
     verification_linking: 'Verifisering og lenking',
     qa: 'QA',
+    awaiting_document_owner_approval: 'Avventer dokumenteiergodkjenning',
     completed: 'Fullført',
     failed: 'Feilet',
     escalated: 'Eskalert',
@@ -100,6 +102,7 @@ const IN_PROGRESS_STATUSES = [
     'generating_pages',
     'verification_linking',
     'qa',
+    'awaiting_document_owner_approval',
     'decision_only',
 ];
 
@@ -112,6 +115,7 @@ const ACTIVE_WIKI_RUN_STATUSES = [
     'generating_concept_entity_pages',
     'verification_linking',
     'qa',
+    'awaiting_document_owner_approval',
 ];
 
 const RUN_TIMELINE_STEPS = [
@@ -121,6 +125,7 @@ const RUN_TIMELINE_STEPS = [
     { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
     { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
     { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },
+    { key: 'awaiting_document_owner_approval', labelKey: 'ingest_timeline_owner_approval', fallback: 'Dokumenteier' },
 ];
 
 function isActiveWikiRun(run) {
@@ -202,6 +207,11 @@ function getIngestActivityCopy(run, tw) {
             detail: tw.ingest_activity_qa ?? 'Kvalitetssikrer innholdet',
             tone: 'active',
         },
+        awaiting_document_owner_approval: {
+            label: tw.ingest_activity_waiting_owner_approval ?? 'Avventer dokumenteier',
+            detail: tw.ingest_activity_waiting_owner_approval ?? 'Venter på dokumenteiergodkjenning',
+            tone: 'warning',
+        },
         completed: {
             label: tw.ingest_activity_completed ?? 'Fullført',
             detail: tw.ingest_activity_completed ?? 'Fullført',
@@ -252,6 +262,10 @@ function getRunTimelineState(run, stepIndex) {
         if (stepIndex < currentIndex) return 'done';
         if (stepIndex === currentIndex) return 'error';
         return 'empty';
+    }
+
+    if (run.status === 'awaiting_document_owner_approval') {
+        return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'waiting';
     }
 
     if (currentIndex === -1) return 'empty';

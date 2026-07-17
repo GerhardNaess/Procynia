@@ -35,4 +35,9 @@ class EnterpriseWikiPageVersion extends Model
         return $this->hasMany(EnterpriseWikiClaim::class, 'enterprise_wiki_page_version_id')
             ->orderBy('position_order');
     }
+
+    public function documentOwnerApprovals(): HasMany
+    {
+        return $this->hasMany(EnterpriseWikiPageVersionDocumentOwnerApproval::class, 'enterprise_wiki_page_version_id');
+    }
 }

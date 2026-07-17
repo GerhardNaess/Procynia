@@ -49,9 +49,10 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiIncrementalRelinkService $incrementalRelinkService,
-        private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
-        private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
-        private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
+    private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
+    private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
+    private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
+    private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
     ) {}
 
     /**
@@ -579,7 +580,7 @@ class EnterpriseWikiDocumentFlowService
         $fresh = $run->fresh() ?? $run;
 
         match ($fresh->qa_status) {
-            EnterpriseWikiIngestRun::QA_STATUS_PASSED => $this->completeRun($fresh),
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED => $this->completeRunIfOwnerApproved($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_ESCALATED => $this->escalateRun($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_FAILED => $this->markRunFailed(
                 $fresh,
@@ -592,6 +593,29 @@ class EnterpriseWikiDocumentFlowService
                 true,
             ),
         };
+    }
+
+    private function completeRunIfOwnerApproved(EnterpriseWikiIngestRun $run): void
+    {
+        $gate = $this->documentOwnerApprovalService->evaluateRunCompletionGate($run);
+
+        if (! $gate['ready']) {
+            $run->update([
+                'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+                'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
+            ]);
+
+            Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting document owner approval.', [
+                'run_id' => $run->id,
+                'pending' => count($gate['pending'] ?? []),
+                'rejected' => count($gate['rejected'] ?? []),
+                'missing_owner' => count($gate['missing_owner'] ?? []),
+            ]);
+
+            return;
+        }
+
+        $this->completeRun($run);
     }
 
     private function markVerificationStage(EnterpriseWikiIngestRun $run): void

@@ -30,6 +30,8 @@ class EnterpriseWikiIngestRun extends Model
 
     public const STATUS_QA = 'qa';
 
+    public const STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL = 'awaiting_document_owner_approval';
+
     public const STATUS_COMPLETED = 'completed';
 
     public const STATUS_FAILED = 'failed';
@@ -49,6 +51,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
         self::STATUS_QA,
+        self::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
         self::STATUS_COMPLETED,
         self::STATUS_FAILED,
         self::STATUS_ESCALATED,
@@ -111,6 +114,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
         self::STATUS_QA,
+        self::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
         self::STATUS_DECISION_ONLY,
     ];
 

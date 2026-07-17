@@ -19,6 +19,7 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
+use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\App\WikiGraphController;
@@ -321,6 +322,8 @@ Route::prefix('app')
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
             Route::patch('/{slug}/reject', [WikiController::class, 'reject'])->name('reject');
+            Route::patch('/{slug}/document-owner-approvals/{approval}/approve', [WikiDocumentOwnerApprovalController::class, 'approve'])->name('document-owner-approvals.approve');
+            Route::patch('/{slug}/document-owner-approvals/{approval}/reject', [WikiDocumentOwnerApprovalController::class, 'reject'])->name('document-owner-approvals.reject');
             Route::patch('/{slug}/claims/{claim}/approve', [WikiClaimController::class, 'approve'])->name('claims.approve');
             Route::patch('/{slug}/claims/{claim}/unapprove', [WikiClaimController::class, 'unapprove'])->name('claims.unapprove');
         });

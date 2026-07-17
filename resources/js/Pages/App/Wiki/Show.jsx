@@ -194,6 +194,8 @@ export default function WikiShow({
     current_version,
     claims,
     claim_summary: claimSummary = null,
+    document_owner_approvals: documentOwnerApprovals = [],
+    document_owner_approval_summary: documentOwnerApprovalSummary = null,
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
     outgoing_links: outgoingLinks = [],
@@ -214,6 +216,8 @@ export default function WikiShow({
     const [verificationOpen, setVerificationOpen] = useState(false);
     const [claimProcessing, setClaimProcessing] = useState(null);
     const [approvalComments, setApprovalComments] = useState({});
+    const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
+    const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const [expandedLintGroups, setExpandedLintGroups] = useState({});
 
     const sendAction = (action) => {
@@ -241,6 +245,26 @@ export default function WikiShow({
             `/app/wiki/${page.slug}/claims/${claim.id}/unapprove`,
             {},
             { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
+    const approveDocumentOwnerApproval = (approval) => {
+        if (documentOwnerApprovalProcessing) return;
+        setDocumentOwnerApprovalProcessing(approval.id);
+        router.patch(
+            `/app/wiki/${page.slug}/document-owner-approvals/${approval.id}/approve`,
+            { comment: documentOwnerApprovalComments[approval.id] || undefined },
+            { onFinish: () => setDocumentOwnerApprovalProcessing(null) },
+        );
+    };
+
+    const rejectDocumentOwnerApproval = (approval) => {
+        if (documentOwnerApprovalProcessing) return;
+        setDocumentOwnerApprovalProcessing(approval.id);
+        router.patch(
+            `/app/wiki/${page.slug}/document-owner-approvals/${approval.id}/reject`,
+            { comment: documentOwnerApprovalComments[approval.id] || undefined },
+            { onFinish: () => setDocumentOwnerApprovalProcessing(null) },
         );
     };
 
@@ -295,6 +319,12 @@ export default function WikiShow({
         pending: tw.claim_status_pending ?? 'Venter',
         approved: tw.claim_status_approved ?? 'Godkjent',
         rejected: tw.claim_status_rejected ?? 'Avvist',
+    }[s] ?? s);
+
+    const documentOwnerApprovalStatusLabel = (s) => ({
+        pending: 'Venter på Dokumenteier',
+        approved: 'Dokumenteier godkjent',
+        rejected: 'Dokumenteier avvist',
     }[s] ?? s);
 
     const isDraft = page.status === 'draft';
@@ -460,6 +490,130 @@ export default function WikiShow({
                         </p>
                     )}
                 </section>
+
+                {current_version && documentOwnerApprovals.length > 0 && (
+                    <section className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h2 className="text-base font-semibold text-slate-700">
+                                Dokumenteiergodkjenning
+                            </h2>
+                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${documentOwnerApprovalSummary?.ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {documentOwnerApprovalSummary?.ready ? 'Klar' : 'Avventer'}
+                            </span>
+                            {documentOwnerApprovalSummary?.missing_owner > 0 && (
+                                <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+                                    {documentOwnerApprovalSummary.missing_owner} uten eier
+                                </span>
+                            )}
+                            {documentOwnerApprovalSummary?.pending > 0 && (
+                                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                    {documentOwnerApprovalSummary.pending} venter
+                                </span>
+                            )}
+                            {documentOwnerApprovalSummary?.approved > 0 && (
+                                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                                    {documentOwnerApprovalSummary.approved} godkjent
+                                </span>
+                            )}
+                            {documentOwnerApprovalSummary?.rejected > 0 && (
+                                <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
+                                    {documentOwnerApprovalSummary.rejected} avvist
+                                </span>
+                            )}
+                        </div>
+
+                        {documentOwnerApprovalSummary?.message && (
+                            <p className="text-sm text-amber-700">
+                                {documentOwnerApprovalSummary.message}
+                            </p>
+                        )}
+
+                        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                            {documentOwnerApprovals.map((approval) => (
+                                <article key={approval.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div className="space-y-2">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Badge
+                                                    label={documentOwnerApprovalStatusLabel(approval.approval_status)}
+                                                    cls={
+                                                        approval.approval_status === 'approved'
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : approval.approval_status === 'rejected'
+                                                                ? 'bg-rose-100 text-rose-700'
+                                                                : 'bg-amber-100 text-amber-700'
+                                                    }
+                                                />
+                                                {approval.is_override && (
+                                                    <span className="rounded-full bg-fuchsia-100 px-2.5 py-0.5 text-xs font-semibold text-fuchsia-700">
+                                                        System Owner-override
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <p className="text-sm font-semibold text-slate-800">
+                                                {approval.document_owner_name ?? 'Kildedokument mangler Dokumenteier'}
+                                                {approval.document_owner_email ? <span className="font-normal text-slate-500"> · {approval.document_owner_email}</span> : null}
+                                            </p>
+
+                                            <div className="space-y-1 text-xs text-slate-500">
+                                                {approval.source_documents?.length > 0 && (
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {approval.source_documents.map((doc) => (
+                                                            <span key={doc.id} className="rounded-full bg-white px-2.5 py-0.5 font-medium text-slate-600 ring-1 ring-slate-200">
+                                                                {doc.original_filename}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {approval.approval_comment && (
+                                                    <p>{approval.approval_comment}</p>
+                                                )}
+                                                {approval.decided_by_name && approval.decided_at && (
+                                                    <p>
+                                                        Beslutning av {approval.decided_by_name} {approval.is_override ? 'som System Owner' : ''}
+                                                    </p>
+                                                )}
+                                                {approval.override_reason && (
+                                                    <p>Overstyringsgrunn: {approval.override_reason}</p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {approval.can_decide && approval.approval_status === 'pending' && (
+                                            <div className="flex flex-wrap gap-2">
+                                                <input
+                                                    type="text"
+                                                    maxLength={2000}
+                                                    placeholder="Valgfri kommentar"
+                                                    value={documentOwnerApprovalComments[approval.id] ?? ''}
+                                                    onChange={(e) => setDocumentOwnerApprovalComments((prev) => ({ ...prev, [approval.id]: e.target.value }))}
+                                                    className="min-w-56 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={documentOwnerApprovalProcessing === approval.id}
+                                                    onClick={() => approveDocumentOwnerApproval(approval)}
+                                                    className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                                >
+                                                    {documentOwnerApprovalProcessing === approval.id ? 'Behandler...' : 'Godkjenn'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={documentOwnerApprovalProcessing === approval.id}
+                                                    onClick={() => rejectDocumentOwnerApproval(approval)}
+                                                    className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                                                >
+                                                    Avvis
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    </section>
+                )}
 
                 {/* Backlinks — pages that link to this one via a canonical inline wikilink */}
                 <section className="space-y-3">
