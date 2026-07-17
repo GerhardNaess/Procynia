@@ -141,9 +141,19 @@ class WikiSourceController extends Controller
             ? $this->resolveOwnerUserIdForCustomer($customerId, (int) $validated['owner_user_id'])
             : null;
 
-        $document->forceFill([
-            'owner_user_id' => $ownerUserId,
-        ])->save();
+        DB::transaction(function () use ($customerId, $document, $ownerUserId): void {
+            $lockedDocument = EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->where('id', $document->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedDocument->forceFill([
+                'owner_user_id' => $ownerUserId,
+            ])->save();
+
+            $this->documentFlowService->syncDocumentOwnerApprovals($lockedDocument->fresh());
+        });
 
         Log::info('[PROCYNIA][WIKI_SOURCE] Updated wiki document owner.', [
             'document_id' => $document->id,

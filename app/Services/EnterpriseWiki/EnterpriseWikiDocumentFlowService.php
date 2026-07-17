@@ -114,6 +114,36 @@ class EnterpriseWikiDocumentFlowService
     }
 
     /**
+     * Re-sync document-owner approvals after a source document owner changes.
+     *
+     * The service only touches current active page versions that actually reference the
+     * changed document through existing provenance, then re-evaluates the linked runs.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\EnterpriseWikiPageVersion>
+     */
+    public function syncDocumentOwnerApprovals(EnterpriseWikiDocument $document)
+    {
+        $versions = $this->documentOwnerApprovalService->syncForDocument($document);
+
+        $runIds = EnterpriseWikiIngestRunPage::query()
+            ->whereIn('generated_page_version_id', $versions->pluck('id'))
+            ->pluck('enterprise_wiki_ingest_run_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        foreach ($runIds as $runId) {
+            $run = EnterpriseWikiIngestRun::query()->find($runId);
+
+            if ($run instanceof EnterpriseWikiIngestRun) {
+                $this->reconcileRunDocumentOwnerApprovalState($run);
+            }
+        }
+
+        return $versions;
+    }
+
+    /**
      * Run the document flow for a queued ingest run up to and including dispatching applied
      * page generation. Duplicate dispatches are ignored by the atomic claim step at the top.
      *
@@ -595,17 +625,21 @@ class EnterpriseWikiDocumentFlowService
         };
     }
 
-    private function completeRunIfOwnerApproved(EnterpriseWikiIngestRun $run): void
+    /**
+     * Re-evaluate the owner-approval gate for a run after document ownership changes.
+     */
+    public function reconcileRunDocumentOwnerApprovalState(EnterpriseWikiIngestRun $run): void
     {
         $gate = $this->documentOwnerApprovalService->evaluateRunCompletionGate($run);
 
         if (! $gate['ready']) {
             $run->update([
                 'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+                'finished_at' => null,
                 'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
             ]);
 
-            Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting document owner approval.', [
+            Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting document owner approval after owner sync.', [
                 'run_id' => $run->id,
                 'pending' => count($gate['pending'] ?? []),
                 'rejected' => count($gate['rejected'] ?? []),
@@ -616,6 +650,11 @@ class EnterpriseWikiDocumentFlowService
         }
 
         $this->completeRun($run);
+    }
+
+    private function completeRunIfOwnerApproved(EnterpriseWikiIngestRun $run): void
+    {
+        $this->reconcileRunDocumentOwnerApprovalState($run);
     }
 
     private function markVerificationStage(EnterpriseWikiIngestRun $run): void

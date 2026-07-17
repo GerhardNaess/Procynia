@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -1665,6 +1666,210 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 8E-19: document owner summary in index()
+    // =========================================================================
+
+    public function test_index_pages_tab_shows_single_owner_pending_and_approved_summaries(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        $pendingPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Dokumenteier venter');
+        $pendingVersion = $this->createVersion($pendingPage, isCurrentTrue: true);
+        $pendingDoc = $this->createDocument($customer);
+        $pendingDoc->forceFill(['owner_user_id' => $owner->id])->save();
+        $pendingClaim = $this->createClaim($pendingPage, $pendingVersion, 'Kilde for ventende side');
+        $this->createDocumentSourceReference($pendingClaim, $pendingDoc);
+        $this->createDocumentOwnerApproval($customer, $pendingPage, $pendingVersion, $owner, [$pendingDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+
+        $approvedPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Dokumenteier godkjent');
+        $approvedVersion = $this->createVersion($approvedPage, isCurrentTrue: true);
+        $approvedDoc = $this->createDocument($customer);
+        $approvedDoc->forceFill(['owner_user_id' => $owner->id])->save();
+        $approvedClaim = $this->createClaim($approvedPage, $approvedVersion, 'Kilde for godkjent side');
+        $this->createDocumentSourceReference($approvedClaim, $approvedDoc);
+        $this->createDocumentOwnerApproval($customer, $approvedPage, $approvedVersion, $owner, [$approvedDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($pendingPage, $approvedPage, $owner): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $pending = $pages->firstWhere('id', $pendingPage->id);
+            $approved = $pages->firstWhere('id', $approvedPage->id);
+
+            return $pending !== null
+                && $approved !== null
+                && data_get($pending, 'document_owner_summary.state') === 'pending'
+                && data_get($pending, 'document_owner_summary.owner_count') === 1
+                && data_get($pending, 'document_owner_summary.label') === $owner->name.' · '.__('procynia.wiki.document_owner_pending_label')
+                && data_get($approved, 'document_owner_summary.state') === 'approved'
+                && data_get($approved, 'document_owner_summary.owner_count') === 1
+                && data_get($approved, 'document_owner_summary.label') === $owner->name.' · '.__('procynia.wiki.document_owner_approved_label');
+        });
+    }
+
+    public function test_index_pages_tab_collapses_multiple_documents_from_same_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'To dokumenter samme eier');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $docA = $this->createDocument($customer);
+        $docB = $this->createDocument($customer);
+        $docA->forceFill(['owner_user_id' => $owner->id])->save();
+        $docB->forceFill(['owner_user_id' => $owner->id])->save();
+        $claimA = $this->createClaim($page, $version, 'Kilde A');
+        $this->createDocumentSourceReference($claimA, $docA);
+        $claimB = $this->createClaim($page, $version, 'Kilde B');
+        $this->createDocumentSourceReference($claimB, $docB);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$docA->id, $docB->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page, $owner): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $row = $pages->firstWhere('id', $page->id);
+
+            return $row !== null
+                && data_get($row, 'document_owner_summary.owner_count') === 1
+                && data_get($row, 'document_owner_summary.approved_count') === 1
+                && data_get($row, 'document_owner_summary.label') === $owner->name.' · '.__('procynia.wiki.document_owner_approved_label');
+        });
+    }
+
+    public function test_index_pages_tab_prioritizes_rejected_over_pending(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $pendingOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $rejectedOwner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Avvist foran venting');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $pendingDoc = $this->createDocument($customer);
+        $rejectedDoc = $this->createDocument($customer);
+        $pendingDoc->forceFill(['owner_user_id' => $pendingOwner->id])->save();
+        $rejectedDoc->forceFill(['owner_user_id' => $rejectedOwner->id])->save();
+        $pendingClaim = $this->createClaim($page, $version, 'Ventende kilde');
+        $this->createDocumentSourceReference($pendingClaim, $pendingDoc);
+        $rejectedClaim = $this->createClaim($page, $version, 'Avvist kilde', 1);
+        $this->createDocumentSourceReference($rejectedClaim, $rejectedDoc);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $pendingOwner, [$pendingDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $rejectedOwner, [$rejectedDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $row = $pages->firstWhere('title', 'Avvist foran venting');
+
+            return $row !== null
+                && data_get($row, 'document_owner_summary.state') === 'rejected'
+                && data_get($row, 'document_owner_summary.label') === '2 eiere · Avvist av 1';
+        });
+    }
+
+    public function test_index_pages_tab_marks_missing_owner_and_override_explicitly(): void
+    {
+        $customer = $this->createCustomer();
+        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Manglende eier');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $doc = $this->createDocument($customer);
+        $claim = $this->createClaim($page, $version, 'Manglende eier-kilde');
+        $this->createDocumentSourceReference($claim, $doc);
+        $approval = $this->createDocumentOwnerApproval($customer, $page, $version, null, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, true);
+        $approval->forceFill([
+            'decided_by_user_id' => $systemOwner->id,
+            'decided_at' => now(),
+        ])->save();
+
+        $response = $this->actingAs($systemOwner)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $row = $pages->firstWhere('title', 'Manglende eier');
+
+            return $row !== null
+                && data_get($row, 'document_owner_summary.state') === 'missing_owner'
+                && str_contains((string) data_get($row, 'document_owner_summary.label'), 'Mangler Dokumenteier')
+                && str_contains((string) data_get($row, 'document_owner_summary.label'), 'System Owner-override');
+        });
+    }
+
+    public function test_index_pages_tab_shows_sync_pending_when_approvals_are_not_materialized(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Avventer synk');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $doc = $this->createDocument($customer);
+        $doc->forceFill(['owner_user_id' => $user->id])->save();
+        $claim = $this->createClaim($page, $version, 'Kilde for ventende side');
+        $this->createDocumentSourceReference($claim, $doc);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $row = $pages->firstWhere('title', 'Avventer synk');
+
+            return $row !== null
+                && data_get($row, 'document_owner_summary.state') === 'awaiting_sync'
+                && data_get($row, 'document_owner_summary.label') === __('procynia.wiki.document_owner_sync_pending');
+        });
+    }
+
+    public function test_index_pages_tab_ignores_unused_documents_and_other_customer_pages(): void
+    {
+        $customer = $this->createCustomer('Egen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        $ownPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Egen side');
+        $ownVersion = $this->createVersion($ownPage, isCurrentTrue: true);
+        $ownDoc = $this->createDocument($customer);
+        $ownDoc->forceFill(['owner_user_id' => $owner->id])->save();
+        $ownClaim = $this->createClaim($ownPage, $ownVersion, 'Egen kilde');
+        $this->createDocumentSourceReference($ownClaim, $ownDoc);
+        $this->createDocumentOwnerApproval($customer, $ownPage, $ownVersion, $owner, [$ownDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+
+        $unusedDoc = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_APPROVED, 'Fremmed side');
+        $foreignVersion = $this->createVersion($foreignPage, isCurrentTrue: true);
+        $foreignDoc = $this->createDocument($otherCustomer);
+        $foreignOwner = $this->createUser($otherCustomer, User::BID_ROLE_BID_MANAGER);
+        $foreignDoc->forceFill(['owner_user_id' => $foreignOwner->id])->save();
+        $foreignClaim = $this->createClaim($foreignPage, $foreignVersion, 'Fremmed kilde');
+        $this->createDocumentSourceReference($foreignClaim, $foreignDoc);
+        $this->createDocumentOwnerApproval($otherCustomer, $foreignPage, $foreignVersion, $foreignOwner, [$foreignDoc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownPage, $unusedDoc, $foreignPage, $owner): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+            $own = $pages->firstWhere('id', $ownPage->id);
+            $foreign = $pages->firstWhere('id', $foreignPage->id);
+
+            return $own !== null
+                && data_get($own, 'document_owner_summary.label') === $owner->name.' · '.__('procynia.wiki.document_owner_pending_label')
+                && ! $pages->contains(fn (array $page) => $page['id'] === $unusedDoc->id)
+                && $foreign === null;
+        });
+    }
+
+    // =========================================================================
     // Phase 8F-3: safe deletion of EnterpriseWikiDocument — delete-preview
     // =========================================================================
 
@@ -2072,6 +2277,49 @@ class WikiControllerTest extends TestCase
             'source_hash' => str_pad('h', 64, '0'),
             'excerpt' => $excerpt,
             'page_reference' => $pageReference,
+        ]);
+    }
+
+    private function createDocumentSourceReference(EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document, ?string $excerpt = null): EnterpriseWikiSourceReference
+    {
+        return EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'source_hash' => hash('sha256', 'enterprise_wiki_document:'.$document->id),
+            'excerpt' => $excerpt,
+            'page_reference' => null,
+        ]);
+    }
+
+    private function createDocumentOwnerApproval(
+        Customer $customer,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        ?User $owner,
+        array $sourceDocumentIds,
+        string $status = EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
+        bool $isOverride = false,
+    ): EnterpriseWikiPageVersionDocumentOwnerApproval {
+        sort($sourceDocumentIds);
+
+        return EnterpriseWikiPageVersionDocumentOwnerApproval::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_ingest_run_id' => null,
+            'document_owner_user_id' => $owner?->id,
+            'source_document_ids' => $sourceDocumentIds,
+            'source_documents_hash' => hash('sha256', json_encode($sourceDocumentIds, JSON_THROW_ON_ERROR)),
+            'approval_status' => $status,
+            'approval_comment' => null,
+            'decided_at' => $status === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING ? null : now(),
+            'decided_by_user_id' => $status === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING ? null : $owner?->id,
+            'is_override' => $isOverride,
+            'override_reason' => $isOverride ? 'Override for test coverage.' : null,
+            'overridden_by_user_id' => $isOverride ? $owner?->id : null,
+            'overridden_at' => $isOverride ? now() : null,
         ]);
     }
 

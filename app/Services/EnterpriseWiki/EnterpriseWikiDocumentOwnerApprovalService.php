@@ -29,7 +29,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
     public function syncForPageVersion(EnterpriseWikiPageVersion $version, ?EnterpriseWikiIngestRun $run = null): Collection
     {
         $run ??= $this->resolveRunForPageVersion($version);
-        $page = $version->page()->first();
+        $page = $version->relationLoaded('page') ? $version->page : $version->page()->first();
 
         if ($page === null) {
             return collect();
@@ -48,6 +48,63 @@ class EnterpriseWikiDocumentOwnerApprovalService
         }
 
         return $approvals;
+    }
+
+    /**
+     * Preview the current required owner groups for one page version without writing rows.
+     *
+     * @return Collection<int, array{
+     *     document_owner_user_id: int|null,
+     *     source_document_ids: list<int>,
+     *     source_document_labels: list<string>,
+     *     source_documents_hash: string
+     * }>
+     */
+    public function previewRequirementsForPageVersion(EnterpriseWikiPageVersion $version): Collection
+    {
+        $page = $version->relationLoaded('page') ? $version->page : $version->page()->first();
+
+        if ($page === null) {
+            return collect();
+        }
+
+        $claims = $version->relationLoaded('claims')
+            ? $version->claims
+            : EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->with(['sourceReferences' => fn ($query) => $query
+                    ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
+                ->get();
+
+        return $this->buildRequirementGroupsFromClaims($claims, $page);
+    }
+
+    /**
+     * Sync every current active page version that actually uses the given document.
+     *
+     * @return Collection<int, EnterpriseWikiPageVersion>
+     */
+    public function syncForDocument(EnterpriseWikiDocument $document): Collection
+    {
+        $versions = EnterpriseWikiPageVersion::query()
+            ->where('is_current', true)
+            ->whereHas('page', fn ($query) => $query
+                ->where('customer_id', $document->customer_id)
+                ->whereNotIn('status', [
+                    EnterpriseWikiPage::STATUS_ARCHIVED,
+                    EnterpriseWikiPage::STATUS_SUPERSEDED,
+                ]))
+            ->whereHas('claims.sourceReferences', fn ($query) => $query
+                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('source_id', $document->id))
+            ->with(['page'])
+            ->get();
+
+        foreach ($versions as $version) {
+            $this->syncForPageVersion($version);
+        }
+
+        return $versions;
     }
 
     /**
@@ -184,6 +241,30 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
             ->get();
 
+        return $this->buildRequirementGroupsFromClaims($claims, $page)
+            ->map(function (array $group) use ($version, $page): EnterpriseWikiPageVersionDocumentOwnerApproval {
+                $sourceDocumentIds = collect($group['source_document_ids'] ?? [])
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->all();
+                $hash = hash('sha256', json_encode($sourceDocumentIds, JSON_THROW_ON_ERROR));
+
+                return $this->firstOrCreateApproval($version, $page, $group['document_owner_user_id'] ?? null, $sourceDocumentIds, $hash);
+            })
+            ->values();
+    }
+
+    /**
+     * @return Collection<int, array{
+     *     document_owner_user_id: int|null,
+     *     source_document_ids: list<int>,
+     *     source_document_labels: list<string>
+     * }>
+     */
+    private function buildRequirementGroupsFromClaims(Collection $claims, EnterpriseWikiPage $page): Collection
+    {
         $documentIds = $claims->flatMap(function (EnterpriseWikiClaim $claim): Collection {
             return $claim->sourceReferences
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
@@ -221,17 +302,28 @@ class EnterpriseWikiDocumentOwnerApprovalService
         }
 
         return collect($groups)
-            ->map(function (array $group) use ($version, $page): EnterpriseWikiPageVersionDocumentOwnerApproval {
-                $sourceDocumentIds = collect($group['source_document_ids'] ?? [])
+            ->map(fn (array $group): array => [
+                'document_owner_user_id' => $group['document_owner_user_id'] ?? null,
+                'source_document_ids' => collect($group['source_document_ids'] ?? [])
                     ->map(static fn (mixed $value): int => (int) $value)
                     ->unique()
                     ->sort()
                     ->values()
-                    ->all();
-                $hash = hash('sha256', json_encode($sourceDocumentIds, JSON_THROW_ON_ERROR));
-
-                return $this->firstOrCreateApproval($version, $page, $group['document_owner_user_id'] ?? null, $sourceDocumentIds, $hash);
-            })
+                    ->all(),
+                'source_document_labels' => collect($group['source_document_labels'] ?? [])
+                    ->map(static fn (mixed $value): string => (string) $value)
+                    ->values()
+                    ->all(),
+                'source_documents_hash' => hash('sha256', json_encode(
+                    collect($group['source_document_ids'] ?? [])
+                        ->map(static fn (mixed $value): int => (int) $value)
+                        ->unique()
+                        ->sort()
+                        ->values()
+                        ->all(),
+                    JSON_THROW_ON_ERROR,
+                )),
+            ])
             ->values();
     }
 

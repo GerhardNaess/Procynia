@@ -5,10 +5,13 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -22,6 +25,7 @@ use App\Services\DocumentTextExtractor;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -287,6 +291,119 @@ class WikiSourceControllerTest extends TestCase
             ->assertForbidden();
 
         $this->assertNull($document->fresh()->owner_user_id);
+    }
+
+    public function test_changing_document_owner_syncs_current_page_versions_and_run_state(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $firstOwner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $secondOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $page = $this->createPageWithCurrentVersionAndClaim($customer, $document, 'owner-sync-page');
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+
+        $this->linkRunToVersion($run, $page->currentVersion);
+
+        $this->actingAs($systemOwner)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $firstOwner->id,
+            ])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $document->refresh();
+        $run->refresh();
+
+        $this->assertSame($firstOwner->id, $document->owner_user_id);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertNull($run->finished_at);
+        $this->assertStringContainsString('Dokumenteier', (string) $run->error_message);
+
+        $approvals = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $page->currentVersion->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(1, $approvals);
+        $this->assertSame($firstOwner->id, $approvals->first()?->document_owner_user_id);
+        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING, $approvals->first()?->approval_status);
+
+        $this->actingAs($systemOwner)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $secondOwner->id,
+            ])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $document->refresh();
+        $run->refresh();
+
+        $approvals = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $page->currentVersion->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertSame($secondOwner->id, $document->owner_user_id);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertCount(2, $approvals);
+        $this->assertSame(
+            [$firstOwner->id, $secondOwner->id],
+            $approvals->pluck('document_owner_user_id')->map(fn ($value) => (int) $value)->all(),
+        );
+
+        $this->actingAs($systemOwner)
+            ->patch("/app/wiki/sources/{$document->id}/owner", [
+                'owner_user_id' => $secondOwner->id,
+            ])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $this->assertSame(
+            2,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $page->currentVersion->id)
+                ->count(),
+        );
+    }
+
+    public function test_changing_document_owner_syncs_only_current_versions_that_use_the_document(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $newOwner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $usedDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $unusedDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $pageA = $this->createPageWithCurrentVersionAndClaim($customer, $usedDocument, 'used-page');
+        $pageB = $this->createPageWithCurrentVersionAndClaim($customer, $unusedDocument, 'unused-page');
+        $runA = $this->createIngestRun($customer, $usedDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $pageA->id);
+        $runB = $this->createIngestRun($customer, $unusedDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $pageB->id);
+
+        $this->linkRunToVersion($runA, $pageA->currentVersion);
+        $this->linkRunToVersion($runB, $pageB->currentVersion);
+
+        $this->actingAs($systemOwner)
+            ->patch("/app/wiki/sources/{$usedDocument->id}/owner", [
+                'owner_user_id' => $newOwner->id,
+            ])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
+
+        $this->assertSame($newOwner->id, $usedDocument->fresh()->owner_user_id);
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $pageA->currentVersion->id)
+                ->count(),
+        );
+        $this->assertSame(
+            0,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $pageB->currentVersion->id)
+                ->count(),
+        );
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $runA->fresh()->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $runB->fresh()->status);
     }
 
     public function test_file_hash_sha256_is_set_on_document(): void
@@ -919,6 +1036,61 @@ class WikiSourceControllerTest extends TestCase
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => hash('sha256', 'test'),
+        ]);
+    }
+
+    private function createPageWithCurrentVersionAndClaim(Customer $customer, EnterpriseWikiDocument $document, string $slug): EnterpriseWikiPage
+    {
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => $slug.'-'.Str::lower(Str::random(8)),
+            'title' => Str::headline($slug),
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => hash('sha256', $slug.'-'.Str::random(8)),
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.e($page->title),
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Kildetekst for '.$document->original_filename,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'excerpt' => 'Utdrag for '.$document->original_filename,
+        ]);
+
+        $page->setRelation('currentVersion', $version);
+
+        return $page;
+    }
+
+    private function linkRunToVersion(EnterpriseWikiIngestRun $run, EnterpriseWikiPageVersion $version): void
+    {
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $version->enterprise_wiki_page_id,
+            'generated_page_version_id' => $version->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 

@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiSourceReference;
@@ -20,6 +21,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -97,7 +99,11 @@ class WikiController extends Controller
         $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('status', $this->visibleStatuses($user))
-            ->withCount('claims');
+            ->withCount('claims')
+            ->with([
+                'currentVersion.claims.sourceReferences',
+                'currentVersion.documentOwnerApprovals.documentOwner',
+            ]);
 
         if ($search !== '') {
             $searchLower = strtolower($search);
@@ -147,6 +153,7 @@ class WikiController extends Controller
             'slug' => $page->slug,
             'page_type' => $page->page_type,
             'status' => $page->status,
+            'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
             'claims_count' => $page->claims_count,
             'updated_at' => $page->updated_at,
         ]);
@@ -166,6 +173,175 @@ class WikiController extends Controller
                 'lint' => $lint,
                 'sort' => $sort,
             ],
+        ];
+    }
+
+    /**
+     * Summarize the materialized document-owner approvals for one page without mutating state.
+     *
+     * The list view must stay read-only and must not try to re-sync approval rows on GET.
+     *
+     * @return array{
+     *     state: string,
+     *     label: string,
+     *     owner_count: int,
+     *     approved_count: int,
+     *     pending_count: int,
+     *     rejected_count: int,
+     *     missing_owner_count: int,
+     *     has_override: bool
+     * }
+     */
+    private function documentOwnerSummaryForPage(EnterpriseWikiPage $page): array
+    {
+        $currentVersion = $page->currentVersion;
+
+        if (! $currentVersion instanceof EnterpriseWikiPageVersion) {
+            return $this->documentOwnerSummaryAwaitingSync();
+        }
+
+        $requirements = $this->documentOwnerApprovalService->previewRequirementsForPageVersion($currentVersion);
+
+        if ($requirements->isEmpty()) {
+            return $this->documentOwnerSummaryAwaitingSync();
+        }
+
+        $approvals = $currentVersion->relationLoaded('documentOwnerApprovals')
+            ? $currentVersion->documentOwnerApprovals->values()
+            : $currentVersion->documentOwnerApprovals()->with('documentOwner')->get()->values();
+
+        $matchedApprovals = $requirements->map(function (array $requirement) use ($approvals): array {
+            $matchingApproval = $approvals->first(function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval) use ($requirement): bool {
+                $approvalOwnerId = $approval->document_owner_user_id !== null ? (int) $approval->document_owner_user_id : null;
+                $requirementOwnerId = $requirement['document_owner_user_id'] !== null ? (int) $requirement['document_owner_user_id'] : null;
+
+                return $approvalOwnerId === $requirementOwnerId
+                    && (string) $approval->source_documents_hash === (string) $requirement['source_documents_hash'];
+            });
+
+            return [
+                'requirement' => $requirement,
+                'approval' => $matchingApproval,
+            ];
+        });
+
+        $ownerCount = $matchedApprovals->count();
+        $missingOwnerCount = $matchedApprovals->filter(fn (array $pair): bool => $pair['requirement']['document_owner_user_id'] === null)->count();
+        $awaitingSyncCount = $matchedApprovals->filter(fn (array $pair): bool => $pair['requirement']['document_owner_user_id'] !== null && ! $pair['approval'] instanceof EnterpriseWikiPageVersionDocumentOwnerApproval)->count();
+        $approvedCount = $matchedApprovals->filter(fn (array $pair): bool => $pair['approval'] instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $pair['approval']->approval_status === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED)->count();
+        $pendingCount = $matchedApprovals->filter(fn (array $pair): bool => $pair['approval'] instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $pair['approval']->approval_status === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)->count();
+        $rejectedCount = $matchedApprovals->filter(fn (array $pair): bool => $pair['approval'] instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $pair['approval']->approval_status === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED)->count();
+        $hasOverride = $matchedApprovals->contains(fn (array $pair): bool => $pair['approval'] instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && (bool) $pair['approval']->is_override);
+        $singlePair = $ownerCount === 1 ? $matchedApprovals->first() : null;
+        $singleApproval = $singlePair['approval'] ?? null;
+        $overrideSuffix = $hasOverride ? ' · '.__('procynia.wiki.document_owner_override') : '';
+
+        if ($missingOwnerCount > 0) {
+            return [
+                'state' => 'missing_owner',
+                'label' => __('procynia.wiki.document_owner_missing').$overrideSuffix,
+                'owner_count' => $ownerCount,
+                'approved_count' => $approvedCount,
+                'pending_count' => $pendingCount,
+                'rejected_count' => $rejectedCount,
+                'missing_owner_count' => $missingOwnerCount,
+                'has_override' => $hasOverride,
+            ];
+        }
+
+        if ($awaitingSyncCount > 0) {
+            return [
+                'state' => 'awaiting_sync',
+                'label' => __('procynia.wiki.document_owner_sync_pending').$overrideSuffix,
+                'owner_count' => $ownerCount,
+                'approved_count' => $approvedCount,
+                'pending_count' => $pendingCount,
+                'rejected_count' => $rejectedCount,
+                'missing_owner_count' => $missingOwnerCount,
+                'has_override' => $hasOverride,
+            ];
+        }
+
+        $ownerCountLabel = $ownerCount > 1
+            ? trans_choice('procynia.wiki.document_owner_owner_count', $ownerCount, ['count' => $ownerCount]).' · '
+            : '';
+
+        if ($rejectedCount > 0) {
+            $label = $ownerCount === 1 && $singleApproval instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $singleApproval->documentOwner?->name
+                ? $singleApproval->documentOwner->name.' · '.__('procynia.wiki.document_owner_rejected_label')
+                : $ownerCountLabel.__('procynia.wiki.document_owner_rejected_count', ['count' => $rejectedCount]);
+
+            return [
+                'state' => 'rejected',
+                'label' => $label.$overrideSuffix,
+                'owner_count' => $ownerCount,
+                'approved_count' => $approvedCount,
+                'pending_count' => $pendingCount,
+                'rejected_count' => $rejectedCount,
+                'missing_owner_count' => $missingOwnerCount,
+                'has_override' => $hasOverride,
+            ];
+        }
+
+        if ($pendingCount > 0) {
+            $label = $ownerCount === 1 && $singleApproval instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $singleApproval->documentOwner?->name
+                ? $singleApproval->documentOwner->name.' · '.__('procynia.wiki.document_owner_pending_label')
+                : $ownerCountLabel.__('procynia.wiki.document_owner_approved_of_total', [
+                    'approved' => $approvedCount,
+                    'total' => $ownerCount,
+                ]);
+
+            return [
+                'state' => $approvedCount > 0 ? 'mixed' : 'pending',
+                'label' => $label.$overrideSuffix,
+                'owner_count' => $ownerCount,
+                'approved_count' => $approvedCount,
+                'pending_count' => $pendingCount,
+                'rejected_count' => $rejectedCount,
+                'missing_owner_count' => $missingOwnerCount,
+                'has_override' => $hasOverride,
+            ];
+        }
+
+        $label = $ownerCount === 1 && $singleApproval instanceof EnterpriseWikiPageVersionDocumentOwnerApproval && $singleApproval->documentOwner?->name
+            ? $singleApproval->documentOwner->name.' · '.__('procynia.wiki.document_owner_approved_label')
+            : $ownerCountLabel.__('procynia.wiki.document_owner_approved_label');
+
+        return [
+            'state' => 'approved',
+            'label' => $label.$overrideSuffix,
+            'owner_count' => $ownerCount,
+            'approved_count' => $approvedCount,
+            'pending_count' => $pendingCount,
+            'rejected_count' => $rejectedCount,
+            'missing_owner_count' => $missingOwnerCount,
+            'has_override' => $hasOverride,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     state: string,
+     *     label: string,
+     *     owner_count: int,
+     *     approved_count: int,
+     *     pending_count: int,
+     *     rejected_count: int,
+     *     missing_owner_count: int,
+     *     has_override: bool
+     * }
+     */
+    private function documentOwnerSummaryAwaitingSync(): array
+    {
+        return [
+            'state' => 'awaiting_sync',
+            'label' => __('procynia.wiki.document_owner_sync_pending'),
+            'owner_count' => 0,
+            'approved_count' => 0,
+            'pending_count' => 0,
+            'rejected_count' => 0,
+            'missing_owner_count' => 0,
+            'has_override' => false,
         ];
     }
 

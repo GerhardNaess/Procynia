@@ -44,6 +44,22 @@ function PageTypeBadge({ type, label }) {
     return <span className={`${BADGE} ${cls}`}>{label}</span>;
 }
 
+const DOCUMENT_OWNER_SUMMARY_STYLES = {
+    awaiting_sync: 'bg-slate-100 text-slate-600',
+    missing_owner: 'bg-rose-100 text-rose-700',
+    pending: 'bg-amber-100 text-amber-700',
+    mixed: 'bg-violet-100 text-violet-700',
+    approved: 'bg-emerald-100 text-emerald-700',
+    rejected: 'bg-rose-100 text-rose-700',
+};
+
+function DocumentOwnerSummaryBadge({ summary, fallbackLabel }) {
+    const label = summary?.label ?? fallbackLabel;
+    const cls = DOCUMENT_OWNER_SUMMARY_STYLES[summary?.state] ?? 'bg-slate-100 text-slate-600';
+
+    return <span className={`${BADGE} ${cls}`}>{label}</span>;
+}
+
 const SOURCE_STATUS_STYLES = {
     extracted: 'bg-emerald-100 text-emerald-700',
     pending: 'bg-amber-100 text-amber-700',
@@ -988,6 +1004,10 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                                         {page.page_type && (
                                             <PageTypeBadge type={page.page_type} label={pageTypeLabel(page.page_type)} />
                                         )}
+                                        <DocumentOwnerSummaryBadge
+                                            summary={page.document_owner_summary}
+                                            fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
+                                        />
                                         <span className="text-xs text-slate-400">
                                             {page.claims_count} {tw.claims ?? 'påstander'}
                                         </span>
@@ -1012,6 +1032,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                                         <th className="px-6 py-4">Tittel</th>
                                         <th className="px-6 py-4">Type</th>
                                         <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4">{tw.document_owner_column ?? 'Dokumenteier'}</th>
                                         <th className="px-6 py-4">{tw.claims ?? 'Påstander'}</th>
                                         <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
                                         <th className="px-6 py-4"></th>
@@ -1028,6 +1049,12 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                                             </td>
                                             <td className="px-6 py-4">
                                                 <StatusBadge status={page.status} label={statusLabel(page.status)} />
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <DocumentOwnerSummaryBadge
+                                                    summary={page.document_owner_summary}
+                                                    fallbackLabel={tw.document_owner_sync_pending ?? 'Avventer synkronisering'}
+                                                />
                                             </td>
                                             <td className="px-6 py-4 text-slate-500">{page.claims_count}</td>
                                             <td className="px-6 py-4 text-slate-500">{formatDate(page.updated_at, locale)}</td>
