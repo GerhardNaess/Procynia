@@ -68,15 +68,25 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
         // The AI content generator: article/summary link to concept+entity, concept/entity
         // link back to the article. All slugs are known in advance from the decision above.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturnUsing(function (string $pageTitle, string $pageType): string {
-                return match ($pageType) {
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array {
+                $markdown = match ($pageType) {
                     'article' => "# Artikkel\n\nProsjektets [[konsept-test|nøkkelkonsept]] eies av [[entitet-test|entiteten]].",
                     'summary' => "# Sammendrag\n\nKort om [[konsept-test]].",
                     'concept' => "# Konsept\n\nSe [[artikkel-test|hovedartikkelen]] for detaljer.",
                     'entity' => "# Entitet\n\nOmtalt i [[artikkel-test|hovedartikkelen]].",
                     default => '# Page',
                 };
+
+                return $this->structuredPageResult($markdown, $sourceElements);
             });
 
         // Claims/verification/lint/QA are mocked to isolate this test to the wikilink flow —
@@ -248,5 +258,31 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
             'extracted_text' => 'This is the extracted text from the source document.',
             'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResult(string $markdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'markdown' => $markdown,
+            'blocks' => [
+                [
+                    'markdown' => $markdown,
+                    'content_origin' => 'source_based',
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
     }
 }

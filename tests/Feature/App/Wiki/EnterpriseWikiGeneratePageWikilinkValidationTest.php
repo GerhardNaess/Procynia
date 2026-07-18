@@ -4,6 +4,7 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -349,9 +350,17 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
     private function mockAiResponse(string $markdown): void
     {
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
+            ->shouldReceive('generatePageFromSource')
             ->once()
-            ->andReturn($markdown);
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($markdown, $sourceElements));
     }
 
     private function createCustomer(string $name = 'Test AS'): Customer
@@ -427,5 +436,31 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         }
 
         return $run;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResult(string $markdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'markdown' => $markdown,
+            'blocks' => [
+                [
+                    'markdown' => $markdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
     }
 }

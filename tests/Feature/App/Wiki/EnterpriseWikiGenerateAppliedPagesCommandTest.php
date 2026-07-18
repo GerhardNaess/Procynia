@@ -29,8 +29,16 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
 
         // Bind a mock so no real OpenAI calls are made in any test.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn(self::FAKE_MARKDOWN)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN, $sourceElements))
             ->byDefault();
     }
 
@@ -134,6 +142,45 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
             ->first();
 
         $this->assertTrue((bool) $version->is_current);
+    }
+
+    public function test_command_stores_ai_declared_source_element_provenance_per_block(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
+        $capturedSourceElements = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedSourceElements): array {
+                $capturedSourceElements = $sourceElements;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN, $sourceElements);
+            });
+
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', '<>', $article->id)
+            ->delete();
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->firstOrFail();
+
+        $this->assertNotEmpty($capturedSourceElements);
+        $this->assertSame($capturedSourceElements[0]['source_element_key'], $version->content_blocks_json[0]['source_element_key']);
+        $this->assertSame($capturedSourceElements[0]['source_element_key'], $version->content_blocks_json[0]['source_elements'][0]['source_element_key']);
     }
 
     // =========================================================================
@@ -510,5 +557,31 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         }
 
         return [$run, $article, $summary, $concept, $entity];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResult(string $markdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'markdown' => $markdown,
+            'blocks' => [
+                [
+                    'markdown' => $markdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
     }
 }

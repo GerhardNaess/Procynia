@@ -254,15 +254,12 @@ class EnterpriseWikiClaimIntegrityRepairService
             return true;
         }
 
-        $text = mb_strtolower((string) $claim->claim_text);
+        $metadata = (array) ($claim->review_metadata ?? []);
 
-        foreach ([' bør ', ' anbefal', ' beste praksis', ' standard', 'rammeverk', 'kan vurdere', 'should ', 'recommended', 'best practice', 'standard'] as $marker) {
-            if (str_contains($text, $marker)) {
-                return true;
-            }
-        }
-
-        return false;
+        return in_array(($metadata['classification_basis'] ?? null), [
+            'ai_block_content_origin',
+            'approved_best_practice',
+        ], true);
     }
 
     private function containsNormalized(string $haystack, string $needle): bool

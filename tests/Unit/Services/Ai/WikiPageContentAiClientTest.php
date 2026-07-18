@@ -52,7 +52,9 @@ class WikiPageContentAiClientTest extends TestCase
 
                 return [
                     'status' => 'completed',
-                    'output_text' => json_encode(['page' => ['markdown' => '# Test Page']]),
+                    'output_text' => json_encode(['page' => ['blocks' => [
+                        $this->sourceBasedBlock('# Test Page'),
+                    ]]]),
                 ];
             });
 
@@ -115,6 +117,22 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('No other pages available to link to.', $userPrompt);
     }
 
+    public function test_source_elements_are_included_in_the_user_prompt(): void
+    {
+        $payload = $this->capturePayload(sourceElements: [
+            [
+                'source_element_key' => 'paragraph-123',
+                'source_element_type' => 'paragraph',
+                'reference_text' => 'Dokumentert kildeelement.',
+            ],
+        ]);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('SOURCE ELEMENTS (1 elements):', $userPrompt);
+        $this->assertStringContainsString('paragraph-123', $userPrompt);
+        $this->assertStringContainsString('Every source_based block must cite one or more source_element_key values', $userPrompt);
+    }
+
     public function test_adding_a_link_catalog_does_not_change_the_model_token_reasoning_or_store_contract(): void
     {
         $catalog = [['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];
@@ -138,14 +156,23 @@ class WikiPageContentAiClientTest extends TestCase
         }
     }
 
-    public function test_schema_requires_page_markdown(): void
+    public function test_schema_requires_page_blocks_with_provenance_fields(): void
     {
         $payload = $this->capturePayload();
 
         $schema = $payload['text']['format']['schema'];
 
         $this->assertSame(['page'], $schema['required']);
-        $this->assertSame(['markdown'], $schema['properties']['page']['required']);
+        $this->assertSame(['blocks'], $schema['properties']['page']['required']);
+        $blockSchema = $schema['properties']['page']['properties']['blocks']['items'];
+        $this->assertSame([
+            'markdown',
+            'content_origin',
+            'source_element_keys',
+            'source_element_types',
+            'best_practice_reason',
+            'link_intents',
+        ], $blockSchema['required']);
         $this->assertFalse($schema['properties']['page']['additionalProperties']);
         $this->assertFalse($schema['additionalProperties']);
     }
@@ -159,7 +186,9 @@ class WikiPageContentAiClientTest extends TestCase
         $expectedMarkdown = "# Test Page\n\nDette er generert innhold.";
         $client = $this->clientReturning([
             'page' => [
-                'markdown' => $expectedMarkdown,
+                'blocks' => [
+                    $this->sourceBasedBlock($expectedMarkdown),
+                ],
             ],
         ]);
 
@@ -183,9 +212,11 @@ class WikiPageContentAiClientTest extends TestCase
                         [
                             'type' => 'output_text',
                             'text' => json_encode([
-                                'page' => [
-                                    'markdown' => $expectedMarkdown,
-                                ],
+                        'page' => [
+                            'blocks' => [
+                                $this->sourceBasedBlock($expectedMarkdown),
+                            ],
+                        ],
                             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                         ],
                     ],
@@ -348,23 +379,23 @@ class WikiPageContentAiClientTest extends TestCase
         });
     }
 
-    public function test_generate_from_source_throws_on_missing_markdown_and_logs_safe_diagnostics(): void
+    public function test_generate_from_source_throws_on_missing_blocks_and_logs_safe_diagnostics(): void
     {
         Log::spy();
 
         $client = $this->clientWithRawResponse([
-            'id' => 'resp_missing_markdown',
+            'id' => 'resp_missing_blocks',
             'output_text' => json_encode(['page' => []]),
         ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/generated page content was empty/');
+        $this->expectExceptionMessageMatches('/generated page blocks were empty/');
 
         $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
 
         Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
             return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
-                && ($context['response_id'] ?? null) === 'resp_missing_markdown'
+                && ($context['response_id'] ?? null) === 'resp_missing_blocks'
                 && ($context['http_status'] ?? null) === 200
                 && ($context['response_status'] ?? null) === 'completed'
                 && ($context['output_text_length'] ?? null) > 0
@@ -385,6 +416,7 @@ class WikiPageContentAiClientTest extends TestCase
         string $languageCode = 'no',
         string $additionalContext = '',
         array $linkCatalog = [],
+        array $sourceElements = [],
     ): array {
         $capturedPayload = null;
 
@@ -399,19 +431,22 @@ class WikiPageContentAiClientTest extends TestCase
                     'status' => 'completed',
                     'output_text' => json_encode([
                         'page' => [
-                            'markdown' => "# {$pageTitle}\n\nGenerert innhold.",
+                            'blocks' => [
+                                $this->sourceBasedBlock("# {$pageTitle}\n\nGenerert innhold."),
+                            ],
                         ],
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
 
-        app(WikiPageContentAiClient::class)->generateFromSource(
-            $pageTitle,
-            $pageType,
-            $sourceText,
-            $languageCode,
-            $additionalContext,
-            $linkCatalog,
+        app(WikiPageContentAiClient::class)->generatePageFromSource(
+            pageTitle: $pageTitle,
+            pageType: $pageType,
+            sourceText: $sourceText,
+            languageCode: $languageCode,
+            additionalContext: $additionalContext,
+            linkCatalog: $linkCatalog,
+            sourceElements: $sourceElements,
         );
 
         return (array) $capturedPayload;
@@ -458,5 +493,20 @@ class WikiPageContentAiClientTest extends TestCase
         ], $responseBody));
 
         return app(WikiPageContentAiClient::class);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sourceBasedBlock(string $markdown): array
+    {
+        return [
+            'markdown' => $markdown,
+            'content_origin' => 'source_based',
+            'source_element_keys' => ['document-1-full-text'],
+            'source_element_types' => ['manual'],
+            'best_practice_reason' => null,
+            'link_intents' => [],
+        ];
     }
 }

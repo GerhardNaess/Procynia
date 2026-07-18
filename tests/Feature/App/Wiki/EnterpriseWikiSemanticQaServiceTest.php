@@ -39,8 +39,18 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
 
         // Suppress any accidental calls to the real page content generator.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn("# Generated\n\nContent.")
+            ->shouldReceive('generatePageFromSource')
+            ->andReturn([
+                'markdown' => "# Generated\n\nContent.",
+                'blocks' => [[
+                    'markdown' => "# Generated\n\nContent.",
+                    'content_origin' => 'source_based',
+                    'source_element_keys' => ['document-1-full-text'],
+                    'source_element_types' => ['manual'],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ]],
+            ])
             ->byDefault();
     }
 

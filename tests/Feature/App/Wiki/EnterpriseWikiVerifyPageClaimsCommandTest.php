@@ -270,7 +270,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertNull($claim->review_reason);
     }
 
-    public function test_unsupported_normative_recommendation_becomes_best_practice_review(): void
+    public function test_explicit_best_practice_block_remains_best_practice_review_when_source_verification_finds_no_support(): void
     {
         $customer = $this->createCustomer();
         [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
@@ -281,6 +281,13 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             'claim_text' => $text,
             'page_excerpt' => $text,
             'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
         ]);
 
         $this->mock(WikiClaimVerificationAiClient::class)

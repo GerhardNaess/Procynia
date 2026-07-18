@@ -44,7 +44,14 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
             'excerpt' => 'Kildebasert tekst.',
         ]);
 
-        [, , $bestPracticeClaim] = $this->createPageVersionAndClaim($customer, 'Virksomheten bør følge etablert beste praksis.');
+        [, , $bestPracticeClaim] = $this->createPageVersionAndClaim($customer, 'Virksomheten bør følge etablert beste praksis.', [
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
         [, , $unsupportedClaim] = $this->createPageVersionAndClaim($customer, 'Dette er en faktapåstand uten kilde.');
         [, , $internalErrorClaim] = $this->createPageVersionAndClaim($customer, 'Finnes ikke i siden.');
         $internalErrorClaim->update([

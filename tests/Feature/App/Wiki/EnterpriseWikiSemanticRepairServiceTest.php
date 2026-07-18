@@ -44,7 +44,7 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
 
         // Level 1/2 repair generator must not be called in semantic repair tests.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
+            ->shouldReceive('generatePageFromSource')
             ->never()
             ->byDefault();
     }
@@ -159,7 +159,7 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         $articleVersion = $this->currentVersion($article);
 
         // Reviser (8G-5) must be called, generator (8G-3 level 1/2) must NOT — setUp() already
-        // asserts generateFromSource->never() by default.
+        // asserts generatePageFromSource->never() by default.
         $this->mock(WikiSemanticReviserAiClient::class)
             ->shouldReceive('revise')
             ->once()

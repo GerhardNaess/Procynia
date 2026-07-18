@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Models\EnterpriseWikiClaim;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
@@ -44,23 +45,92 @@ class WikiPageContentAiClient
         string $additionalContext = '',
         array $linkCatalog = [],
     ): string {
+        return $this->generatePageFromSource(
+            pageTitle: $pageTitle,
+            pageType: $pageType,
+            sourceText: $sourceText,
+            languageCode: $languageCode,
+            additionalContext: $additionalContext,
+            linkCatalog: $linkCatalog,
+        )['markdown'];
+    }
+
+    /**
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     *
+     * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
+     */
+    public function generatePageFromSource(
+        string $pageTitle,
+        string $pageType,
+        string $sourceText,
+        string $languageCode,
+        string $additionalContext = '',
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $this->languageName($languageCode), $linkCatalog);
+        $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $this->languageName($languageCode), $linkCatalog, $sourceElements);
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient');
 
-        $markdown = data_get($decoded, 'page.markdown', '');
+        $blocks = data_get($decoded, 'page.blocks', []);
 
-        if (! is_string($markdown) || trim($markdown) === '') {
+        if (! is_array($blocks) || $blocks === []) {
+            throw new RuntimeException('WikiPageContentAiClient: generated page blocks were empty.');
+        }
+
+        $markdownParts = [];
+
+        foreach ($blocks as $index => $block) {
+            if (! is_array($block)) {
+                throw new RuntimeException("WikiPageContentAiClient: generated page block [{$index}] was invalid.");
+            }
+
+            $blockMarkdown = trim((string) ($block['markdown'] ?? ''));
+
+            if ($blockMarkdown === '') {
+                throw new RuntimeException("WikiPageContentAiClient: generated page block [{$index}] markdown was empty.");
+            }
+
+            $origin = (string) ($block['content_origin'] ?? '');
+            if (! in_array($origin, [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ], true)) {
+                throw new RuntimeException("WikiPageContentAiClient: generated page block [{$index}] has invalid content_origin.");
+            }
+
+            $sourceElementKeys = $block['source_element_keys'] ?? [];
+            if (! is_array($sourceElementKeys)) {
+                throw new RuntimeException("WikiPageContentAiClient: generated page block [{$index}] source_element_keys was invalid.");
+            }
+
+            if ($origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED && $sourceElementKeys === []) {
+                throw new RuntimeException("WikiPageContentAiClient: source-based block [{$index}] has no source_element_keys.");
+            }
+
+            $blocks[$index]['markdown'] = $blockMarkdown;
+            $markdownParts[] = $blockMarkdown;
+        }
+
+        $markdown = trim(implode("\n\n", $markdownParts));
+
+        if ($markdown === '') {
             throw new RuntimeException('WikiPageContentAiClient: generated page content was empty.');
         }
 
         $this->validateMarkdown($markdown);
 
-        return $markdown;
+        return [
+            'markdown' => $markdown,
+            'blocks' => array_values($blocks),
+        ];
     }
 
     private function validateMarkdown(string $markdown): void
@@ -78,7 +148,7 @@ class WikiPageContentAiClient
         }
     }
 
-    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog = []): array
+    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog = [], array $sourceElements = []): array
     {
         return [
             'model' => self::MODEL,
@@ -97,7 +167,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($pageTitle, $sourceText, $additionalContext, $linkCatalog),
+                            'text' => $this->userPrompt($pageTitle, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
                         ],
                     ],
                 ],
@@ -131,6 +201,18 @@ class WikiPageContentAiClient
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
 
+        $blockRules = implode("\n", [
+            'STRUCTURED BLOCK OUTPUT:',
+            '- Return page.blocks as the only content-bearing output. Do not return a single free-form markdown field.',
+            '- Each block must be one independently traceable heading, paragraph, or heading+paragraph group.',
+            '- For source_based blocks, copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
+            '- A source_based block without source_element_keys is invalid.',
+            '- Use best_practice only for clearly marked recommendations, normative additions, established practice, or standard-based guidance beyond the source document.',
+            '- For best_practice blocks, explain the positive basis in best_practice_reason and leave source_element_keys/source_element_types empty.',
+            '- Do not classify factual statements, uncertain source facts, rewritten source facts, or likely hallucinations as best_practice.',
+            '- link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
+        ]);
+
         $wikilinkRules = implode("\n", [
             'INLINE WIKILINKS:',
             '- content_markdown is wiki content — reference other pages inline the way a wiki article does.',
@@ -155,6 +237,8 @@ class WikiPageContentAiClient
                 '- Write flowing prose — no bullet lists, no headings beyond the title',
                 '- Inline-link the most important concept/entity pages from the allowed targets; keep the summary short and natural',
                 '',
+                $blockRules,
+                '',
                 $wikilinkRules,
                 '',
                 $prohibitions,
@@ -174,6 +258,8 @@ class WikiPageContentAiClient
                 '- Do not invent facts not supported by the provided material',
                 '- If related article or summary content is provided, use it to enrich the explanation',
                 '',
+                $blockRules,
+                '',
                 $wikilinkRules,
                 '',
                 $prohibitions,
@@ -192,6 +278,8 @@ class WikiPageContentAiClient
                 '- Derive all facts from the provided source text and related page content',
                 '- Do not invent roles, relationships, or attributes not present in the material',
                 '- If related article or summary content is provided, use it to enrich the description',
+                '',
+                $blockRules,
                 '',
                 $wikilinkRules,
                 '',
@@ -213,6 +301,8 @@ class WikiPageContentAiClient
                 '- Do not repeat the same fact across multiple sections',
                 '- Do not invent facts not present in the source document',
                 '',
+                $blockRules,
+                '',
                 $wikilinkRules,
                 '',
                 $prohibitions,
@@ -220,7 +310,7 @@ class WikiPageContentAiClient
         };
     }
 
-    private function userPrompt(string $pageTitle, string $sourceText, string $additionalContext, array $linkCatalog = []): string
+    private function userPrompt(string $pageTitle, string $sourceText, string $additionalContext, array $linkCatalog = [], array $sourceElements = []): string
     {
         $parts = [
             "Page title: {$pageTitle}",
@@ -261,6 +351,16 @@ class WikiPageContentAiClient
             $parts[] = 'No other pages available to link to.';
         }
 
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'SOURCE ELEMENTS ('.count($sourceElements).' elements):';
+        $parts[] = '';
+        $parts[] = 'Every source_based block must cite one or more source_element_key values from this list.';
+        $parts[] = 'Do not invent source_element_key values.';
+        $parts[] = '';
+        $parts[] = (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
         return implode("\n", $parts);
     }
 
@@ -272,9 +372,57 @@ class WikiPageContentAiClient
                 'page' => [
                     'type' => 'object',
                     'properties' => [
-                        'markdown' => ['type' => 'string'],
+                        'blocks' => [
+                            'type' => 'array',
+                            'minItems' => 1,
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'markdown' => ['type' => 'string'],
+                                    'content_origin' => [
+                                        'type' => 'string',
+                                        'enum' => [
+                                            EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                                            EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                                        ],
+                                    ],
+                                    'source_element_keys' => [
+                                        'type' => 'array',
+                                        'items' => ['type' => 'string'],
+                                    ],
+                                    'source_element_types' => [
+                                        'type' => 'array',
+                                        'items' => ['type' => 'string'],
+                                    ],
+                                    'best_practice_reason' => [
+                                        'type' => ['string', 'null'],
+                                    ],
+                                    'link_intents' => [
+                                        'type' => 'array',
+                                        'items' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'target_slug' => ['type' => 'string'],
+                                                'reason' => ['type' => 'string'],
+                                            ],
+                                            'required' => ['target_slug', 'reason'],
+                                            'additionalProperties' => false,
+                                        ],
+                                    ],
+                                ],
+                                'required' => [
+                                    'markdown',
+                                    'content_origin',
+                                    'source_element_keys',
+                                    'source_element_types',
+                                    'best_practice_reason',
+                                    'link_intents',
+                                ],
+                                'additionalProperties' => false,
+                            ],
+                        ],
                     ],
-                    'required' => ['markdown'],
+                    'required' => ['blocks'],
                     'additionalProperties' => false,
                 ],
             ],

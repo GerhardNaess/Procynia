@@ -45,8 +45,18 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         config(['services.enterprise_wiki.ai_enabled' => true]);
 
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn("# Article\n\nContent.")
+            ->shouldReceive('generatePageFromSource')
+            ->andReturn([
+                'markdown' => "# Article\n\nContent.",
+                'blocks' => [[
+                    'markdown' => "# Article\n\nContent.",
+                    'content_origin' => 'source_based',
+                    'source_element_keys' => ['document-1-full-text'],
+                    'source_element_types' => ['manual'],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ]],
+            ])
             ->byDefault();
 
         $this->mock(WikiSemanticQaAiClient::class)
@@ -135,7 +145,8 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         $claim = EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Existing claim without ref',
+            'claim_text' => 'Content.',
+            'page_excerpt' => 'Content.',
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,

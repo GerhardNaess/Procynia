@@ -5,6 +5,7 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -30,8 +31,16 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         parent::setUp();
 
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn(self::FAKE_MARKDOWN)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN, $sourceElements))
             ->byDefault();
     }
 
@@ -158,7 +167,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         // createAppliedRunWithTwoPages() (which sets its own default success mock) to
         // actually take effect — see the note in that helper.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
+            ->shouldReceive('generatePageFromSource')
             ->andThrow(new RuntimeException('AI unavailable'));
 
         try {
@@ -211,7 +220,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $capturedContext = null;
 
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
+            ->shouldReceive('generatePageFromSource')
             ->once()
             ->andReturnUsing(function (
                 string $pageTitle,
@@ -220,12 +229,13 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 string $languageCode,
                 string $additionalContext = '',
                 array $linkCatalog = [],
-            ) use (&$capturedContext, $article): string {
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
                 $capturedContext = $additionalContext;
 
                 // The run has other applied pages (article, summary), so 8I-4's
                 // minimum-wikilink domain rule requires at least one valid link.
-                return self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.";
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
             });
 
         Queue::fake();
@@ -304,8 +314,16 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         // wikilink. Point the mocked AI response at the summary's real slug so these
         // orchestration-focused tests satisfy that rule without asserting on it directly.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturn(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.")
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.", $sourceElements))
             ->byDefault();
 
         return [$run, $article, $summary];
@@ -333,5 +351,31 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         }
 
         return $run;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResult(string $markdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'markdown' => $markdown,
+            'blocks' => [
+                [
+                    'markdown' => $markdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
     }
 }

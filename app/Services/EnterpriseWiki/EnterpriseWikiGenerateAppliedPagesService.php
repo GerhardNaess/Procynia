@@ -108,17 +108,23 @@ class EnterpriseWikiGenerateAppliedPagesService
                 continue;
             }
 
-            $markdown = $this->aiClient->generateFromSource(
+            $sourceElements = $this->contentBlockService->sourceElementsForGeneration(
+                $document,
+                $this->sourceElementService->inspect($document)['elements'],
+            );
+
+            $generated = $this->aiClient->generatePageFromSource(
                 pageTitle:    $page->title,
                 pageType:     $page->page_type,
                 sourceText:   $sourceText,
                 languageCode: $languageCode,
+                sourceElements: $sourceElements,
             );
 
-            $this->writeVersion($page->id, $markdown, $this->contentBlockService->buildBlocks(
-                $markdown,
+            $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
-                $this->sourceElementService->inspect($document)['elements'],
+                $generated['blocks'],
+                $sourceElements,
             ));
             $counts[$page->page_type]++;
         }
@@ -141,18 +147,24 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             $additionalContext = $this->buildConceptEntityContext($page, $decisionJson, $sharedContext);
 
-            $markdown = $this->aiClient->generateFromSource(
+            $sourceElements = $this->contentBlockService->sourceElementsForGeneration(
+                $document,
+                $this->sourceElementService->inspect($document)['elements'],
+            );
+
+            $generated = $this->aiClient->generatePageFromSource(
                 pageTitle:         $page->title,
                 pageType:          $page->page_type,
                 sourceText:        $sourceText,
                 languageCode:      $languageCode,
                 additionalContext: $additionalContext,
+                sourceElements:    $sourceElements,
             );
 
-            $this->writeVersion($page->id, $markdown, $this->contentBlockService->buildBlocks(
-                $markdown,
+            $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
-                $this->sourceElementService->inspect($document)['elements'],
+                $generated['blocks'],
+                $sourceElements,
             ));
             $counts[$page->page_type]++;
         }
@@ -237,26 +249,37 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
 
-        $markdown = $this->aiClient->generateFromSource(
+        $sourceElements = $this->contentBlockService->sourceElementsForGeneration(
+            $document,
+            $this->sourceElementService->inspect($document)['elements'],
+        );
+
+        $generated = $this->aiClient->generatePageFromSource(
             pageTitle:         $page->title,
             pageType:          $page->page_type,
             sourceText:        $sourceText,
             languageCode:      $languageCode,
             additionalContext: $additionalContext,
             linkCatalog:       $catalogResult['catalog'],
+            sourceElements:    $sourceElements,
         );
 
         // Deterministically rewrite unambiguous near-miss wikilinks (e.g. the model writing a
         // page's title instead of its differently-cased slug) to their canonical form before
         // final validation — see EnterpriseWikiWikilinkCanonicalizer for the exact, narrow rules.
-        $markdown = $this->wikilinkCanonicalizer->canonicalize($markdown, $catalogResult['catalog']);
+        $generated['blocks'] = array_map(function (array $block) use ($catalogResult): array {
+            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+            return $block;
+        }, $generated['blocks']);
+        $markdown = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
-        $contentBlocks = $this->contentBlockService->buildBlocks(
-            $markdown,
+        $contentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
             $document,
-            $this->sourceElementService->inspect($document)['elements'],
+            $generated['blocks'],
+            $sourceElements,
         );
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {

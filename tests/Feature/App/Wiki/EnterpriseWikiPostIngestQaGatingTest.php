@@ -160,10 +160,18 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
         // catalog page at all — canonicalization cannot help, and the real
         // EnterpriseWikiInvalidWikilinksException is thrown organically, exactly like run 18.
         $this->mock(WikiPageContentAiClient::class)
-            ->shouldReceive('generateFromSource')
-            ->andReturnUsing(fn (string $pageTitle, string $pageType) => $pageType === 'article'
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) => $this->structuredPageResult($pageType === 'article'
                 ? "# Artikkel\n\nSee [[sammendrag|Sammendrag]] here."
-                : "# Sammendrag\n\nSe [[Advania]] her.");
+                : "# Sammendrag\n\nSe [[Advania]] her.", $sourceElements));
 
         Queue::fake();
 
@@ -285,5 +293,31 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
             'error_message' => $errorMessage,
             'finished_at' => in_array($status, EnterpriseWikiIngestRun::TERMINAL_STATUSES, true) ? now() : null,
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResult(string $markdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'markdown' => $markdown,
+            'blocks' => [
+                [
+                    'markdown' => $markdown,
+                    'content_origin' => 'source_based',
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
     }
 }

@@ -251,9 +251,12 @@ class EnterpriseWikiExtractPageClaimsService
                 $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
                 $block = $this->contentBlockService->findUniqueBlockForExcerpt($version, $pageExcerpt);
                 $hasPageAnchor = $block !== null;
-                $contentOrigin = $hasPageAnchor
-                    ? EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
-                    : EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR;
+                $blockOrigin = $hasPageAnchor ? (string) ($block['content_origin'] ?? '') : '';
+                $contentOrigin = match ($blockOrigin) {
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    default => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                };
 
                 $createdClaim = EnterpriseWikiClaim::query()->create([
                     'enterprise_wiki_page_id' => $page->id,
@@ -262,9 +265,21 @@ class EnterpriseWikiExtractPageClaimsService
                     'content_origin' => $contentOrigin,
                     'page_excerpt' => $pageExcerpt !== '' ? $pageExcerpt : null,
                     'content_block_key' => $block['block_key'] ?? null,
-                    'review_reason' => null,
-                    'review_metadata' => null,
-                    'generation_issue' => $hasPageAnchor ? null : 'claim_excerpt_not_found_in_page_version',
+                    'review_reason' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                        ? (string) ($block['best_practice_reason'] ?? 'Vurder om anbefalingen skal beholdes som beste praksis.')
+                        : null,
+                    'review_metadata' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                        ? [
+                            'statement_kind' => 'recommendation',
+                            'classification_basis' => 'ai_block_content_origin',
+                            'suggested_placement' => $block['block_key'] ?? null,
+                            'visible_wiki_link_recommendation' => ($block['link_intents'] ?? []) !== [] ? 'recommended' : 'not_needed',
+                            'link_intents' => $block['link_intents'] ?? [],
+                        ]
+                        : null,
+                    'generation_issue' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
+                        ? 'claim_excerpt_not_found_in_page_version'
+                        : null,
                     'position_order' => $i,
                     'confidence' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
                         ? EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN
@@ -273,19 +288,12 @@ class EnterpriseWikiExtractPageClaimsService
                     'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 ]);
 
-                if ($block !== null) {
-                    EnterpriseWikiSourceReference::query()->create([
-                        'enterprise_wiki_claim_id' => $createdClaim->id,
-                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                        'source_id' => (int) ($block['source_id'] ?? 0),
-                        'source_element_key' => $block['source_element_key'] ?? null,
-                        'source_element_type' => $block['source_element_type'] ?? null,
-                        'source_row_key' => $block['source_row_key'] ?? null,
-                        'source_label' => (string) ($block['source_label'] ?? 'Kildedokument'),
-                        'excerpt' => (string) ($block['source_excerpt'] ?? $pageExcerpt),
-                        'source_hash' => (string) ($block['source_hash'] ?? ''),
-                        'page_reference' => $block['page_reference'] ?? null,
-                    ]);
+                if ($block !== null && $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                    foreach ($this->sourceReferencePayloadsForBlock($block, $pageExcerpt) as $sourceReferencePayload) {
+                        EnterpriseWikiSourceReference::query()->create(array_merge([
+                            'enterprise_wiki_claim_id' => $createdClaim->id,
+                        ], $sourceReferencePayload));
+                    }
                 }
 
                 $created++;
@@ -299,6 +307,46 @@ class EnterpriseWikiExtractPageClaimsService
 
             return $created;
         });
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function sourceReferencePayloadsForBlock(array $block, string $pageExcerpt): array
+    {
+        $sourceElements = (array) ($block['source_elements'] ?? []);
+
+        if ($sourceElements === [] && ($block['source_id'] ?? null) !== null) {
+            $sourceElements = [$block];
+        }
+
+        $payloads = [];
+
+        foreach ($sourceElements as $sourceElement) {
+            if (! is_array($sourceElement)) {
+                continue;
+            }
+
+            $sourceId = (int) ($sourceElement['source_id'] ?? 0);
+
+            if ($sourceId <= 0) {
+                continue;
+            }
+
+            $payloads[] = [
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => $sourceId,
+                'source_element_key' => $sourceElement['source_element_key'] ?? null,
+                'source_element_type' => $sourceElement['source_element_type'] ?? null,
+                'source_row_key' => $sourceElement['source_row_key'] ?? null,
+                'source_label' => (string) ($sourceElement['source_label'] ?? 'Kildedokument'),
+                'excerpt' => (string) ($sourceElement['source_excerpt'] ?? $pageExcerpt),
+                'source_hash' => (string) ($sourceElement['source_hash'] ?? ''),
+                'page_reference' => $sourceElement['page_reference'] ?? null,
+            ];
+        }
+
+        return $payloads;
     }
 
     private function resolveLanguageCode(int $customerId): string
