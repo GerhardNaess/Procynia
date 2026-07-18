@@ -103,6 +103,12 @@ class EnterpriseWikiPageContentBlockService
                 throw new \RuntimeException('WikiPageContentAiClient: generated page block markdown was empty.');
             }
 
+            $this->assertNoControlCharacters($markdown, 'block markdown');
+
+            if (is_string($block['best_practice_reason'] ?? null)) {
+                $this->assertNoControlCharacters((string) $block['best_practice_reason'], 'best_practice_reason');
+            }
+
             $resolvedElements = [];
 
             foreach ($sourceElementKeys as $sourceElementKey) {
@@ -160,6 +166,33 @@ class EnterpriseWikiPageContentBlockService
         }
 
         return $blocks;
+    }
+
+    /**
+     * Rejects a generated page block field that is not valid UTF-8, or that contains a raw ASCII
+     * control character (anything other than the ordinary whitespace/newline characters).
+     *
+     * Found via a live Wiki run-35 verification: an existing, already-corrupted page title
+     * (page 187 — see EnterpriseWikiMaintainerDecisionPrompt::validateNoControlCharacters(),
+     * which validates the maintainer-decision step but not page generation) was fed into the
+     * page-generation prompt as link-catalog context, and the model faithfully echoed it back
+     * verbatim as a [[slug|anchor text]] wikilink's visible text — propagating the same control
+     * byte into every NEW page version that links to it. This mirrors that same validation at
+     * the page-generation boundary, so corrupted text can never enter content_markdown/
+     * content_blocks_json regardless of whether the model invented it or copied it from stale
+     * context — the run fails loudly here instead of silently persisting corrupted content.
+     *
+     * @throws \RuntimeException
+     */
+    private function assertNoControlCharacters(string $value, string $fieldLabel): void
+    {
+        if (! mb_check_encoding($value, 'UTF-8')) {
+            throw new \RuntimeException("WikiPageContentAiClient: generated {$fieldLabel} is not valid UTF-8 — the AI response text is corrupted.");
+        }
+
+        if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', $value) === 1) {
+            throw new \RuntimeException("WikiPageContentAiClient: generated {$fieldLabel} contains an invalid control character — the AI response text is corrupted.");
+        }
     }
 
     /**
