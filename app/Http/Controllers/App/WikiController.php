@@ -926,6 +926,9 @@ class WikiController extends Controller
                         ->map(fn($ref) => [
                             'id' => $ref->id,
                             'source_type' => $ref->source_type,
+                            'source_element_key' => $ref->source_element_key,
+                            'source_element_type' => $ref->source_element_type,
+                            'source_row_key' => $ref->source_row_key,
                             'source_label' => $ref->source_label,
                             'excerpt' => $ref->excerpt,
                             'page_reference' => $ref->page_reference,

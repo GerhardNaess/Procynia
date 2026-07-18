@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
@@ -858,6 +859,144 @@ class WikiSourceControllerTest extends TestCase
         $this->assertSame(SavedNoticeAiRequirementWikiAnswer::STALE_REASON_SOURCE_DOCUMENT_DELETED, $answer->stale_reason);
         $this->assertSame('test.pdf', $answer->stale_context['deleted_document_name']);
         $this->assertSame('Eksisterende Wiki-svar.', $answer->answer_text);
+    }
+
+    public function test_delete_resets_claims_that_lose_their_only_source_to_pending_and_reopens_missing_source_warning(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $supportingDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($supportingDocument->file_path, 'supporting test content');
+
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        $supportingRun = $this->createIngestRun($customer, $supportingDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+
+        $supportingVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => false,
+            'content_markdown' => '# '.$page->title."\n\nSupplerende dokumentasjon.",
+        ]);
+
+        $this->linkRunToVersion($supportingRun, $supportingVersion);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Påstanden er dokumentert.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            'approved_by_user_id' => $user->id,
+            'approved_at' => now(),
+            'approval_comment' => 'Tidligere godkjent med kilde.',
+            'position_order' => 0,
+        ]);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'enterprise_wiki_document_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Claim has no source reference.',
+            'status' => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+            'detected_at' => now(),
+            'resolved_at' => now(),
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'paragraph-0',
+            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+            'source_row_key' => null,
+            'source_label' => $document->original_filename,
+            'source_hash' => hash('sha256', implode('|', [
+                'enterprise_wiki_document',
+                $document->id,
+                $document->file_hash_sha256,
+                'paragraph',
+                'paragraph-0',
+                'manual',
+            ])),
+            'excerpt' => 'Dokumentert i dette avsnittet.',
+            'page_reference' => 'Avsnitt 1.1',
+        ]);
+
+        $supportingClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $supportingVersion->id,
+            'claim_text' => 'Supplerende påstand som holder siden aktiv.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 1,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $supportingClaim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $supportingDocument->id,
+            'source_element_key' => 'paragraph-1',
+            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+            'source_row_key' => null,
+            'source_label' => $supportingDocument->original_filename,
+            'source_hash' => hash('sha256', implode('|', [
+                'enterprise_wiki_document',
+                $supportingDocument->id,
+                $supportingDocument->file_hash_sha256,
+                'paragraph',
+                'paragraph-1',
+                'manual',
+            ])),
+            'excerpt' => 'Støttende dokumentasjon.',
+            'page_reference' => 'Avsnitt 2.1',
+        ]);
+
+        $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
+        $preview->assertOk();
+        $preview->assertJsonPath('blocked', false);
+        $preview->assertJsonPath('sole_source_page_count', 0);
+        $preview->assertJsonPath('shared_page_count', 1);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $this->assertDatabaseMissing('enterprise_wiki_source_references', ['enterprise_wiki_claim_id' => $claim->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $claim->approval_status);
+        $this->assertNull($claim->approved_by_user_id);
+        $this->assertNull($claim->approved_at);
+        $this->assertNull($claim->approval_comment);
+        $this->assertTrue($claim->needsSourceWarning());
+        $this->assertTrue(EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('code', EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->exists());
     }
 
     public function test_delete_rejects_document_with_queued_ingest_run(): void

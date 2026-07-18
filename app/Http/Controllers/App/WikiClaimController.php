@@ -8,7 +8,9 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Support\CustomerContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
@@ -33,6 +35,7 @@ class WikiClaimController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -95,7 +98,10 @@ class WikiClaimController extends Controller
 
         $validated = $request->validate([
             'source_document_id' => ['required', 'integer'],
-            'excerpt' => ['required', 'string', 'max:4000'],
+            'source_element_key' => ['nullable', 'string', 'max:255'],
+            'source_element_type' => ['nullable', 'string', 'max:50'],
+            'source_row_key' => ['nullable', 'string', 'max:255'],
+            'excerpt' => ['nullable', 'string', 'max:4000'],
             'page_reference' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -107,23 +113,68 @@ class WikiClaimController extends Controller
 
         abort_unless($document !== null && trim((string) $document->extracted_text) !== '', 404);
 
-        $pageReference = trim((string) ($validated['page_reference'] ?? ''));
-        $pageReference = $pageReference !== '' ? $pageReference : null;
+        $hadSourceReference = $claim->hasSourceReference();
+        $catalog = $this->sourceElementService->inspect($document);
+        $sourceElementKey = $this->normalizeNullableString($validated['source_element_key'] ?? null);
+        $sourceElementType = $this->normalizeNullableString($validated['source_element_type'] ?? null);
+        $sourceRowKey = $this->normalizeNullableString($validated['source_row_key'] ?? null);
+        $pageReference = $this->normalizeNullableString($validated['page_reference'] ?? null);
+        $excerpt = $this->normalizeNullableString($validated['excerpt'] ?? null);
+
+        $resolvedSelection = null;
+        $isManualFallbackRequest = $sourceElementType === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_MANUAL
+            || ($sourceElementKey === null && $sourceElementType === null && $sourceRowKey === null);
+
+        if (! $isManualFallbackRequest) {
+            $resolvedSelection = $this->sourceElementService->resolveSelection(
+                $document,
+                $sourceElementKey,
+                $sourceElementType,
+                $sourceRowKey,
+            );
+
+            abort_unless($resolvedSelection !== null, 422, 'Det valgte kildedokumentelementet finnes ikke i dette dokumentet.');
+
+            $sourceElementKey = $resolvedSelection['source_element_key'] ?? null;
+            $sourceElementType = $resolvedSelection['source_element_type'] ?? null;
+            $sourceRowKey = $resolvedSelection['source_row_key'] ?? null;
+            $excerpt = $resolvedSelection['reference_text'] ?? null;
+            $pageReference = $resolvedSelection['page_reference'] ?? null;
+        } elseif (! ($catalog['manual_source_allowed'] ?? false)) {
+            abort(422, 'Velg et konkret kildedokumentelement når dokumentet har strukturerte elementer.');
+        } elseif ($excerpt === null) {
+            abort(422, 'Et manuelt kildeutdrag kreves når dokumentet ikke har strukturerte elementer.');
+        } else {
+            $sourceElementType = EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_MANUAL;
+            $sourceElementKey = null;
+            $sourceRowKey = null;
+        }
 
         EnterpriseWikiSourceReference::query()->updateOrCreate(
             [
                 'enterprise_wiki_claim_id' => $claim->id,
                 'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
                 'source_id' => $document->id,
-                'page_reference' => $pageReference,
+                'source_element_key' => $sourceElementKey,
+                'source_element_type' => $sourceElementType,
+                'source_row_key' => $sourceRowKey,
             ],
             [
                 'source_label' => $document->original_filename,
-                'source_hash' => hash('sha256', 'enterprise_wiki_document:'.$document->id),
-                'excerpt' => $validated['excerpt'],
+                'source_hash' => hash('sha256', implode('|', [
+                    'enterprise_wiki_document',
+                    $document->id,
+                    $document->file_hash_sha256,
+                    $sourceElementType ?? 'manual',
+                    $sourceElementKey ?? 'manual',
+                    $sourceRowKey ?? 'manual',
+                ])),
+                'excerpt' => $excerpt,
+                'page_reference' => $pageReference,
             ],
         );
 
+        $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, ! $hadSourceReference);
         $this->lintService->resolveClaimMissingSourceFinding($claim);
 
         return redirect()
@@ -188,5 +239,36 @@ class WikiClaimController extends Controller
         abort_unless($claim->enterprise_wiki_page_id === $page->id, 404);
 
         return $page;
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value !== '' ? $value : null;
+    }
+
+    public function sourceDocumentElements(string $slug, EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document): JsonResponse
+    {
+        $page = $this->resolvePageForClaim($slug, $claim);
+        $catalog = $this->sourceElementService->inspect($document);
+
+        abort_unless($document->customer_id === $this->customerContext->currentCustomerId(), 404);
+        abort_unless($claim->enterprise_wiki_page_id === $page->id, 404);
+        abort_unless($document->document_status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED, 404);
+        abort_unless(trim((string) $document->extracted_text) !== '', 404);
+
+        return response()->json([
+            'document_id' => $document->id,
+            'document_name' => $document->original_filename,
+            'supports_structured_elements' => $catalog['supports_structured_elements'],
+            'manual_source_allowed' => $catalog['manual_source_allowed'],
+            'manual_source_reason' => $catalog['manual_source_reason'],
+            'elements' => $catalog['elements'],
+        ]);
     }
 }

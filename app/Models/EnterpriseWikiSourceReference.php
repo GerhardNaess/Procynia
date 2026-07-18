@@ -17,6 +17,21 @@ class EnterpriseWikiSourceReference extends Model
 
     public const SOURCE_TYPE_MANUAL = 'manual';
 
+    public const SOURCE_ELEMENT_TYPE_PARAGRAPH = 'paragraph';
+
+    public const SOURCE_ELEMENT_TYPE_LIST_ITEM = 'list_item';
+
+    public const SOURCE_ELEMENT_TYPE_TABLE_ROW = 'table_row';
+
+    public const SOURCE_ELEMENT_TYPE_MANUAL = 'manual';
+
+    public const SOURCE_ELEMENT_TYPES = [
+        self::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+        self::SOURCE_ELEMENT_TYPE_LIST_ITEM,
+        self::SOURCE_ELEMENT_TYPE_TABLE_ROW,
+        self::SOURCE_ELEMENT_TYPE_MANUAL,
+    ];
+
     public const SOURCE_TYPES = [
         self::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
         self::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
@@ -29,6 +44,9 @@ class EnterpriseWikiSourceReference extends Model
         'enterprise_wiki_claim_id',
         'source_type',
         'source_id',
+        'source_element_key',
+        'source_element_type',
+        'source_row_key',
         'source_label',
         'excerpt',
         'source_hash',

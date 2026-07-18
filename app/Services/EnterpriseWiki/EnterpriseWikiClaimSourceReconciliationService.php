@@ -213,6 +213,8 @@ class EnterpriseWikiClaimSourceReconciliationService
                 'excerpt' => $excerpt,
             ]);
 
+            $this->lintService->resetClaimDecisionAfterFirstSourceReference($freshClaim, true);
+
             $locked->update([
                 'status' => EnterpriseWikiClaimSourceReconciliationAttempt::STATUS_COMPLETED,
                 'result' => EnterpriseWikiClaimSourceReconciliationAttempt::RESULT_SUPPORTED,

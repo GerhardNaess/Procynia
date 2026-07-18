@@ -53,6 +53,7 @@ class EnterpriseWikiVerifyPageClaimsService
 
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
+        private readonly EnterpriseWikiAppliedRunLintService $lintService,
     ) {}
 
     /**
@@ -283,6 +284,8 @@ class EnterpriseWikiVerifyPageClaimsService
                 'excerpt' => $result['excerpt'],
                 'source_hash' => $document->file_hash_sha256 ?? '',
             ]);
+
+            $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
 
             $claim->update([
                 'verified_at' => now(),

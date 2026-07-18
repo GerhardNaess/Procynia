@@ -14,6 +14,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
+use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
@@ -38,6 +39,7 @@ class WikiSourceController extends Controller
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiAppliedRunLintService $lintService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -249,8 +251,14 @@ class WikiSourceController extends Controller
         $runIds = $runs->pluck('id');
         [$soleSourcePageIds] = $this->classifyPages($runIds);
         $staleImpact = $this->wikiAnswerStalenessService->previewDeletionImpact($document, $runIds, $soleSourcePageIds);
+        $impactedClaimIds = EnterpriseWikiSourceReference::query()
+            ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('source_id', $document->id)
+            ->whereNotNull('enterprise_wiki_claim_id')
+            ->distinct()
+            ->pluck('enterprise_wiki_claim_id');
 
-        DB::transaction(function () use ($document, $runIds, $soleSourcePageIds): void {
+        DB::transaction(function () use ($document, $runIds, $soleSourcePageIds, $impactedClaimIds): void {
             $this->wikiAnswerStalenessService->markAnswersStaleForDeletedDocument($document, $runIds, $soleSourcePageIds);
 
             // Delete lint findings for sole-source pages
@@ -277,6 +285,8 @@ class WikiSourceController extends Controller
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
                 ->where('source_id', $document->id)
                 ->delete();
+
+            $this->resetClaimsThatLostTheirOnlySource($impactedClaimIds);
 
             // Delete sole-source pages (cascades: claims, source refs, versions, page links, run_pages)
             if ($soleSourcePageIds->isNotEmpty()) {
@@ -415,5 +425,48 @@ class WikiSourceController extends Controller
         }
 
         return $owner->id;
+    }
+
+    /**
+     * @param  Collection<int, int|string>  $claimIds
+     */
+    private function resetClaimsThatLostTheirOnlySource(Collection $claimIds): void
+    {
+        $resolvedClaimIds = $claimIds
+            ->map(static fn (mixed $value): int => (int) $value)
+            ->filter(static fn (int $value): bool => $value > 0)
+            ->unique()
+            ->values();
+
+        if ($resolvedClaimIds->isEmpty()) {
+            return;
+        }
+
+        $claims = EnterpriseWikiClaim::query()
+            ->whereIn('id', $resolvedClaimIds->all())
+            ->withCount('sourceReferences')
+            ->get();
+
+        foreach ($claims as $claim) {
+            if ($claim->source_references_count > 0) {
+                continue;
+            }
+
+            if (! in_array($claim->approval_status, [
+                EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+                EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+            ], true)) {
+                continue;
+            }
+
+            $claim->update([
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'approved_by_user_id' => null,
+                'approved_at' => null,
+                'approval_comment' => null,
+            ]);
+
+            $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
+        }
     }
 }

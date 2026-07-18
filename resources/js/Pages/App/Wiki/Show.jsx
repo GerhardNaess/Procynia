@@ -245,6 +245,7 @@ export default function WikiShow({
     const [claimProcessing, setClaimProcessing] = useState(null);
     const [claimSourceDrafts, setClaimSourceDrafts] = useState({});
     const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
+    const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
@@ -307,20 +308,42 @@ export default function WikiShow({
 
         const draft = claimSourceDrafts[claim.id] ?? {};
         const sourceDocumentId = Number(draft.source_document_id || 0);
+        const sourceElementKey = String(draft.source_element_key || '').trim();
+        const sourceElementType = String(draft.source_element_type || '').trim();
+        const sourceRowKey = String(draft.source_row_key || '').trim();
         const excerpt = String(draft.excerpt || '').trim();
+        const pageReference = String(draft.page_reference || '').trim();
 
-        if (!sourceDocumentId || !excerpt) {
+        if (!sourceDocumentId) {
             return;
+        }
+
+        const payload = {
+            source_document_id: sourceDocumentId,
+        };
+
+        if (sourceElementKey && sourceElementType) {
+            payload.source_element_key = sourceElementKey;
+            payload.source_element_type = sourceElementType;
+            if (sourceRowKey) {
+                payload.source_row_key = sourceRowKey;
+            }
+        } else {
+            if (!excerpt) {
+                return;
+            }
+
+            payload.source_element_type = 'manual';
+            payload.excerpt = excerpt;
+            if (pageReference) {
+                payload.page_reference = pageReference;
+            }
         }
 
         setClaimSourceProcessing(claim.id);
         router.post(
             `/app/wiki/${page.slug}/claims/${claim.id}/source-references`,
-            {
-                source_document_id: sourceDocumentId,
-                excerpt,
-                page_reference: String(draft.page_reference || '').trim() || undefined,
-            },
+            payload,
             {
                 preserveScroll: true,
                 onSuccess: () => {
@@ -333,6 +356,80 @@ export default function WikiShow({
                 onFinish: () => setClaimSourceProcessing(null),
             },
         );
+    };
+
+    const loadClaimSourceElements = async (claim, documentId) => {
+        const sourceDocumentId = Number(documentId || 0);
+
+        if (!sourceDocumentId || claimSourceCatalog[sourceDocumentId]?.loading || claimSourceCatalog[sourceDocumentId]?.loaded) {
+            return;
+        }
+
+        setClaimSourceCatalog((prev) => ({
+            ...prev,
+            [sourceDocumentId]: {
+                ...(prev[sourceDocumentId] ?? {}),
+                loading: true,
+                error: null,
+            },
+        }));
+
+        try {
+            const response = await fetch(
+                `/app/wiki/${page.slug}/claims/${claim.id}/source-documents/${sourceDocumentId}/elements`,
+                {
+                    headers: {
+                        Accept: 'application/json',
+                    },
+                },
+            );
+
+            const payload = await response.json();
+
+            if (!response.ok) {
+                throw new Error(payload?.message || 'Kunne ikke hente kildeelementer.');
+            }
+
+            setClaimSourceCatalog((prev) => ({
+                ...prev,
+                [sourceDocumentId]: {
+                    loading: false,
+                    loaded: true,
+                    ...payload,
+                },
+            }));
+        } catch (error) {
+            setClaimSourceCatalog((prev) => ({
+                ...prev,
+                [sourceDocumentId]: {
+                    ...(prev[sourceDocumentId] ?? {}),
+                    loading: false,
+                    loaded: false,
+                    error: error instanceof Error ? error.message : 'Kunne ikke hente kildeelementer.',
+                    elements: [],
+                },
+            }));
+        }
+    };
+
+    const selectClaimSourceElement = (claim, documentId, element) => {
+        setClaimSourceDrafts((prev) => {
+            const current = prev[claim.id] ?? {};
+
+            return {
+                ...prev,
+                [claim.id]: {
+                    ...current,
+                    source_document_id: documentId,
+                    source_element_key: element.source_element_key,
+                    source_element_type: element.source_element_type,
+                    source_row_key: element.source_row_key ?? '',
+                    excerpt: element.reference_text ?? '',
+                    page_reference: element.page_reference ?? '',
+                    source_element_search: current.source_element_search ?? '',
+                },
+            };
+        });
     };
 
     const rejectClaim = (claim) => {
@@ -391,6 +488,13 @@ export default function WikiShow({
         manual: tw.source_type_manual ?? 'Manuell kilde',
     }[type] ?? type);
 
+    const sourceElementTypeLabel = (type) => ({
+        paragraph: tw.source_element_type_paragraph ?? 'Avsnitt',
+        list_item: tw.source_element_type_list_item ?? 'Listepunkt',
+        table_row: tw.source_element_type_table_row ?? 'Tabellrad',
+        manual: tw.source_element_type_manual ?? 'Manuelt kilderutdrag',
+    }[type] ?? type);
+
     const actionLabel = tw.action_confirming ?? 'Behandler...';
 
     const pageStatusLabel = (status) => ({
@@ -439,6 +543,26 @@ export default function WikiShow({
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};
         const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
+        const selectedSourceCatalog = selectedSourceDocument ? (claimSourceCatalog[selectedSourceDocument.id] ?? null) : null;
+        const selectedSourceElements = selectedSourceCatalog?.elements ?? [];
+        const sourceElementSearch = String(sourceDraft.source_element_search || '').trim().toLowerCase();
+        const filteredSourceElements = sourceElementSearch
+            ? selectedSourceElements.filter((element) => {
+                const haystack = [
+                    element.source_element_key,
+                    element.source_element_type,
+                    element.source_row_key,
+                    element.page_reference,
+                    element.display_text,
+                    element.reference_text,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase();
+
+                return haystack.includes(sourceElementSearch);
+            })
+            : selectedSourceElements;
         const canLinkSource = canApproveWikiClaims && claim.source_status === 'missing_source';
 
         return (
@@ -524,13 +648,27 @@ export default function WikiShow({
                                                     </span>
                                                     <select
                                                         value={sourceDraft.source_document_id ?? ''}
-                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
-                                                            ...prev,
-                                                            [claim.id]: {
-                                                                ...sourceDraft,
-                                                                source_document_id: e.target.value,
-                                                            },
-                                                        }))}
+                                                        onChange={(e) => {
+                                                            const nextDocumentId = e.target.value;
+
+                                                            setClaimSourceDrafts((prev) => ({
+                                                                ...prev,
+                                                                [claim.id]: {
+                                                                    ...sourceDraft,
+                                                                    source_document_id: nextDocumentId,
+                                                                    source_element_key: '',
+                                                                    source_element_type: '',
+                                                                    source_row_key: '',
+                                                                    excerpt: '',
+                                                                    page_reference: '',
+                                                                    source_element_search: '',
+                                                                },
+                                                            }));
+
+                                                            if (nextDocumentId) {
+                                                                loadClaimSourceElements(claim, nextDocumentId);
+                                                            }
+                                                        }}
                                                         className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
                                                     >
                                                         <option value="">{tw.claim_source_document_placeholder ?? 'Velg et kildedokument'}</option>
@@ -558,50 +696,156 @@ export default function WikiShow({
                                                     </a>
                                                 )}
 
-                                                <label className="block space-y-1">
-                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                                                        {tw.claim_source_excerpt_label ?? 'Tekstutdrag'}
-                                                    </span>
-                                                    <textarea
-                                                        rows={3}
-                                                        maxLength={4000}
-                                                        value={sourceDraft.excerpt ?? ''}
-                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
-                                                            ...prev,
-                                                            [claim.id]: {
-                                                                ...sourceDraft,
-                                                                excerpt: e.target.value,
-                                                            },
-                                                        }))}
-                                                        className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
-                                                        placeholder={tw.claim_source_excerpt_placeholder ?? 'Lim inn teksten som dokumenterer påstanden.'}
-                                                    />
-                                                </label>
+                                                {selectedSourceCatalog?.loading && (
+                                                    <p className="text-xs text-sky-700">
+                                                        {tw.action_confirming ?? 'Behandler...'}
+                                                    </p>
+                                                )}
 
-                                                <label className="block space-y-1">
-                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                                                        {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}
-                                                    </span>
-                                                    <input
-                                                        type="text"
-                                                        maxLength={255}
-                                                        value={sourceDraft.page_reference ?? ''}
-                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
-                                                            ...prev,
-                                                            [claim.id]: {
-                                                                ...sourceDraft,
-                                                                page_reference: e.target.value,
-                                                            },
-                                                        }))}
-                                                        className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
-                                                        placeholder={tw.claim_source_page_reference_placeholder ?? 'Valgfri plassering, for eksempel avsnitt, tabellrad eller sidetall'}
-                                                    />
-                                                </label>
+                                                {selectedSourceCatalog?.error && (
+                                                    <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                                        {selectedSourceCatalog.error}
+                                                    </p>
+                                                )}
+
+                                                {selectedSourceDocument && !selectedSourceCatalog && (
+                                                    <p className="text-xs text-sky-700">
+                                                        {tw.action_confirming ?? 'Behandler...'}
+                                                    </p>
+                                                )}
+
+                                                {selectedSourceCatalog?.manual_source_allowed ? (
+                                                    <>
+                                                        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                                            {selectedSourceCatalog.manual_source_reason ?? 'Dette dokumentet har ikke strukturerte kildeelementer. Bruk et manuelt kilderutdrag.'}
+                                                        </p>
+                                                        <label className="block space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                                {tw.claim_source_excerpt_label ?? 'Tekstutdrag'}
+                                                            </span>
+                                                            <textarea
+                                                                rows={3}
+                                                                maxLength={4000}
+                                                                value={sourceDraft.excerpt ?? ''}
+                                                                onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                                    ...prev,
+                                                                    [claim.id]: {
+                                                                        ...sourceDraft,
+                                                                        excerpt: e.target.value,
+                                                                    },
+                                                                }))}
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                placeholder={tw.claim_source_excerpt_placeholder ?? 'Lim inn teksten som dokumenterer påstanden.'}
+                                                            />
+                                                        </label>
+
+                                                        <label className="block space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                                {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}
+                                                            </span>
+                                                            <input
+                                                                type="text"
+                                                                maxLength={255}
+                                                                value={sourceDraft.page_reference ?? ''}
+                                                                onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                                    ...prev,
+                                                                    [claim.id]: {
+                                                                        ...sourceDraft,
+                                                                        page_reference: e.target.value,
+                                                                    },
+                                                                }))}
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                placeholder={tw.claim_source_page_reference_placeholder ?? 'Valgfri plassering, for eksempel avsnitt, tabellrad eller sidetall'}
+                                                            />
+                                                        </label>
+                                                    </>
+                                                ) : selectedSourceCatalog ? (
+                                                    <>
+                                                        <label className="block space-y-1">
+                                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                                {tw.claim_source_element_search_label ?? 'Søk i kilden'}
+                                                            </span>
+                                                            <input
+                                                                type="search"
+                                                                value={sourceDraft.source_element_search ?? ''}
+                                                                onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                                    ...prev,
+                                                                    [claim.id]: {
+                                                                        ...sourceDraft,
+                                                                        source_element_search: e.target.value,
+                                                                    },
+                                                                }))}
+                                                                className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                                placeholder={tw.claim_source_element_search_placeholder ?? 'Søk etter avsnitt, listepunkt eller tabellrad'}
+                                                            />
+                                                        </label>
+
+                                                        <div className="max-h-56 space-y-2 overflow-auto rounded-xl border border-sky-100 bg-white p-2">
+                                                            {filteredSourceElements.length > 0 ? filteredSourceElements.map((element) => {
+                                                                const isSelected = String(sourceDraft.source_element_key || '') === String(element.source_element_key || '')
+                                                                    && String(sourceDraft.source_element_type || '') === String(element.source_element_type || '')
+                                                                    && String(sourceDraft.source_row_key || '') === String(element.source_row_key || '');
+
+                                                                return (
+                                                                    <button
+                                                                        type="button"
+                                                                        key={`${element.source_element_type}:${element.source_element_key}`}
+                                                                        onClick={() => selectClaimSourceElement(claim, selectedSourceDocument.id, element)}
+                                                                        className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition ${isSelected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50'}`}
+                                                                    >
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            <span className="font-semibold text-slate-700">
+                                                                                {sourceElementTypeLabel(element.source_element_type)}
+                                                                            </span>
+                                                                            <span className="text-slate-500">
+                                                                                {element.page_reference ?? (tw.source_page_reference ?? 'Plassering i kilden')}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="mt-1 text-slate-600">
+                                                                            {element.display_text ?? element.reference_text}
+                                                                        </p>
+                                                                    </button>
+                                                                );
+                                                            }) : (
+                                                                <p className="px-2 py-3 text-xs italic text-slate-400">
+                                                                    {tw.claim_source_no_element_match ?? 'Ingen kildeelementer matcher søket.'}
+                                                                </p>
+                                                            )}
+                                                        </div>
+
+                                                        {sourceDraft.source_element_key && (
+                                                            <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
+                                                                <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                                    {tw.claim_source_selected_element ?? 'Valgt element'}
+                                                                </p>
+                                                                <p className="mt-1 text-xs text-sky-900">
+                                                                    {selectedSourceElements.find((element) => String(element.source_element_key) === String(sourceDraft.source_element_key) && String(element.source_element_type) === String(sourceDraft.source_element_type))?.reference_text ?? ''}
+                                                                </p>
+                                                                <p className="mt-1 text-xs text-sky-700">
+                                                                    {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}: {sourceDraft.page_reference || '—'}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                ) : null}
 
                                                 <div className="flex flex-wrap gap-2">
                                                     <button
                                                         type="button"
-                                                        disabled={claimSourceProcessing === claim.id || !sourceDraft.source_document_id || !String(sourceDraft.excerpt || '').trim()}
+                                                        disabled={
+                                                            claimSourceProcessing === claim.id
+                                                            || !sourceDraft.source_document_id
+                                                            || (
+                                                                selectedSourceCatalog
+                                                                && selectedSourceCatalog.manual_source_allowed
+                                                                && !String(sourceDraft.excerpt || '').trim()
+                                                            )
+                                                            || (
+                                                                selectedSourceCatalog
+                                                                && !selectedSourceCatalog.manual_source_allowed
+                                                                && !String(sourceDraft.source_element_key || '').trim()
+                                                            )
+                                                        }
                                                         onClick={() => linkClaimSource(claim)}
                                                         className="rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
                                                     >
@@ -623,6 +867,17 @@ export default function WikiShow({
                                         {ref.source_type && (
                                             <p className="text-xs text-slate-400">
                                                 {tw.source_type ?? 'Kildetype'}: {sourceTypeLabel(ref.source_type)}
+                                            </p>
+                                        )}
+                                        {ref.source_element_type && (
+                                            <p className="text-xs text-slate-400">
+                                                {tw.source_element_type ?? 'Kildeelement'}: {sourceElementTypeLabel(ref.source_element_type)}
+                                                {ref.source_element_key ? ` · ${ref.source_element_key}` : ''}
+                                            </p>
+                                        )}
+                                        {ref.source_row_key && ref.source_row_key !== ref.source_element_key && (
+                                            <p className="text-xs text-slate-400">
+                                                {tw.source_row_key ?? 'Radnøkkel'}: {ref.source_row_key}
                                             </p>
                                         )}
                                         {ref.page_reference && (

@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -300,6 +301,283 @@ class WikiClaimControllerTest extends TestCase
         $this->assertSame($document->original_filename, $reference->source_label);
         $this->assertSame('Dokumentet viser at påstanden er korrekt.', $reference->excerpt);
         $this->assertSame('Avsnitt 2.1', $reference->page_reference);
+    }
+
+    public function test_system_owner_can_link_structured_source_element_to_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $finding = $this->createOpenMissingSourceFinding($customer, $page, $claim);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['extracted_text' => 'Dokumenttekst.'])->save();
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock) use ($document): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => true,
+                    'manual_source_allowed' => false,
+                    'manual_source_reason' => 'Dokumentet har strukturerte kildeelementer.',
+                    'elements' => [
+                        [
+                            'source_element_key' => 'paragraph-0',
+                            'source_element_type' => 'paragraph',
+                            'source_row_key' => null,
+                            'page_reference' => 'Avsnitt 2.1',
+                            'reference_text' => 'Påstanden er dokumentert i dette avsnittet.',
+                            'display_text' => 'Påstanden er dokumentert i dette avsnittet.',
+                        ],
+                    ],
+                ]);
+
+            $mock->shouldReceive('resolveSelection')
+                ->once()
+                ->with(
+                    \Mockery::on(static fn ($arg): bool => $arg instanceof EnterpriseWikiDocument && $arg->id === $document->id),
+                    'paragraph-0',
+                    'paragraph',
+                    null,
+                )
+                ->andReturn([
+                    'source_element_key' => 'paragraph-0',
+                    'source_element_type' => 'paragraph',
+                    'source_row_key' => null,
+                    'page_reference' => 'Avsnitt 2.1',
+                    'reference_text' => 'Påstanden er dokumentert i dette avsnittet.',
+                    'display_text' => 'Påstanden er dokumentert i dette avsnittet.',
+                ]);
+        });
+
+        $response = $this->actingAs($owner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+            ],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id]));
+
+        $freshClaim = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $freshClaim->approval_status);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_FOUND, $freshClaim->sourceStatus());
+        $this->assertSame(EnterpriseWikiLintFinding::STATUS_RESOLVED, $finding->fresh()->status);
+
+        $reference = EnterpriseWikiSourceReference::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('source_id', $document->id)
+            ->first();
+
+        $this->assertNotNull($reference);
+        $this->assertSame('paragraph-0', $reference->source_element_key);
+        $this->assertSame('paragraph', $reference->source_element_type);
+        $this->assertNull($reference->source_row_key);
+        $this->assertSame('Påstanden er dokumentert i dette avsnittet.', $reference->excerpt);
+        $this->assertSame('Avsnitt 2.1', $reference->page_reference);
+        $this->assertNotEmpty($reference->source_hash);
+    }
+
+    public function test_system_owner_can_link_manual_source_excerpt_only_when_document_has_no_structured_elements(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['extracted_text' => 'Dokumenttekst.'])->save();
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => false,
+                    'manual_source_allowed' => true,
+                    'manual_source_reason' => 'Dokumentet har ikke strukturerte kildeelementer.',
+                    'elements' => [],
+                ]);
+
+            $mock->shouldReceive('resolveSelection')->never();
+        });
+
+        $response = $this->actingAs($owner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'excerpt' => 'Manuelt dokumentert utdrag.',
+                'page_reference' => 'Side 4',
+                'source_element_type' => 'manual',
+            ],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id]));
+
+        $reference = EnterpriseWikiSourceReference::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('source_id', $document->id)
+            ->first();
+
+        $this->assertNotNull($reference);
+        $this->assertSame(EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_MANUAL, $reference->source_element_type);
+        $this->assertNull($reference->source_element_key);
+        $this->assertNull($reference->source_row_key);
+        $this->assertSame('Manuelt dokumentert utdrag.', $reference->excerpt);
+        $this->assertSame('Side 4', $reference->page_reference);
+    }
+
+    public function test_invalid_structured_source_element_does_not_resolve_missing_source_warning(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $finding = $this->createOpenMissingSourceFinding($customer, $page, $claim);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['extracted_text' => 'Dokumenttekst.'])->save();
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock) use ($document): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => true,
+                    'manual_source_allowed' => false,
+                    'manual_source_reason' => 'Dokumentet har strukturerte kildeelementer.',
+                    'elements' => [],
+                ]);
+
+            $mock->shouldReceive('resolveSelection')
+                ->once()
+                ->with(
+                    \Mockery::on(static fn ($arg): bool => $arg instanceof EnterpriseWikiDocument && $arg->id === $document->id),
+                    'paragraph-9',
+                    'paragraph',
+                    null,
+                )
+                ->andReturnNull();
+        });
+
+        $response = $this->actingAs($owner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+            ],
+        );
+
+        $response->assertStatus(422);
+        $this->assertDatabaseMissing('enterprise_wiki_source_references', [
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_id' => $document->id,
+        ]);
+        $this->assertSame(EnterpriseWikiLintFinding::STATUS_OPEN, $finding->fresh()->status);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_MISSING, $claim->fresh()->sourceStatus());
+    }
+
+    public function test_source_element_endpoint_returns_structured_elements(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['extracted_text' => 'Dokumenttekst.'])->save();
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => true,
+                    'manual_source_allowed' => false,
+                    'manual_source_reason' => 'Dokumentet har strukturerte kildeelementer.',
+                    'elements' => [
+                        [
+                            'source_element_key' => 'listitem-0',
+                            'source_element_type' => 'list_item',
+                            'source_row_key' => null,
+                            'page_reference' => 'Avsnitt 1.2',
+                            'reference_text' => 'Første listepunkt.',
+                            'display_text' => 'Første listepunkt.',
+                        ],
+                    ],
+                ]);
+        });
+
+        $response = $this->actingAs($owner)->getJson("/app/wiki/{$page->slug}/claims/{$claim->id}/source-documents/{$document->id}/elements");
+
+        $response->assertOk();
+        $response->assertJsonPath('supports_structured_elements', true);
+        $response->assertJsonPath('manual_source_allowed', false);
+        $response->assertJsonPath('elements.0.source_element_key', 'listitem-0');
+        $response->assertJsonPath('elements.0.source_element_type', 'list_item');
+        $response->assertJsonPath('elements.0.reference_text', 'Første listepunkt.');
+    }
+
+    public function test_linking_first_real_source_resets_existing_manual_decision_to_pending(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $claim->update([
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            'approved_by_user_id' => $owner->id,
+            'approved_at' => now(),
+            'approval_comment' => 'Tidligere godkjent uten kilde.',
+        ]);
+        $finding = $this->createOpenMissingSourceFinding($customer, $page, $claim);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['extracted_text' => 'Dokumenttekst.'])->save();
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock) use ($document): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => true,
+                    'manual_source_allowed' => false,
+                    'manual_source_reason' => 'Dokumentet har strukturerte kildeelementer.',
+                    'elements' => [
+                        [
+                            'source_element_key' => 'paragraph-1',
+                            'source_element_type' => 'paragraph',
+                            'source_row_key' => null,
+                            'page_reference' => 'Avsnitt 3.4',
+                            'reference_text' => 'Ny dokumentasjon.',
+                            'display_text' => 'Ny dokumentasjon.',
+                        ],
+                    ],
+                ]);
+
+            $mock->shouldReceive('resolveSelection')
+                ->once()
+                ->with(
+                    \Mockery::on(static fn ($arg): bool => $arg instanceof EnterpriseWikiDocument && $arg->id === $document->id),
+                    'paragraph-1',
+                    'paragraph',
+                    null,
+                )
+                ->andReturn([
+                    'source_element_key' => 'paragraph-1',
+                    'source_element_type' => 'paragraph',
+                    'source_row_key' => null,
+                    'page_reference' => 'Avsnitt 3.4',
+                    'reference_text' => 'Ny dokumentasjon.',
+                    'display_text' => 'Ny dokumentasjon.',
+                ]);
+        });
+
+        $this->actingAs($owner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'source_element_key' => 'paragraph-1',
+                'source_element_type' => 'paragraph',
+            ],
+        );
+
+        $freshClaim = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $freshClaim->approval_status);
+        $this->assertNull($freshClaim->approved_by_user_id);
+        $this->assertNull($freshClaim->approved_at);
+        $this->assertNull($freshClaim->approval_comment);
+        $this->assertSame(EnterpriseWikiLintFinding::STATUS_RESOLVED, $finding->fresh()->status);
     }
 
     public function test_contributor_cannot_link_source_to_claim(): void

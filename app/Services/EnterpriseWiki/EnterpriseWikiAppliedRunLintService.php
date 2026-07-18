@@ -207,6 +207,36 @@ class EnterpriseWikiAppliedRunLintService
         ]);
     }
 
+    /**
+     * Purpose: Reset a claim's manual decision back to pending when its first real source
+     * reference arrives after an approval or rejection already existed.
+     * Inputs: The claim and whether it had no real source reference immediately before the new
+     * reference was attached.
+     * Returns: None.
+     * Side effects: Clears approval fields when the claim was previously decided without a real
+     * source basis and now has one.
+     */
+    public function resetClaimDecisionAfterFirstSourceReference(EnterpriseWikiClaim $claim, bool $wasMissingSourceBefore): void
+    {
+        if (! $wasMissingSourceBefore) {
+            return;
+        }
+
+        if (! in_array($claim->approval_status, [
+            EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+        ], true)) {
+            return;
+        }
+
+        $claim->update([
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'approved_by_user_id' => null,
+            'approved_at' => null,
+            'approval_comment' => null,
+        ]);
+    }
+
     // =========================================================================
     // Check groups
     // =========================================================================
