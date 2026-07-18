@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
@@ -43,6 +44,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -78,6 +80,8 @@ class WikiClaimController extends Controller
             ]);
         }
 
+        $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
+
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er godkjent.');
     }
 
@@ -99,7 +103,67 @@ class WikiClaimController extends Controller
             $validated['comment'] ?? null,
         );
 
+        $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
+
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er avvist.');
+    }
+
+    /**
+     * Cross-page overgeneration fix (Del 9/10): a best-practice suggestion sharing the same
+     * canonical fact across several page occurrences should require one human decision, not one
+     * per page. Once the primary claim is decided, apply the SAME decision to every other still-
+     * pending best_practice claim linked to the same canonical_fact_id — but only the decision
+     * itself (approval_status/who/when/comment), never the primary claim's edited wording; each
+     * sibling occurrence keeps its own page/block text. A sibling whose fact link went stale
+     * (e.g. this decision's own text edit diverged from the shared fact) is left untouched so it
+     * still gets its own independent human decision.
+     */
+    private function cascadeBestPracticeDecision(EnterpriseWikiClaim $claim, int $userId, string $status, ?string $comment): void
+    {
+        if ($claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE || $claim->canonical_fact_id === null) {
+            return;
+        }
+
+        $fact = $claim->canonicalFact ?? $claim->canonicalFact()->first();
+
+        if ($fact === null || $fact->is_stale) {
+            return;
+        }
+
+        $siblings = EnterpriseWikiClaim::query()
+            ->where('canonical_fact_id', $fact->id)
+            ->where('id', '!=', $claim->id)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)
+            ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
+            ->get();
+
+        foreach ($siblings as $sibling) {
+            if (! $this->canonicalizationService->areEquivalentTexts($sibling->claim_text, $fact->canonical_text)) {
+                continue;
+            }
+
+            $this->storeDecision($sibling, $userId, $status, $comment);
+
+            if ($status !== EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED) {
+                continue;
+            }
+
+            $siblingPage = $sibling->page()->first();
+
+            if ($siblingPage === null) {
+                continue;
+            }
+
+            $this->pageLinksService->materializeWikilinksForPage($siblingPage);
+
+            $sibling->fresh()->update([
+                'review_metadata' => array_merge($sibling->fresh()->review_metadata ?? [], [
+                    'visible_wiki_link_result' => str_contains((string) $sibling->fresh()->claim_text, '[[')
+                        ? 'materialized_from_approved_text'
+                        : 'no_visible_link_needed',
+                ]),
+            ]);
+        }
     }
 
     public function storeSourceReference(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -268,6 +332,14 @@ class WikiClaimController extends Controller
             422,
             'Best-practice text can only be edited when the original block is still present in the current Wiki page version.',
         );
+
+        if ($claim->canonical_fact_id !== null) {
+            $fact = $claim->canonicalFact ?? $claim->canonicalFact()->first();
+
+            if ($fact !== null) {
+                $this->canonicalizationService->markStaleIfDiverged($fact, $approvedText);
+            }
+        }
 
         $claim->update([
             'claim_text' => $approvedText,

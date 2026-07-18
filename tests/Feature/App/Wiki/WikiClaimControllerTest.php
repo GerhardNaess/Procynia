@@ -916,8 +916,146 @@ class WikiClaimControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Cross-page canonical fact cascading (Del 9/10)
+    // =========================================================================
+
+    public function test_approving_best_practice_claim_cascades_to_equivalent_sibling_on_another_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $fact = $this->createCanonicalFact($customer, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+
+        [$pageA, , $claimA] = $this->createBestPracticeClaim($customer, $fact, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+        [$pageB, , $claimB] = $this->createBestPracticeClaim($customer, $fact, 'Systemeier bør jevnlig gjennomgå tilganger.');
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$pageA->slug}/claims/{$claimA->id}/approve",
+            ['comment' => 'Godkjent som beste praksis.'],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $pageA->slug));
+
+        $freshB = $claimB->fresh();
+        $this->assertTrue($freshB->isApproved());
+        $this->assertSame($owner->id, $freshB->approved_by_user_id);
+        $this->assertSame('Godkjent som beste praksis.', $freshB->approval_comment);
+    }
+
+    public function test_rejecting_best_practice_claim_cascades_to_equivalent_sibling_on_another_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $fact = $this->createCanonicalFact($customer, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+
+        [$pageA, , $claimA] = $this->createBestPracticeClaim($customer, $fact, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+        [, , $claimB] = $this->createBestPracticeClaim($customer, $fact, 'Systemeier bør jevnlig gjennomgå tilganger.');
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$pageA->slug}/claims/{$claimA->id}/reject",
+            ['comment' => 'Ikke relevant for denne kunden.'],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $pageA->slug));
+
+        $freshB = $claimB->fresh();
+        $this->assertTrue($freshB->isRejected());
+        $this->assertSame('Ikke relevant for denne kunden.', $freshB->approval_comment);
+    }
+
+    public function test_cascade_skips_sibling_whose_wording_no_longer_matches_the_canonical_fact(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $fact = $this->createCanonicalFact($customer, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+
+        [$pageA, , $claimA] = $this->createBestPracticeClaim($customer, $fact, 'Tilganger bør gjennomgås jevnlig av systemeier.');
+        [, , $claimB] = $this->createBestPracticeClaim(
+            $customer,
+            $fact,
+            'Kritiske hendelser skal eskaleres til vaktansvarlig innen 15 minutter.',
+        );
+
+        $this->actingAs($owner)->patch("/app/wiki/{$pageA->slug}/claims/{$claimA->id}/approve");
+
+        $freshB = $claimB->fresh();
+        $this->assertTrue($freshB->isPending());
+    }
+
+    public function test_approving_edited_best_practice_claim_that_diverges_from_the_fact_marks_it_stale_and_skips_cascade(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $originalText = 'Tilganger bør gjennomgås jevnlig av systemeier.';
+        $fact = $this->createCanonicalFact($customer, $originalText);
+
+        [$pageA, $versionA, $claimA] = $this->createBestPracticeClaim($customer, $fact, $originalText);
+        [, , $claimB] = $this->createBestPracticeClaim($customer, $fact, 'Systemeier bør jevnlig gjennomgå tilganger.');
+
+        $versionA->update([
+            'content_markdown' => "# Claim Page\n\n{$originalText}",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => '# Claim Page',
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => $originalText,
+                ],
+            ],
+        ]);
+        $claimA->update(['content_block_key' => 'block-0002']);
+
+        $divergedText = 'Kritiske hendelser skal eskaleres til vaktansvarlig innen 15 minutter.';
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$pageA->slug}/claims/{$claimA->id}/approve",
+            ['approved_text' => $divergedText],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $pageA->slug));
+
+        $this->assertTrue($fact->fresh()->is_stale);
+        $this->assertTrue($claimB->fresh()->isPending());
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
+
+    private function createCanonicalFact(Customer $customer, string $canonicalText): \App\Models\EnterpriseWikiCanonicalFact
+    {
+        return \App\Models\EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'source_element_keys' => [],
+            'source_element_keys_hash' => hash('sha256', Str::random(32)),
+            'normalized_fingerprint' => hash('sha256', $canonicalText),
+            'canonical_text' => $canonicalText,
+            'verification_status' => 'verified_unsupported',
+            'verified_at' => now(),
+        ]);
+    }
+
+    /**
+     * @return array{0: EnterpriseWikiPage, 1: EnterpriseWikiPageVersion, 2: EnterpriseWikiClaim}
+     */
+    private function createBestPracticeClaim(Customer $customer, \App\Models\EnterpriseWikiCanonicalFact $fact, string $claimText): array
+    {
+        [$page, $version, $claim] = $this->createPageWithClaim($customer);
+
+        $claim->update([
+            'claim_text' => $claimText,
+            'page_excerpt' => $claimText,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'canonical_fact_id' => $fact->id,
+        ]);
+
+        return [$page, $version, $claim->fresh()];
+    }
 
     private function createCustomer(string $name = 'Wiki Claim Test AS'): Customer
     {

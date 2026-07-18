@@ -84,6 +84,7 @@ class EnterpriseWikiClaim extends Model
         'content_origin',
         'page_excerpt',
         'content_block_key',
+        'canonical_fact_id',
         'review_reason',
         'review_metadata',
         'generation_issue',
@@ -134,6 +135,11 @@ class EnterpriseWikiClaim extends Model
     public function sourceReferences(): HasMany
     {
         return $this->hasMany(EnterpriseWikiSourceReference::class);
+    }
+
+    public function canonicalFact(): BelongsTo
+    {
+        return $this->belongsTo(EnterpriseWikiCanonicalFact::class, 'canonical_fact_id');
     }
 
     public function isPending(): bool

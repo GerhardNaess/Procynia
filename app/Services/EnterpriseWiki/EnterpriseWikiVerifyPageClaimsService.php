@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -56,10 +57,11 @@ class EnterpriseWikiVerifyPageClaimsService
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
 
     /**
-     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int, busy: int}
+     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int, busy: int, reused: int}
      *
      * @throws \InvalidArgumentException if the run is not applied or the source document is missing
      * @throws \RuntimeException if AI is unavailable or verification fails
@@ -97,6 +99,7 @@ class EnterpriseWikiVerifyPageClaimsService
         $skipped = 0;
         $noSupport = 0;
         $busy = 0;
+        $reused = 0;
 
         foreach ($pivotRows as $row) {
             $page = $row->page;
@@ -159,6 +162,34 @@ class EnterpriseWikiVerifyPageClaimsService
                     continue;
                 }
 
+                // Cross-page overgeneration fix: before calling AI, check whether this claim
+                // expresses a fact already verified for another occurrence (same customer,
+                // content_origin, document/source version, and cited source elements — Del 3/6).
+                // Only claims carrying a real structured source reference are eligible; a claim
+                // with none (e.g. an unstructured/manual reference) has nothing safe to key on
+                // and is always verified independently.
+                $reusableFact = $this->canonicalizationService->findReusableFact($claim, $run->customer_id);
+
+                if ($reusableFact !== null) {
+                    $outcome = $this->persistReusedFact($claim->id, $token, $reusableFact);
+
+                    if ($outcome === null) {
+                        $busy++;
+
+                        continue;
+                    }
+
+                    $reused++;
+
+                    if ($outcome === 'unsupported') {
+                        $noSupport++;
+                    } else {
+                        $references++;
+                    }
+
+                    continue;
+                }
+
                 try {
                     $result = $this->aiClient->verifyClaim(
                         claimText: $claim->claim_text,
@@ -196,6 +227,7 @@ class EnterpriseWikiVerifyPageClaimsService
             'skipped' => $skipped,
             'no_support' => $noSupport,
             'busy' => $busy,
+            'reused' => $reused,
         ];
     }
 
@@ -279,6 +311,11 @@ class EnterpriseWikiVerifyPageClaimsService
                 return 'unsupported';
             }
 
+            // A local anchor problem is always a per-occurrence defect (Del 8) — captured before
+            // recordOutcome() below, which must key on the claim's pre-verification origin
+            // (source_based/best_practice), never on internal_error/unsupported.
+            $originalContentOrigin = (string) $claim->content_origin;
+
             if (! $result['supported']) {
                 $bestPractice = $this->isPositiveBestPracticeSuggestion($claim);
 
@@ -303,6 +340,14 @@ class EnterpriseWikiVerifyPageClaimsService
                     'verification_claimed_at' => null,
                     'verification_claim_token' => null,
                 ]);
+
+                $this->canonicalizationService->recordOutcome(
+                    $claim->fresh(['sourceReferences']),
+                    $document->customer_id,
+                    $originalContentOrigin,
+                    EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+                    null,
+                );
 
                 return 'unsupported';
             }
@@ -339,7 +384,69 @@ class EnterpriseWikiVerifyPageClaimsService
                 'verification_claim_token' => null,
             ]);
 
+            $this->canonicalizationService->recordOutcome(
+                $claim->fresh(['sourceReferences']),
+                $document->customer_id,
+                $originalContentOrigin,
+                EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+                (string) ($result['excerpt'] ?? ''),
+            );
+
             return 'supported';
+        });
+    }
+
+    /**
+     * Apply an already-verified canonical fact's outcome to a NEW occurrence without calling AI
+     * — the actual cost/duplication saving of cross-page canonicalization (Del 6). Only reached
+     * after EnterpriseWikiClaimCanonicalizationService::findReusableFact() has already confirmed
+     * both the Tier-1 hard key and the Tier-2 deterministic equivalence check.
+     *
+     * @return string|null 'supported', 'unsupported', or null if the reservation was lost
+     */
+    private function persistReusedFact(int $claimId, string $token, EnterpriseWikiCanonicalFact $fact): ?string
+    {
+        return DB::transaction(function () use ($claimId, $token, $fact): ?string {
+            $claim = EnterpriseWikiClaim::query()
+                ->where('id', $claimId)
+                ->where('verification_claim_token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if ($claim === null) {
+                return null;
+            }
+
+            $finalOrigin = $this->canonicalizationService->resolveContentOriginForReuse($fact);
+            $bestPractice = $finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+            $unsupported = $finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;
+
+            $claim->update([
+                'content_origin' => $finalOrigin,
+                'canonical_fact_id' => $fact->id,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                'review_reason' => $bestPractice
+                    ? 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.'
+                    : null,
+                'generation_issue' => $unsupported ? 'unsupported_generated_content' : null,
+                'verified_at' => now(),
+                'verification_claimed_at' => null,
+                'verification_claim_token' => null,
+            ]);
+
+            if ($finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                $hasExistingReferences = EnterpriseWikiSourceReference::query()
+                    ->where('enterprise_wiki_claim_id', $claim->id)
+                    ->exists();
+
+                if ($hasExistingReferences) {
+                    $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
+                }
+
+                return 'supported';
+            }
+
+            return 'unsupported';
         });
     }
 
