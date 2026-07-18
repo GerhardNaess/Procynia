@@ -3488,6 +3488,122 @@ return [
         'quality_filter_code_all' => 'All checks',
         'quality_filter_page_type_all' => 'All page types',
         'quality_filter_clear' => 'Clear filters',
+        'quality_check_unknown_label' => 'Unknown check type',
+        'quality_check_unknown_description' => 'This quality check has not been translated yet.',
+        'quality_checks' => [
+            'applied_run_without_article' => [
+                'label' => 'Run is missing an article',
+                'description' => 'The run does not contain an article page.',
+            ],
+            'applied_run_without_pages' => [
+                'label' => 'Run is missing pages',
+                'description' => 'The run does not contain any pages.',
+            ],
+            'applied_run_without_summary' => [
+                'label' => 'Run is missing a summary',
+                'description' => 'The run does not contain a summary page.',
+            ],
+            'article_without_concept_or_entity_links' => [
+                'label' => 'Article is missing concept or entity links',
+                'description' => 'The article does not link to concept pages or entity pages.',
+            ],
+            'article_without_summary_link' => [
+                'label' => 'Article is missing a summary link',
+                'description' => 'The article does not link to the summary page.',
+            ],
+            'broken_wikilink' => [
+                'label' => 'Invalid wiki link',
+                'description' => 'The content contains a wiki link that does not point to a valid page.',
+            ],
+            'claim_missing_source' => [
+                'label' => 'Claim is missing a source reference',
+                'description' => 'The claim does not have a source reference.',
+            ],
+            'concept_without_incoming_wikilink' => [
+                'label' => 'Concept page is missing an incoming wiki link',
+                'description' => 'The concept page has no incoming wiki links from other pages.',
+            ],
+            'cross_customer_wikilink' => [
+                'label' => 'Wiki link points to another customer',
+                'description' => 'The content points to a page that belongs to another customer.',
+            ],
+            'empty_page_content' => [
+                'label' => 'Page has empty content',
+                'description' => 'The current page version has no text content.',
+            ],
+            'entity_without_incoming_wikilink' => [
+                'label' => 'Entity page is missing an incoming wiki link',
+                'description' => 'The entity page has no incoming wiki links from other pages.',
+            ],
+            'malformed_wikilink' => [
+                'label' => 'Content contains a malformed wiki link',
+                'description' => 'The content contains a wiki link that cannot be read correctly.',
+            ],
+            'missing_current_version' => [
+                'label' => 'Page is missing a current version',
+                'description' => 'The page has no current version to check.',
+            ],
+            'missing_reverse_link' => [
+                'label' => 'Missing reverse link',
+                'description' => 'An expected link back to this page is missing.',
+            ],
+            'missing_wikilink_materialization' => [
+                'label' => 'Wiki links are not materialized',
+                'description' => 'The page has valid wiki links in the content, but they are not materialized in the link structure.',
+            ],
+            'orphan_concept_page' => [
+                'label' => 'Concept page is not linked to other pages',
+                'description' => 'The concept page has no links to article or summary pages.',
+            ],
+            'orphan_entity_page' => [
+                'label' => 'Entity page is not linked to other pages',
+                'description' => 'The entity page has no links to article or summary pages.',
+            ],
+            'page_without_claims' => [
+                'label' => 'Page is missing claims',
+                'description' => 'The page has no claims extracted from its content.',
+            ],
+            'page_without_incoming_links' => [
+                'label' => 'Page is missing incoming links',
+                'description' => 'No other pages link to this page yet.',
+            ],
+            'page_without_outgoing_links' => [
+                'label' => 'Page is missing outgoing links',
+                'description' => 'The page does not have any outgoing links yet.',
+            ],
+            'run_targets_available_but_not_linked' => [
+                'label' => 'Available pages are not linked',
+                'description' => 'There are other pages in the run, but this page has no outgoing wiki link.',
+            ],
+            'self_wikilink' => [
+                'label' => 'Self link in content',
+                'description' => 'The content contains a wiki link that points back to the same page.',
+            ],
+            'source_reference_customer_mismatch' => [
+                'label' => 'Source reference points to another customer',
+                'description' => 'The source reference points to a document that belongs to another customer.',
+            ],
+            'source_reference_missing_excerpt' => [
+                'label' => 'Source reference is missing an excerpt',
+                'description' => 'The source reference has no text excerpt attached to it.',
+            ],
+            'source_reference_without_document' => [
+                'label' => 'Source reference points to a missing document',
+                'description' => 'The source reference points to a document that no longer exists.',
+            ],
+            'stale_wikilink_graph_edge' => [
+                'label' => 'Stale wiki link in graph',
+                'description' => 'The graph shows a link that no longer exists in the current page version.',
+            ],
+            'summary_without_article_link' => [
+                'label' => 'Summary is missing an article link',
+                'description' => 'The summary page does not link back to the article.',
+            ],
+            'wikilink_projection_mismatch' => [
+                'label' => 'Wiki link and graph are out of sync',
+                'description' => 'The content contains a valid wiki link that has not yet been reflected in the materialized link view.',
+            ],
+        ],
         'filter_search_placeholder' => 'Search...',
         'filter_page_type_all' => 'All types',
         'filter_status_all' => 'All statuses',

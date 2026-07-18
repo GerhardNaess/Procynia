@@ -2801,6 +2801,60 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_quality_tab_keeps_unknown_check_types_visible(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $finding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'code' => 'future_unknown_check_type',
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_INFO,
+            'message' => 'Future unknown check message.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
+            $found = collect(data_get($inertia, 'props.quality_findings', []))
+                ->firstWhere('id', $finding->id);
+
+            return $found !== null
+                && ($found['code'] ?? null) === 'future_unknown_check_type'
+                && ($found['message'] ?? null) === 'Future unknown check message.';
+        });
+    }
+
+    public function test_quality_tab_translates_all_current_check_types(): void
+    {
+        $codes = EnterpriseWikiLintFinding::CODES;
+        $locale = app()->getLocale();
+
+        app()->setLocale('no');
+        foreach ($codes as $code) {
+            $label = trans("procynia.wiki.quality_checks.{$code}.label");
+            $description = trans("procynia.wiki.quality_checks.{$code}.description");
+
+            $this->assertNotSame($code, $label);
+            $this->assertNotEmpty($description);
+        }
+
+        app()->setLocale('en');
+        foreach ($codes as $code) {
+            $label = trans("procynia.wiki.quality_checks.{$code}.label");
+            $description = trans("procynia.wiki.quality_checks.{$code}.description");
+
+            $this->assertNotSame($code, $label);
+            $this->assertNotEmpty($description);
+        }
+
+        app()->setLocale($locale);
+    }
+
     public function test_quality_tab_empty_state_handled_gracefully(): void
     {
         $customer = $this->createCustomer();

@@ -3488,6 +3488,122 @@ return [
         'quality_filter_code_all' => 'Alle sjekker',
         'quality_filter_page_type_all' => 'Alle sidetyper',
         'quality_filter_clear' => 'Nullstill',
+        'quality_check_unknown_label' => 'Ukjent sjekktype',
+        'quality_check_unknown_description' => 'Denne kvalitetssjekken er ikke oversatt ennå.',
+        'quality_checks' => [
+            'applied_run_without_article' => [
+                'label' => 'Kjøring mangler artikkel',
+                'description' => 'Kjøringen har ingen artikkelside.',
+            ],
+            'applied_run_without_pages' => [
+                'label' => 'Kjøring mangler sider',
+                'description' => 'Kjøringen inneholder ingen sider.',
+            ],
+            'applied_run_without_summary' => [
+                'label' => 'Kjøring mangler sammendrag',
+                'description' => 'Kjøringen har ingen sammendragsside.',
+            ],
+            'article_without_concept_or_entity_links' => [
+                'label' => 'Artikkel mangler koblinger til begreper eller enheter',
+                'description' => 'Artikkelen mangler koblinger til begrepssider eller enhetssider.',
+            ],
+            'article_without_summary_link' => [
+                'label' => 'Artikkel mangler lenke til sammendrag',
+                'description' => 'Artikkelen mangler en lenke til sammendragssiden.',
+            ],
+            'broken_wikilink' => [
+                'label' => 'Ugyldig wikilenke',
+                'description' => 'Innholdet inneholder en wikilenke som ikke peker til en gyldig side.',
+            ],
+            'claim_missing_source' => [
+                'label' => 'Påstand mangler kildehenvisning',
+                'description' => 'Påstanden mangler en kildehenvisning.',
+            ],
+            'concept_without_incoming_wikilink' => [
+                'label' => 'Begrepsside mangler innkommende wikilenke',
+                'description' => 'Begrepssiden har ingen innkommende wikilenke fra andre sider.',
+            ],
+            'cross_customer_wikilink' => [
+                'label' => 'Wikilenke peker til annen kunde',
+                'description' => 'Innholdet peker til en side som tilhører en annen kunde.',
+            ],
+            'empty_page_content' => [
+                'label' => 'Side har tomt innhold',
+                'description' => 'Den aktuelle sideversjonen har ingen tekstinnhold.',
+            ],
+            'entity_without_incoming_wikilink' => [
+                'label' => 'Enhetsside mangler innkommende wikilenke',
+                'description' => 'Enhetssiden har ingen innkommende wikilenke fra andre sider.',
+            ],
+            'malformed_wikilink' => [
+                'label' => 'Innholdet inneholder ugyldig wikilenke',
+                'description' => 'Innholdet inneholder en wikilenke som ikke kan leses riktig.',
+            ],
+            'missing_current_version' => [
+                'label' => 'Side mangler gjeldende versjon',
+                'description' => 'Siden har ingen gjeldende versjon som kan kontrolleres.',
+            ],
+            'missing_reverse_link' => [
+                'label' => 'Mangler motsatt lenke',
+                'description' => 'En forventet lenke tilbake til denne siden mangler.',
+            ],
+            'missing_wikilink_materialization' => [
+                'label' => 'Wikilenker er ikke materialisert',
+                'description' => 'Siden har gyldige wikilenker i innholdet, men de er ikke materialisert i lenkestrukturen.',
+            ],
+            'orphan_concept_page' => [
+                'label' => 'Begrepsside er ikke koblet til andre sider',
+                'description' => 'Begrepssiden har ingen lenker til artikkel- eller sammendragssider.',
+            ],
+            'orphan_entity_page' => [
+                'label' => 'Enhetsside er ikke koblet til andre sider',
+                'description' => 'Enhetssiden har ingen lenker til artikkel- eller sammendragssider.',
+            ],
+            'page_without_claims' => [
+                'label' => 'Side mangler påstander',
+                'description' => 'Siden har ingen påstander hentet ut fra innholdet.',
+            ],
+            'page_without_incoming_links' => [
+                'label' => 'Side mangler innkommende lenker',
+                'description' => 'Ingen andre sider lenker til denne siden ennå.',
+            ],
+            'page_without_outgoing_links' => [
+                'label' => 'Side mangler utgående lenker',
+                'description' => 'Siden har ingen utgående lenker ennå.',
+            ],
+            'run_targets_available_but_not_linked' => [
+                'label' => 'Tilgjengelige sider er ikke koblet',
+                'description' => 'Det finnes andre sider i kjøringen, men denne siden har ingen utgående wikilenke.',
+            ],
+            'self_wikilink' => [
+                'label' => 'Selvlenke i innholdet',
+                'description' => 'Innholdet inneholder en wikilenke som peker tilbake til samme side.',
+            ],
+            'source_reference_customer_mismatch' => [
+                'label' => 'Kildehenvisning peker til annen kunde',
+                'description' => 'Kildehenvisningen peker til et dokument som tilhører en annen kunde.',
+            ],
+            'source_reference_missing_excerpt' => [
+                'label' => 'Kildehenvisning mangler utdrag',
+                'description' => 'Kildehenvisningen har ikke et tilhørende tekstutdrag.',
+            ],
+            'source_reference_without_document' => [
+                'label' => 'Kildehenvisning peker til manglende dokument',
+                'description' => 'Kildehenvisningen peker til et dokument som ikke finnes lenger.',
+            ],
+            'stale_wikilink_graph_edge' => [
+                'label' => 'Utdatert wikilenke i grafen',
+                'description' => 'Grafen viser en lenke som ikke lenger finnes i gjeldende sideversjon.',
+            ],
+            'summary_without_article_link' => [
+                'label' => 'Sammendrag mangler lenke til artikkel',
+                'description' => 'Sammendragssiden mangler en lenke tilbake til artikkelen.',
+            ],
+            'wikilink_projection_mismatch' => [
+                'label' => 'Wikilenke og graf er ikke synkronisert',
+                'description' => 'Innholdet inneholder en gyldig wikilenke som ennå ikke er speilet i den materialiserte lenkevisningen.',
+            ],
+        ],
         'filter_search_placeholder' => 'Søk...',
         'filter_page_type_all' => 'Alle typer',
         'filter_status_all' => 'Alle statuser',

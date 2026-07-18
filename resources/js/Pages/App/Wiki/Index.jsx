@@ -2218,6 +2218,66 @@ const PAGE_TYPE_LABELS = {
     backlinks: 'Backlinks',
 };
 
+const QUALITY_CHECKS = {
+    applied_run_without_article: 'applied_run_without_article',
+    applied_run_without_pages: 'applied_run_without_pages',
+    applied_run_without_summary: 'applied_run_without_summary',
+    article_without_concept_or_entity_links: 'article_without_concept_or_entity_links',
+    article_without_summary_link: 'article_without_summary_link',
+    broken_wikilink: 'broken_wikilink',
+    claim_missing_source: 'claim_missing_source',
+    concept_without_incoming_wikilink: 'concept_without_incoming_wikilink',
+    cross_customer_wikilink: 'cross_customer_wikilink',
+    empty_page_content: 'empty_page_content',
+    entity_without_incoming_wikilink: 'entity_without_incoming_wikilink',
+    malformed_wikilink: 'malformed_wikilink',
+    missing_current_version: 'missing_current_version',
+    missing_reverse_link: 'missing_reverse_link',
+    missing_wikilink_materialization: 'missing_wikilink_materialization',
+    orphan_concept_page: 'orphan_concept_page',
+    orphan_entity_page: 'orphan_entity_page',
+    page_without_claims: 'page_without_claims',
+    page_without_incoming_links: 'page_without_incoming_links',
+    page_without_outgoing_links: 'page_without_outgoing_links',
+    run_targets_available_but_not_linked: 'run_targets_available_but_not_linked',
+    self_wikilink: 'self_wikilink',
+    source_reference_customer_mismatch: 'source_reference_customer_mismatch',
+    source_reference_missing_excerpt: 'source_reference_missing_excerpt',
+    source_reference_without_document: 'source_reference_without_document',
+    stale_wikilink_graph_edge: 'stale_wikilink_graph_edge',
+    summary_without_article_link: 'summary_without_article_link',
+    wikilink_projection_mismatch: 'wikilink_projection_mismatch',
+};
+
+function getNestedTranslation(source, path, fallback = null) {
+    return path.split('.').reduce((value, key) => value?.[key], source) ?? fallback;
+}
+
+function getQualityCheckCopy(code, tw) {
+    const key = QUALITY_CHECKS[code];
+    const translated = key ? {
+        label: getNestedTranslation(tw, `quality_checks.${key}.label`),
+        description: getNestedTranslation(tw, `quality_checks.${key}.description`),
+    } : null;
+
+    if (translated) {
+        return {
+            label: translated.label ?? code,
+            description: translated.description ?? '',
+            unknown: false,
+        };
+    }
+
+    const unknownLabel = tw.quality_check_unknown_label ?? 'Ukjent sjekktype';
+    const unknownDescription = tw.quality_check_unknown_description ?? 'Denne kvalitetssjekken er ikke oversatt ennå.';
+
+    return {
+        label: `${unknownLabel}: ${code}`,
+        description: `${unknownDescription} (${code})`,
+        unknown: true,
+    };
+}
+
 function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale }) {
     const filters = qualityFilters ?? {};
 
@@ -2260,7 +2320,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                 >
                     <option value="">{tw.quality_filter_code_all ?? 'Alle sjekker'}</option>
                     {usedCodes.map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>{getQualityCheckCopy(c, tw).label}</option>
                     ))}
                 </select>
 
@@ -2313,6 +2373,8 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                             <tbody className="divide-y divide-slate-100">
                                 {findings.map((f) => {
                                     const sevCls = SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600';
+                                    const checkCopy = getQualityCheckCopy(f.code, tw);
+                                    const description = checkCopy.unknown && f.message ? f.message : (checkCopy.description || f.message || '');
                                     return (
                                         <tr key={f.id} className="text-sm text-slate-700">
                                             <td className="max-w-[180px] px-4 py-3">
@@ -2338,9 +2400,18 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                                             <td className="px-4 py-3">
                                                 <span className={`${BADGE} ${sevCls}`}>{f.severity}</span>
                                             </td>
-                                            <td className="px-4 py-3 font-mono text-[11px] text-slate-500">{f.code}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="space-y-0.5">
+                                                    <div className="text-sm font-medium text-slate-700">
+                                                        {checkCopy.label}
+                                                    </div>
+                                                    {checkCopy.unknown && (
+                                                        <div className="font-mono text-[11px] text-slate-400">{f.code}</div>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td className="max-w-[240px] px-4 py-3 text-slate-600">
-                                                <span className="block truncate" title={f.message}>{f.message}</span>
+                                                <span className="block truncate" title={description}>{description || '—'}</span>
                                             </td>
                                             <td className="max-w-[160px] px-4 py-3">
                                                 {f.source_filename ? (
