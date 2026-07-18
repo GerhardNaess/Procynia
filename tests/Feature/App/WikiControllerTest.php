@@ -214,7 +214,7 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia): bool {
+        $response->assertViewHas('page', function (array $inertia) use ($owner): bool {
             $props = data_get($inertia, 'props');
             $summary = data_get($props, 'document_owner_approval_summary', []);
             $approvals = collect(data_get($props, 'document_owner_approvals', []));
@@ -222,9 +222,14 @@ class WikiControllerTest extends TestCase
 
             return data_get($props, 'page.status') === EnterpriseWikiPage::STATUS_DRAFT
                 && ($summary['ready'] ?? null) === true
-                && ($summary['ui_status_label'] ?? null) === __('procynia.wiki.document_owner_ready_label')
-                && ($summary['scope_note'] ?? null) === __('procynia.wiki.document_owner_scope_note')
-                && ($approval['display_status_label'] ?? null) === __('procynia.wiki.document_owner_approved_detail_label')
+                && ($summary['summary_text'] ?? null) === __('procynia.wiki.document_owner_summary_approved', [
+                    'approved' => 1,
+                    'total' => 1,
+                ])
+                && ($approval['summary_text'] ?? null) === __('procynia.wiki.document_owner_sentence_approved', [
+                    'owner' => $owner->name,
+                    'source' => 'test-document.pdf',
+                ])
                 && ($approval['approval_status'] ?? null) === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED;
         });
     }

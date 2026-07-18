@@ -345,6 +345,132 @@ class WikiController extends Controller
         ];
     }
 
+    private function documentOwnerApprovalSummaryText(Collection $approvalRows): string
+    {
+        $totalSourceDocuments = $approvalRows
+            ->flatMap(function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): array {
+                return is_array($approval->source_document_ids) ? $approval->source_document_ids : [];
+            })
+            ->map(static fn (mixed $value): int => (int) $value)
+            ->filter(static fn (int $value): bool => $value > 0)
+            ->unique()
+            ->count();
+
+        if ($totalSourceDocuments === 0) {
+            return '';
+        }
+
+        $countForStatus = static function (Collection $rows, string $status): int {
+            return $rows
+                ->where('approval_status', $status)
+                ->sum(static function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): int {
+                    return is_array($approval->source_document_ids) ? count($approval->source_document_ids) : 0;
+                });
+        };
+
+        $approvedCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+        $pendingCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+        $rejectedCount = $countForStatus($approvalRows, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
+        $missingOwnerCount = $approvalRows
+            ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
+            ->whereNull('document_owner_user_id')
+            ->sum(static function (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): int {
+                return is_array($approval->source_document_ids) ? count($approval->source_document_ids) : 0;
+            });
+
+        if ($approvedCount === 0 && $pendingCount === 0 && $rejectedCount === 0 && $missingOwnerCount > 0) {
+            return trans_choice('procynia.wiki.document_owner_summary_missing_owner', $missingOwnerCount, [
+                'count' => $missingOwnerCount,
+            ]);
+        }
+
+        $parts = [];
+
+        if ($approvedCount > 0) {
+            $parts[] = trans_choice('procynia.wiki.document_owner_summary_approved', $approvedCount, [
+                'approved' => $approvedCount,
+                'total' => $totalSourceDocuments,
+            ]);
+        }
+
+        if ($pendingCount > 0) {
+            $parts[] = trans_choice('procynia.wiki.document_owner_summary_pending', $pendingCount, [
+                'count' => $pendingCount,
+            ]);
+        }
+
+        if ($rejectedCount > 0) {
+            $parts[] = trans_choice('procynia.wiki.document_owner_summary_rejected', $rejectedCount, [
+                'count' => $rejectedCount,
+            ]);
+        }
+
+        if ($missingOwnerCount > 0) {
+            $parts[] = trans_choice('procynia.wiki.document_owner_summary_missing_owner', $missingOwnerCount, [
+                'count' => $missingOwnerCount,
+            ]);
+        }
+
+        return implode(' · ', $parts);
+    }
+
+    private function documentOwnerApprovalSentence(
+        EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
+        Collection $sourceDocuments,
+    ): string {
+        $sourceLabel = $this->documentOwnerApprovalSourceLabel($approval, $sourceDocuments);
+
+        if ($approval->is_override) {
+            return __('procynia.wiki.document_owner_sentence_overridden', [
+                'source' => $sourceLabel,
+            ]);
+        }
+
+        return match ($approval->approval_status) {
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED => __('procynia.wiki.document_owner_sentence_approved', [
+                'owner' => $approval->documentOwner?->name ?? __('procynia.wiki.document_owner_label'),
+                'source' => $sourceLabel,
+            ]),
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED => __('procynia.wiki.document_owner_sentence_rejected', [
+                'owner' => $approval->documentOwner?->name ?? __('procynia.wiki.document_owner_label'),
+                'source' => $sourceLabel,
+            ]),
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING => $approval->document_owner_user_id === null
+                ? __('procynia.wiki.document_owner_sentence_missing_owner', [
+                    'source' => $sourceLabel,
+                ])
+                : __('procynia.wiki.document_owner_sentence_pending', [
+                    'owner' => $approval->documentOwner?->name ?? __('procynia.wiki.document_owner_label'),
+                    'source' => $sourceLabel,
+                ]),
+            default => __('procynia.wiki.document_owner_sentence_pending', [
+                'owner' => $approval->documentOwner?->name ?? __('procynia.wiki.document_owner_label'),
+                'source' => $sourceLabel,
+            ]),
+        };
+    }
+
+    private function documentOwnerApprovalSourceLabel(
+        EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
+        Collection $sourceDocuments,
+    ): string {
+        $documentIds = collect(is_array($approval->source_document_ids) ? $approval->source_document_ids : [])
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->filter(static fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values();
+
+        if ($documentIds->count() === 1) {
+            $document = $sourceDocuments->get($documentIds->first());
+
+            return $document?->original_filename ?? __('procynia.wiki.document_owner_source_single_fallback');
+        }
+
+        return trans_choice('procynia.wiki.document_owner_source_multiple', $documentIds->count(), [
+            'count' => $documentIds->count(),
+        ]);
+    }
+
     private function loadSourcesTab(?User $user, int $customerId, Request $request): array
     {
         $allowedDocStatuses = [
@@ -707,11 +833,7 @@ class WikiController extends Controller
                 return [
                     'id' => $approval->id,
                     'approval_status' => $approval->approval_status,
-                    'display_status_label' => match ($approval->approval_status) {
-                        EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED => __('procynia.wiki.document_owner_approved_detail_label'),
-                        EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED => __('procynia.wiki.document_owner_rejected_detail_label'),
-                        default => __('procynia.wiki.document_owner_pending_detail_label'),
-                    },
+                    'summary_text' => $this->documentOwnerApprovalSentence($approval, $sourceDocuments),
                     'approval_comment' => $approval->approval_comment,
                     'decided_at' => $approval->decided_at,
                     'decided_by_name' => $approval->decidedBy?->name,
@@ -740,13 +862,7 @@ class WikiController extends Controller
                     EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
                     EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
                 ])->isEmpty(),
-                'ui_status_label' => $approvalRows->whereIn('approval_status', [
-                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
-                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
-                ])->isEmpty()
-                    ? __('procynia.wiki.document_owner_ready_label')
-                    : __('procynia.wiki.document_owner_waiting_label'),
-                'scope_note' => __('procynia.wiki.document_owner_scope_note'),
+                'summary_text' => $this->documentOwnerApprovalSummaryText($approvalRows),
                 'message' => null,
             ];
 

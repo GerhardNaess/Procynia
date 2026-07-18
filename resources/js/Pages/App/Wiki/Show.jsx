@@ -206,6 +206,7 @@ export default function WikiShow({
 }) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
     // Claim approve/undo uses its own permission (System Owner, or QA + effective access to
     // approve_wiki_claims) — separate from whole-page approve/reject, which stays System
@@ -343,11 +344,15 @@ export default function WikiShow({
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
 
-    const documentOwnerApprovalStatusLabel = (s) => ({
-        pending: 'Venter på Dokumenteier',
-        approved: 'Kildegrunnlaget er godkjent av Dokumenteier',
-        rejected: 'Kildegrunnlaget er avvist av Dokumenteier',
-    }[s] ?? s);
+    const documentOwnerApprovalCardClass = (status, isOverride) => ({
+        approved: isOverride
+            ? 'border-fuchsia-200 bg-fuchsia-50'
+            : 'border-emerald-200 bg-emerald-50',
+        rejected: 'border-rose-200 bg-rose-50',
+        pending: 'border-amber-200 bg-amber-50',
+    }[status] ?? 'border-slate-200 bg-slate-50');
+
+    const documentOwnerApprovalSentence = (approval) => approval.summary_text ?? '';
 
     const isDraft = page.status === 'draft';
     const isPendingReview = page.status === 'pending_review';
@@ -519,71 +524,30 @@ export default function WikiShow({
                             <h2 className="text-base font-semibold text-slate-700">
                                 Dokumenteiergodkjenning
                             </h2>
-                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${documentOwnerApprovalSummary?.ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {documentOwnerApprovalSummary?.ui_status_label ?? (documentOwnerApprovalSummary?.ready ? 'Dokumenteiergodkjenning fullført' : 'Avventer Dokumenteiergodkjenning')}
-                            </span>
-                            {documentOwnerApprovalSummary?.missing_owner > 0 && (
-                                <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
-                                    {documentOwnerApprovalSummary.missing_owner} uten eier
-                                </span>
-                            )}
-                            {documentOwnerApprovalSummary?.pending > 0 && (
-                                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                    {documentOwnerApprovalSummary.pending} venter
-                                </span>
-                            )}
-                            {documentOwnerApprovalSummary?.approved > 0 && (
-                                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
-                                    {documentOwnerApprovalSummary.approved} godkjent
-                                </span>
-                            )}
-                            {documentOwnerApprovalSummary?.rejected > 0 && (
-                                <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
-                                    {documentOwnerApprovalSummary.rejected} avvist
-                                </span>
-                            )}
                         </div>
 
-                        {documentOwnerApprovalSummary?.message && (
-                            <p className="text-sm text-amber-700">
-                                {documentOwnerApprovalSummary.message}
+                        {documentOwnerApprovalSummary?.summary_text && (
+                            <p className={`text-sm font-medium ${documentOwnerApprovalSummary.ready ? 'text-emerald-700' : 'text-slate-600'}`}>
+                                {documentOwnerApprovalSummary.summary_text}
                             </p>
                         )}
 
-                        <p className="text-sm text-slate-500">
-                            {documentOwnerApprovalSummary?.scope_note ?? 'Dette gjelder kildedokumentene som siden bygger på, ikke artikkelstatusen øverst.'}
-                        </p>
-
                         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             {documentOwnerApprovals.map((approval) => (
-                                <article key={approval.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                                <article key={approval.id} className={`rounded-xl border p-4 ${documentOwnerApprovalCardClass(approval.approval_status, approval.is_override)}`}>
                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                         <div className="space-y-2">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <Badge
-                                                    label={approval.display_status_label ?? documentOwnerApprovalStatusLabel(approval.approval_status)}
-                                                    cls={
-                                                        approval.approval_status === 'approved'
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : approval.approval_status === 'rejected'
-                                                                ? 'bg-rose-100 text-rose-700'
-                                                                : 'bg-amber-100 text-amber-700'
-                                                    }
-                                                />
-                                                {approval.is_override && (
-                                                    <span className="rounded-full bg-fuchsia-100 px-2.5 py-0.5 text-xs font-semibold text-fuchsia-700">
-                                                        System Owner-override
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            <p className="text-sm font-semibold text-slate-800">
-                                                {approval.document_owner_name ?? 'Kildedokument mangler Dokumenteier'}
-                                                {approval.document_owner_email ? <span className="font-normal text-slate-500"> · {approval.document_owner_email}</span> : null}
+                                            <p className="text-sm font-semibold text-slate-900">
+                                                {documentOwnerApprovalSentence(approval)}
                                             </p>
 
-                                            <div className="space-y-1 text-xs text-slate-500">
-                                                {approval.source_documents?.length > 0 && (
+                                            <div className="space-y-1.5 text-xs text-slate-600">
+                                                <p>
+                                                    {tw.document_owner_label ?? 'Dokumenteier'}: {approval.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier')}
+                                                    {approval.document_owner_email ? <span className="text-slate-500"> · {approval.document_owner_email}</span> : null}
+                                                </p>
+
+                                                {approval.source_documents?.length > 1 && (
                                                     <div className="flex flex-wrap gap-2">
                                                         {approval.source_documents.map((doc) => (
                                                             <span key={doc.id} className="rounded-full bg-white px-2.5 py-0.5 font-medium text-slate-600 ring-1 ring-slate-200">
@@ -592,16 +556,31 @@ export default function WikiShow({
                                                         ))}
                                                     </div>
                                                 )}
+
+                                                {approval.decided_at && (
+                                                    <p>
+                                                        {tw.document_owner_decision_date ?? 'Beslutningsdato'}: {new Date(approval.decided_at).toLocaleString(locale, {
+                                                            dateStyle: 'medium',
+                                                            timeStyle: 'short',
+                                                        })}
+                                                    </p>
+                                                )}
+
+                                                {approval.decided_by_name && approval.decided_by_name !== approval.document_owner_name && (
+                                                    <p>
+                                                        {approval.is_override
+                                                            ? (tw.document_owner_overridden_by ?? 'Overstyrt av')
+                                                            : (tw.document_owner_decided_by ?? 'Beslutning tatt av')}{' '}
+                                                        {approval.decided_by_name}
+                                                    </p>
+                                                )}
+
                                                 {approval.approval_comment && (
                                                     <p>{approval.approval_comment}</p>
                                                 )}
-                                                {approval.decided_by_name && approval.decided_at && (
-                                                    <p>
-                                                        Beslutning av {approval.decided_by_name} {approval.is_override ? 'som System Owner' : ''}
-                                                    </p>
-                                                )}
+
                                                 {approval.override_reason && (
-                                                    <p>Overstyringsgrunn: {approval.override_reason}</p>
+                                                    <p>{tw.document_owner_override_reason ?? 'Overstyringsgrunn'}: {approval.override_reason}</p>
                                                 )}
                                             </div>
                                         </div>
