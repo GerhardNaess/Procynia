@@ -707,6 +707,11 @@ class WikiController extends Controller
                 return [
                     'id' => $approval->id,
                     'approval_status' => $approval->approval_status,
+                    'display_status_label' => match ($approval->approval_status) {
+                        EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED => __('procynia.wiki.document_owner_approved_detail_label'),
+                        EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED => __('procynia.wiki.document_owner_rejected_detail_label'),
+                        default => __('procynia.wiki.document_owner_pending_detail_label'),
+                    },
                     'approval_comment' => $approval->approval_comment,
                     'decided_at' => $approval->decided_at,
                     'decided_by_name' => $approval->decidedBy?->name,
@@ -735,6 +740,13 @@ class WikiController extends Controller
                     EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
                     EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
                 ])->isEmpty(),
+                'ui_status_label' => $approvalRows->whereIn('approval_status', [
+                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING,
+                    EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
+                ])->isEmpty()
+                    ? __('procynia.wiki.document_owner_ready_label')
+                    : __('procynia.wiki.document_owner_waiting_label'),
+                'scope_note' => __('procynia.wiki.document_owner_scope_note'),
                 'message' => null,
             ];
 

@@ -192,6 +192,43 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_show_distinguishes_page_status_from_document_owner_approval_status(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Statusforklaring');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $owner->id])->save();
+        $claim = $this->createClaim($page, $version, 'Grunnlag for statusforklaring.');
+        $this->createDocumentSourceReference($claim, $document);
+        $this->createDocumentOwnerApproval(
+            $customer,
+            $page,
+            $version,
+            $owner,
+            [$document->id],
+            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
+        );
+
+        $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $props = data_get($inertia, 'props');
+            $summary = data_get($props, 'document_owner_approval_summary', []);
+            $approvals = collect(data_get($props, 'document_owner_approvals', []));
+            $approval = $approvals->first();
+
+            return data_get($props, 'page.status') === EnterpriseWikiPage::STATUS_DRAFT
+                && ($summary['ready'] ?? null) === true
+                && ($summary['ui_status_label'] ?? null) === __('procynia.wiki.document_owner_ready_label')
+                && ($summary['scope_note'] ?? null) === __('procynia.wiki.document_owner_scope_note')
+                && ($approval['display_status_label'] ?? null) === __('procynia.wiki.document_owner_approved_detail_label')
+                && ($approval['approval_status'] ?? null) === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED;
+        });
+    }
+
     public function test_show_returns_404_for_unknown_slug(): void
     {
         $customer = $this->createCustomer();

@@ -345,8 +345,8 @@ export default function WikiShow({
 
     const documentOwnerApprovalStatusLabel = (s) => ({
         pending: 'Venter på Dokumenteier',
-        approved: 'Dokumenteier godkjent',
-        rejected: 'Dokumenteier avvist',
+        approved: 'Kildegrunnlaget er godkjent av Dokumenteier',
+        rejected: 'Kildegrunnlaget er avvist av Dokumenteier',
     }[s] ?? s);
 
     const isDraft = page.status === 'draft';
@@ -416,8 +416,8 @@ export default function WikiShow({
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                         <p className="text-sm text-amber-800">
                             {isPendingReview
-                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert og ikke kvalitetssikret.')
-                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast. Innholdet er ikke kvalitetssikret.')}
+                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert.')
+                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast.')}
                         </p>
                     </div>
                 )}
@@ -520,7 +520,7 @@ export default function WikiShow({
                                 Dokumenteiergodkjenning
                             </h2>
                             <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${documentOwnerApprovalSummary?.ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {documentOwnerApprovalSummary?.ready ? 'Klar' : 'Avventer'}
+                                {documentOwnerApprovalSummary?.ui_status_label ?? (documentOwnerApprovalSummary?.ready ? 'Dokumenteiergodkjenning fullført' : 'Avventer Dokumenteiergodkjenning')}
                             </span>
                             {documentOwnerApprovalSummary?.missing_owner > 0 && (
                                 <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
@@ -550,6 +550,10 @@ export default function WikiShow({
                             </p>
                         )}
 
+                        <p className="text-sm text-slate-500">
+                            {documentOwnerApprovalSummary?.scope_note ?? 'Dette gjelder kildedokumentene som siden bygger på, ikke artikkelstatusen øverst.'}
+                        </p>
+
                         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             {documentOwnerApprovals.map((approval) => (
                                 <article key={approval.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
@@ -557,7 +561,7 @@ export default function WikiShow({
                                         <div className="space-y-2">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <Badge
-                                                    label={documentOwnerApprovalStatusLabel(approval.approval_status)}
+                                                    label={approval.display_status_label ?? documentOwnerApprovalStatusLabel(approval.approval_status)}
                                                     cls={
                                                         approval.approval_status === 'approved'
                                                             ? 'bg-emerald-100 text-emerald-700'
