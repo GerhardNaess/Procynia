@@ -103,6 +103,29 @@ class WikiPageHelpTest extends TestCase
         app()->setLocale($locale);
     }
 
+    public function test_wiki_quality_tab_exposes_quality_page_help_translation_keys(): void
+    {
+        $locale = app()->getLocale();
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/Wiki/Index'
+                && data_get($page, 'props.active_tab') === 'quality';
+        });
+
+        $this->assertSame('Slik fungerer Kvalitet', trans('procynia.wiki.quality_page_help_title'));
+        $this->assertSame('Åpne kvalitetsfunn', trans('procynia.wiki.quality_row_open'));
+
+        app()->setLocale('en');
+        $this->assertSame('How quality works', trans('procynia.wiki.quality_page_help_title'));
+        $this->assertSame('Open quality finding', trans('procynia.wiki.quality_row_open'));
+        app()->setLocale($locale);
+    }
+
     private function createCustomer(string $name = 'Testkunde AS'): Customer
     {
         $language = Language::query()->firstOrCreate(

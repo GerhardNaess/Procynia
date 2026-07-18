@@ -597,6 +597,10 @@ class WikiController extends Controller
             'page_title' => $f->page?->title,
             'page_slug' => $f->page?->slug,
             'page_type' => $f->page?->page_type,
+            'target_url' => $this->qualityFindingTargetUrl($f),
+            'target_page_id' => $f->enterprise_wiki_page_id,
+            'target_page_version_id' => $f->enterprise_wiki_page_version_id,
+            'target_claim_id' => $f->enterprise_wiki_claim_id,
             'run_id' => $f->enterprise_wiki_ingest_run_id,
             'source_filename' => $f->run?->source_id ? $docFilenames->get($f->run->source_id) : null,
             'created_at' => $f->created_at,
@@ -613,6 +617,24 @@ class WikiController extends Controller
             ],
             'coverage' => $coverage,
         ];
+    }
+
+    private function qualityFindingTargetUrl(EnterpriseWikiLintFinding $finding): ?string
+    {
+        $pageSlug = $finding->page?->slug;
+
+        if ($pageSlug === null || $pageSlug === '') {
+            return null;
+        }
+
+        $target = route('app.wiki.show', ['slug' => $pageSlug]);
+        $claimId = $finding->enterprise_wiki_claim_id !== null ? (int) $finding->enterprise_wiki_claim_id : null;
+
+        if ($claimId !== null && $claimId > 0) {
+            $target .= '?claim_id='.$claimId;
+        }
+
+        return $target;
     }
 
     public function show(string $slug): Response

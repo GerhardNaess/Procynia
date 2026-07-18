@@ -2797,7 +2797,57 @@ class WikiControllerTest extends TestCase
             return $found !== null
                 && $found['run_id'] === $run->id
                 && isset($found['page_type'])
-                && isset($found['source_filename']);
+                && isset($found['source_filename'])
+                && isset($found['target_url'])
+                && str_contains($found['target_url'], '/app/wiki/'.$found['page_slug']);
+        });
+    }
+
+    public function test_quality_tab_navigation_targets_page_and_claim_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Navigasjonsside');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Påstand uten kilde.');
+        $pageFinding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'code' => EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_SUMMARY_LINK,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Article page has no link to a summary page.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+        $claimFinding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Claim has no source reference.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($pageFinding, $claimFinding, $claim, $page): bool {
+            $rows = collect(data_get($inertia, 'props.quality_findings', []))->keyBy('id');
+            $pageRow = $rows->get($pageFinding->id);
+            $claimRow = $rows->get($claimFinding->id);
+
+            return $pageRow !== null
+                && $claimRow !== null
+                && $pageRow['target_url'] === route('app.wiki.show', ['slug' => $pageRow['page_slug']])
+                && $pageRow['target_page_id'] === $page->id
+                && $pageRow['target_claim_id'] === null
+                && $claimRow['target_url'] === route('app.wiki.show', ['slug' => $pageRow['page_slug']]).'?claim_id='.$claim->id
+                && $claimRow['target_page_id'] === $page->id
+                && $claimRow['target_claim_id'] === $claim->id;
         });
     }
 

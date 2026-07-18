@@ -806,6 +806,46 @@ function getWikiRunsHelpSections(tw) {
     ];
 }
 
+function getWikiQualityHelpSections(tw) {
+    return [
+        {
+            title: tw.quality_page_help_section_worklist ?? 'Kvalitet som arbeidsliste',
+            items: [
+                {
+                    title: tw.quality_page_help_item_worklist_title ?? 'Hver rad peker til et konkret sted',
+                    text: tw.quality_page_help_item_worklist_text ?? 'Kvalitetsfunn er laget for oppfølging. Velg en rad for å åpne Wiki-siden eller påstanden funnet gjelder.',
+                },
+                {
+                    title: tw.quality_page_help_item_worklist_scope_title ?? 'Noen funn peker på en hel side',
+                    text: tw.quality_page_help_item_worklist_scope_text ?? 'Sidebaserte funn åpner den berørte Wiki-siden slik at du kan kontrollere og rette innholdet på riktig sted.',
+                },
+            ],
+        },
+        {
+            title: tw.quality_page_help_section_claims ?? 'Når funnet gjelder en påstand',
+            items: [
+                {
+                    title: tw.quality_page_help_item_claim_focus_title ?? 'Så nær den konkrete påstanden som mulig',
+                    text: tw.quality_page_help_item_claim_focus_text ?? 'Funn som gjelder en påstand, åpner den aktuelle Wiki-siden og fokuserer påstanden når det er mulig. Hvis presist påstandsfokus mangler, åpnes siden likevel på trygg måte.',
+                },
+                {
+                    title: tw.quality_page_help_item_claim_focus_scope_title ?? 'Kilden hjelper deg videre',
+                    text: tw.quality_page_help_item_claim_focus_scope_text ?? 'Kildefilen og kjøringen kan fortsatt åpnes fra tabellen, men de skal ikke overstyre radens hovedmål.',
+                },
+            ],
+        },
+        {
+            title: tw.quality_page_help_section_meaning ?? 'Hvordan lese alvorligheten',
+            items: [
+                {
+                    title: tw.quality_page_help_item_meaning_title ?? 'Alvorlighet beskriver funnet',
+                    text: tw.quality_page_help_item_meaning_text ?? 'Alvorligheten sier hvor viktig funnet er, men den retter ikke problemet automatisk. Du må fortsatt åpne den berørte siden eller påstanden og gjøre den faktiske kontrollen der.',
+                },
+            ],
+        },
+    ];
+}
+
 function ingestStatusLabel(status, qaStatus = null) {
     if (status === 'completed' && qaStatus === 'passed') {
         return 'Fullført / bestått';
@@ -2295,6 +2335,25 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
 
     const usedCodes = [...new Set(findings.map((f) => f.code))].sort();
 
+    const openFinding = (finding) => {
+        if (!finding.target_url) {
+            return;
+        }
+
+        router.visit(finding.target_url, { preserveScroll: true });
+    };
+
+    const handleFindingKeyDown = (event, finding) => {
+        if (!finding.target_url) {
+            return;
+        }
+
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openFinding(finding);
+        }
+    };
+
     return (
         <div className="space-y-5">
             <CoveragePanel coverage={coverage} tw={tw} />
@@ -2375,12 +2434,22 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                                     const sevCls = SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600';
                                     const checkCopy = getQualityCheckCopy(f.code, tw);
                                     const description = checkCopy.unknown && f.message ? f.message : (checkCopy.description || f.message || '');
+                                    const rowTitle = f.page_title ?? f.page_slug ?? checkCopy.label;
                                     return (
-                                        <tr key={f.id} className="text-sm text-slate-700">
+                                        <tr
+                                            key={f.id}
+                                            role={f.target_url ? 'link' : undefined}
+                                            tabIndex={f.target_url ? 0 : undefined}
+                                            aria-label={f.target_url ? `${tw.quality_row_open ?? 'Åpne kvalitetsfunn'}: ${rowTitle}` : undefined}
+                                            onClick={() => openFinding(f)}
+                                            onKeyDown={(event) => handleFindingKeyDown(event, f)}
+                                            className={`text-sm text-slate-700 ${f.target_url ? 'cursor-pointer transition hover:bg-violet-50 focus-visible:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-300' : ''}`}
+                                        >
                                             <td className="max-w-[180px] px-4 py-3">
                                                 {f.page_slug ? (
                                                     <Link
                                                         href={`/app/wiki/${f.page_slug}`}
+                                                        onClick={(event) => event.stopPropagation()}
                                                         className="block truncate font-medium text-violet-700 hover:underline"
                                                         title={f.page_title ?? f.page_slug}
                                                     >
@@ -2426,6 +2495,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                                                 {f.run_id ? (
                                                     <Link
                                                         href={`/app/wiki?tab=runs&run_src=${f.run_id}`}
+                                                        onClick={(event) => event.stopPropagation()}
                                                         className="font-mono text-[11px] text-slate-400 hover:text-violet-700 hover:underline"
                                                     >
                                                         #{f.run_id}
@@ -2485,12 +2555,18 @@ export default function WikiIndex({
                 intro: tw.sources_page_help_intro ?? 'Kildedokumenter er grunnlaget for Enterprise Wiki. Her laster du opp dokumenter, velger Dokumenteier, følger behandlingen og ser hvilke Wiki-sider som bruker dokumentet.',
                 sections: getWikiSourcesHelpSections(tw),
             }
-            : activeTab === 'runs'
-                ? {
-                    title: tw.runs_page_help_title ?? 'Slik fungerer Kjøringer',
-                    intro: tw.runs_page_help_intro ?? 'Kjøringer viser hvordan kildedokumenter behandles og blir til Wiki-materiale. Her kan du følge fremdrift, se hvilket steg behandlingen er på, og finne forståelige forklaringer dersom noe stopper eller venter på godkjenning.',
-                    sections: getWikiRunsHelpSections(tw),
-                }
+                : activeTab === 'runs'
+                    ? {
+                        title: tw.runs_page_help_title ?? 'Slik fungerer Kjøringer',
+                        intro: tw.runs_page_help_intro ?? 'Kjøringer viser hvordan kildedokumenter behandles og blir til Wiki-materiale. Her kan du følge fremdrift, se hvilket steg behandlingen er på, og finne forståelige forklaringer dersom noe stopper eller venter på godkjenning.',
+                        sections: getWikiRunsHelpSections(tw),
+                    }
+                    : activeTab === 'quality'
+                        ? {
+                            title: tw.quality_page_help_title ?? 'Slik fungerer Kvalitet',
+                            intro: tw.quality_page_help_intro ?? 'Kvalitetsfunn er en arbeidsliste for å gå direkte til stedet der noe bør kontrolleres eller rettes. Noen funn peker på en hel side, mens andre kan peke på en konkret påstand.',
+                            sections: getWikiQualityHelpSections(tw),
+                        }
                 : null;
 
     useEffect(() => {

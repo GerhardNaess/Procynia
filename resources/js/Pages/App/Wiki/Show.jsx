@@ -1,5 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
@@ -219,6 +219,28 @@ export default function WikiShow({
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const [expandedLintGroups, setExpandedLintGroups] = useState({});
+    const targetClaimId = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('claim_id')
+        : null;
+
+    useEffect(() => {
+        if (!targetClaimId) {
+            return undefined;
+        }
+
+        const targetElement = document.getElementById(`claim-${targetClaimId}`);
+
+        if (!targetElement) {
+            return undefined;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetElement.focus({ preventScroll: true });
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [targetClaimId, page.slug, claims.length]);
 
     const sendAction = (action) => {
         if (processing) return;
@@ -781,7 +803,9 @@ export default function WikiShow({
                                         {claims.map((claim) => (
                                             <article
                                                 key={claim.id}
-                                                className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+                                                id={`claim-${claim.id}`}
+                                                tabIndex={-1}
+                                                className={`scroll-mt-24 rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)] ${String(claim.id) === targetClaimId ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white' : ''}`}
                                             >
                                                 <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
 
