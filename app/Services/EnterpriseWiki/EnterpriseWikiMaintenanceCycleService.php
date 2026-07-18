@@ -25,16 +25,22 @@ class EnterpriseWikiMaintenanceCycleService
     public function __construct(
         private readonly EnterpriseWikiPostIngestQaService $qaService,
         private readonly EnterpriseWikiDeepRepairService $deepRepairService,
+        private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiQaRegressionService $regressionService,
     ) {}
 
     /**
-     * Run one maintenance cycle: find escalated runs with source changes and retry QA.
+     * Run one maintenance cycle: find escalated runs with source changes and retry QA, and
+     * attempt a bounded claim-content repair for runs stopped with qa_status=repair_required
+     * (see EnterpriseWikiClaimContentRepairService — unlike the source-change retry above, this
+     * is not gated on the source document having changed, since the defect is in the run's own
+     * generated content, not the source).
      *
      * Returns a summary array:
      * - retried (int) — runs where QA was re-triggered
      * - skipped (int) — runs whose source has not changed since the last attempt
      * - failed  (int) — runs where the QA retry threw an unexpected error
+     * - claim_content_repairs_attempted (int) — repair_required runs a repair was attempted for
      */
     public function run(): array
     {
@@ -42,7 +48,7 @@ class EnterpriseWikiMaintenanceCycleService
 
         $retried = 0;
         $skipped = 0;
-        $failed  = 0;
+        $failed = 0;
 
         foreach ($runs as $run) {
             $outcome = $this->processRun($run);
@@ -50,25 +56,70 @@ class EnterpriseWikiMaintenanceCycleService
             match ($outcome) {
                 'retried' => $retried++,
                 'skipped' => $skipped++,
-                'failed'  => $failed++,
+                'failed' => $failed++,
             };
         }
+
+        $claimContentRepairsAttempted = $this->processClaimContentRepairs();
 
         $regressionSummary = $this->regressionService->processPendingSnapshots();
 
         Log::info('[WIKI_MAINTENANCE] Maintenance cycle complete', [
             'retried' => $retried,
             'skipped' => $skipped,
-            'failed'  => $failed,
+            'failed' => $failed,
+            'claim_content_repairs_attempted' => $claimContentRepairsAttempted,
             'regressions' => $regressionSummary,
         ]);
 
-        return compact('retried', 'skipped', 'failed');
+        return [
+            'retried' => $retried,
+            'skipped' => $skipped,
+            'failed' => $failed,
+            'claim_content_repairs_attempted' => $claimContentRepairsAttempted,
+        ];
     }
 
     // =========================================================================
     // Internal
     // =========================================================================
+
+    /**
+     * Attempt a bounded claim-content repair (EnterpriseWikiClaimContentRepairService) for every
+     * applied run currently stopped with qa_status=repair_required — see
+     * EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()/
+     * EnterpriseWikiDocumentFlowService::escalateRunForClaimIntegrityRepair(). The repair
+     * service itself enforces MAX_CLAIM_CONTENT_REPAIR_ATTEMPTS and is a no-op once reached, so
+     * repeatedly finding the same run across maintenance ticks is safe.
+     *
+     * @return int number of runs a repair attempt was made for
+     */
+    private function processClaimContentRepairs(): int
+    {
+        $runs = EnterpriseWikiIngestRun::query()
+            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+            ->where('qa_status', EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED)
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('claim_content_repair_attempt_count', '<', EnterpriseWikiIngestRun::MAX_CLAIM_CONTENT_REPAIR_ATTEMPTS)
+            ->orderBy('id')
+            ->get();
+
+        $attempted = 0;
+
+        foreach ($runs as $run) {
+            try {
+                $this->claimContentRepairService->attempt($run);
+                $attempted++;
+            } catch (\Throwable $e) {
+                Log::error('[WIKI_MAINTENANCE] Claim-content repair attempt failed', [
+                    'run_id' => $run->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $attempted;
+    }
 
     private function findEscalatedWithDocumentSource(): Collection
     {
@@ -91,8 +142,8 @@ class EnterpriseWikiMaintenanceCycleService
 
         if ($document === null) {
             Log::warning('[WIKI_MAINTENANCE] Source document not found — skipping run', [
-                'run_id'      => $run->id,
-                'source_id'   => $run->source_id,
+                'run_id' => $run->id,
+                'source_id' => $run->source_id,
             ]);
 
             return 'skipped';
@@ -107,7 +158,7 @@ class EnterpriseWikiMaintenanceCycleService
 
         $run->update([
             'maintenance_triggered_at' => now(),
-            'maintenance_source_hash'  => $currentHash,
+            'maintenance_source_hash' => $currentHash,
         ]);
 
         // $previousHash was captured before the update() call above, which otherwise mutates
@@ -120,10 +171,10 @@ class EnterpriseWikiMaintenanceCycleService
                 ? '[WIKI_MAINTENANCE] First maintenance check for this run — triggering QA retry'
                 : '[WIKI_MAINTENANCE] Source changed — triggering QA retry',
             [
-                'run_id'       => $run->id,
-                'document_id'  => $document->id,
+                'run_id' => $run->id,
+                'document_id' => $document->id,
                 'current_hash' => $currentHash,
-                'prev_hash'    => $previousHash,
+                'prev_hash' => $previousHash,
             ],
         );
 
@@ -132,7 +183,7 @@ class EnterpriseWikiMaintenanceCycleService
         } catch (\Throwable $e) {
             Log::error('[WIKI_MAINTENANCE] QA retry failed for run', [
                 'run_id' => $run->id,
-                'error'  => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             return 'failed';

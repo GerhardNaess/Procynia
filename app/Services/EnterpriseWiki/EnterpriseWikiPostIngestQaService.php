@@ -81,9 +81,16 @@ class EnterpriseWikiPostIngestQaService
      * Run post-ingest QA for a single applied run.
      *
      * Returns the QA result array, or null if the run was skipped (already
-     * running or already passed, or failed/escalated without $retry).
+     * running, or failed/escalated/passed without $retry).
      *
-     * @param  bool  $retry  When true, also claims runs in 'failed' or 'escalated' status.
+     * @param  bool  $retry  When true, also claims runs in 'failed', 'escalated', or 'passed'
+     *                       status — an explicit operator decision to re-evaluate, e.g. after a
+     *                       QA-gating fix means a previously recorded 'passed' verdict is now
+     *                       known to be wrong for content already generated (see the run-34 claim-
+     *                       integrity gating fix). findPendingRuns()/findRetryableRuns() never
+     *                       include 'passed', so this never causes a scheduled/bulk sweep to
+     *                       reopen completed work — only a direct, single runForRun(..., retry:
+     *                       true) call can.
      *
      * @throws \InvalidArgumentException if the run is not applied
      * @throws \Throwable on unexpected errors (run is escalated before re-throw)
@@ -98,7 +105,7 @@ class EnterpriseWikiPostIngestQaService
 
         // Atomic transition: set running only if eligible.
         // Without retry: null, pending, repair_required (stuck transient state).
-        // With retry: also failed, escalated (explicit operator decision to retry).
+        // With retry: also failed, escalated, passed (explicit operator decision to retry).
         $eligibleStatuses = [
             EnterpriseWikiIngestRun::QA_STATUS_PENDING,
             EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
@@ -107,6 +114,7 @@ class EnterpriseWikiPostIngestQaService
         if ($retry) {
             $eligibleStatuses[] = EnterpriseWikiIngestRun::QA_STATUS_FAILED;
             $eligibleStatuses[] = EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+            $eligibleStatuses[] = EnterpriseWikiIngestRun::QA_STATUS_PASSED;
         }
 
         $claimed = $this->scopeToRunsReadyForQa(
@@ -173,6 +181,7 @@ class EnterpriseWikiPostIngestQaService
      *     reason: ?string,
      *     incomplete_steps: list<string>,
      *     critical_defects: list<string>,
+     *     claim_integrity_defects: list<string>,
      *     checks: array{article_exists: bool, summary_exists: bool, article_has_content: bool, summary_has_content: bool},
      * }
      */
@@ -190,6 +199,7 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Run has no applied pages — cannot determine a QA result.',
                 'incomplete_steps' => [],
                 'critical_defects' => [],
+                'claim_integrity_defects' => [],
                 'checks' => $checks,
             ];
         }
@@ -204,6 +214,7 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.',
                 'incomplete_steps' => $incompleteSteps,
                 'critical_defects' => [],
+                'claim_integrity_defects' => [],
                 'checks' => $checks,
             ];
         }
@@ -216,6 +227,24 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Critical defect(s) found: '.implode(', ', $criticalDefects).'.',
                 'incomplete_steps' => [],
                 'critical_defects' => $criticalDefects,
+                'claim_integrity_defects' => [],
+                'checks' => $checks,
+            ];
+        }
+
+        // Claims are guaranteed verified_at !== null at this point (findIncompleteSteps above
+        // already escalated any run with a claim still pending verification), so every claim
+        // has a final content_origin — this check distinguishes "finished and genuinely wrong"
+        // claim content from the structural defects above.
+        $claimIntegrityDefects = $this->findClaimIntegrityDefects($pageIds);
+
+        if ($claimIntegrityDefects !== []) {
+            return [
+                'verdict' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+                'reason' => 'Unresolved claim-integrity defect(s) found: '.implode(', ', $claimIntegrityDefects).'.',
+                'incomplete_steps' => [],
+                'critical_defects' => [],
+                'claim_integrity_defects' => $claimIntegrityDefects,
                 'checks' => $checks,
             ];
         }
@@ -225,6 +254,7 @@ class EnterpriseWikiPostIngestQaService
             'reason' => null,
             'incomplete_steps' => [],
             'critical_defects' => [],
+            'claim_integrity_defects' => [],
             'checks' => $checks,
         ];
     }
@@ -345,6 +375,7 @@ class EnterpriseWikiPostIngestQaService
             'semantic_qa_post_repair' => null,
             'incomplete_steps' => $evaluation['incomplete_steps'],
             'critical_defects' => $evaluation['critical_defects'],
+            'claim_integrity_defects' => $evaluation['claim_integrity_defects'],
         ];
 
         $run->update([
@@ -464,6 +495,72 @@ class EnterpriseWikiPostIngestQaService
 
         if ($hasCriticalLint) {
             $defects[] = 'critical_lint_findings_or_broken_links';
+        }
+
+        return $defects;
+    }
+
+    /**
+     * Claim-integrity defects — content that is "finished and genuinely wrong" at the claim
+     * level rather than at the page-structure level findCriticalDefects() checks above. Scoped
+     * to claims tied to the run's pages' CURRENT page versions only: a claim left over on a
+     * superseded version (e.g. after a controlled block revision) is historical record, not an
+     * active defect.
+     *
+     * A claim recorded as content_origin=unsupported_generated_content or internal_error is, by
+     * construction (EnterpriseWikiVerifyPageClaimsService::persist()/markInternalGenerationError()),
+     * text the run's own AI-verification step already determined is not supported by the source
+     * document, or an internal anchoring/versioning inconsistency — this text must not reach
+     * Document Owner approval as ordinary, presumed-correct Wiki content. A content_origin of
+     * source_based without a real EnterpriseWikiSourceReference row is the same underlying
+     * problem seen from the other side: the claim is presented as document-backed but the
+     * evidence that made it so is missing (e.g. wiped without a reverification pass).
+     *
+     * Legitimate best_practice suggestions are deliberately excluded — those wait for an
+     * explicit human decision (approve/edit-and-approve/reject) via the ordinary claim review
+     * flow and must not, on their own, block technical QA from passing.
+     *
+     * @return list<string>
+     */
+    private function findClaimIntegrityDefects(Collection $pageIds): array
+    {
+        $currentVersionIds = DB::table('enterprise_wiki_page_versions')
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->where('is_current', true)
+            ->pluck('id');
+
+        if ($currentVersionIds->isEmpty()) {
+            return [];
+        }
+
+        $defects = [];
+
+        $hasInternalError = EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)
+            ->exists();
+
+        if ($hasInternalError) {
+            $defects[] = 'active_internal_error_claims';
+        }
+
+        $hasUnsupported = EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
+            ->exists();
+
+        if ($hasUnsupported) {
+            $defects[] = 'active_unsupported_generated_content_claims';
+        }
+
+        $hasUnprovenSourceBased = EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED)
+            ->whereDoesntHave('sourceReferences')
+            ->exists();
+
+        if ($hasUnprovenSourceBased) {
+            $defects[] = 'source_based_claims_missing_provenance';
         }
 
         return $defects;

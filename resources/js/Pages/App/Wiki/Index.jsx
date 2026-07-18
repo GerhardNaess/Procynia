@@ -50,6 +50,7 @@ function PageTypeBadge({ type, label }) {
 
 const DOCUMENT_OWNER_SUMMARY_STYLES = {
     awaiting_sync: 'bg-slate-100 text-slate-600',
+    blocked_by_quality: 'bg-amber-100 text-amber-700',
     missing_owner: 'bg-rose-100 text-rose-700',
     pending: 'bg-amber-100 text-amber-700',
     mixed: 'bg-violet-100 text-violet-700',
@@ -431,6 +432,10 @@ function getWikiPagesHelpSections(tw) {
                 {
                     title: tw.page_help_item_workflow_wiki_title ?? 'Wiki-siden bygges og kontrolleres',
                     text: tw.page_help_item_workflow_wiki_text ?? 'Procynia genererer Wiki-sider og påstander, kobler dem til riktige kilder og kjører claims, kvalitetskontroll og QA før materialet tas i bruk.',
+                },
+                {
+                    title: tw.page_help_item_workflow_blocked_title ?? '«Behandles fortsatt» betyr at innhold ikke kunne bekreftes',
+                    text: tw.page_help_item_workflow_blocked_text ?? 'Hvis systemet finner påstander som ikke støttes av kildegrunnlaget, eller en intern genereringsfeil, stoppes siden før Dokumenteiergodkjenning. Dette løses teknisk eller ved en kontrollert revisjon — Dokumenteieren trenger ikke gjøre noe før siden er klar.',
                 },
             ],
         },

@@ -12,6 +12,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 /**
@@ -36,7 +37,7 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
 
         $summary = $this->makeService()->run();
 
-        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0], $summary);
+        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0, 'claim_content_repairs_attempted' => 0], $summary);
     }
 
     // =========================================================================
@@ -140,16 +141,16 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
     {
         $customer = $this->createCustomer();
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => 99999,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 99999,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
         ]);
 
         $this->mockQaService()->shouldNotReceive('runForRun');
@@ -171,23 +172,23 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
     {
         $customer = $this->createCustomer();
         EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
-            'source_id'                        => 1,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_id' => 1,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
         ]);
 
         $this->mockQaService()->shouldNotReceive('runForRun');
 
         $summary = $this->makeService()->run();
 
-        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0], $summary);
+        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0, 'claim_content_repairs_attempted' => 0], $summary);
     }
 
     // =========================================================================
@@ -203,7 +204,7 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
 
         $summary = $this->makeService()->run();
 
-        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0], $summary);
+        $this->assertSame(['retried' => 0, 'skipped' => 0, 'failed' => 0, 'claim_content_repairs_attempted' => 0], $summary);
     }
 
     // =========================================================================
@@ -320,7 +321,7 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
         return app(EnterpriseWikiMaintenanceCycleService::class);
     }
 
-    private function mockQaService(): \Mockery\MockInterface
+    private function mockQaService(): MockInterface
     {
         return $this->mock(EnterpriseWikiPostIngestQaService::class);
     }
@@ -338,24 +339,24 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer, string $hash = ''): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'source.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => $hash !== '' ? $hash : hash('sha256', Str::random(32)),
-            'extracted_text'    => 'Source text for maintenance tests.',
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => $hash !== '' ? $hash : hash('sha256', Str::random(32)),
+            'extracted_text' => 'Source text for maintenance tests.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
@@ -368,17 +369,17 @@ class EnterpriseWikiMaintenanceCycleTest extends TestCase
         $document ??= $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
-            'maintainer_decision_json'         => ['pages' => []],
-            'qa_status'                        => $qaStatus,
-            'maintenance_source_hash'          => $maintenanceSourceHash,
+            'maintainer_decision_json' => ['pages' => []],
+            'qa_status' => $qaStatus,
+            'maintenance_source_hash' => $maintenanceSourceHash,
         ]);
     }
 }

@@ -58,15 +58,21 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_DECISION_ONLY,
     ];
 
-    public const MAINTAINER_DECISION_STATUS_PENDING  = 'pending';
-    public const MAINTAINER_DECISION_STATUS_APPLIED  = 'applied';
+    public const MAINTAINER_DECISION_STATUS_PENDING = 'pending';
 
-    public const QA_STATUS_PENDING         = 'pending';
-    public const QA_STATUS_RUNNING         = 'running';
-    public const QA_STATUS_PASSED          = 'passed';
+    public const MAINTAINER_DECISION_STATUS_APPLIED = 'applied';
+
+    public const QA_STATUS_PENDING = 'pending';
+
+    public const QA_STATUS_RUNNING = 'running';
+
+    public const QA_STATUS_PASSED = 'passed';
+
     public const QA_STATUS_REPAIR_REQUIRED = 'repair_required';
-    public const QA_STATUS_FAILED          = 'failed';
-    public const QA_STATUS_ESCALATED       = 'escalated';
+
+    public const QA_STATUS_FAILED = 'failed';
+
+    public const QA_STATUS_ESCALATED = 'escalated';
 
     public const QA_STATUSES = [
         self::QA_STATUS_PENDING,
@@ -76,6 +82,13 @@ class EnterpriseWikiIngestRun extends Model
         self::QA_STATUS_FAILED,
         self::QA_STATUS_ESCALATED,
     ];
+
+    /**
+     * Maximum number of automatic claim-content repair attempts (EnterpriseWikiClaimContentRepairService)
+     * per run. Bounds the repair loop — after this many attempts a run with unresolved claim-integrity
+     * defects stays escalated for manual/technical follow-up instead of retrying indefinitely.
+     */
+    public const MAX_CLAIM_CONTENT_REPAIR_ATTEMPTS = 2;
 
     public const TRIGGER_TYPE_MANUAL = 'manual';
 
@@ -148,6 +161,9 @@ class EnterpriseWikiIngestRun extends Model
         'deep_repair_attempted_at',
         'deep_repair_source_hash',
         'deep_repair_result',
+        'claim_content_repair_attempt_count',
+        'claim_content_repair_attempted_at',
+        'claim_content_repair_result',
     ];
 
     protected function casts(): array
@@ -161,13 +177,16 @@ class EnterpriseWikiIngestRun extends Model
             'finished_at' => 'datetime',
             'maintainer_decision_json' => 'array',
             'maintainer_decision_generated_at' => 'datetime',
-            'qa_started_at'   => 'datetime',
+            'qa_started_at' => 'datetime',
             'qa_completed_at' => 'datetime',
             'qa_attempt_count' => 'integer',
-            'qa_result'       => 'array',
+            'qa_result' => 'array',
             'maintenance_triggered_at' => 'datetime',
             'deep_repair_attempted_at' => 'datetime',
-            'deep_repair_result'       => 'array',
+            'deep_repair_result' => 'array',
+            'claim_content_repair_attempt_count' => 'integer',
+            'claim_content_repair_attempted_at' => 'datetime',
+            'claim_content_repair_result' => 'array',
         ];
     }
 

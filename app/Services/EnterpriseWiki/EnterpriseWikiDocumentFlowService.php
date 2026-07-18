@@ -10,7 +10,9 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -49,10 +51,10 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiIncrementalRelinkService $incrementalRelinkService,
-    private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
-    private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
-    private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
-    private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
+        private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
+        private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
+        private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
     ) {}
 
     /**
@@ -119,7 +121,7 @@ class EnterpriseWikiDocumentFlowService
      * The service only touches current active page versions that actually reference the
      * changed document through existing provenance, then re-evaluates the linked runs.
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\EnterpriseWikiPageVersion>
+     * @return Collection<int, EnterpriseWikiPageVersion>
      */
     public function syncDocumentOwnerApprovals(EnterpriseWikiDocument $document)
     {
@@ -611,6 +613,7 @@ class EnterpriseWikiDocumentFlowService
 
         match ($fresh->qa_status) {
             EnterpriseWikiIngestRun::QA_STATUS_PASSED => $this->completeRunIfOwnerApproved($fresh),
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED => $this->escalateRunForClaimIntegrityRepair($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_ESCALATED => $this->escalateRun($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_FAILED => $this->markRunFailed(
                 $fresh,
@@ -627,9 +630,24 @@ class EnterpriseWikiDocumentFlowService
 
     /**
      * Re-evaluate the owner-approval gate for a run after document ownership changes.
+     *
+     * Guarded on qa_status === passed: Document Owner approval exists to gate legitimate,
+     * source-backed content — it must never complete a run whose own technical QA has not
+     * (yet) passed, however "ready" (no pending/rejected groups) the approval gate looks. A run
+     * can look vacuously ready here precisely because its pages carry active claim-integrity
+     * defects: EnterpriseWikiDocumentOwnerApprovalService never creates an approval requirement
+     * for a claim that lacks a real source reference, so a technically invalid page version can
+     * have zero pending groups without a single legitimate approval having been given. This is
+     * called both from the ordinary QA-passed path (completeRunIfOwnerApproved(), where the
+     * guard is always satisfied) and from syncDocumentOwnerApprovals() after a document owner
+     * changes, which has no QA context of its own.
      */
     public function reconcileRunDocumentOwnerApprovalState(EnterpriseWikiIngestRun $run): void
     {
+        if ($run->qa_status !== EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
+            return;
+        }
+
         $gate = $this->documentOwnerApprovalService->evaluateRunCompletionGate($run);
 
         if (! $gate['ready']) {
@@ -685,6 +703,34 @@ class EnterpriseWikiDocumentFlowService
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
             'run_id' => $run->id,
+        ]);
+    }
+
+    /**
+     * A run whose QA verdict is repair_required has known, active claim-integrity defects
+     * (unsupported generated content, an internal generation/anchoring error, or a source-based
+     * claim missing its provenance — see EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()).
+     * That content must never reach Document Owner approval as ordinary, presumed-correct Wiki
+     * text, so this stops the run here rather than routing it into
+     * completeRunIfOwnerApproved()/reconcileRunDocumentOwnerApprovalState().
+     *
+     * The run is left in a clear, user-facing "needs technical repair" state — no internal
+     * queue/lease/database detail in error_message — and is picked up for an automatic, bounded
+     * content repair attempt by EnterpriseWikiMaintenanceCycleService (EnterpriseWikiClaimContentRepairService),
+     * exactly like an ordinary qa_status=escalated run is picked up for deep repair. This method
+     * itself never calls AI and never attempts a repair — it only records the stop.
+     */
+    private function escalateRunForClaimIntegrityRepair(EnterpriseWikiIngestRun $run): void
+    {
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
+            'finished_at' => now(),
+            'error_message' => 'Wiki-siden ble stanset fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget. Automatisk reparasjon vil bli forsøkt.',
+        ]);
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Run escalated for claim-content repair — not routed to document owner approval.', [
+            'run_id' => $run->id,
+            'claim_integrity_defects' => $run->qa_result['claim_integrity_defects'] ?? [],
         ]);
     }
 

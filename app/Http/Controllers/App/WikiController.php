@@ -8,9 +8,9 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
-use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
@@ -203,6 +203,10 @@ class WikiController extends Controller
         $requirements = $this->documentOwnerApprovalService->previewRequirementsForPageVersion($currentVersion);
 
         if ($requirements->isEmpty()) {
+            if ($this->documentOwnerApprovalService->hasActiveClaimIntegrityDefectsForVersion($currentVersion)) {
+                return $this->documentOwnerSummaryBlockedByQuality();
+            }
+
             return $this->documentOwnerSummaryAwaitingSync();
         }
 
@@ -336,6 +340,30 @@ class WikiController extends Controller
         return [
             'state' => 'awaiting_sync',
             'label' => __('procynia.wiki.document_owner_sync_pending'),
+            'owner_count' => 0,
+            'approved_count' => 0,
+            'pending_count' => 0,
+            'rejected_count' => 0,
+            'missing_owner_count' => 0,
+            'has_override' => false,
+        ];
+    }
+
+    /**
+     * A technically invalid page version (active unsupported/internal-error claims, or a
+     * source-based claim missing its provenance — see
+     * EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefectsForVersion())
+     * never generates a Document Owner approval requirement, so it always falls into the same
+     * "no requirements" branch as a page still awaiting its first sync. This distinct state
+     * keeps the two apart in the UI: a Document Owner must never be asked to approve/reject
+     * unresolved technical defects, only see an understandable "still processing" message
+     * without internal enum names (Del 9).
+     */
+    private function documentOwnerSummaryBlockedByQuality(): array
+    {
+        return [
+            'state' => 'blocked_by_quality',
+            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
             'owner_count' => 0,
             'approved_count' => 0,
             'pending_count' => 0,
@@ -520,19 +548,19 @@ class WikiController extends Controller
 
         $latestRuns = $allRuns
             ->groupBy('source_id')
-            ->map(fn($group) => $group->first());
+            ->map(fn ($group) => $group->first());
 
         $pagesPerDocument = $allRuns
-            ->filter(fn($run) => $run->enterprise_wiki_page_id !== null && $run->page !== null)
+            ->filter(fn ($run) => $run->enterprise_wiki_page_id !== null && $run->page !== null)
             ->groupBy('source_id')
-            ->map(fn($runs) => $runs
-                ->map(fn($run) => $run->page)
-                ->filter(fn($page) => in_array($page->status, $visibleStatuses, true))
+            ->map(fn ($runs) => $runs
+                ->map(fn ($run) => $run->page)
+                ->filter(fn ($page) => in_array($page->status, $visibleStatuses, true))
                 ->unique('id')
                 ->values()
             );
 
-        $sources = $documents->map(fn(EnterpriseWikiDocument $doc) => [
+        $sources = $documents->map(fn (EnterpriseWikiDocument $doc) => [
             'id' => $doc->id,
             'original_filename' => $doc->original_filename,
             'document_status' => $doc->document_status,
@@ -559,7 +587,7 @@ class WikiController extends Controller
                 'lint_count' => (int) ($latestRuns[$doc->id]->lint_count ?? 0),
             ] : null,
             'generated_pages' => ($pagesPerDocument->get($doc->id) ?? collect())
-                ->map(fn($page) => [
+                ->map(fn ($page) => [
                     'id' => $page->id,
                     'title' => $page->title,
                     'slug' => $page->slug,
@@ -632,7 +660,7 @@ class WikiController extends Controller
             : collect();
 
         return [
-            'runs' => $runs->map(fn(EnterpriseWikiIngestRun $run) => [
+            'runs' => $runs->map(fn (EnterpriseWikiIngestRun $run) => [
                 'id' => $run->id,
                 'status' => $run->status,
                 'maintainer_decision_status' => $run->maintainer_decision_status,
@@ -641,6 +669,8 @@ class WikiController extends Controller
                 'error_message' => $run->error_message,
                 'qa_status' => $run->qa_status,
                 'qa_last_error' => $run->qa_last_error,
+                'claim_content_repair_attempt_count' => $run->claim_content_repair_attempt_count,
+                'claim_content_repair_result' => $run->claim_content_repair_result,
                 'model_used' => $run->model_used,
                 'input_tokens' => $run->input_tokens,
                 'output_tokens' => $run->output_tokens,
@@ -784,8 +814,11 @@ class WikiController extends Controller
                 $currentVersion !== null
                 && $user instanceof User
                 && $user->is_active
-                && $this->documentOwnerApprovalService->isRequiredDocumentOwnerForPageVersion($currentVersion, $user)
-        );
+                && (
+                    $this->documentOwnerApprovalService->isRequiredDocumentOwnerForPageVersion($currentVersion, $user)
+                    || $this->documentOwnerApprovalService->isOwnerOfAnySourceDocumentForPageVersion($currentVersion, $user)
+                )
+            );
 
         abort_unless($canViewPendingPage, 404);
 
@@ -928,7 +961,7 @@ class WikiController extends Controller
             }
 
             $claims = $claimCollection
-                ->map(fn(EnterpriseWikiClaim $claim) => [
+                ->map(fn (EnterpriseWikiClaim $claim) => [
                     'id' => $claim->id,
                     'claim_text' => $claim->claim_text,
                     'content_origin' => $claim->content_origin,
@@ -946,7 +979,7 @@ class WikiController extends Controller
                     'approved_at' => $claim->approved_at,
                     'approval_comment' => $claim->approval_comment,
                     'source_references' => $claim->sourceReferences
-                        ->map(fn($ref) => [
+                        ->map(fn ($ref) => [
                             'id' => $ref->id,
                             'source_type' => $ref->source_type,
                             'source_element_key' => $ref->source_element_key,
@@ -971,7 +1004,7 @@ class WikiController extends Controller
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
             ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
             ->get()
-            ->map(fn($f) => [
+            ->map(fn ($f) => [
                 'id' => $f->id,
                 'code' => $f->code,
                 'severity' => $f->severity,
@@ -980,18 +1013,18 @@ class WikiController extends Controller
             ->all();
 
         $lintSummary = [
-            'error'   => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)->count(),
+            'error' => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)->count(),
             'warning' => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_WARNING)->count(),
-            'info'    => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_INFO)->count(),
-            'total'   => count($lintFindings),
+            'info' => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_INFO)->count(),
+            'total' => count($lintFindings),
         ];
 
-        $mapPage = fn(EnterpriseWikiPage $p) => [
-            'id'        => $p->id,
-            'title'     => $p->title,
-            'slug'      => $p->slug,
+        $mapPage = fn (EnterpriseWikiPage $p) => [
+            'id' => $p->id,
+            'title' => $p->title,
+            'slug' => $p->slug,
             'page_type' => $p->page_type,
-            'status'    => $p->status,
+            'status' => $p->status,
         ];
 
         $renderedMarkdown = $currentVersion !== null && $currentVersion->content_markdown !== null
@@ -1008,7 +1041,7 @@ class WikiController extends Controller
             ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->with('fromPage')
             ->get()
-            ->map(fn(EnterpriseWikiPageLink $link) => $link->fromPage)
+            ->map(fn (EnterpriseWikiPageLink $link) => $link->fromPage)
             ->filter()
             ->unique('id')
             ->map($mapPage)
@@ -1058,35 +1091,36 @@ class WikiController extends Controller
 
         return Inertia::render('App/Wiki/Show', [
             'page' => [
-                'id'           => $page->id,
-                'title'        => $page->title,
-                'slug'         => $page->slug,
-                'page_type'    => $page->page_type,
-                'status'       => $page->status,
+                'id' => $page->id,
+                'title' => $page->title,
+                'slug' => $page->slug,
+                'page_type' => $page->page_type,
+                'status' => $page->status,
                 'generated_by' => $page->generated_by,
-                'reviewed_at'  => $page->reviewed_at,
-                'updated_at'   => $page->updated_at,
+                'reviewed_at' => $page->reviewed_at,
+                'updated_at' => $page->updated_at,
             ],
             'current_version' => $currentVersion !== null ? [
-                'id'                => $currentVersion->id,
-                'version_number'    => $currentVersion->version_number,
-                'content_markdown'  => $currentVersion->content_markdown,
+                'id' => $currentVersion->id,
+                'version_number' => $currentVersion->version_number,
+                'content_markdown' => $currentVersion->content_markdown,
                 'rendered_markdown' => $renderedMarkdown,
             ] : null,
-            'claims'          => $claims,
-            'claim_summary'   => $claimSummary,
-            'lint_findings'   => $lintFindings,
-            'lint_summary'    => $lintSummary,
-            'outgoing_links'  => $this->traversal->outgoing($page)->map($mapPage)->values()->all(),
-            'incoming_links'  => $this->traversal->incoming($page)->map($mapPage)->values()->all(),
+            'claims' => $claims,
+            'claim_summary' => $claimSummary,
+            'lint_findings' => $lintFindings,
+            'lint_summary' => $lintSummary,
+            'outgoing_links' => $this->traversal->outgoing($page)->map($mapPage)->values()->all(),
+            'incoming_links' => $this->traversal->incoming($page)->map($mapPage)->values()->all(),
             'related_articles' => $this->traversal->relatedArticles($page)->map($mapPage)->values()->all(),
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
-            'backlinks'       => $backlinks,
+            'backlinks' => $backlinks,
             'can_handle_wiki_claims' => $canHandleWikiClaims,
             'source_documents' => $sourceDocuments,
             'document_owner_approvals' => $documentOwnerApprovals,
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,
+            'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
         ]);
     }
 

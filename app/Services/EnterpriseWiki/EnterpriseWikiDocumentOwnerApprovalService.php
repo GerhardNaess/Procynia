@@ -13,8 +13,6 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class EnterpriseWikiDocumentOwnerApprovalService
 {
@@ -293,6 +291,35 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
+     * Whether the user owns at least one source document referenced by any claim on this page
+     * version — computed directly from claims' source references, independent of
+     * syncForPageVersion()/previewRequirementsForPageVersion(), which return no requirement at
+     * all once the version has an active claim-integrity defect (see
+     * hasActiveClaimIntegrityDefects()). A legitimate Document Owner for a page's *good* claims
+     * must still be able to reach the page (to see the "still processing" state — Del 9) even
+     * while other claims on the same version are blocked; gating solely on
+     * isRequiredDocumentOwnerForPageVersion() would 404 them out entirely in that case.
+     */
+    public function isOwnerOfAnySourceDocumentForPageVersion(EnterpriseWikiPageVersion $version, User $user): bool
+    {
+        $documentIds = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->whereHas('sourceReferences', fn ($query) => $query
+                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT))
+            ->with(['sourceReferences' => fn ($query) => $query
+                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
+            ->get()
+            ->flatMap(fn (EnterpriseWikiClaim $claim) => $claim->sourceReferences->pluck('source_id'))
+            ->map(static fn (mixed $value): int => (int) $value)
+            ->filter(static fn (int $value): bool => $value > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $this->userOwnsAnySourceDocument($user, $documentIds);
+    }
+
+    /**
      * @return Collection<int, EnterpriseWikiPageVersionDocumentOwnerApproval>
      */
     private function buildRequirementsForPageVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): Collection
@@ -327,6 +354,10 @@ class EnterpriseWikiDocumentOwnerApprovalService
      */
     private function buildRequirementGroupsFromClaims(Collection $claims, EnterpriseWikiPage $page): Collection
     {
+        if ($this->hasActiveClaimIntegrityDefects($claims)) {
+            return collect();
+        }
+
         $documentIds = $claims->flatMap(function (EnterpriseWikiClaim $claim): Collection {
             return $claim->sourceReferences
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
@@ -387,6 +418,49 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 )),
             ])
             ->values();
+    }
+
+    /**
+     * Whether a page version's claims currently carry an active claim-integrity defect — the
+     * public counterpart of hasActiveClaimIntegrityDefects() for callers (WikiController) that
+     * only need the boolean, not a full requirements/approvals computation.
+     */
+    public function hasActiveClaimIntegrityDefectsForVersion(EnterpriseWikiPageVersion $version): bool
+    {
+        $claims = $version->relationLoaded('claims')
+            ? $version->claims
+            : EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->with(['sourceReferences' => fn ($query) => $query
+                    ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
+                ->get();
+
+        return $this->hasActiveClaimIntegrityDefects($claims);
+    }
+
+    /**
+     * A page version carrying an active claim-integrity defect (unsupported generated content,
+     * an internal generation/anchoring error, or a source-based claim missing its provenance —
+     * the same set EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects() gates QA on)
+     * must never generate a Document Owner approval requirement: the whole-page approval this
+     * service builds would otherwise ask the Document Owner to bless known-invalid text as
+     * ordinary, presumed-correct Wiki content. Best-practice suggestions are excluded — those
+     * are a distinct, already-supported review flow (WikiClaimController::approve()) and must
+     * not suppress or block the document-owner requirement on their own.
+     */
+    private function hasActiveClaimIntegrityDefects(Collection $claims): bool
+    {
+        return $claims->contains(function (EnterpriseWikiClaim $claim): bool {
+            if (in_array($claim->content_origin, [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            ], true)) {
+                return true;
+            }
+
+            return $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+                && $claim->sourceReferences->isEmpty();
+        });
     }
 
     private function firstOrCreateApproval(
@@ -499,7 +573,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * @param list<int> $documentIds
+     * @param  list<int>  $documentIds
      */
     private function userOwnsAnySourceDocument(User $actor, array $documentIds): bool
     {
@@ -515,9 +589,9 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * @param list<array<string, mixed>> $pending
-     * @param list<array<string, mixed>> $rejected
-     * @param list<array<string, mixed>> $missingOwner
+     * @param  list<array<string, mixed>>  $pending
+     * @param  list<array<string, mixed>>  $rejected
+     * @param  list<array<string, mixed>>  $missingOwner
      */
     private function buildGateMessage(array $pending, array $rejected, array $missingOwner): string
     {

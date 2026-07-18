@@ -576,11 +576,31 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
         ]);
 
+        // Gives any claim the default extractClaims mock produces (excerpt "Excerpt A") a
+        // resolvable, source-based block anchor — without this, EnterpriseWikiExtractPageClaimsService
+        // cannot match the excerpt to any block (content_origin=internal_error) and
+        // EnterpriseWikiVerifyPageClaimsService's own anchor check against content_markdown
+        // would independently fail the same way, since it checks content_markdown directly, not
+        // content_blocks_json. See EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(),
+        // which now correctly blocks qa_status=passed for either.
+        $blockMarkdown = 'Excerpt A appears in this block.';
+        $defaultMarkdown = "# {$title}\n\n{$blockMarkdown}";
+
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 1,
             'is_current' => true,
-            'content_markdown' => $content !== '' ? $content : "# {$title}\n\nContent.",
+            'content_markdown' => $content !== '' ? $content : $defaultMarkdown,
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $blockMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => $run->source_id,
+                'source_label' => 'source.pdf',
+                'source_hash' => '',
+            ]],
             'generated_by_model' => 'gpt-5',
         ]);
 

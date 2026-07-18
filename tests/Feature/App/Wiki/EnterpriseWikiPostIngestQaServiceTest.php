@@ -502,6 +502,61 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Run-34 fix: a stale qa_status=passed run can be explicitly re-evaluated once a claim-
+    // integrity defect is discovered — but never picked up by scheduled/bulk sweeps.
+    // =========================================================================
+
+    public function test_default_mode_skips_passed_run(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+
+        $result = $this->service()->runForRun($run);
+
+        $this->assertNull($result, 'Passed run must not be re-evaluated without --retry.');
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_retry_mode_can_re_evaluate_a_passed_run_and_downgrade_it(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        // A claim-integrity defect discovered after the run was originally marked passed.
+        $version = $article->versions()->where('is_current', true)->first();
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Bad claim.',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'verified_at' => now(),
+        ]);
+
+        $result = $this->service()->runForRun($run, retry: true);
+
+        $this->assertNotNull($result);
+        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    public function test_find_pending_runs_and_find_retryable_runs_never_include_passed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+
+        $this->assertFalse($this->service()->findPendingRuns()->contains('id', $run->id));
+        $this->assertFalse($this->service()->findRetryableRuns()->contains('id', $run->id));
+    }
+
+    // =========================================================================
     // Lint errors are a critical (failed) defect; warnings do not block passed
     // =========================================================================
 

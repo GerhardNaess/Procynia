@@ -224,6 +224,7 @@ export default function WikiShow({
     source_documents: sourceDocuments = [],
     document_owner_approvals: documentOwnerApprovals = [],
     document_owner_approval_summary: documentOwnerApprovalSummary = null,
+    document_owner_summary: documentOwnerSummary = null,
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
     outgoing_links: outgoingLinks = [],
@@ -1220,6 +1221,14 @@ export default function WikiShow({
                         </p>
                     )}
                 </section>
+
+                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'blocked_by_quality' && (
+                    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                        <p className="text-sm font-medium text-amber-800">
+                            {tw.document_owner_blocked_by_quality_message ?? 'Wiki-siden behandles fortsatt fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget.'}
+                        </p>
+                    </section>
+                )}
 
                 {current_version && documentOwnerApprovals.length > 0 && (
                     <section className="space-y-3">
