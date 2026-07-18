@@ -14,12 +14,15 @@ class EnterpriseWikiClaim extends Model
 
     public const CONTENT_ORIGIN_BEST_PRACTICE = 'best_practice';
 
+    public const CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT = 'unsupported_generated_content';
+
     public const CONTENT_ORIGIN_INTERNAL_ERROR = 'internal_error';
 
     public const CONTENT_ORIGINS = [
         self::CONTENT_ORIGIN_UNCLASSIFIED,
         self::CONTENT_ORIGIN_SOURCE_BASED,
         self::CONTENT_ORIGIN_BEST_PRACTICE,
+        self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         self::CONTENT_ORIGIN_INTERNAL_ERROR,
     ];
 
@@ -71,13 +74,18 @@ class EnterpriseWikiClaim extends Model
     /** The claim is an internal consistency problem and must not be a normal user task. */
     public const SOURCE_STATUS_INTERNAL_ERROR = 'internal_generation_error';
 
+    /** Generated content is unsupported and must be handled as a system deviation. */
+    public const SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT = 'unsupported_generated_content';
+
     protected $fillable = [
         'enterprise_wiki_page_id',
         'enterprise_wiki_page_version_id',
         'claim_text',
         'content_origin',
         'page_excerpt',
+        'content_block_key',
         'review_reason',
+        'review_metadata',
         'generation_issue',
         'position_order',
         'confidence',
@@ -99,6 +107,7 @@ class EnterpriseWikiClaim extends Model
             'approved_at' => 'datetime',
             'verified_at' => 'datetime',
             'verification_claimed_at' => 'datetime',
+            'review_metadata' => 'array',
         ];
     }
 
@@ -167,6 +176,10 @@ class EnterpriseWikiClaim extends Model
             return self::SOURCE_STATUS_INTERNAL_ERROR;
         }
 
+        if ($this->content_origin === self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT) {
+            return self::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT;
+        }
+
         if ($this->content_origin === self::CONTENT_ORIGIN_BEST_PRACTICE && $this->isPending()) {
             return self::SOURCE_STATUS_BEST_PRACTICE_REVIEW;
         }
@@ -200,6 +213,7 @@ class EnterpriseWikiClaim extends Model
     {
         if (in_array($this->content_origin, [
             self::CONTENT_ORIGIN_BEST_PRACTICE,
+            self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             self::CONTENT_ORIGIN_INTERNAL_ERROR,
         ], true)) {
             return false;

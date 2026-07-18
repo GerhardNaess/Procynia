@@ -294,11 +294,25 @@ class EnterpriseWikiVerifyPageClaimsService
             }
 
             if (! $result['supported']) {
+                $bestPractice = $this->isPositiveBestPracticeSuggestion($claim);
+
                 $claim->update([
-                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'content_origin' => $bestPractice
+                        ? EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                        : EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
-                    'review_reason' => 'Innholdet finnes i Wiki-teksten, men ble ikke direkte dokumentert av kildedokumentet. Vurder om dette skal beholdes som beste praksis.',
-                    'generation_issue' => null,
+                    'review_reason' => $bestPractice
+                        ? 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.'
+                        : null,
+                    'review_metadata' => $bestPractice
+                        ? [
+                            'statement_kind' => 'recommendation',
+                            'classification_basis' => 'normative_language',
+                            'suggested_placement' => $claim->content_block_key,
+                            'visible_wiki_link_recommendation' => 'auto_evaluate',
+                        ]
+                        : null,
+                    'generation_issue' => $bestPractice ? null : 'unsupported_generated_content',
                     'verified_at' => now(),
                     'verification_claimed_at' => null,
                     'verification_claim_token' => null,
@@ -390,6 +404,23 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         return null;
+    }
+
+    private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
+    {
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return true;
+        }
+
+        $text = mb_strtolower((string) $claim->claim_text);
+
+        foreach ([' bør ', ' anbefal', ' beste praksis', ' standard', 'rammeverk', 'kan vurdere', 'should ', 'recommended', 'best practice', 'standard'] as $marker) {
+            if (str_contains($text, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function containsNormalized(string $haystack, string $needle): bool

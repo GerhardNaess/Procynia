@@ -25,7 +25,10 @@ class EnterpriseWikiRepairClaimIntegrity extends Command
         $this->line(sprintf('  Claims checked:      %d', $result['checked']));
         $this->line(sprintf('  Source-based:        %d', $result['source_based']));
         $this->line(sprintf('  Best-practice:       %d', $result['best_practice']));
+        $this->line(sprintf('  Unsupported content: %d', $result['unsupported_generated_content']));
         $this->line(sprintf('  Internal errors:     %d', $result['internal_error']));
+        $this->line(sprintf('  Wrong version:       %d', $result['wrong_version']));
+        $this->line(sprintf('  Missing anchor:      %d', $result['missing_anchor']));
         $this->line(sprintf('  Unchanged/unknown:   %d', $result['unchanged']));
 
         if (! $apply) {

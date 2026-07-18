@@ -205,7 +205,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_HIGH, $first->confidence);
     }
 
-    public function test_claim_stores_page_excerpt_and_starts_unclassified_when_excerpt_exists_in_current_version(): void
+    public function test_claim_stores_page_excerpt_block_key_and_source_based_origin_when_excerpt_matches_unique_block(): void
     {
         $customer = $this->createCustomer();
         [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
@@ -217,8 +217,9 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->orderBy('position_order')
             ->firstOrFail();
 
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
         $this->assertSame('Supporting excerpt alpha.', $claim->page_excerpt);
+        $this->assertSame('block-0002', $claim->content_block_key);
         $this->assertNull($claim->generation_issue);
     }
 
@@ -384,15 +385,25 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     // No side effects
     // =========================================================================
 
-    public function test_command_does_not_create_source_references(): void
+    public function test_command_creates_source_references_from_page_block_provenance_before_verification(): void
     {
         $customer = $this->createCustomer();
-        [$run]    = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-        $refsBefore = EnterpriseWikiSourceReference::query()->count();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
 
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $this->assertSame($refsBefore, EnterpriseWikiSourceReference::query()->count());
+        $claim = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->firstOrFail();
+
+        $reference = EnterpriseWikiSourceReference::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->firstOrFail();
+
+        $this->assertSame(123, $reference->source_id);
+        $this->assertSame('source-alpha', $reference->source_element_key);
+        $this->assertSame('Supporting excerpt alpha.', $reference->excerpt);
     }
 
     public function test_command_does_not_create_additional_ingest_runs(): void
@@ -534,6 +545,47 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             'version_number'          => 1,
             'is_current'              => true,
             'content_markdown'        => "# Test Page\n\nThis is test content with verifiable facts.\n\nSupporting excerpt alpha.\n\nSupporting excerpt beta.",
+            'content_blocks_json'      => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => '# Test Page',
+                    'source_id' => 123,
+                    'source_label' => 'source.docx',
+                    'source_hash' => str_pad('a', 64, '0'),
+                    'source_element_key' => 'source-heading',
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                    'source_row_key' => null,
+                    'source_excerpt' => 'Test Page',
+                    'page_reference' => 'Tittel',
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => 'Supporting excerpt alpha.',
+                    'source_id' => 123,
+                    'source_label' => 'source.docx',
+                    'source_hash' => str_pad('a', 64, '0'),
+                    'source_element_key' => 'source-alpha',
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                    'source_row_key' => null,
+                    'source_excerpt' => 'Supporting excerpt alpha.',
+                    'page_reference' => 'Avsnitt 1',
+                ],
+                [
+                    'block_key' => 'block-0003',
+                    'position' => 2,
+                    'markdown' => 'Supporting excerpt beta.',
+                    'source_id' => 123,
+                    'source_label' => 'source.docx',
+                    'source_hash' => str_pad('a', 64, '0'),
+                    'source_element_key' => 'source-beta',
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                    'source_row_key' => null,
+                    'source_excerpt' => 'Supporting excerpt beta.',
+                    'page_reference' => 'Avsnitt 2',
+                ],
+            ],
             'generated_by_model'      => 'gpt-5',
         ]);
 

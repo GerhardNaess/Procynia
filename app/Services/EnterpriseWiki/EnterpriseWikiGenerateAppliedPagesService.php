@@ -41,6 +41,8 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiWikilinkCanonicalizer $wikilinkCanonicalizer,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
     ) {}
 
     /**
@@ -113,7 +115,11 @@ class EnterpriseWikiGenerateAppliedPagesService
                 languageCode: $languageCode,
             );
 
-            $this->writeVersion($page->id, $markdown);
+            $this->writeVersion($page->id, $markdown, $this->contentBlockService->buildBlocks(
+                $markdown,
+                $document,
+                $this->sourceElementService->inspect($document)['elements'],
+            ));
             $counts[$page->page_type]++;
         }
 
@@ -143,7 +149,11 @@ class EnterpriseWikiGenerateAppliedPagesService
                 additionalContext: $additionalContext,
             );
 
-            $this->writeVersion($page->id, $markdown);
+            $this->writeVersion($page->id, $markdown, $this->contentBlockService->buildBlocks(
+                $markdown,
+                $document,
+                $this->sourceElementService->inspect($document)['elements'],
+            ));
             $counts[$page->page_type]++;
         }
 
@@ -243,7 +253,13 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
-        DB::transaction(function () use ($run, $page, $markdown): void {
+        $contentBlocks = $this->contentBlockService->buildBlocks(
+            $markdown,
+            $document,
+            $this->sourceElementService->inspect($document)['elements'],
+        );
+
+        DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
             $pivot = EnterpriseWikiIngestRunPage::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('enterprise_wiki_page_id', $page->id)
@@ -255,7 +271,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 return;
             }
 
-            $version = $this->writeNewCurrentVersion($page->id, $markdown);
+            $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
 
             $pivot->update([
@@ -347,7 +363,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         return $this->buildConceptEntityContext($page, $decisionJson, $sharedContext);
     }
 
-    private function writeNewCurrentVersion(int $pageId, string $markdown): EnterpriseWikiPageVersion
+    private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = []): EnterpriseWikiPageVersion
     {
         $next = ((int) EnterpriseWikiPageVersion::query()
             ->where('enterprise_wiki_page_id', $pageId)
@@ -363,6 +379,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'version_number'          => $next,
             'is_current'              => true,
             'content_markdown'        => $markdown,
+            'content_blocks_json'      => $contentBlocks,
             'generated_by_model'      => WikiPageContentAiClient::MODEL,
         ]);
 
@@ -376,7 +393,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->exists();
     }
 
-    private function writeVersion(int $pageId, string $markdown): void
+    private function writeVersion(int $pageId, string $markdown, array $contentBlocks = []): void
     {
         $next = ((int) EnterpriseWikiPageVersion::query()
             ->where('enterprise_wiki_page_id', $pageId)
@@ -387,6 +404,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'version_number'          => $next,
             'is_current'              => true,
             'content_markdown'        => $markdown,
+            'content_blocks_json'      => $contentBlocks,
             'generated_by_model'      => WikiPageContentAiClient::MODEL,
         ]);
     }

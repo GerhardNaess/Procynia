@@ -108,7 +108,7 @@ class WikiShowClaimStatusTest extends TestCase
         });
     }
 
-    public function test_claim_summary_distinguishes_best_practice_and_internal_generation_errors(): void
+    public function test_claim_summary_distinguishes_best_practice_unsupported_and_internal_generation_errors(): void
     {
         $customer = $this->createCustomer();
         $viewer = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
@@ -142,22 +142,31 @@ class WikiShowClaimStatusTest extends TestCase
             'generation_issue' => 'claim_not_traceable_to_current_page_version',
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
         ]);
+        $unsupportedClaim = $this->makeClaim($page, $version, 'Dette er en faktapåstand uten støtte.', 2, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+        ]);
 
         $response = $this->actingAs($viewer)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($bestPracticeClaim, $internalErrorClaim): bool {
+        $response->assertViewHas('page', function (array $inertia) use ($bestPracticeClaim, $internalErrorClaim, $unsupportedClaim): bool {
             $props = data_get($inertia, 'props');
             $summary = data_get($props, 'claim_summary');
             $claims = collect(data_get($props, 'claims', []))->keyBy('id');
 
             $bestPractice = $claims->get($bestPracticeClaim->id);
             $internalError = $claims->get($internalErrorClaim->id);
+            $unsupported = $claims->get($unsupportedClaim->id);
 
             return $summary['best_practice_review'] === 1
+                && $summary['unsupported_generated_content'] === 1
                 && $summary['internal_generation_error'] === 1
                 && ($bestPractice['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW
                 && ($bestPractice['review_reason'] ?? null) === 'Beste praksis uten kildegrunnlag.'
+                && ($unsupported['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT
+                && ($unsupported['generation_issue'] ?? null) === 'unsupported_generated_content'
                 && ($internalError['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_INTERNAL_ERROR
                 && ($internalError['generation_issue'] ?? null) === 'claim_not_traceable_to_current_page_version';
         });

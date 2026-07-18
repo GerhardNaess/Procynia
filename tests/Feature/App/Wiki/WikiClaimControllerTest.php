@@ -67,12 +67,30 @@ class WikiClaimControllerTest extends TestCase
         $editedText = 'Virksomheten bør gjennomføre dokumentert tilgangsgjennomgang minst årlig.';
 
         $version->update([
-            'content_markdown' => "# Claim Page\n\n{$originalText}",
+            'content_markdown' => "# Claim Page\n\n{$originalText}\n\n{$originalText}",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => '# Claim Page',
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => $originalText,
+                ],
+                [
+                    'block_key' => 'block-0003',
+                    'position' => 2,
+                    'markdown' => $originalText,
+                ],
+            ],
         ]);
 
         $claim->update([
             'claim_text' => $originalText,
             'page_excerpt' => $originalText,
+            'content_block_key' => 'block-0002',
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
             'review_reason' => 'Beste praksis uten kildegrunnlag.',
@@ -89,13 +107,16 @@ class WikiClaimControllerTest extends TestCase
         $response->assertRedirect(route('app.wiki.show', $page->slug));
 
         $this->assertStringContainsString($editedText, $version->fresh()->content_markdown);
-        $this->assertStringNotContainsString($originalText, $version->fresh()->content_markdown);
+        $this->assertSame(1, substr_count($version->fresh()->content_markdown, $originalText));
+        $this->assertSame($editedText, $version->fresh()->content_blocks_json[1]['markdown']);
+        $this->assertSame($originalText, $version->fresh()->content_blocks_json[2]['markdown']);
 
         $claim->refresh();
         $this->assertTrue($claim->isApproved());
         $this->assertSame($editedText, $claim->claim_text);
         $this->assertSame($editedText, $claim->page_excerpt);
         $this->assertSame('Presisert formulering.', $claim->approval_comment);
+        $this->assertSame('no_visible_link_needed', $claim->review_metadata['visible_wiki_link_result'] ?? null);
     }
 
     public function test_bid_manager_cannot_approve_claim(): void

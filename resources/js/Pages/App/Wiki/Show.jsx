@@ -44,9 +44,10 @@ const SOURCE_STATUS_STYLES = {
     missing_source: 'bg-rose-100 text-rose-700',
     best_practice_review: 'bg-amber-100 text-amber-700',
     internal_generation_error: 'bg-slate-200 text-slate-700',
+    unsupported_generated_content: 'bg-slate-200 text-slate-700',
 };
 
-const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source', 'best_practice_review', 'internal_generation_error']);
+const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source', 'best_practice_review', 'internal_generation_error', 'unsupported_generated_content']);
 
 const CLAIM_SOURCE_STATUS_STYLES = {
     source_found: 'bg-emerald-100 text-emerald-700',
@@ -56,6 +57,7 @@ const CLAIM_SOURCE_STATUS_STYLES = {
     missing_source: 'bg-rose-100 text-rose-700',
     best_practice_review: 'bg-amber-100 text-amber-700',
     internal_generation_error: 'bg-slate-200 text-slate-700',
+    unsupported_generated_content: 'bg-slate-200 text-slate-700',
 };
 
 const HIGH_VOLUME_THRESHOLD = 100;
@@ -283,6 +285,7 @@ export default function WikiShow({
     const openClaims = claims.filter((claim) => (
         claim.approval_status === 'pending'
         && claim.content_origin !== 'internal_error'
+        && claim.content_origin !== 'unsupported_generated_content'
         && (
             claim.content_origin === 'best_practice'
             || claim.conflict_flag
@@ -290,7 +293,15 @@ export default function WikiShow({
             || claim.source_status === 'missing_excerpt'
         )
     ));
-    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim) && claim.content_origin !== 'internal_error');
+    const internalClaimIssues = claims.filter((claim) => (
+        claim.content_origin === 'internal_error'
+        || claim.content_origin === 'unsupported_generated_content'
+    ));
+    const verifiedClaims = claims.filter((claim) => (
+        !openClaims.includes(claim)
+        && claim.content_origin !== 'internal_error'
+        && claim.content_origin !== 'unsupported_generated_content'
+    ));
 
     const sendAction = (action) => {
         if (processing) return;
@@ -493,6 +504,7 @@ export default function WikiShow({
         missing_source: tw.claim_source_status_missing_source ?? 'Mangler kildereferanse',
         best_practice_review: tw.claim_source_status_best_practice_review ?? 'Forslag basert på beste praksis',
         internal_generation_error: tw.claim_source_status_internal_error ?? 'Genereringsfeil',
+        unsupported_generated_content: tw.claim_source_status_unsupported_generated_content ?? 'Ikke-støttet generert innhold',
     }[status] ?? status);
 
     const sourceTypeLabel = (type) => ({
@@ -1390,6 +1402,11 @@ export default function WikiShow({
                                 {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
                             </span>
                         )}
+                        {isSystemOwner && internalClaimIssues.length > 0 && (
+                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-normal text-slate-700">
+                                {internalClaimIssues.length} {tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}
+                            </span>
+                        )}
                     </button>
 
                     {verificationOpen && (
@@ -1411,6 +1428,12 @@ export default function WikiShow({
                                         label={`${structuralFindings.length} ${tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}`}
                                         cls="bg-slate-100 text-slate-600"
                                     />
+                                    {isSystemOwner && (
+                                        <Badge
+                                            label={`${internalClaimIssues.length} ${tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}`}
+                                            cls="bg-slate-200 text-slate-700"
+                                        />
+                                    )}
                                 </div>
                                 {claimLintFindings.length > 0 && (
                                     <p className="mt-3 text-xs text-slate-500">
@@ -1444,6 +1467,40 @@ export default function WikiShow({
                                     </div>
                                 )}
                             </section>
+
+                            {isSystemOwner && internalClaimIssues.length > 0 && (
+                                <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                                    <div className="space-y-1">
+                                        <h3 className="text-sm font-semibold text-slate-700">
+                                            {tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}
+                                        </h3>
+                                        <p className="text-sm text-slate-500">
+                                            {tw.verification_basis_internal_issues_intro ?? 'Disse claimene skjules fra ordinær Dokumenteierbehandling fordi de mangler stabilt grunnlag eller ikke er støttet av kildene.'}
+                                        </p>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {internalClaimIssues.map((claim) => (
+                                            <article key={claim.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <Badge
+                                                        label={claimSourceStatusLabel(claim.source_status)}
+                                                        cls={CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}
+                                                    />
+                                                    {claim.content_block_key && (
+                                                        <Badge label={claim.content_block_key} cls="bg-slate-100 text-slate-600" />
+                                                    )}
+                                                </div>
+                                                <p className="mt-2 text-sm leading-6 text-slate-800">{claim.claim_text}</p>
+                                                {claim.generation_issue && (
+                                                    <p className="mt-2 text-xs text-slate-500">
+                                                        {tw.verification_basis_generation_issue_label ?? 'Årsak'}: {claim.generation_issue}
+                                                    </p>
+                                                )}
+                                            </article>
+                                        ))}
+                                    </div>
+                                </section>
+                            )}
 
                             <section className="space-y-3">
                                 <button

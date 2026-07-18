@@ -9,8 +9,10 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -37,7 +39,9 @@ class WikiClaimController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiBuildPageLinksService $pageLinksService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
     ) {}
 
@@ -61,6 +65,18 @@ class WikiClaimController extends Controller
             EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
             $validated['comment'] ?? null,
         );
+
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            $this->pageLinksService->materializeWikilinksForPage($page);
+
+            $claim->fresh()->update([
+                'review_metadata' => array_merge($claim->fresh()->review_metadata ?? [], [
+                    'visible_wiki_link_result' => str_contains((string) $claim->fresh()->claim_text, '[[')
+                        ? 'materialized_from_approved_text'
+                        : 'no_visible_link_needed',
+                ]),
+            ]);
+        }
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er godkjent.');
     }
@@ -241,15 +257,17 @@ class WikiClaimController extends Controller
             abort(422, 'Claim is not tied to a valid Wiki page version.');
         }
 
-        $anchor = $this->normalizeNullableString($claim->page_excerpt) ?? $this->normalizeNullableString($claim->claim_text);
+        $blockKey = $this->normalizeNullableString($claim->content_block_key);
 
-        if ($anchor === null || ! str_contains((string) $version->content_markdown, $anchor)) {
-            abort(422, 'Best-practice text can only be edited when the original text is still present in the current Wiki page version.');
+        if ($blockKey === null) {
+            abort(422, 'Best-practice text can only be edited when the claim has a stable Wiki text block.');
         }
 
-        $version->update([
-            'content_markdown' => str_replace($anchor, $approvedText, (string) $version->content_markdown),
-        ]);
+        abort_unless(
+            $this->contentBlockService->replaceBlockMarkdown($version, $blockKey, $approvedText),
+            422,
+            'Best-practice text can only be edited when the original block is still present in the current Wiki page version.',
+        );
 
         $claim->update([
             'claim_text' => $approvedText,

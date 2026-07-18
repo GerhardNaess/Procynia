@@ -248,7 +248,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame($refsBefore, EnterpriseWikiSourceReference::query()->count());
     }
 
-    public function test_unsupported_claim_with_page_anchor_becomes_best_practice_review(): void
+    public function test_unsupported_factual_claim_with_page_anchor_becomes_unsupported_generated_content(): void
     {
         $customer = $this->createCustomer();
         [$run, , , $claim] = $this->createAppliedRunWithClaimedPage($customer);
@@ -262,10 +262,39 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 
         $claim->refresh();
 
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
         $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN, $claim->confidence);
-        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT, $claim->sourceStatus());
         $this->assertFalse($claim->needsSourceWarning());
+        $this->assertSame('unsupported_generated_content', $claim->generation_issue);
+        $this->assertNull($claim->review_reason);
+    }
+
+    public function test_unsupported_normative_recommendation_becomes_best_practice_review(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
+        $text = 'Virksomheten bør gjennomføre årlig tilgangsgjennomgang.';
+
+        $version->update(['content_markdown' => "# {$page->title}\n\n{$text}"]);
+        $claim->update([
+            'claim_text' => $text,
+            'page_excerpt' => $text,
+            'content_block_key' => 'block-0001',
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn(['supported' => false, 'excerpt' => '']);
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+        $this->assertSame('recommendation', $claim->review_metadata['statement_kind'] ?? null);
         $this->assertNotNull($claim->review_reason);
     }
 

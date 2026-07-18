@@ -13,6 +13,7 @@ class EnterpriseWikiPageVersion extends Model
         'version_number',
         'is_current',
         'content_markdown',
+        'content_blocks_json',
         'generated_by_model',
         'generation_prompt_hash',
     ];
@@ -22,6 +23,7 @@ class EnterpriseWikiPageVersion extends Model
         return [
             'version_number' => 'integer',
             'is_current' => 'boolean',
+            'content_blocks_json' => 'array',
         ];
     }
 

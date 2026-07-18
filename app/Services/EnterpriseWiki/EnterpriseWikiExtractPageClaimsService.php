@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -62,6 +63,7 @@ class EnterpriseWikiExtractPageClaimsService
 
     public function __construct(
         private readonly WikiPageClaimExtractionAiClient $aiClient,
+        private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
     ) {}
 
     /**
@@ -247,19 +249,21 @@ class EnterpriseWikiExtractPageClaimsService
 
             foreach ($result['claims'] as $i => $claim) {
                 $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
-                $hasPageAnchor = $pageExcerpt !== ''
-                    && $this->containsNormalized((string) ($version->content_markdown ?? ''), $pageExcerpt);
+                $block = $this->contentBlockService->findUniqueBlockForExcerpt($version, $pageExcerpt);
+                $hasPageAnchor = $block !== null;
                 $contentOrigin = $hasPageAnchor
-                    ? EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED
+                    ? EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
                     : EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR;
 
-                EnterpriseWikiClaim::query()->create([
+                $createdClaim = EnterpriseWikiClaim::query()->create([
                     'enterprise_wiki_page_id' => $page->id,
                     'enterprise_wiki_page_version_id' => $version->id,
                     'claim_text' => $claim['text'],
                     'content_origin' => $contentOrigin,
                     'page_excerpt' => $pageExcerpt !== '' ? $pageExcerpt : null,
+                    'content_block_key' => $block['block_key'] ?? null,
                     'review_reason' => null,
+                    'review_metadata' => null,
                     'generation_issue' => $hasPageAnchor ? null : 'claim_excerpt_not_found_in_page_version',
                     'position_order' => $i,
                     'confidence' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
@@ -268,6 +272,21 @@ class EnterpriseWikiExtractPageClaimsService
                     'conflict_flag' => ($claim['conflict_note'] ?? null) !== null,
                     'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 ]);
+
+                if ($block !== null) {
+                    EnterpriseWikiSourceReference::query()->create([
+                        'enterprise_wiki_claim_id' => $createdClaim->id,
+                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                        'source_id' => (int) ($block['source_id'] ?? 0),
+                        'source_element_key' => $block['source_element_key'] ?? null,
+                        'source_element_type' => $block['source_element_type'] ?? null,
+                        'source_row_key' => $block['source_row_key'] ?? null,
+                        'source_label' => (string) ($block['source_label'] ?? 'Kildedokument'),
+                        'excerpt' => (string) ($block['source_excerpt'] ?? $pageExcerpt),
+                        'source_hash' => (string) ($block['source_hash'] ?? ''),
+                        'page_reference' => $block['page_reference'] ?? null,
+                    ]);
+                }
 
                 $created++;
             }

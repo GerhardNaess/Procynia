@@ -901,6 +901,7 @@ class WikiController extends Controller
             'rejected' => 0,
             'missing_source' => 0,
             'best_practice_review' => 0,
+            'unsupported_generated_content' => 0,
             'internal_generation_error' => 0,
             'conflict' => 0,
         ];
@@ -921,6 +922,7 @@ class WikiController extends Controller
                     EnterpriseWikiClaim::SOURCE_STATUS_REJECTED => 'rejected',
                     EnterpriseWikiClaim::SOURCE_STATUS_MISSING => 'missing_source',
                     EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW => 'best_practice_review',
+                    EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT => 'unsupported_generated_content',
                     EnterpriseWikiClaim::SOURCE_STATUS_INTERNAL_ERROR => 'internal_generation_error',
                 }]++;
             }
@@ -931,7 +933,9 @@ class WikiController extends Controller
                     'claim_text' => $claim->claim_text,
                     'content_origin' => $claim->content_origin,
                     'page_excerpt' => $claim->page_excerpt,
+                    'content_block_key' => $claim->content_block_key,
                     'review_reason' => $claim->review_reason,
+                    'review_metadata' => $claim->review_metadata,
                     'generation_issue' => $claim->generation_issue,
                     'confidence' => $claim->confidence,
                     'conflict_flag' => $claim->conflict_flag,

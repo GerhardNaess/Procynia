@@ -26,7 +26,7 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
 
         $this->artisan('wiki:repair-claim-integrity', ['--customer-id' => $customer->id])
             ->expectsOutputToContain('Dry-run only')
-            ->expectsOutputToContain('Best-practice:       1')
+            ->expectsOutputToContain('Unsupported content: 1')
             ->assertExitCode(0);
 
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
@@ -44,7 +44,8 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
             'excerpt' => 'Kildebasert tekst.',
         ]);
 
-        [, , $bestPracticeClaim] = $this->createPageVersionAndClaim($customer, 'Beste praksis tekst.');
+        [, , $bestPracticeClaim] = $this->createPageVersionAndClaim($customer, 'Virksomheten bør følge etablert beste praksis.');
+        [, , $unsupportedClaim] = $this->createPageVersionAndClaim($customer, 'Dette er en faktapåstand uten kilde.');
         [, , $internalErrorClaim] = $this->createPageVersionAndClaim($customer, 'Finnes ikke i siden.');
         $internalErrorClaim->update([
             'enterprise_wiki_page_version_id' => $version->id,
@@ -58,11 +59,42 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
 
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $sourceClaim->fresh()->content_origin);
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $bestPracticeClaim->fresh()->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $unsupportedClaim->fresh()->content_origin);
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, $internalErrorClaim->fresh()->content_origin);
         $this->assertFalse($bestPracticeClaim->fresh()->needsSourceWarning());
+        $this->assertFalse($unsupportedClaim->fresh()->needsSourceWarning());
         $this->assertFalse($internalErrorClaim->fresh()->needsSourceWarning());
 
         $this->assertSame($page->customer_id, $customer->id);
+    }
+
+    public function test_apply_backfills_stable_blocks_for_legacy_page_versions(): void
+    {
+        $customer = $this->createCustomer();
+        [, $version, $claim] = $this->createPageVersionAndClaim($customer, 'Legacy kildebasert tekst.');
+        $version->update(['content_blocks_json' => null]);
+        $claim->update([
+            'content_block_key' => null,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 123,
+            'source_label' => 'kilde.docx',
+            'excerpt' => 'Legacy kildebasert tekst.',
+        ]);
+
+        $this->artisan('wiki:repair-claim-integrity', [
+            '--customer-id' => $customer->id,
+            '--apply' => true,
+        ])->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->fresh()->content_origin);
+        $this->assertSame('block-0002', $claim->fresh()->content_block_key);
+        $this->assertNotEmpty($version->fresh()->content_blocks_json);
+        $this->assertSame('Legacy kildebasert tekst.', $version->fresh()->content_blocks_json[1]['markdown']);
     }
 
     /**
@@ -85,6 +117,21 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
             'version_number' => 1,
             'is_current' => true,
             'content_markdown' => "# Repair Page\n\n{$text}",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => $text,
+                    'source_id' => 123,
+                    'source_label' => 'kilde.docx',
+                    'source_hash' => str_pad('a', 64, '0'),
+                    'source_element_key' => 'source-1',
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                    'source_row_key' => null,
+                    'source_excerpt' => $text,
+                    'page_reference' => 'Avsnitt 1',
+                ],
+            ],
             'generated_by_model' => 'gpt-5',
         ]);
 
@@ -93,6 +140,7 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => $text,
             'page_excerpt' => $text,
+            'content_block_key' => 'block-0001',
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
