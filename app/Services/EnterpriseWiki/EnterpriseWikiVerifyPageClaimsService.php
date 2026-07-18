@@ -132,25 +132,6 @@ class EnterpriseWikiVerifyPageClaimsService
                     continue;
                 }
 
-                // Defensive fallback for a claim that already has a reference but predates
-                // the checkpoint column being set: record the checkpoint instead of
-                // calling AI again.
-                $hasRef = EnterpriseWikiSourceReference::query()
-                    ->where('enterprise_wiki_claim_id', $claim->id)
-                    ->exists();
-
-                if ($hasRef) {
-                    $claim->update([
-                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                        'review_reason' => null,
-                        'generation_issue' => null,
-                        'verified_at' => now(),
-                    ]);
-                    $skipped++;
-
-                    continue;
-                }
-
                 $token = (string) Str::uuid();
                 $reservation = $this->reserve($claim, $token);
 
@@ -321,22 +302,28 @@ class EnterpriseWikiVerifyPageClaimsService
                 return 'unsupported';
             }
 
-            $sourceElement = $this->matchSourceElement($document, (string) ($result['excerpt'] ?? ''));
+            $hasExistingReferences = EnterpriseWikiSourceReference::query()
+                ->where('enterprise_wiki_claim_id', $claim->id)
+                ->exists();
 
-            EnterpriseWikiSourceReference::query()->create([
-                'enterprise_wiki_claim_id' => $claim->id,
-                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                'source_id' => $document->id,
-                'source_element_key' => $sourceElement['source_element_key'] ?? null,
-                'source_element_type' => $sourceElement['source_element_type'] ?? null,
-                'source_row_key' => $sourceElement['source_row_key'] ?? null,
-                'source_label' => $document->original_filename,
-                'excerpt' => $result['excerpt'],
-                'source_hash' => $document->file_hash_sha256 ?? '',
-                'page_reference' => $sourceElement['page_reference'] ?? null,
-            ]);
+            if (! $hasExistingReferences) {
+                $sourceElement = $this->matchSourceElement($document, (string) ($result['excerpt'] ?? ''));
 
-            $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
+                EnterpriseWikiSourceReference::query()->create([
+                    'enterprise_wiki_claim_id' => $claim->id,
+                    'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                    'source_id' => $document->id,
+                    'source_element_key' => $sourceElement['source_element_key'] ?? null,
+                    'source_element_type' => $sourceElement['source_element_type'] ?? null,
+                    'source_row_key' => $sourceElement['source_row_key'] ?? null,
+                    'source_label' => $document->original_filename,
+                    'excerpt' => $result['excerpt'],
+                    'source_hash' => $document->file_hash_sha256 ?? '',
+                    'page_reference' => $sourceElement['page_reference'] ?? null,
+                ]);
+
+                $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
+            }
 
             $claim->update([
                 'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,

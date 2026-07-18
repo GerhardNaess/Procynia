@@ -183,13 +183,14 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
-    // Idempotency: claims with existing references are skipped
+    // Idempotency: claims with existing references are verified once and not duplicated
     // =========================================================================
 
-    public function test_command_skips_claim_with_existing_source_reference(): void
+    public function test_command_verifies_claim_with_existing_source_reference_without_creating_duplicate_reference(): void
     {
         $customer                   = $this->createCustomer();
         [$run, , , $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
+        $verified = false;
 
         // Pre-create a reference for this claim
         EnterpriseWikiSourceReference::query()->create([
@@ -203,12 +204,23 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 
         $refsBefore = EnterpriseWikiSourceReference::query()->count();
 
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturnUsing(function () use (&$verified): array {
+                $verified = true;
+
+                return ['supported' => true, 'excerpt' => self::FAKE_EXCERPT];
+            });
+
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
+        $this->assertTrue($verified);
         $this->assertSame($refsBefore, EnterpriseWikiSourceReference::query()->count());
+        $this->assertNotNull($claim->fresh()->verified_at);
     }
 
-    public function test_command_reports_skipped_count_for_existing_references(): void
+    public function test_command_does_not_report_existing_unverified_references_as_skipped(): void
     {
         $customer                   = $this->createCustomer();
         [$run, , , $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
@@ -224,7 +236,36 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
-        $this->assertStringContainsString('Skipped:             1', Artisan::output());
+        $this->assertStringContainsString('Claims checked:      1', Artisan::output());
+        $this->assertNotNull($claim->fresh()->verified_at);
+    }
+
+    public function test_existing_source_reference_does_not_prevent_unsupported_verdict(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'excerpt' => 'Pre-existing but insufficient excerpt.',
+            'source_hash' => $document->file_hash_sha256,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn(['supported' => false, 'excerpt' => '']);
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('unsupported_generated_content', $claim->generation_issue);
+        $this->assertNotNull($claim->verified_at);
     }
 
     // =========================================================================
@@ -429,17 +470,9 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 
     public function test_command_outputs_skipped_count(): void
     {
-        $customer                   = $this->createCustomer();
-        [$run, , , $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
-
-        EnterpriseWikiSourceReference::query()->create([
-            'enterprise_wiki_claim_id' => $claim->id,
-            'source_type'              => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                => $document->id,
-            'source_label'             => $document->original_filename,
-            'excerpt'                  => 'Pre-existing excerpt.',
-            'source_hash'              => $document->file_hash_sha256,
-        ]);
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createAppliedRunWithClaimedPage($customer);
+        $claim->update(['verified_at' => now()]);
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
