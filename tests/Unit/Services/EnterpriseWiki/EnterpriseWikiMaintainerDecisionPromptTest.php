@@ -125,11 +125,11 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $decision = $this->validDecision();
         $decision['concept_pages'] = [
             [
-                'action'        => 'update',
-                'page_id'       => 42,
-                'title'         => 'Masterdatastyring',
+                'action' => 'update',
+                'page_id' => 42,
+                'title' => 'Masterdatastyring',
                 'proposed_slug' => 'masterdatastyring',
-                'reason'        => 'Expanding existing concept page.',
+                'reason' => 'Expanding existing concept page.',
             ],
         ];
 
@@ -142,11 +142,11 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $decision = $this->validDecision();
         $decision['concept_pages'] = [
             [
-                'action'        => 'update',
-                'page_id'       => null,
-                'title'         => 'Masterdatastyring',
+                'action' => 'update',
+                'page_id' => null,
+                'title' => 'Masterdatastyring',
                 'proposed_slug' => 'masterdatastyring',
-                'reason'        => 'Should fail — update needs a page_id.',
+                'reason' => 'Should fail — update needs a page_id.',
             ],
         ];
 
@@ -160,11 +160,11 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $decision = $this->validDecision();
         $decision['entity_pages'] = [
             [
-                'action'        => 'create',
-                'page_id'       => null,
-                'title'         => 'Statsbygg',
+                'action' => 'create',
+                'page_id' => null,
+                'title' => 'Statsbygg',
                 'proposed_slug' => 'statsbygg',
-                'reason'        => 'New entity page.',
+                'reason' => 'New entity page.',
             ],
         ];
 
@@ -210,6 +210,77 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         $decision = $this->validDecision();
         $decision['source_article']['title'] = 'Masterdata Prosjekt';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    // =========================================================================
+    // validate() — control-character / invalid-UTF-8 rejection (Wiki run-34 fix:
+    // page 187's title was persisted from a maintainer decision containing a raw control byte
+    // and a malformed Unicode escape where a Norwegian diacritic should have been)
+    // =========================================================================
+
+    public function test_title_with_norwegian_diacritics_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['title'] = 'Rød/Gul/Grønn-klassifiseringsmodell for applikasjoner';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_title_with_raw_control_character_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['title'] = "R\x0Fd/Gul/Gr";
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('control character', implode(' ', $errors));
+    }
+
+    public function test_proposed_slug_with_control_character_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['proposed_slug'] = "rod-gul-gr\x0Fnn";
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('control character', implode(' ', $errors));
+    }
+
+    public function test_reason_with_invalid_utf8_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        // A lone continuation byte (0x80) is not valid standalone UTF-8.
+        $decision['source_article']['reason'] = "Invalid \x80 byte sequence.";
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('not valid UTF-8', implode(' ', $errors));
+    }
+
+    public function test_control_character_in_concept_page_title_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => "Tilgangsstyring \x0Fperiodisk",
+            'proposed_slug' => 'tilgangsstyring-periodisk',
+            'reason' => 'Concept page for periodic access review.',
+        ]];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('control character', implode(' ', $errors));
+    }
+
+    public function test_ordinary_whitespace_and_newlines_in_reason_are_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['reason'] = "Line one.\nLine two.\tTabbed.";
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
@@ -266,21 +337,21 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         return [
             'source_article' => [
-                'action'        => 'create',
-                'title'         => 'Masterdata Prosjekt',
+                'action' => 'create',
+                'title' => 'Masterdata Prosjekt',
                 'proposed_slug' => 'masterdata-prosjekt',
-                'reason'        => 'Source document introduces project scope not yet in the wiki.',
+                'reason' => 'Source document introduces project scope not yet in the wiki.',
             ],
             'source_summary' => [
-                'action'        => 'create',
-                'title'         => 'Sammendrag: Masterdata Prosjekt',
+                'action' => 'create',
+                'title' => 'Sammendrag: Masterdata Prosjekt',
                 'proposed_slug' => 'sammendrag-masterdata-prosjekt',
-                'reason'        => 'Companion summary for the source article.',
+                'reason' => 'Companion summary for the source article.',
             ],
-            'concept_pages'    => [],
-            'entity_pages'     => [],
+            'concept_pages' => [],
+            'entity_pages' => [],
             'no_action_reason' => null,
-            'warnings'         => [],
+            'warnings' => [],
         ];
     }
 

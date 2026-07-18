@@ -2,13 +2,17 @@
 
 namespace App\Services\EnterpriseWiki;
 
-use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 
 class EnterpriseWikiPageContentBlockService
 {
+    public function __construct(
+        private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
+    ) {}
+
     /**
      * @param  list<array<string, mixed>>  $sourceElements
      * @return list<array<string, mixed>>
@@ -163,9 +167,7 @@ class EnterpriseWikiPageContentBlockService
      */
     public function findUniqueBlockForExcerpt(EnterpriseWikiPageVersion $version, string $excerpt): ?array
     {
-        $excerpt = $this->normalize($excerpt);
-
-        if ($excerpt === '') {
+        if (trim($excerpt) === '') {
             return null;
         }
 
@@ -176,7 +178,7 @@ class EnterpriseWikiPageContentBlockService
                 continue;
             }
 
-            if (str_contains($this->normalize((string) ($block['markdown'] ?? '')), $excerpt)) {
+            if ($this->textNormalizer->contains((string) ($block['markdown'] ?? ''), $excerpt)) {
                 $matches[] = $block;
             }
         }
@@ -273,10 +275,5 @@ class EnterpriseWikiPageContentBlockService
             'source_excerpt' => $element['reference_text'] ?? null,
             'page_reference' => $element['page_reference'] ?? null,
         ];
-    }
-
-    private function normalize(string $value): string
-    {
-        return mb_strtolower(preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value));
     }
 }

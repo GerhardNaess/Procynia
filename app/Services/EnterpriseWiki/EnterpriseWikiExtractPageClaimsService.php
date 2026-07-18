@@ -64,6 +64,7 @@ class EnterpriseWikiExtractPageClaimsService
     public function __construct(
         private readonly WikiPageClaimExtractionAiClient $aiClient,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
+        private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
     ) {}
 
     /**
@@ -247,7 +248,7 @@ class EnterpriseWikiExtractPageClaimsService
 
             $created = 0;
 
-            foreach ($result['claims'] as $i => $claim) {
+            foreach ($this->dedupeClaims($result['claims']) as $i => $claim) {
                 $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
                 $block = $this->contentBlockService->findUniqueBlockForExcerpt($version, $pageExcerpt);
                 $hasPageAnchor = $block !== null;
@@ -307,6 +308,42 @@ class EnterpriseWikiExtractPageClaimsService
 
             return $created;
         });
+    }
+
+    /**
+     * Drops an exact (post-normalization) duplicate claim within a single extraction response —
+     * the same AI call occasionally restates one fact twice (e.g. once from a heading/summary
+     * line and once from the body sentence it summarizes). A single page version must not carry
+     * two active claims for the literal same statement (Wiki run-34 overgeneration finding).
+     *
+     * Deliberately narrow in scope: this only removes claims identical to one another WITHIN
+     * this one page's extraction result. It does not attempt cross-page/cross-run fact
+     * deduplication, which would need a shared fact registry — out of scope here.
+     *
+     * @param  list<array<string, mixed>>  $claims
+     * @return list<array<string, mixed>>
+     */
+    private function dedupeClaims(array $claims): array
+    {
+        $seen = [];
+        $deduped = [];
+
+        foreach ($claims as $claim) {
+            $text = is_array($claim) ? (string) ($claim['text'] ?? '') : '';
+            $key = $this->textNormalizer->normalize($text);
+
+            if ($key !== '' && in_array($key, $seen, true)) {
+                continue;
+            }
+
+            if ($key !== '') {
+                $seen[] = $key;
+            }
+
+            $deduped[] = $claim;
+        }
+
+        return array_values($deduped);
     }
 
     /**

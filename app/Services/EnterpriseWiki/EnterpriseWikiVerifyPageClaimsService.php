@@ -55,6 +55,7 @@ class EnterpriseWikiVerifyPageClaimsService
         private readonly WikiClaimVerificationAiClient $aiClient,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
     ) {}
 
     /**
@@ -149,8 +150,10 @@ class EnterpriseWikiVerifyPageClaimsService
 
                 $claims++;
 
-                if (! $this->claimHasCurrentPageAnchor($claim, $version)) {
-                    $this->markInternalGenerationError($claim, 'claim_anchor_not_found_in_current_page_version');
+                $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
+
+                if ($anchorFailure !== null) {
+                    $this->markInternalGenerationError($claim, $anchorFailure);
                     $noSupport++;
 
                     continue;
@@ -260,12 +263,14 @@ class EnterpriseWikiVerifyPageClaimsService
                 return null;
             }
 
-            if (! $this->claimHasCurrentPageAnchor($claim, $version)) {
+            $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
+
+            if ($anchorFailure !== null) {
                 $claim->update([
                     'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                     'review_reason' => null,
-                    'generation_issue' => 'claim_anchor_not_found_in_current_page_version',
+                    'generation_issue' => $anchorFailure,
                     'verified_at' => now(),
                     'verification_claimed_at' => null,
                     'verification_claim_token' => null,
@@ -345,15 +350,72 @@ class EnterpriseWikiVerifyPageClaimsService
         return $customer?->language?->code ?? 'no';
     }
 
-    private function claimHasCurrentPageAnchor(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version): bool
+    /**
+     * Whether a claim's anchor is still valid against $version, and — when it is not — the
+     * concrete diagnostic reason (App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService
+     * and System Owner diagnostics rely on these exact codes, not a single generic one):
+     *
+     *   - 'wrong_version': the claim is tied to a different page version than the one being
+     *     checked (e.g. it belongs to a superseded version).
+     *   - 'missing_block': the claim has a content_block_key, but no block with that key exists
+     *     in $version's current content_blocks_json — the block was removed or never persisted.
+     *   - 'genuine_content_mismatch': the claim's anchor text was not found in its resolved
+     *     block's visible text (or, for a legacy claim with no content_block_key, in the whole
+     *     page's visible text) even after normalizing both sides — a real anchoring problem, not
+     *     a false positive from wikilink/Markdown markup differing from the plain-text anchor.
+     *
+     * Priority order (Wiki run-34 fix): a claim with a stable content_block_key is checked
+     * against ITS OWN resolved block only — never against the whole page — so an anchor that's
+     * genuinely present in one block can't be mistaken as valid because a different block on the
+     * same page happens to contain similar text. Whole-page markdown is used only as a fallback
+     * for claims that predate block-level provenance (no content_block_key at all).
+     *
+     * @return string|null null when the anchor is valid
+     */
+    private function claimAnchorFailureReason(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version): ?string
     {
         if ((int) $claim->enterprise_wiki_page_version_id !== (int) $version->id) {
-            return false;
+            return 'wrong_version';
         }
 
         $anchor = trim((string) ($claim->page_excerpt ?: $claim->claim_text));
 
-        return $anchor !== '' && $this->containsNormalized((string) ($version->content_markdown ?? ''), $anchor);
+        if ($anchor === '') {
+            return 'genuine_content_mismatch';
+        }
+
+        $blockKey = trim((string) ($claim->content_block_key ?? ''));
+
+        if ($blockKey !== '') {
+            $block = $this->findBlockByKey($version, $blockKey);
+
+            if ($block === null) {
+                return 'missing_block';
+            }
+
+            return $this->textNormalizer->contains((string) ($block['markdown'] ?? ''), $anchor)
+                ? null
+                : 'genuine_content_mismatch';
+        }
+
+        // Legacy claim with no stable block anchor — whole-page markdown is the fallback.
+        return $this->textNormalizer->contains((string) ($version->content_markdown ?? ''), $anchor)
+            ? null
+            : 'genuine_content_mismatch';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findBlockByKey(EnterpriseWikiPageVersion $version, string $blockKey): ?array
+    {
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (is_array($block) && (string) ($block['block_key'] ?? '') === $blockKey) {
+                return $block;
+            }
+        }
+
+        return null;
     }
 
     private function markInternalGenerationError(EnterpriseWikiClaim $claim, string $issue): void
