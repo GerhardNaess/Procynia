@@ -50,10 +50,12 @@ class WikiPageHelpTest extends TestCase
 
         $this->assertSame('Slik fungerer Wiki-sider', trans('procynia.wiki.page_help_title'));
         $this->assertSame('Avventer synkronisering', trans('procynia.wiki.page_help_item_status_sync_title'));
+        $this->assertSame('Verifikasjonsgrunnlag', trans('procynia.wiki.page_help_section_verification'));
 
         app()->setLocale('en');
         $this->assertSame('How Wiki pages work', trans('procynia.wiki.page_help_title'));
         $this->assertSame('Awaiting sync', trans('procynia.wiki.page_help_item_status_sync_title'));
+        $this->assertSame('Verification basis', trans('procynia.wiki.page_help_section_verification'));
         app()->setLocale($locale);
     }
 

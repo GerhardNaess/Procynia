@@ -2,6 +2,11 @@ import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import {
+    getWikiQualityCheckCopy,
+    groupWikiFindingsByCode,
+    splitWikiVerificationFindings,
+} from './wikiQualityChecks';
 
 const PAGE_STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
@@ -39,6 +44,13 @@ const SOURCE_STATUS_STYLES = {
 };
 
 const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source']);
+
+const CLAIM_SOURCE_STATUS_STYLES = {
+    source_found: 'bg-emerald-100 text-emerald-700',
+    missing_excerpt: 'bg-amber-100 text-amber-700',
+    manually_approved: 'bg-sky-100 text-sky-700',
+    missing_source: 'bg-rose-100 text-rose-700',
+};
 
 const HIGH_VOLUME_THRESHOLD = 100;
 
@@ -212,22 +224,28 @@ export default function WikiShow({
     // approve_wiki_claims) — separate from whole-page approve/reject, which stays System
     // Owner-only. See User::canApproveWikiClaims().
     const canApproveWikiClaims = auth.user?.can_approve_wiki_claims ?? false;
+    const targetClaimId = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('claim_id')
+        : null;
+    const hasVerificationContent = claims.length > 0 || lintFindings.length > 0;
 
     const [processing, setProcessing] = useState(null);
-    const [verificationOpen, setVerificationOpen] = useState(false);
+    const [verificationOpen, setVerificationOpen] = useState(Boolean(targetClaimId) || hasVerificationContent);
+    const [verifiedClaimsOpen, setVerifiedClaimsOpen] = useState(Boolean(targetClaimId));
+    const [structuralFindingsOpen, setStructuralFindingsOpen] = useState(Boolean(targetClaimId));
     const [claimProcessing, setClaimProcessing] = useState(null);
     const [approvalComments, setApprovalComments] = useState({});
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
-    const [expandedLintGroups, setExpandedLintGroups] = useState({});
-    const targetClaimId = typeof window !== 'undefined'
-        ? new URLSearchParams(window.location.search).get('claim_id')
-        : null;
 
     useEffect(() => {
         if (!targetClaimId) {
             return undefined;
         }
+
+        setVerificationOpen(true);
+        setVerifiedClaimsOpen(true);
+        setStructuralFindingsOpen(true);
 
         const targetElement = document.getElementById(`claim-${targetClaimId}`);
 
@@ -241,7 +259,16 @@ export default function WikiShow({
         });
 
         return () => window.cancelAnimationFrame(frame);
-    }, [targetClaimId, page.slug, claims.length]);
+    }, [targetClaimId, page.slug, claims.length, verificationOpen, verifiedClaimsOpen, structuralFindingsOpen]);
+
+    const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
+    const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
+    const openClaims = claims.filter((claim) => (
+        claim.conflict_flag
+        || claim.source_status === 'missing_source'
+        || claim.source_status === 'missing_excerpt'
+    ));
+    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim));
 
     const sendAction = (action) => {
         if (processing) return;
@@ -291,28 +318,12 @@ export default function WikiShow({
         );
     };
 
-    const sourceStatusLabel = (status) => ({
-        source_found: tw.quality_source_found ?? 'Kilde funnet',
-        missing_excerpt: tw.quality_missing_excerpt ?? 'Mangler utdrag',
-        manually_approved: tw.quality_manually_approved ?? 'Manuelt godkjent',
-        missing_source: tw.quality_no_source ?? 'Mangler kilde',
+    const claimSourceStatusLabel = (status) => ({
+        source_found: tw.claim_source_status_found ?? 'Kildegrunnlag funnet',
+        missing_excerpt: tw.claim_source_status_missing_excerpt ?? 'Kildegrunnlag mangler utdrag',
+        manually_approved: tw.claim_source_status_manually_approved ?? 'Manuelt godkjent uten kildereferanse',
+        missing_source: tw.claim_source_status_missing_source ?? 'Mangler kildereferanse',
     }[status] ?? status);
-
-    const lintGroups = Object.values(
-        lintFindings.reduce((acc, f) => {
-            (acc[f.code] ??= []).push(f);
-            return acc;
-        }, {}),
-    );
-
-    const collapsedLintLabel = (code, count, sampleMessage) => {
-        if (code === 'claim_missing_source') {
-            return (tw.lint_group_claim_missing_source ?? ':count påstander mangler kilde').replace(':count', count);
-        }
-        return (tw.lint_group_generic ?? ':message (×:count)')
-            .replace(':message', sampleMessage)
-            .replace(':count', count);
-    };
 
     const actionLabel = tw.action_confirming ?? 'Behandler...';
 
@@ -343,6 +354,167 @@ export default function WikiShow({
         approved: tw.claim_status_approved ?? 'Godkjent',
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
+
+    const claimProblemLabel = (claim) => {
+        if (claim.conflict_flag) {
+            return tw.verification_basis_claim_problem_conflict ?? 'Påstanden er markert som mulig konflikt.';
+        }
+
+        return ({
+            missing_source: tw.verification_basis_claim_problem_missing_source ?? 'Påstanden mangler kildereferanse.',
+            missing_excerpt: tw.verification_basis_claim_problem_missing_excerpt ?? 'Kilden er funnet, men mangler tekstutdrag.',
+        }[claim.source_status] ?? '');
+    };
+
+    const renderClaimCard = (claim, group) => {
+        const isOpenGroup = group === 'open';
+        const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
+        const showDecisionBadge = claim.approval_status !== 'pending';
+
+        return (
+            <article
+                key={claim.id}
+                id={`claim-${claim.id}`}
+                tabIndex={-1}
+                className={`scroll-mt-24 rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)] ${String(claim.id) === targetClaimId ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white' : ''}`}
+            >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                        <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {showDecisionBadge && (
+                                <Badge
+                                    label={claimStatusLabel(claim.approval_status)}
+                                    cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
+                                />
+                            )}
+                            {claim.confidence && claim.confidence !== 'uncertain' && (
+                                <Badge
+                                    label={confidenceLabel(claim.confidence)}
+                                    cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
+                                />
+                            )}
+                            {claim.conflict_flag && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
+                                    <WarnIcon className="h-3 w-3" />
+                                    {tw.conflict_detected ?? 'Mulig konflikt'}
+                                </span>
+                            )}
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
+                                {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
+                                    <WarnIcon className="h-3 w-3" />
+                                ) : (
+                                    <CheckIcon className="h-3 w-3" />
+                                )}
+                                {claimSourceStatusLabel(claim.source_status)}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {problemLabel && (
+                    <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                        {problemLabel}
+                    </p>
+                )}
+
+                <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                    <div className="space-y-1.5">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
+                        </p>
+                        {claim.source_references.length === 0 ? (
+                            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                                <WarnIcon className="h-3.5 w-3.5 shrink-0" />
+                                {claim.source_status === 'missing_excerpt'
+                                    ? (tw.verification_basis_claim_missing_excerpt_source ?? 'Systemet fant en kilde, men ikke et tekstutdrag som kan vises.')
+                                    : (tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.')}
+                            </p>
+                        ) : (
+                            <ul className="space-y-3">
+                                {claim.source_references.map((ref) => (
+                                    <li key={ref.id} className="space-y-1.5">
+                                        <p className="text-xs font-semibold text-slate-600">
+                                            {ref.source_label}
+                                        </p>
+                                        {ref.page_reference && (
+                                            <p className="text-xs text-slate-400">
+                                                {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
+                                            </p>
+                                        )}
+                                        {ref.excerpt ? (
+                                            <p className="text-xs leading-5 text-slate-400 line-clamp-3">
+                                                {ref.excerpt}
+                                            </p>
+                                        ) : (
+                                            <p className="text-xs italic text-slate-300">
+                                                {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
+                                            </p>
+                                        )}
+                                        {ref.download_url && (
+                                            <a
+                                                href={ref.download_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                            >
+                                                <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                    <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                    <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                </svg>
+                                                {tw.source_open_document ?? 'Åpne kildedokument'}
+                                            </a>
+                                        )}
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+
+                    {isOpenGroup && canApproveWikiClaims && claim.source_status === 'missing_source' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input
+                                type="text"
+                                maxLength={1000}
+                                placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
+                                value={approvalComments[claim.id] ?? ''}
+                                onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
+                                className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
+                            />
+                            <button
+                                type="button"
+                                disabled={claimProcessing === claim.id}
+                                onClick={() => approveClaim(claim)}
+                                className="rounded-full bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+                            >
+                                {tw.approve_claim_button ?? 'Godkjenn manuelt'}
+                            </button>
+                        </div>
+                    )}
+
+                    {!isOpenGroup && canApproveWikiClaims && claim.approval_status === 'approved' && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                            <span>
+                                {(tw.approved_by_at ?? 'Godkjent av :name den :date')
+                                    .replace(':name', claim.approved_by_name ?? '—')
+                                    .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
+                                {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={claimProcessing === claim.id}
+                                onClick={() => unapproveClaim(claim)}
+                                className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                            >
+                                {tw.unapprove_claim_button ?? 'Angre godkjenning'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </article>
+        );
+    };
 
     const documentOwnerApprovalCardClass = (status, isOverride) => ({
         approved: isOverride
@@ -684,232 +856,168 @@ export default function WikiShow({
                     >
                         <ChevronIcon open={verificationOpen} />
                         {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
-                        {claimSummary && claimSummary.total > 0 && (
+                        {openClaims.length > 0 && (
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-normal text-rose-700">
+                                {openClaims.length} {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
+                            </span>
+                        )}
+                        {verifiedClaims.length > 0 && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-normal text-emerald-700">
+                                {verifiedClaims.length} {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
+                            </span>
+                        )}
+                        {structuralFindings.length > 0 && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
-                                {claimSummary.total} {tw.claims ?? 'påstander'}
-                            </span>
-                        )}
-                        {lintSummary && lintSummary.total === 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                                <CheckIcon className="h-3 w-3" />
-                                {tw.lint_summary_ok ?? 'OK'}
-                            </span>
-                        )}
-                        {lintSummary && lintSummary.error > 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
-                                <WarnIcon className="h-3 w-3" />
-                                {lintSummary.error}
-                            </span>
-                        )}
-                        {lintSummary && lintSummary.warning > 0 && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                                <WarnIcon className="h-3 w-3" />
-                                {lintSummary.warning}
+                                {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
                             </span>
                         )}
                     </button>
 
                     {verificationOpen && (
-                        <div className="space-y-4">
-                            {lintFindings.length > 0 && (
-                                <div className="space-y-2">
-                                    <p className="text-sm font-semibold text-slate-600">
-                                        {tw.lint_findings_heading ?? 'Helsekontroll'}
-                                    </p>
-                                    <ul className="space-y-2">
-                                        {lintGroups.map((group) => {
-                                            const first = group[0];
-                                            const severityBadge = (
-                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
-                                                    {first.severity === 'error'
-                                                        ? (tw.lint_severity_error ?? 'Feil')
-                                                        : first.severity === 'warning'
-                                                            ? (tw.lint_severity_warning ?? 'Advarsel')
-                                                            : (tw.lint_severity_info ?? 'Info')}
-                                                </span>
-                                            );
-
-                                            if (group.length === 1) {
-                                                return (
-                                                    <li
-                                                        key={first.id}
-                                                        className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
-                                                    >
-                                                        {severityBadge}
-                                                        <p className="text-sm text-slate-700">{first.message}</p>
-                                                    </li>
-                                                );
-                                            }
-
-                                            const isExpanded = expandedLintGroups[first.code] ?? false;
-
-                                            return (
-                                                <li
-                                                    key={first.code}
-                                                    className="rounded-xl border border-slate-100 bg-white px-4 py-3"
-                                                >
-                                                    <div className="flex items-start gap-3">
-                                                        {severityBadge}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setExpandedLintGroups((prev) => ({ ...prev, [first.code]: !isExpanded }))}
-                                                            className="flex-1 text-left text-sm text-slate-700 hover:underline"
-                                                        >
-                                                            {collapsedLintLabel(first.code, group.length, first.message)}
-                                                            <span className="ml-1 text-xs text-slate-400">
-                                                                ({isExpanded ? (tw.lint_group_hide_details ?? 'Skjul detaljer') : (tw.lint_group_show_details ?? 'Vis detaljer')})
-                                                            </span>
-                                                        </button>
-                                                    </div>
-                                                    {isExpanded && (
-                                                        <ul className="mt-2 space-y-1 pl-8 text-xs text-slate-500">
-                                                            {group.map((f) => (
-                                                                <li key={f.id}>{f.message}</li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
+                        <div className="space-y-5">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                <p className="text-sm leading-6 text-slate-600">
+                                    {tw.verification_basis_intro ?? 'Verifikasjonsgrunnlag samler påstander, kildegrunnlag og strukturelle funn slik at du kan kontrollere det som trenger behandling uten å blande ulike typer kvalitetsarbeid.'}
+                                </p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <Badge
+                                        label={`${openClaims.length} ${tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}`}
+                                        cls="bg-rose-100 text-rose-700"
+                                    />
+                                    <Badge
+                                        label={`${verifiedClaims.length} ${tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}`}
+                                        cls="bg-emerald-100 text-emerald-700"
+                                    />
+                                    <Badge
+                                        label={`${structuralFindings.length} ${tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}`}
+                                        cls="bg-slate-100 text-slate-600"
+                                    />
                                 </div>
-                            )}
+                                {claimLintFindings.length > 0 && (
+                                    <p className="mt-3 text-xs text-slate-500">
+                                        {tw.verification_basis_claim_findings_note ?? 'Påstandsrelaterte kontrollfunn vises direkte i påstandskortene nedenfor.'}
+                                    </p>
+                                )}
+                            </div>
 
-                            {!current_version ? (
-                                <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
-                            ) : claims.length === 0 ? (
-                                <p className="text-sm text-slate-400">{tw.no_claims ?? 'Ingen påstander for denne siden.'}</p>
-                            ) : (
-                                <>
-                                    <ClaimSummary summary={claimSummary} tw={tw} />
+                            <section className="space-y-3">
+                                <div className="space-y-1">
+                                    <h3 className="text-sm font-semibold text-slate-700">
+                                        {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
+                                        <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                            {openClaims.length}
+                                        </span>
+                                    </h3>
+                                    <p className="text-sm text-slate-500">
+                                        {tw.verification_basis_open_intro ?? 'Kontroller påstandene mot kildedokumentene. Godkjenn manuelt der det støttes av eksisterende funksjonalitet, eller bruk avvisning når påstanden ikke kan dokumenteres.'}
+                                    </p>
+                                </div>
+
+                                {!current_version ? (
+                                    <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
+                                ) : openClaims.length === 0 ? (
+                                    <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                        {tw.verification_basis_no_open_claims ?? 'Alle påstander som krever behandling, er ferdigbehandlet.'}
+                                    </p>
+                                ) : (
                                     <div className="space-y-4">
-                                        {claims.map((claim) => (
-                                            <article
-                                                key={claim.id}
-                                                id={`claim-${claim.id}`}
-                                                tabIndex={-1}
-                                                className={`scroll-mt-24 rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)] ${String(claim.id) === targetClaimId ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white' : ''}`}
-                                            >
-                                                <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
-
-                                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                    <Badge
-                                                        label={claimStatusLabel(claim.approval_status)}
-                                                        cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
-                                                    />
-                                                    {claim.confidence && claim.confidence !== 'uncertain' && (
-                                                        <Badge
-                                                            label={confidenceLabel(claim.confidence)}
-                                                            cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
-                                                        />
-                                                    )}
-                                                    {claim.conflict_flag && (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
-                                                            <WarnIcon className="h-3 w-3" />
-                                                            {tw.conflict_detected ?? 'Mulig konflikt'}
-                                                        </span>
-                                                    )}
-                                                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
-                                                        {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
-                                                            <WarnIcon className="h-3 w-3" />
-                                                        ) : (
-                                                            <CheckIcon className="h-3 w-3" />
-                                                        )}
-                                                        {sourceStatusLabel(claim.source_status)}
-                                                    </span>
-                                                </div>
-
-                                                {canApproveWikiClaims && claim.source_status === 'missing_source' && (
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        <input
-                                                            type="text"
-                                                            maxLength={1000}
-                                                            placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
-                                                            value={approvalComments[claim.id] ?? ''}
-                                                            onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                                            className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            disabled={claimProcessing === claim.id}
-                                                            onClick={() => approveClaim(claim)}
-                                                            className="rounded-full bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
-                                                        >
-                                                            {tw.approve_claim_button ?? 'Godkjenn manuelt'}
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                {canApproveWikiClaims && claim.approval_status === 'approved' && (
-                                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
-                                                        <span>
-                                                            {(tw.approved_by_at ?? 'Godkjent av :name den :date')
-                                                                .replace(':name', claim.approved_by_name ?? '—')
-                                                                .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString() : '')}
-                                                            {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            disabled={claimProcessing === claim.id}
-                                                            onClick={() => unapproveClaim(claim)}
-                                                            className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
-                                                        >
-                                                            {tw.unapprove_claim_button ?? 'Angre godkjenning'}
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                <div className="mt-4 border-t border-slate-100 pt-4">
-                                                    {claim.source_references.length === 0 ? (
-                                                        <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                                                            <WarnIcon className="h-3.5 w-3.5 shrink-0" />
-                                                            {tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.'}
-                                                        </p>
-                                                    ) : (
-                                                        <ul className="space-y-3">
-                                                            {claim.source_references.map((ref) => (
-                                                                <li key={ref.id}>
-                                                                    <p className="text-xs font-semibold text-slate-600">
-                                                                        {ref.source_label}
-                                                                    </p>
-                                                                    {ref.page_reference && (
-                                                                        <p className="mt-0.5 text-xs text-slate-400">
-                                                                            {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
-                                                                        </p>
-                                                                    )}
-                                                                    {ref.excerpt ? (
-                                                                        <p className="mt-1 text-xs leading-5 text-slate-400 line-clamp-3">
-                                                                            {ref.excerpt}
-                                                                        </p>
-                                                                    ) : (
-                                                                        <p className="mt-1 text-xs italic text-slate-300">
-                                                                            {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
-                                                                        </p>
-                                                                    )}
-                                                                    {ref.download_url && (
-                                                                        <a
-                                                                            href={ref.download_url}
-                                                                            target="_blank"
-                                                                            rel="noreferrer"
-                                                                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline"
-                                                                        >
-                                                                            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                                                                            </svg>
-                                                                            {tw.source_open_document ?? 'Åpne kildedokument'}
-                                                                        </a>
-                                                                    )}
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </div>
-                                            </article>
-                                        ))}
+                                        {openClaims.map((claim) => renderClaimCard(claim, 'open'))}
                                     </div>
-                                </>
-                            )}
+                                )}
+                            </section>
+
+                            <section className="space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setVerifiedClaimsOpen((v) => !v)}
+                                    className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                                >
+                                    <ChevronIcon open={verifiedClaimsOpen} />
+                                    {tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                                        {verifiedClaims.length}
+                                    </span>
+                                </button>
+
+                                {verifiedClaimsOpen && (
+                                    <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                        {verifiedClaims.length === 0 ? (
+                                            <p className="text-sm text-slate-400">
+                                                {tw.verification_basis_no_verified_claims ?? 'Ingen verifiserte påstander ennå.'}
+                                            </p>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {verifiedClaims.map((claim) => renderClaimCard(claim, 'verified'))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </section>
+
+                            <section className="space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setStructuralFindingsOpen((v) => !v)}
+                                    className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                                >
+                                    <ChevronIcon open={structuralFindingsOpen} />
+                                    {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                                        {structuralFindings.length}
+                                    </span>
+                                </button>
+
+                                {structuralFindingsOpen && (
+                                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                        <p className="text-sm text-slate-500">
+                                            {tw.verification_basis_structural_intro ?? 'Disse funnene gjelder struktur og lenker på Wiki-siden, ikke den enkelte påstanden.'}
+                                        </p>
+
+                                        {structuralFindingGroups.length === 0 ? (
+                                            <p className="text-sm text-slate-400">
+                                                {tw.verification_basis_no_structural_findings ?? 'Ingen strukturelle funn på denne siden.'}
+                                            </p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {structuralFindingGroups.map((group) => {
+                                                    const first = group.findings[0];
+                                                    const checkCopy = getWikiQualityCheckCopy(first.code, tw);
+
+                                                    return (
+                                                        <article key={first.code} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                                            <div className="flex items-start gap-3">
+                                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                                                    {first.severity === 'error'
+                                                                        ? (tw.lint_severity_error ?? 'Feil')
+                                                                        : first.severity === 'warning'
+                                                                            ? (tw.lint_severity_warning ?? 'Advarsel')
+                                                                            : (tw.lint_severity_info ?? 'Info')}
+                                                                </span>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <p className="text-sm font-semibold text-slate-700">
+                                                                            {checkCopy.label}
+                                                                        </p>
+                                                                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
+                                                                            ×{group.findings.length}
+                                                                        </span>
+                                                                    </div>
+                                                                    {checkCopy.unknown && (
+                                                                        <p className="font-mono text-[11px] text-slate-400">{first.code}</p>
+                                                                    )}
+                                                                    <p className="mt-1 text-sm text-slate-600">
+                                                                        {checkCopy.description || first.message}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </article>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </section>
                         </div>
                     )}
                 </section>
