@@ -1206,6 +1206,12 @@ class WikiControllerTest extends TestCase
         $this->createSourceReference($claim2, 'kilde.pdf', null);
 
         $this->createClaim($page, $version, 'Mangler kilde påstand.');
+        $this->createClaim($page, $version, 'Avvist påstand.', 3, [
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+            'approved_by_user_id' => $user->id,
+            'approved_at' => now(),
+            'approval_comment' => 'Avvist manuelt.',
+        ]);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
 
@@ -1214,9 +1220,10 @@ class WikiControllerTest extends TestCase
             $summary = data_get($inertia, 'props.claim_summary');
 
             return $summary !== null
-                && $summary['total'] === 3
+                && $summary['total'] === 4
                 && $summary['source_found'] === 1
                 && $summary['missing_excerpt'] === 1
+                && $summary['rejected'] === 1
                 && $summary['missing_source'] === 1;
         });
     }
@@ -2269,16 +2276,18 @@ class WikiControllerTest extends TestCase
         EnterpriseWikiPage $page,
         EnterpriseWikiPageVersion $version,
         string $text,
+        int $positionOrder = 0,
+        array $overrides = [],
     ): EnterpriseWikiClaim {
-        return EnterpriseWikiClaim::query()->create([
+        return EnterpriseWikiClaim::query()->create(array_merge([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => $text,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-            'position_order' => 0,
-        ]);
+            'position_order' => $positionOrder,
+        ], $overrides));
     }
 
     private function createDocument(Customer $customer, string $status = EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED): EnterpriseWikiDocument

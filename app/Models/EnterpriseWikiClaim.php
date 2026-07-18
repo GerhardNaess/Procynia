@@ -44,6 +44,9 @@ class EnterpriseWikiClaim extends Model
     /** No source reference exists, but a System Owner manually approved the claim. */
     public const SOURCE_STATUS_MANUALLY_APPROVED = 'manually_approved';
 
+    /** No source reference exists, but the claim was explicitly rejected. */
+    public const SOURCE_STATUS_REJECTED = 'rejected';
+
     /** No source reference exists and the claim has not been manually approved. */
     public const SOURCE_STATUS_MISSING = 'missing_source';
 
@@ -109,6 +112,11 @@ class EnterpriseWikiClaim extends Model
         return $this->approval_status === self::APPROVAL_STATUS_APPROVED;
     }
 
+    public function isRejected(): bool
+    {
+        return $this->approval_status === self::APPROVAL_STATUS_REJECTED;
+    }
+
     public function reconciliationAttempts(): HasMany
     {
         return $this->hasMany(EnterpriseWikiClaimSourceReconciliationAttempt::class);
@@ -135,7 +143,15 @@ class EnterpriseWikiClaim extends Model
             : $this->sourceReferences()->get();
 
         if ($references->isEmpty()) {
-            return $this->isApproved() ? self::SOURCE_STATUS_MANUALLY_APPROVED : self::SOURCE_STATUS_MISSING;
+            if ($this->isApproved()) {
+                return self::SOURCE_STATUS_MANUALLY_APPROVED;
+            }
+
+            if ($this->approval_status === self::APPROVAL_STATUS_REJECTED) {
+                return self::SOURCE_STATUS_REJECTED;
+            }
+
+            return self::SOURCE_STATUS_MISSING;
         }
 
         return $references->every(fn (EnterpriseWikiSourceReference $ref) => empty($ref->excerpt))

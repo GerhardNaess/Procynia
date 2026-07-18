@@ -40,6 +40,7 @@ const SOURCE_STATUS_STYLES = {
     source_found: 'bg-emerald-100 text-emerald-700',
     missing_excerpt: 'bg-amber-100 text-amber-700',
     manually_approved: 'bg-sky-100 text-sky-700',
+    rejected: 'bg-slate-200 text-slate-700',
     missing_source: 'bg-rose-100 text-rose-700',
 };
 
@@ -49,6 +50,7 @@ const CLAIM_SOURCE_STATUS_STYLES = {
     source_found: 'bg-emerald-100 text-emerald-700',
     missing_excerpt: 'bg-amber-100 text-amber-700',
     manually_approved: 'bg-sky-100 text-sky-700',
+    rejected: 'bg-slate-200 text-slate-700',
     missing_source: 'bg-rose-100 text-rose-700',
 };
 
@@ -109,6 +111,12 @@ function ClaimSummary({ summary, tw }) {
                     <span className="flex items-center gap-1 text-sky-700">
                         <CheckIcon className="h-3.5 w-3.5" />
                         {summary.manually_approved} {tw.quality_manually_approved ?? 'manuelt godkjent'}
+                    </span>
+                )}
+                {summary.rejected > 0 && (
+                    <span className="flex items-center gap-1 text-slate-700">
+                        <WarnIcon className="h-3.5 w-3.5" />
+                        {summary.rejected} {tw.claim_status_rejected ?? 'avvist'}
                     </span>
                 )}
                 {summary.missing_excerpt > 0 && (
@@ -264,9 +272,12 @@ export default function WikiShow({
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
     const openClaims = claims.filter((claim) => (
-        claim.conflict_flag
-        || claim.source_status === 'missing_source'
-        || claim.source_status === 'missing_excerpt'
+        claim.approval_status === 'pending'
+        && (
+            claim.conflict_flag
+            || claim.source_status === 'missing_source'
+            || claim.source_status === 'missing_excerpt'
+        )
     ));
     const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim));
 
@@ -283,6 +294,16 @@ export default function WikiShow({
         setClaimProcessing(claim.id);
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
+            { comment: approvalComments[claim.id] || undefined },
+            { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
+    const rejectClaim = (claim) => {
+        if (claimProcessing) return;
+        setClaimProcessing(claim.id);
+        router.patch(
+            `/app/wiki/${page.slug}/claims/${claim.id}/reject`,
             { comment: approvalComments[claim.id] || undefined },
             { onFinish: () => setClaimProcessing(null) },
         );
@@ -322,8 +343,17 @@ export default function WikiShow({
         source_found: tw.claim_source_status_found ?? 'Kildegrunnlag funnet',
         missing_excerpt: tw.claim_source_status_missing_excerpt ?? 'Kildegrunnlag mangler utdrag',
         manually_approved: tw.claim_source_status_manually_approved ?? 'Manuelt godkjent uten kildereferanse',
+        rejected: tw.claim_source_status_rejected ?? 'Avvist uten kildereferanse',
         missing_source: tw.claim_source_status_missing_source ?? 'Mangler kildereferanse',
     }[status] ?? status);
+
+    const sourceTypeLabel = (type) => ({
+        enterprise_wiki_document: tw.source_type_enterprise_wiki_document ?? 'Kildedokument',
+        knowledge_item_version: tw.source_type_knowledge_item_version ?? 'Kunnskapsbaseversjon',
+        saved_notice_document: tw.source_type_saved_notice_document ?? 'Lagret kunngjøringsdokument',
+        doffin_notice: tw.source_type_doffin_notice ?? 'Doffin-kunngjøring',
+        manual: tw.source_type_manual ?? 'Manuell kilde',
+    }[type] ?? type);
 
     const actionLabel = tw.action_confirming ?? 'Behandler...';
 
@@ -369,6 +399,7 @@ export default function WikiShow({
     const renderClaimCard = (claim, group) => {
         const isOpenGroup = group === 'open';
         const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
+        const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
 
         return (
@@ -438,6 +469,11 @@ export default function WikiShow({
                                         <p className="text-xs font-semibold text-slate-600">
                                             {ref.source_label}
                                         </p>
+                                        {ref.source_type && (
+                                            <p className="text-xs text-slate-400">
+                                                {tw.source_type ?? 'Kildetype'}: {sourceTypeLabel(ref.source_type)}
+                                            </p>
+                                        )}
                                         {ref.page_reference && (
                                             <p className="text-xs text-slate-400">
                                                 {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
@@ -472,7 +508,7 @@ export default function WikiShow({
                         )}
                     </div>
 
-                    {isOpenGroup && canApproveWikiClaims && claim.source_status === 'missing_source' && (
+                    {canApproveWikiClaims && isPendingDecision && (
                         <div className="flex flex-wrap items-center gap-2">
                             <input
                                 type="text"
@@ -486,17 +522,25 @@ export default function WikiShow({
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => approveClaim(claim)}
-                                className="rounded-full bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+                                className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                             >
-                                {tw.approve_claim_button ?? 'Godkjenn manuelt'}
+                                {tw.approve_claim_button ?? 'Godkjenn'}
+                            </button>
+                            <button
+                                type="button"
+                                disabled={claimProcessing === claim.id}
+                                onClick={() => rejectClaim(claim)}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                            >
+                                {tw.reject_claim_button ?? 'Avvis'}
                             </button>
                         </div>
                     )}
 
-                    {!isOpenGroup && canApproveWikiClaims && claim.approval_status === 'approved' && (
+                    {!isPendingDecision && canApproveWikiClaims && (
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
                             <span>
-                                {(tw.approved_by_at ?? 'Godkjent av :name den :date')
+                                {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                     .replace(':name', claim.approved_by_name ?? '—')
                                     .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
                                 {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
@@ -507,7 +551,7 @@ export default function WikiShow({
                                 onClick={() => unapproveClaim(claim)}
                                 className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
                             >
-                                {tw.unapprove_claim_button ?? 'Angre godkjenning'}
+                                {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
                         </div>
                     )}

@@ -17,8 +17,9 @@ use Tests\TestCase;
 
 /**
  * WikiController::show() must distinguish "Kilde funnet" (source_found), "Manuelt godkjent"
- * (manually_approved) and "Mangler kilde" (missing_source) per claim, and the claim_summary
- * counts must reflect all three buckets — see EnterpriseWikiClaim::sourceStatus().
+ * (manually_approved), "Avvist uten kildereferanse" (rejected) and "Mangler kilde"
+ * (missing_source) per claim, and the claim_summary
+ * counts must reflect the source-status buckets — see EnterpriseWikiClaim::sourceStatus().
  */
 class WikiShowClaimStatusTest extends TestCase
 {
@@ -70,28 +71,39 @@ class WikiShowClaimStatusTest extends TestCase
             'approval_comment' => 'Bekreftet av kunden.',
         ]);
 
-        $missingClaim = $this->makeClaim($page, $version, 'Mangler fortsatt kilde.', 2);
+        $rejectedClaim = $this->makeClaim($page, $version, 'Avvist påstand uten kilde.', 2, [
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+            'approved_by_user_id' => $owner->id,
+            'approved_at' => now(),
+            'approval_comment' => 'Avvist av fagansvarlig.',
+        ]);
+        $missingClaim = $this->makeClaim($page, $version, 'Mangler fortsatt kilde.', 3);
 
         $response = $this->actingAs($viewer)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($foundClaim, $approvedClaim, $missingClaim, $owner): bool {
+        $response->assertViewHas('page', function (array $inertia) use ($foundClaim, $approvedClaim, $rejectedClaim, $missingClaim, $owner): bool {
             $props = data_get($inertia, 'props');
             $summary = data_get($props, 'claim_summary');
             $claims = collect(data_get($props, 'claims', []))->keyBy('id');
 
             $found = $claims->get($foundClaim->id);
             $approved = $claims->get($approvedClaim->id);
+            $rejected = $claims->get($rejectedClaim->id);
             $missing = $claims->get($missingClaim->id);
 
-            return $summary['total'] === 3
+            return $summary['total'] === 4
                 && $summary['source_found'] === 1
                 && $summary['manually_approved'] === 1
+                && $summary['rejected'] === 1
                 && $summary['missing_source'] === 1
                 && ($found['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_FOUND
                 && ($approved['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_MANUALLY_APPROVED
                 && ($approved['approved_by_name'] ?? null) === $owner->name
                 && ($approved['approval_comment'] ?? null) === 'Bekreftet av kunden.'
+                && ($rejected['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_REJECTED
+                && ($rejected['approved_by_name'] ?? null) === $owner->name
+                && ($rejected['approval_comment'] ?? null) === 'Avvist av fagansvarlig.'
                 && ($missing['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_MISSING;
         });
     }

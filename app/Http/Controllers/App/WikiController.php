@@ -880,6 +880,7 @@ class WikiController extends Controller
             'source_found' => 0,
             'missing_excerpt' => 0,
             'manually_approved' => 0,
+            'rejected' => 0,
             'missing_source' => 0,
             'conflict' => 0,
         ];
@@ -903,6 +904,7 @@ class WikiController extends Controller
                     EnterpriseWikiClaim::SOURCE_STATUS_FOUND => 'source_found',
                     EnterpriseWikiClaim::SOURCE_STATUS_MISSING_EXCERPT => 'missing_excerpt',
                     EnterpriseWikiClaim::SOURCE_STATUS_MANUALLY_APPROVED => 'manually_approved',
+                    EnterpriseWikiClaim::SOURCE_STATUS_REJECTED => 'rejected',
                     EnterpriseWikiClaim::SOURCE_STATUS_MISSING => 'missing_source',
                 }]++;
             }

@@ -79,6 +79,18 @@ class WikiClaimControllerTest extends TestCase
         $this->assertFalse($claim->fresh()->isApproved());
     }
 
+    public function test_contributor_cannot_reject_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $response = $this->actingAs($contributor)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/reject");
+
+        $response->assertForbidden();
+        $this->assertTrue($claim->fresh()->isPending());
+    }
+
     public function test_bid_manager_cannot_unapprove_claim(): void
     {
         $customer = $this->createCustomer();
@@ -255,7 +267,7 @@ class WikiClaimControllerTest extends TestCase
     // Guards
     // =========================================================================
 
-    public function test_approve_rejects_claim_that_already_has_source_reference(): void
+    public function test_system_owner_can_approve_claim_that_already_has_source_reference(): void
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -269,10 +281,38 @@ class WikiClaimControllerTest extends TestCase
             'excerpt' => 'Eksisterende utdrag.',
         ]);
 
-        $response = $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve");
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            ['comment' => 'Godkjent på tross av at kilden allerede finnes.'],
+        );
 
-        $response->assertStatus(422);
-        $this->assertFalse($claim->fresh()->isApproved());
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isApproved());
+        $this->assertSame('Godkjent på tross av at kilden allerede finnes.', $fresh->approval_comment);
+        $this->assertSame($owner->id, $fresh->approved_by_user_id);
+    }
+
+    public function test_system_owner_can_reject_claim_manually(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $finding = $this->createOpenMissingSourceFinding($customer, $page, $claim);
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/reject",
+            ['comment' => 'Påstanden ble avvist av fagansvarlig.'],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isRejected());
+        $this->assertSame($owner->id, $fresh->approved_by_user_id);
+        $this->assertSame('Påstanden ble avvist av fagansvarlig.', $fresh->approval_comment);
+        $this->assertSame(EnterpriseWikiLintFinding::STATUS_RESOLVED, $finding->fresh()->status);
     }
 
     public function test_unapprove_rejects_claim_that_is_not_approved(): void
@@ -284,6 +324,25 @@ class WikiClaimControllerTest extends TestCase
         $response = $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/unapprove");
 
         $response->assertStatus(422);
+    }
+
+    public function test_unapprove_resets_rejected_claim_back_to_pending(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+
+        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/reject", ['comment' => null]);
+
+        $response = $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/unapprove");
+
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isPending());
+        $this->assertNull($fresh->approved_by_user_id);
+        $this->assertNull($fresh->approved_at);
+        $this->assertNull($fresh->approval_comment);
     }
 
     public function test_approve_rejects_other_customers_claim(): void

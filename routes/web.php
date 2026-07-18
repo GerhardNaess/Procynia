@@ -325,6 +325,7 @@ Route::prefix('app')
             Route::patch('/{slug}/document-owner-approvals/{approval}/approve', [WikiDocumentOwnerApprovalController::class, 'approve'])->name('document-owner-approvals.approve');
             Route::patch('/{slug}/document-owner-approvals/{approval}/reject', [WikiDocumentOwnerApprovalController::class, 'reject'])->name('document-owner-approvals.reject');
             Route::patch('/{slug}/claims/{claim}/approve', [WikiClaimController::class, 'approve'])->name('claims.approve');
+            Route::patch('/{slug}/claims/{claim}/reject', [WikiClaimController::class, 'reject'])->name('claims.reject');
             Route::patch('/{slug}/claims/{claim}/unapprove', [WikiClaimController::class, 'unapprove'])->name('claims.unapprove');
         });
     });
