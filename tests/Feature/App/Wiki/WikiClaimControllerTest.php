@@ -4,6 +4,7 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
@@ -264,6 +265,75 @@ class WikiClaimControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Source linking
+    // =========================================================================
+
+    public function test_system_owner_can_link_source_to_claim_and_resolve_missing_source_warning(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $finding = $this->createOpenMissingSourceFinding($customer, $page, $claim);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($owner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'excerpt' => 'Dokumentet viser at påstanden er korrekt.',
+                'page_reference' => 'Avsnitt 2.1',
+            ],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id]));
+
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_FOUND, $fresh->sourceStatus());
+        $this->assertSame(EnterpriseWikiLintFinding::STATUS_RESOLVED, $finding->fresh()->status);
+
+        $reference = EnterpriseWikiSourceReference::query()
+            ->where('enterprise_wiki_claim_id', $claim->id)
+            ->where('source_id', $document->id)
+            ->first();
+
+        $this->assertNotNull($reference);
+        $this->assertSame($document->original_filename, $reference->source_label);
+        $this->assertSame('Dokumentet viser at påstanden er korrekt.', $reference->excerpt);
+        $this->assertSame('Avsnitt 2.1', $reference->page_reference);
+    }
+
+    public function test_contributor_cannot_link_source_to_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+
+        $this->actingAs($contributor)
+            ->post("/app/wiki/{$page->slug}/claims/{$claim->id}/source-references", [
+                'source_document_id' => $document->id,
+                'excerpt' => 'Dokumentert.',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_other_customer_cannot_link_source_to_claim(): void
+    {
+        $customer = $this->createCustomer('Eier AS');
+        $otherCustomer = $this->createCustomer('Fremmed AS');
+        $owner = $this->createUser($otherCustomer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+
+        $this->actingAs($owner)
+            ->post("/app/wiki/{$page->slug}/claims/{$claim->id}/source-references", [
+                'source_document_id' => $document->id,
+                'excerpt' => 'Dokumentert.',
+            ])
+            ->assertNotFound();
+    }
+
+    // =========================================================================
     // Guards
     // =========================================================================
 
@@ -432,6 +502,20 @@ class WikiClaimControllerTest extends TestCase
         ]);
 
         return [$page, $version, $claim];
+    }
+
+    private function createDocument(Customer $customer): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'uploaded_by_user_id' => null,
+            'owner_user_id' => null,
+            'original_filename' => 'source-document.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(12).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => 'Dette er et testutdrag som dokumenterer påstanden.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
     }
 
     private function createOpenMissingSourceFinding(

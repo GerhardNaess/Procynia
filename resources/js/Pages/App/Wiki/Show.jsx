@@ -214,6 +214,7 @@ export default function WikiShow({
     current_version,
     claims,
     claim_summary: claimSummary = null,
+    source_documents: sourceDocuments = [],
     document_owner_approvals: documentOwnerApprovals = [],
     document_owner_approval_summary: documentOwnerApprovalSummary = null,
     lint_findings: lintFindings = [],
@@ -242,6 +243,8 @@ export default function WikiShow({
     const [verifiedClaimsOpen, setVerifiedClaimsOpen] = useState(Boolean(targetClaimId));
     const [structuralFindingsOpen, setStructuralFindingsOpen] = useState(Boolean(targetClaimId));
     const [claimProcessing, setClaimProcessing] = useState(null);
+    const [claimSourceDrafts, setClaimSourceDrafts] = useState({});
+    const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
     const [approvalComments, setApprovalComments] = useState({});
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
@@ -296,6 +299,39 @@ export default function WikiShow({
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
             { comment: approvalComments[claim.id] || undefined },
             { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
+    const linkClaimSource = (claim) => {
+        if (claimSourceProcessing) return;
+
+        const draft = claimSourceDrafts[claim.id] ?? {};
+        const sourceDocumentId = Number(draft.source_document_id || 0);
+        const excerpt = String(draft.excerpt || '').trim();
+
+        if (!sourceDocumentId || !excerpt) {
+            return;
+        }
+
+        setClaimSourceProcessing(claim.id);
+        router.post(
+            `/app/wiki/${page.slug}/claims/${claim.id}/source-references`,
+            {
+                source_document_id: sourceDocumentId,
+                excerpt,
+                page_reference: String(draft.page_reference || '').trim() || undefined,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setClaimSourceDrafts((prev) => {
+                        const next = { ...prev };
+                        delete next[claim.id];
+                        return next;
+                    });
+                },
+                onFinish: () => setClaimSourceProcessing(null),
+            },
         );
     };
 
@@ -373,14 +409,14 @@ export default function WikiShow({
     }[type] ?? type);
 
     const confidenceLabel = (c) => ({
-        high: tw.confidence_high ?? 'Høy',
+        high: tw.confidence_high ?? 'Høy sikkerhet',
         medium: tw.confidence_medium ?? 'Medium',
         low: tw.confidence_low ?? 'Lav',
         uncertain: tw.confidence_uncertain ?? 'Usikker',
     }[c] ?? c);
 
     const claimStatusLabel = (s) => ({
-        pending: tw.claim_status_pending ?? 'Venter',
+        pending: tw.claim_status_pending ?? 'Venter på manuell vurdering',
         approved: tw.claim_status_approved ?? 'Godkjent',
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
@@ -391,7 +427,7 @@ export default function WikiShow({
         }
 
         return ({
-            missing_source: tw.verification_basis_claim_problem_missing_source ?? 'Påstanden mangler kildereferanse.',
+            missing_source: tw.verification_basis_claim_problem_missing_source ?? 'Systemet fant ikke et kildeavsnitt som dokumenterer påstanden. Koble en kilde dersom påstanden kan dokumenteres, eller avvis den.',
             missing_excerpt: tw.verification_basis_claim_problem_missing_excerpt ?? 'Kilden er funnet, men mangler tekstutdrag.',
         }[claim.source_status] ?? '');
     };
@@ -401,6 +437,9 @@ export default function WikiShow({
         const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
+        const sourceDraft = claimSourceDrafts[claim.id] ?? {};
+        const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
+        const canLinkSource = canApproveWikiClaims && claim.source_status === 'missing_source';
 
         return (
             <article
@@ -456,12 +495,124 @@ export default function WikiShow({
                             {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
                         </p>
                         {claim.source_references.length === 0 ? (
-                            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                                <WarnIcon className="h-3.5 w-3.5 shrink-0" />
-                                {claim.source_status === 'missing_excerpt'
-                                    ? (tw.verification_basis_claim_missing_excerpt_source ?? 'Systemet fant en kilde, men ikke et tekstutdrag som kan vises.')
-                                    : (tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.')}
-                            </p>
+                            <div className="space-y-2">
+                                <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                                    <WarnIcon className="h-3.5 w-3.5 shrink-0" />
+                                    {claim.source_status === 'missing_excerpt'
+                                        ? (tw.verification_basis_claim_missing_excerpt_source ?? 'Systemet fant en kilde, men ikke et tekstutdrag som kan vises.')
+                                        : (tw.claim_no_sources ?? 'Systemet fant ikke et kildeavsnitt som dokumenterer påstanden. Koble en kilde dersom påstanden kan dokumenteres, eller avvis den.')}
+                                </p>
+
+                                {canLinkSource && (
+                                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                                            {tw.claim_source_link_heading ?? 'Koble kilde'}
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-sky-800">
+                                            {tw.claim_source_link_intro ?? 'Velg et kildedokument og lim inn utdraget som dokumenterer påstanden.'}
+                                        </p>
+
+                                        {sourceDocuments.length === 0 ? (
+                                            <p className="mt-2 text-xs text-sky-700">
+                                                {tw.claim_source_no_documents ?? 'Ingen kildedokumenter er tilgjengelige for denne kunden.'}
+                                            </p>
+                                        ) : (
+                                            <div className="mt-3 space-y-3">
+                                                <label className="block space-y-1">
+                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                        {tw.claim_source_document_label ?? 'Kildedokument'}
+                                                    </span>
+                                                    <select
+                                                        value={sourceDraft.source_document_id ?? ''}
+                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                            ...prev,
+                                                            [claim.id]: {
+                                                                ...sourceDraft,
+                                                                source_document_id: e.target.value,
+                                                            },
+                                                        }))}
+                                                        className="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                    >
+                                                        <option value="">{tw.claim_source_document_placeholder ?? 'Velg et kildedokument'}</option>
+                                                        {sourceDocuments.map((doc) => (
+                                                            <option key={doc.id} value={doc.id}>
+                                                                {doc.original_filename}
+                                                                {doc.owner_name ? ` · ${doc.owner_name}` : ''}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+
+                                                {selectedSourceDocument?.download_url && (
+                                                    <a
+                                                        href={selectedSourceDocument.download_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 hover:text-sky-900 hover:underline"
+                                                    >
+                                                        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                            <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                            <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                        </svg>
+                                                        {tw.claim_source_open_selected_document ?? (tw.source_open_document ?? 'Åpne original kilde')}
+                                                    </a>
+                                                )}
+
+                                                <label className="block space-y-1">
+                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                        {tw.claim_source_excerpt_label ?? 'Tekstutdrag'}
+                                                    </span>
+                                                    <textarea
+                                                        rows={3}
+                                                        maxLength={4000}
+                                                        value={sourceDraft.excerpt ?? ''}
+                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                            ...prev,
+                                                            [claim.id]: {
+                                                                ...sourceDraft,
+                                                                excerpt: e.target.value,
+                                                            },
+                                                        }))}
+                                                        className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                        placeholder={tw.claim_source_excerpt_placeholder ?? 'Lim inn teksten som dokumenterer påstanden.'}
+                                                    />
+                                                </label>
+
+                                                <label className="block space-y-1">
+                                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                                                        {tw.claim_source_page_reference_label ?? (tw.source_page_reference ?? 'Plassering i kilden')}
+                                                    </span>
+                                                    <input
+                                                        type="text"
+                                                        maxLength={255}
+                                                        value={sourceDraft.page_reference ?? ''}
+                                                        onChange={(e) => setClaimSourceDrafts((prev) => ({
+                                                            ...prev,
+                                                            [claim.id]: {
+                                                                ...sourceDraft,
+                                                                page_reference: e.target.value,
+                                                            },
+                                                        }))}
+                                                        className="w-full rounded-lg border border-sky-200 px-3 py-2 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+                                                        placeholder={tw.claim_source_page_reference_placeholder ?? 'Valgfri plassering, for eksempel avsnitt, tabellrad eller sidetall'}
+                                                    />
+                                                </label>
+
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        disabled={claimSourceProcessing === claim.id || !sourceDraft.source_document_id || !String(sourceDraft.excerpt || '').trim()}
+                                                        onClick={() => linkClaimSource(claim)}
+                                                        className="rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                                                    >
+                                                        {claimSourceProcessing === claim.id ? (tw.action_confirming ?? 'Behandler...') : (tw.claim_source_link_submit ?? 'Koble kilde')}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         ) : (
                             <ul className="space-y-3">
                                 {claim.source_references.map((ref) => (
@@ -476,7 +627,7 @@ export default function WikiShow({
                                         )}
                                         {ref.page_reference && (
                                             <p className="text-xs text-slate-400">
-                                                {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
+                                                {tw.source_page_reference ?? 'Plassering i kilden'}: {ref.page_reference}
                                             </p>
                                         )}
                                         {ref.excerpt ? (
@@ -499,7 +650,7 @@ export default function WikiShow({
                                                     <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
                                                     <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
                                                 </svg>
-                                                {tw.source_open_document ?? 'Åpne kildedokument'}
+                                                {tw.source_open_document ?? 'Åpne original kilde'}
                                             </a>
                                         )}
                                     </li>
@@ -524,7 +675,7 @@ export default function WikiShow({
                                 onClick={() => approveClaim(claim)}
                                 className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                             >
-                                {tw.approve_claim_button ?? 'Godkjenn'}
+                                {tw.approve_claim_button ?? 'Godkjenn påstanden'}
                             </button>
                             <button
                                 type="button"
@@ -532,7 +683,7 @@ export default function WikiShow({
                                 onClick={() => rejectClaim(claim)}
                                 className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
                             >
-                                {tw.reject_claim_button ?? 'Avvis'}
+                                {tw.reject_claim_button ?? 'Avvis påstanden'}
                             </button>
                         </div>
                     )}

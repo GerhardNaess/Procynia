@@ -774,6 +774,7 @@ class WikiController extends Controller
             ->first() ?? abort(404);
 
         $currentVersion = $page->currentVersion()->first();
+        $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
 
         $canViewPendingPage = $page->status === EnterpriseWikiPage::STATUS_APPROVED
             || $user?->isSystemOwner()
@@ -987,6 +988,29 @@ class WikiController extends Controller
             ->values()
             ->all();
 
+        $sourceDocuments = [];
+
+        if ($canApproveWikiClaims) {
+            $sourceDocuments = EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->where('document_status', EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED)
+                ->with('owner:id,name,email,is_active')
+                ->orderByDesc('created_at')
+                ->get()
+                ->map(fn (EnterpriseWikiDocument $doc): array => [
+                    'id' => $doc->id,
+                    'original_filename' => $doc->original_filename,
+                    'document_status' => $doc->document_status,
+                    'owner_user_id' => $doc->owner_user_id,
+                    'owner_name' => $doc->owner?->name,
+                    'owner_email' => $doc->owner?->email,
+                    'owner_is_active' => $doc->owner?->is_active,
+                    'download_url' => route('app.wiki.sources.download', $doc->id),
+                    'created_at' => $doc->created_at,
+                ])
+                ->all();
+        }
+
         return Inertia::render('App/Wiki/Show', [
             'page' => [
                 'id'           => $page->id,
@@ -1014,6 +1038,7 @@ class WikiController extends Controller
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks'       => $backlinks,
+            'source_documents' => $sourceDocuments,
             'document_owner_approvals' => $documentOwnerApprovals,
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,
         ]);

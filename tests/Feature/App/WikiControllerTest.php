@@ -192,6 +192,39 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_show_exposes_customer_source_documents_for_claim_linking(): void
+    {
+        $customer = $this->createCustomer();
+        $otherCustomer = $this->createCustomer('Fremmed kunde');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignOwner = $this->createUser($otherCustomer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildevalg');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Påstand uten kilde.');
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $document->forceFill(['owner_user_id' => $owner->id])->save();
+        $foreignDocument = $this->createDocument($otherCustomer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $foreignDocument->forceFill(['owner_user_id' => $foreignOwner->id])->save();
+
+        $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document, $foreignDocument, $owner): bool {
+            $props = data_get($inertia, 'props');
+            $sourceDocuments = collect(data_get($props, 'source_documents', []));
+
+            $ownDoc = $sourceDocuments->firstWhere('id', $document->id);
+            $foreignDoc = $sourceDocuments->firstWhere('id', $foreignDocument->id);
+
+            return $sourceDocuments->count() === 1
+                && $ownDoc !== null
+                && ($ownDoc['original_filename'] ?? null) === $document->original_filename
+                && ($ownDoc['owner_name'] ?? null) === $owner->name
+                && ! $foreignDoc
+                && isset($ownDoc['download_url']);
+        });
+    }
+
     public function test_show_distinguishes_page_status_from_document_owner_approval_status(): void
     {
         $customer = $this->createCustomer();
