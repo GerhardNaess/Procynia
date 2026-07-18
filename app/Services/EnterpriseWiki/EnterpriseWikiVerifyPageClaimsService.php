@@ -54,6 +54,7 @@ class EnterpriseWikiVerifyPageClaimsService
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     /**
@@ -139,7 +140,12 @@ class EnterpriseWikiVerifyPageClaimsService
                     ->exists();
 
                 if ($hasRef) {
-                    $claim->update(['verified_at' => now()]);
+                    $claim->update([
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                        'review_reason' => null,
+                        'generation_issue' => null,
+                        'verified_at' => now(),
+                    ]);
                     $skipped++;
 
                     continue;
@@ -162,6 +168,13 @@ class EnterpriseWikiVerifyPageClaimsService
 
                 $claims++;
 
+                if (! $this->claimHasCurrentPageAnchor($claim, $version)) {
+                    $this->markInternalGenerationError($claim, 'claim_anchor_not_found_in_current_page_version');
+                    $noSupport++;
+
+                    continue;
+                }
+
                 try {
                     $result = $this->aiClient->verifyClaim(
                         claimText: $claim->claim_text,
@@ -174,7 +187,7 @@ class EnterpriseWikiVerifyPageClaimsService
                     throw $e;
                 }
 
-                $outcome = $this->persist($claim->id, $token, $document, $result);
+                $outcome = $this->persist($claim->id, $token, $document, $result, $version);
 
                 if ($outcome === null) {
                     // Another worker reclaimed this lease as stale while the AI call was in
@@ -253,9 +266,9 @@ class EnterpriseWikiVerifyPageClaimsService
      *
      * @return string|null 'supported', 'unsupported', or null if the reservation was lost
      */
-    private function persist(int $claimId, string $token, EnterpriseWikiDocument $document, array $result): ?string
+    private function persist(int $claimId, string $token, EnterpriseWikiDocument $document, array $result, EnterpriseWikiPageVersion $version): ?string
     {
-        return DB::transaction(function () use ($claimId, $token, $document, $result): ?string {
+        return DB::transaction(function () use ($claimId, $token, $document, $result, $version): ?string {
             $claim = EnterpriseWikiClaim::query()
                 ->where('id', $claimId)
                 ->where('verification_claim_token', $token)
@@ -266,8 +279,12 @@ class EnterpriseWikiVerifyPageClaimsService
                 return null;
             }
 
-            if (! $result['supported']) {
+            if (! $this->claimHasCurrentPageAnchor($claim, $version)) {
                 $claim->update([
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'review_reason' => null,
+                    'generation_issue' => 'claim_anchor_not_found_in_current_page_version',
                     'verified_at' => now(),
                     'verification_claimed_at' => null,
                     'verification_claim_token' => null,
@@ -276,18 +293,41 @@ class EnterpriseWikiVerifyPageClaimsService
                 return 'unsupported';
             }
 
+            if (! $result['supported']) {
+                $claim->update([
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'review_reason' => 'Innholdet finnes i Wiki-teksten, men ble ikke direkte dokumentert av kildedokumentet. Vurder om dette skal beholdes som beste praksis.',
+                    'generation_issue' => null,
+                    'verified_at' => now(),
+                    'verification_claimed_at' => null,
+                    'verification_claim_token' => null,
+                ]);
+
+                return 'unsupported';
+            }
+
+            $sourceElement = $this->matchSourceElement($document, (string) ($result['excerpt'] ?? ''));
+
             EnterpriseWikiSourceReference::query()->create([
                 'enterprise_wiki_claim_id' => $claim->id,
                 'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
                 'source_id' => $document->id,
+                'source_element_key' => $sourceElement['source_element_key'] ?? null,
+                'source_element_type' => $sourceElement['source_element_type'] ?? null,
+                'source_row_key' => $sourceElement['source_row_key'] ?? null,
                 'source_label' => $document->original_filename,
                 'excerpt' => $result['excerpt'],
                 'source_hash' => $document->file_hash_sha256 ?? '',
+                'page_reference' => $sourceElement['page_reference'] ?? null,
             ]);
 
             $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
 
             $claim->update([
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'review_reason' => null,
+                'generation_issue' => null,
                 'verified_at' => now(),
                 'verification_claimed_at' => null,
                 'verification_claim_token' => null,
@@ -302,5 +342,65 @@ class EnterpriseWikiVerifyPageClaimsService
         $customer = Customer::query()->with('language')->find($customerId);
 
         return $customer?->language?->code ?? 'no';
+    }
+
+    private function claimHasCurrentPageAnchor(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version): bool
+    {
+        if ((int) $claim->enterprise_wiki_page_version_id !== (int) $version->id) {
+            return false;
+        }
+
+        $anchor = trim((string) ($claim->page_excerpt ?: $claim->claim_text));
+
+        return $anchor !== '' && $this->containsNormalized((string) ($version->content_markdown ?? ''), $anchor);
+    }
+
+    private function markInternalGenerationError(EnterpriseWikiClaim $claim, string $issue): void
+    {
+        EnterpriseWikiClaim::query()
+            ->where('id', $claim->id)
+            ->update([
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                'review_reason' => null,
+                'generation_issue' => $issue,
+                'verified_at' => now(),
+                'verification_claimed_at' => null,
+                'verification_claim_token' => null,
+            ]);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function matchSourceElement(EnterpriseWikiDocument $document, string $excerpt): ?array
+    {
+        $excerpt = trim($excerpt);
+
+        if ($excerpt === '') {
+            return null;
+        }
+
+        foreach ($this->sourceElementService->inspect($document)['elements'] as $element) {
+            $referenceText = (string) ($element['reference_text'] ?? '');
+
+            if ($this->containsNormalized($referenceText, $excerpt) || $this->containsNormalized($excerpt, $referenceText)) {
+                return $element;
+            }
+        }
+
+        return null;
+    }
+
+    private function containsNormalized(string $haystack, string $needle): bool
+    {
+        $normalize = static fn (string $value): string => preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
+
+        $needle = $normalize($needle);
+
+        return $needle !== '' && str_contains(
+            mb_strtolower($normalize($haystack)),
+            mb_strtolower($needle),
+        );
     }
 }

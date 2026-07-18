@@ -108,6 +108,61 @@ class WikiShowClaimStatusTest extends TestCase
         });
     }
 
+    public function test_claim_summary_distinguishes_best_practice_and_internal_generation_errors(): void
+    {
+        $customer = $this->createCustomer();
+        $viewer = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'origin-page-'.Str::lower(Str::random(6)),
+            'title' => 'Origin Page',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_APPROVED,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Origin Page',
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $bestPracticeClaim = $this->makeClaim($page, $version, 'Årlig tilgangsgjennomgang bør vurderes.', 0, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Beste praksis uten kildegrunnlag.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+        ]);
+
+        $internalErrorClaim = $this->makeClaim($page, $version, 'Løsrevet claim.', 1, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+            'generation_issue' => 'claim_not_traceable_to_current_page_version',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+        ]);
+
+        $response = $this->actingAs($viewer)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($bestPracticeClaim, $internalErrorClaim): bool {
+            $props = data_get($inertia, 'props');
+            $summary = data_get($props, 'claim_summary');
+            $claims = collect(data_get($props, 'claims', []))->keyBy('id');
+
+            $bestPractice = $claims->get($bestPracticeClaim->id);
+            $internalError = $claims->get($internalErrorClaim->id);
+
+            return $summary['best_practice_review'] === 1
+                && $summary['internal_generation_error'] === 1
+                && ($bestPractice['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW
+                && ($bestPractice['review_reason'] ?? null) === 'Beste praksis uten kildegrunnlag.'
+                && ($internalError['source_status'] ?? null) === EnterpriseWikiClaim::SOURCE_STATUS_INTERNAL_ERROR
+                && ($internalError['generation_issue'] ?? null) === 'claim_not_traceable_to_current_page_version';
+        });
+    }
+
     private function makeClaim(
         EnterpriseWikiPage $page,
         EnterpriseWikiPageVersion $version,

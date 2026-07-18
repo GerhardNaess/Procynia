@@ -205,6 +205,54 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_HIGH, $first->confidence);
     }
 
+    public function test_claim_stores_page_excerpt_and_starts_unclassified_when_excerpt_exists_in_current_version(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $claim = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->firstOrFail();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->content_origin);
+        $this->assertSame('Supporting excerpt alpha.', $claim->page_excerpt);
+        $this->assertNull($claim->generation_issue);
+    }
+
+    public function test_claim_without_page_excerpt_anchor_is_internal_generation_error(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn([
+                'claims' => [
+                    [
+                        'text' => 'Loose claim not in the page.',
+                        'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                        'excerpt' => 'This excerpt is not present in the Wiki page.',
+                        'conflict_note' => null,
+                    ],
+                ],
+            ]);
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $claim = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->firstOrFail();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN, $claim->confidence);
+        $this->assertSame('claim_excerpt_not_found_in_page_version', $claim->generation_issue);
+        $this->assertFalse($claim->needsSourceWarning());
+    }
+
     public function test_claim_approval_status_is_pending(): void
     {
         $customer          = $this->createCustomer();
@@ -485,7 +533,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             'enterprise_wiki_page_id' => $page->id,
             'version_number'          => 1,
             'is_current'              => true,
-            'content_markdown'        => "# Test Page\n\nThis is test content with verifiable facts.",
+            'content_markdown'        => "# Test Page\n\nThis is test content with verifiable facts.\n\nSupporting excerpt alpha.\n\nSupporting excerpt beta.",
             'generated_by_model'      => 'gpt-5',
         ]);
 

@@ -42,9 +42,11 @@ const SOURCE_STATUS_STYLES = {
     manually_approved: 'bg-sky-100 text-sky-700',
     rejected: 'bg-slate-200 text-slate-700',
     missing_source: 'bg-rose-100 text-rose-700',
+    best_practice_review: 'bg-amber-100 text-amber-700',
+    internal_generation_error: 'bg-slate-200 text-slate-700',
 };
 
-const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source']);
+const SOURCE_STATUS_WARNS = new Set(['missing_excerpt', 'missing_source', 'best_practice_review', 'internal_generation_error']);
 
 const CLAIM_SOURCE_STATUS_STYLES = {
     source_found: 'bg-emerald-100 text-emerald-700',
@@ -52,6 +54,8 @@ const CLAIM_SOURCE_STATUS_STYLES = {
     manually_approved: 'bg-sky-100 text-sky-700',
     rejected: 'bg-slate-200 text-slate-700',
     missing_source: 'bg-rose-100 text-rose-700',
+    best_practice_review: 'bg-amber-100 text-amber-700',
+    internal_generation_error: 'bg-slate-200 text-slate-700',
 };
 
 const HIGH_VOLUME_THRESHOLD = 100;
@@ -214,6 +218,7 @@ export default function WikiShow({
     current_version,
     claims,
     claim_summary: claimSummary = null,
+    can_handle_wiki_claims: canHandleWikiClaims = false,
     source_documents: sourceDocuments = [],
     document_owner_approvals: documentOwnerApprovals = [],
     document_owner_approval_summary: documentOwnerApprovalSummary = null,
@@ -229,10 +234,6 @@ export default function WikiShow({
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
-    // Claim approve/undo uses its own permission (System Owner, or QA + effective access to
-    // approve_wiki_claims) — separate from whole-page approve/reject, which stays System
-    // Owner-only. See User::canApproveWikiClaims().
-    const canApproveWikiClaims = auth.user?.can_approve_wiki_claims ?? false;
     const targetClaimId = typeof window !== 'undefined'
         ? new URLSearchParams(window.location.search).get('claim_id')
         : null;
@@ -247,8 +248,12 @@ export default function WikiShow({
     const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
+    const [claimTextEdits, setClaimTextEdits] = useState({});
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
+    const claimAccessNotice = canHandleWikiClaims
+        ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
+        : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
 
     useEffect(() => {
         if (!targetClaimId) {
@@ -277,13 +282,15 @@ export default function WikiShow({
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
     const openClaims = claims.filter((claim) => (
         claim.approval_status === 'pending'
+        && claim.content_origin !== 'internal_error'
         && (
-            claim.conflict_flag
+            claim.content_origin === 'best_practice'
+            || claim.conflict_flag
             || claim.source_status === 'missing_source'
             || claim.source_status === 'missing_excerpt'
         )
     ));
-    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim));
+    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim) && claim.content_origin !== 'internal_error');
 
     const sendAction = (action) => {
         if (processing) return;
@@ -296,9 +303,15 @@ export default function WikiShow({
     const approveClaim = (claim) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
+        const approvedText = claim.content_origin === 'best_practice'
+            ? String(claimTextEdits[claim.id] ?? claim.claim_text ?? '').trim()
+            : '';
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
-            { comment: approvalComments[claim.id] || undefined },
+            {
+                comment: approvalComments[claim.id] || undefined,
+                approved_text: approvedText || undefined,
+            },
             { onFinish: () => setClaimProcessing(null) },
         );
     };
@@ -478,6 +491,8 @@ export default function WikiShow({
         manually_approved: tw.claim_source_status_manually_approved ?? 'Manuelt godkjent uten kildereferanse',
         rejected: tw.claim_source_status_rejected ?? 'Avvist uten kildereferanse',
         missing_source: tw.claim_source_status_missing_source ?? 'Mangler kildereferanse',
+        best_practice_review: tw.claim_source_status_best_practice_review ?? 'Forslag basert på beste praksis',
+        internal_generation_error: tw.claim_source_status_internal_error ?? 'Genereringsfeil',
     }[status] ?? status);
 
     const sourceTypeLabel = (type) => ({
@@ -526,6 +541,12 @@ export default function WikiShow({
     }[s] ?? s);
 
     const claimProblemLabel = (claim) => {
+        if (claim.content_origin === 'best_practice') {
+            return claim.review_reason
+                || tw.verification_basis_best_practice_reason_fallback
+                || 'Innholdet er et forslag basert på beste praksis og må vurderes før det kan brukes som godkjent materiale.';
+        }
+
         if (claim.conflict_flag) {
             return tw.verification_basis_claim_problem_conflict ?? 'Påstanden er markert som mulig konflikt.';
         }
@@ -542,6 +563,11 @@ export default function WikiShow({
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};
+        const claimTextEdit = claimTextEdits[claim.id] ?? claim.claim_text ?? '';
+        const sourceReferences = claim.source_references ?? [];
+        const hasSourceReferences = sourceReferences.length > 0;
+        const canHandleClaim = claim.can_handle ?? false;
+        const isBestPracticeClaim = claim.content_origin === 'best_practice';
         const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
         const selectedSourceCatalog = selectedSourceDocument ? (claimSourceCatalog[selectedSourceDocument.id] ?? null) : null;
         const selectedSourceElements = selectedSourceCatalog?.elements ?? [];
@@ -563,7 +589,7 @@ export default function WikiShow({
                 return haystack.includes(sourceElementSearch);
             })
             : selectedSourceElements;
-        const canLinkSource = canApproveWikiClaims && claim.source_status === 'missing_source';
+        const canLinkSource = canHandleClaim && !isBestPracticeClaim && claim.source_status === 'missing_source';
 
         return (
             <article
@@ -575,6 +601,11 @@ export default function WikiShow({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                         <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                        {claim.page_excerpt && claim.page_excerpt !== claim.claim_text && (
+                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                                {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {claim.page_excerpt}
+                            </p>
+                        )}
 
                         <div className="mt-3 flex flex-wrap items-center gap-2">
                             {showDecisionBadge && (
@@ -583,10 +614,16 @@ export default function WikiShow({
                                     cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
                                 />
                             )}
-                            {claim.confidence && claim.confidence !== 'uncertain' && (
+                            {claim.confidence && claim.confidence !== 'uncertain' && claim.content_origin === 'source_based' && (
                                 <Badge
                                     label={confidenceLabel(claim.confidence)}
                                     cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
+                                />
+                            )}
+                            {isBestPracticeClaim && (
+                                <Badge
+                                    label={tw.verification_basis_best_practice_badge ?? 'Beste praksis'}
+                                    cls="bg-amber-100 text-amber-700"
                                 />
                             )}
                             {claim.conflict_flag && (
@@ -615,17 +652,37 @@ export default function WikiShow({
 
                 <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
                     <div className="space-y-1.5">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
-                        </p>
-                        {claim.source_references.length === 0 ? (
+                        {hasSourceReferences && (
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {tw.verification_basis_claim_source_basis_heading ?? 'Kildegrunnlag'}
+                            </p>
+                        )}
+                        {sourceReferences.length === 0 ? (
                             <div className="space-y-2">
-                                <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                                    <WarnIcon className="h-3.5 w-3.5 shrink-0" />
-                                    {claim.source_status === 'missing_excerpt'
-                                        ? (tw.verification_basis_claim_missing_excerpt_source ?? 'Systemet fant en kilde, men ikke et tekstutdrag som kan vises.')
-                                        : (tw.claim_no_sources ?? 'Systemet fant ikke et kildeavsnitt som dokumenterer påstanden. Koble en kilde dersom påstanden kan dokumenteres, eller avvis den.')}
-                                </p>
+                                {isBestPracticeClaim && (
+                                    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                                        <p className="text-sm leading-6 text-amber-800">
+                                            {tw.verification_basis_best_practice_no_source_search ?? 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.'}
+                                        </p>
+                                        {canHandleClaim && isPendingDecision && (
+                                            <label className="block space-y-1">
+                                                <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                                                    {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
+                                                </span>
+                                                <textarea
+                                                    rows={3}
+                                                    maxLength={4000}
+                                                    value={claimTextEdit}
+                                                    onChange={(e) => setClaimTextEdits((prev) => ({
+                                                        ...prev,
+                                                        [claim.id]: e.target.value,
+                                                    }))}
+                                                    className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-amber-400 focus:outline-none"
+                                                />
+                                            </label>
+                                        )}
+                                    </div>
+                                )}
 
                                 {canLinkSource && (
                                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
@@ -856,10 +913,16 @@ export default function WikiShow({
                                         )}
                                     </div>
                                 )}
+
+                                {!canHandleClaim && !isBestPracticeClaim && (
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                                        {claimAccessNotice}
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <ul className="space-y-3">
-                                {claim.source_references.map((ref) => (
+                                {sourceReferences.map((ref) => (
                                     <li key={ref.id} className="space-y-1.5">
                                         <p className="text-xs font-semibold text-slate-600">
                                             {ref.source_label}
@@ -914,7 +977,7 @@ export default function WikiShow({
                         )}
                     </div>
 
-                    {canApproveWikiClaims && isPendingDecision && (
+                    {canHandleClaim && isPendingDecision && (
                         <div className="flex flex-wrap items-center gap-2">
                             <input
                                 type="text"
@@ -943,7 +1006,7 @@ export default function WikiShow({
                         </div>
                     )}
 
-                    {!isPendingDecision && canApproveWikiClaims && (
+                    {!isPendingDecision && canHandleClaim && (
                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
                             <span>
                                 {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
@@ -959,6 +1022,12 @@ export default function WikiShow({
                             >
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
+                        </div>
+                    )}
+
+                    {!canHandleClaim && hasSourceReferences && (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                            {claimAccessNotice}
                         </div>
                     )}
                 </div>
@@ -1327,7 +1396,7 @@ export default function WikiShow({
                         <div className="space-y-5">
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                 <p className="text-sm leading-6 text-slate-600">
-                                    {tw.verification_basis_intro ?? 'Verifikasjonsgrunnlag samler påstander, kildegrunnlag og strukturelle funn slik at du kan kontrollere det som trenger behandling uten å blande ulike typer kvalitetsarbeid.'}
+                                    {claimAccessNotice}
                                 </p>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <Badge
@@ -1359,7 +1428,7 @@ export default function WikiShow({
                                         </span>
                                     </h3>
                                     <p className="text-sm text-slate-500">
-                                        {tw.verification_basis_open_intro ?? 'Kontroller påstandene mot kildedokumentene. Godkjenn manuelt der det støttes av eksisterende funksjonalitet, eller bruk avvisning når påstanden ikke kan dokumenteres.'}
+                                        {claimAccessNotice}
                                     </p>
                                 </div>
 

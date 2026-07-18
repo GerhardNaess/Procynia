@@ -168,6 +168,20 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame(self::FAKE_EXCERPT, $ref->excerpt);
     }
 
+    public function test_supported_claim_is_marked_source_based(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createAppliedRunWithClaimedPage($customer);
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertNull($claim->review_reason);
+        $this->assertNull($claim->generation_issue);
+    }
+
     // =========================================================================
     // Idempotency: claims with existing references are skipped
     // =========================================================================
@@ -232,6 +246,48 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
         $this->assertSame($refsBefore, EnterpriseWikiSourceReference::query()->count());
+    }
+
+    public function test_unsupported_claim_with_page_anchor_becomes_best_practice_review(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createAppliedRunWithClaimedPage($customer);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn(['supported' => false, 'excerpt' => '']);
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN, $claim->confidence);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+        $this->assertFalse($claim->needsSourceWarning());
+        $this->assertNotNull($claim->review_reason);
+    }
+
+    public function test_claim_without_current_page_anchor_is_internal_error_and_skips_ai(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createAppliedRunWithClaimedPage($customer);
+
+        $claim->update([
+            'page_excerpt' => 'This text is not present in the page.',
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_INTERNAL_ERROR, $claim->sourceStatus());
+        $this->assertSame('claim_anchor_not_found_in_current_page_version', $claim->generation_issue);
+        $this->assertFalse($claim->needsSourceWarning());
     }
 
     public function test_command_outputs_no_support_count(): void
@@ -505,6 +561,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             'enterprise_wiki_page_id'         => $page->id,
             'enterprise_wiki_page_version_id'  => $version->id,
             'claim_text'                       => 'Test claim text for verification.',
+            'page_excerpt'                      => self::FAKE_EXCERPT,
             'position_order'                   => 0,
             'confidence'                       => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag'                    => false,

@@ -246,12 +246,25 @@ class EnterpriseWikiExtractPageClaimsService
             $created = 0;
 
             foreach ($result['claims'] as $i => $claim) {
+                $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
+                $hasPageAnchor = $pageExcerpt !== ''
+                    && $this->containsNormalized((string) ($version->content_markdown ?? ''), $pageExcerpt);
+                $contentOrigin = $hasPageAnchor
+                    ? EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED
+                    : EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR;
+
                 EnterpriseWikiClaim::query()->create([
                     'enterprise_wiki_page_id' => $page->id,
                     'enterprise_wiki_page_version_id' => $version->id,
                     'claim_text' => $claim['text'],
+                    'content_origin' => $contentOrigin,
+                    'page_excerpt' => $pageExcerpt !== '' ? $pageExcerpt : null,
+                    'review_reason' => null,
+                    'generation_issue' => $hasPageAnchor ? null : 'claim_excerpt_not_found_in_page_version',
                     'position_order' => $i,
-                    'confidence' => $claim['confidence'] ?? EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'confidence' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
+                        ? EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN
+                        : ($claim['confidence'] ?? EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN),
                     'conflict_flag' => ($claim['conflict_note'] ?? null) !== null,
                     'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 ]);
@@ -274,5 +287,15 @@ class EnterpriseWikiExtractPageClaimsService
         $customer = Customer::query()->with('language')->find($customerId);
 
         return $customer?->language?->code ?? 'no';
+    }
+
+    private function containsNormalized(string $haystack, string $needle): bool
+    {
+        $normalize = static fn (string $value): string => preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value);
+
+        return str_contains(
+            mb_strtolower($normalize($haystack)),
+            mb_strtolower($normalize($needle)),
+        );
     }
 }

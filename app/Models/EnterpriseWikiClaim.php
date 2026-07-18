@@ -8,6 +8,21 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EnterpriseWikiClaim extends Model
 {
+    public const CONTENT_ORIGIN_UNCLASSIFIED = 'unclassified';
+
+    public const CONTENT_ORIGIN_SOURCE_BASED = 'source_based';
+
+    public const CONTENT_ORIGIN_BEST_PRACTICE = 'best_practice';
+
+    public const CONTENT_ORIGIN_INTERNAL_ERROR = 'internal_error';
+
+    public const CONTENT_ORIGINS = [
+        self::CONTENT_ORIGIN_UNCLASSIFIED,
+        self::CONTENT_ORIGIN_SOURCE_BASED,
+        self::CONTENT_ORIGIN_BEST_PRACTICE,
+        self::CONTENT_ORIGIN_INTERNAL_ERROR,
+    ];
+
     public const CONFIDENCE_HIGH = 'high';
 
     public const CONFIDENCE_MEDIUM = 'medium';
@@ -50,10 +65,20 @@ class EnterpriseWikiClaim extends Model
     /** No source reference exists and the claim has not been manually approved. */
     public const SOURCE_STATUS_MISSING = 'missing_source';
 
+    /** A best-practice suggestion is waiting for a human decision; no source should be linked. */
+    public const SOURCE_STATUS_BEST_PRACTICE_REVIEW = 'best_practice_review';
+
+    /** The claim is an internal consistency problem and must not be a normal user task. */
+    public const SOURCE_STATUS_INTERNAL_ERROR = 'internal_generation_error';
+
     protected $fillable = [
         'enterprise_wiki_page_id',
         'enterprise_wiki_page_version_id',
         'claim_text',
+        'content_origin',
+        'page_excerpt',
+        'review_reason',
+        'generation_issue',
         'position_order',
         'confidence',
         'conflict_flag',
@@ -138,6 +163,14 @@ class EnterpriseWikiClaim extends Model
      */
     public function sourceStatus(): string
     {
+        if ($this->content_origin === self::CONTENT_ORIGIN_INTERNAL_ERROR) {
+            return self::SOURCE_STATUS_INTERNAL_ERROR;
+        }
+
+        if ($this->content_origin === self::CONTENT_ORIGIN_BEST_PRACTICE && $this->isPending()) {
+            return self::SOURCE_STATUS_BEST_PRACTICE_REVIEW;
+        }
+
         $references = $this->relationLoaded('sourceReferences')
             ? $this->sourceReferences
             : $this->sourceReferences()->get();
@@ -165,6 +198,23 @@ class EnterpriseWikiClaim extends Model
      */
     public function needsSourceWarning(): bool
     {
+        if (in_array($this->content_origin, [
+            self::CONTENT_ORIGIN_BEST_PRACTICE,
+            self::CONTENT_ORIGIN_INTERNAL_ERROR,
+        ], true)) {
+            return false;
+        }
+
         return $this->sourceStatus() === self::SOURCE_STATUS_MISSING;
+    }
+
+    public function isBestPracticeReview(): bool
+    {
+        return $this->content_origin === self::CONTENT_ORIGIN_BEST_PRACTICE && $this->isPending();
+    }
+
+    public function isInternalGenerationError(): bool
+    {
+        return $this->content_origin === self::CONTENT_ORIGIN_INTERNAL_ERROR;
     }
 }

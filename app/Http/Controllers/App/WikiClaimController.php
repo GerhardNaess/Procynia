@@ -7,7 +7,9 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\EnterpriseWikiPage;
+use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
@@ -36,24 +38,25 @@ class WikiClaimController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
-            abort(403);
-        }
-
         $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
 
         $validated = $request->validate([
             'comment' => ['nullable', 'string', 'max:1000'],
+            'approved_text' => ['nullable', 'string', 'max:4000'],
         ]);
 
+        $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
+
         $this->storeDecision(
-            $claim,
+            $claim->fresh(),
             $user->id,
             EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
             $validated['comment'] ?? null,
@@ -66,11 +69,8 @@ class WikiClaimController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
-            abort(403);
-        }
-
         $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
 
         $validated = $request->validate([
             'comment' => ['nullable', 'string', 'max:1000'],
@@ -90,11 +90,8 @@ class WikiClaimController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
-            abort(403);
-        }
-
         $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
 
         $validated = $request->validate([
             'source_document_id' => ['required', 'integer'],
@@ -112,6 +109,7 @@ class WikiClaimController extends Controller
             ->first();
 
         abort_unless($document !== null && trim((string) $document->extracted_text) !== '', 404);
+        abort_unless($this->documentOwnerApprovalService->canUseSourceDocumentForClaim($claim, $document, $user, $page->currentVersion()->first()), 403);
 
         $hadSourceReference = $claim->hasSourceReference();
         $catalog = $this->sourceElementService->inspect($document);
@@ -186,11 +184,8 @@ class WikiClaimController extends Controller
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner() && ! $user?->canApproveWikiClaims()) {
-            abort(403);
-        }
-
         $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
 
         if (! in_array($claim->approval_status, [
             EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
@@ -227,6 +222,41 @@ class WikiClaimController extends Controller
         $this->lintService->resolveClaimMissingSourceFinding($claim);
     }
 
+    private function applyBestPracticeTextEdit(EnterpriseWikiClaim $claim, ?string $approvedText): void
+    {
+        if ($claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return;
+        }
+
+        $approvedText = $this->normalizeNullableString($approvedText);
+
+        if ($approvedText === null || $approvedText === trim((string) $claim->claim_text)) {
+            return;
+        }
+
+        $claim->loadMissing('version');
+        $version = $claim->version;
+
+        if ($version === null || (int) $version->id !== (int) $claim->enterprise_wiki_page_version_id) {
+            abort(422, 'Claim is not tied to a valid Wiki page version.');
+        }
+
+        $anchor = $this->normalizeNullableString($claim->page_excerpt) ?? $this->normalizeNullableString($claim->claim_text);
+
+        if ($anchor === null || ! str_contains((string) $version->content_markdown, $anchor)) {
+            abort(422, 'Best-practice text can only be edited when the original text is still present in the current Wiki page version.');
+        }
+
+        $version->update([
+            'content_markdown' => str_replace($anchor, $approvedText, (string) $version->content_markdown),
+        ]);
+
+        $claim->update([
+            'claim_text' => $approvedText,
+            'page_excerpt' => $approvedText,
+        ]);
+    }
+
     private function resolvePageForClaim(string $slug, EnterpriseWikiClaim $claim): EnterpriseWikiPage
     {
         $customerId = $this->customerContext->currentCustomerId();
@@ -255,12 +285,15 @@ class WikiClaimController extends Controller
     public function sourceDocumentElements(string $slug, EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document): JsonResponse
     {
         $page = $this->resolvePageForClaim($slug, $claim);
-        $catalog = $this->sourceElementService->inspect($document);
+        $user = $this->customerContext->currentUser();
 
         abort_unless($document->customer_id === $this->customerContext->currentCustomerId(), 404);
         abort_unless($claim->enterprise_wiki_page_id === $page->id, 404);
         abort_unless($document->document_status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED, 404);
         abort_unless(trim((string) $document->extracted_text) !== '', 404);
+        abort_unless($this->documentOwnerApprovalService->canUseSourceDocumentForClaim($claim, $document, $user, $page->currentVersion()->first()), 403);
+
+        $catalog = $this->sourceElementService->inspect($document);
 
         return response()->json([
             'document_id' => $document->id,
@@ -270,5 +303,18 @@ class WikiClaimController extends Controller
             'manual_source_reason' => $catalog['manual_source_reason'],
             'elements' => $catalog['elements'],
         ]);
+    }
+
+    private function canHandleClaimForPage(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, ?User $user): bool
+    {
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        return $this->documentOwnerApprovalService->canHandleClaim(
+            $claim,
+            $user,
+            $page->currentVersion()->first(),
+        );
     }
 }

@@ -218,6 +218,68 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
+     * Decide whether a user may handle one claim's verification basis.
+     *
+     * System Owner and QA keep their existing broad access. Document owners are granted access
+     * only when the claim is tied to one of their own source documents, or when the claim still
+     * lacks a source reference but the current page version already proves that the user is a
+     * required owner for that version's provenance.
+     */
+    public function canHandleClaim(EnterpriseWikiClaim $claim, User $actor, ?EnterpriseWikiPageVersion $currentVersion = null): bool
+    {
+        if (! $actor->is_active || ! $actor->canAccessCustomerFrontend()) {
+            return false;
+        }
+
+        if ($actor->isSystemOwner() || $actor->canApproveWikiClaims()) {
+            return true;
+        }
+
+        $documentIds = $this->claimSourceDocumentIds($claim);
+
+        if ($documentIds !== []) {
+            return $this->userOwnsAnySourceDocument($actor, $documentIds);
+        }
+
+        $currentVersion ??= $claim->relationLoaded('version')
+            ? $claim->version
+            : $claim->version()->with('page')->first();
+
+        return $currentVersion instanceof EnterpriseWikiPageVersion
+            && $this->isRequiredDocumentOwnerForPageVersion($currentVersion, $actor);
+    }
+
+    /**
+     * Decide whether a user may inspect or link a specific source document for one claim.
+     * Document owners may only work with their own documents; generic QA/System Owner access
+     * remains unchanged.
+     */
+    public function canUseSourceDocumentForClaim(
+        EnterpriseWikiClaim $claim,
+        EnterpriseWikiDocument $document,
+        User $actor,
+        ?EnterpriseWikiPageVersion $currentVersion = null,
+    ): bool {
+        if (! $actor->is_active || ! $actor->canAccessCustomerFrontend()) {
+            return false;
+        }
+
+        if ($actor->isSystemOwner() || $actor->canApproveWikiClaims()) {
+            return $document->customer_id === $actor->customer_id;
+        }
+
+        if ((int) $document->customer_id !== (int) $actor->customer_id) {
+            return false;
+        }
+
+        if ((int) $document->owner_user_id === (int) $actor->id) {
+            return $this->canHandleClaim($claim, $actor, $currentVersion);
+        }
+
+        return false;
+    }
+
+    /**
      * Determine whether the user is one of the required document owners for a version.
      */
     public function isRequiredDocumentOwnerForPageVersion(EnterpriseWikiPageVersion $version, User $user): bool
@@ -417,6 +479,39 @@ class EnterpriseWikiDocumentOwnerApprovalService
         return $documentIds === []
             ? 'Ingen dokumenter'
             : 'Dokumenter: '.implode(', ', array_map(static fn (mixed $id): string => (string) $id, $documentIds));
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function claimSourceDocumentIds(EnterpriseWikiClaim $claim): array
+    {
+        return collect($claim->relationLoaded('sourceReferences')
+            ? $claim->sourceReferences
+            : $claim->sourceReferences()->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)->get())
+            ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->pluck('source_id')
+            ->map(static fn (mixed $value): int => (int) $value)
+            ->filter(static fn (int $value): bool => $value > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param list<int> $documentIds
+     */
+    private function userOwnsAnySourceDocument(User $actor, array $documentIds): bool
+    {
+        if ($documentIds === []) {
+            return false;
+        }
+
+        return EnterpriseWikiDocument::query()
+            ->where('customer_id', $actor->customer_id)
+            ->whereIn('id', $documentIds)
+            ->where('owner_user_id', $actor->id)
+            ->exists();
     }
 
     /**

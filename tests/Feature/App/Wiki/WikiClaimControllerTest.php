@@ -57,6 +57,47 @@ class WikiClaimControllerTest extends TestCase
         $this->assertSame('Bekreftet muntlig av kunden.', $fresh->approval_comment);
     }
 
+    public function test_system_owner_can_edit_and_approve_best_practice_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, $version, $claim] = $this->createPageWithClaim($customer);
+
+        $originalText = 'Virksomheten bør gjennomføre en årlig tilgangsgjennomgang.';
+        $editedText = 'Virksomheten bør gjennomføre dokumentert tilgangsgjennomgang minst årlig.';
+
+        $version->update([
+            'content_markdown' => "# Claim Page\n\n{$originalText}",
+        ]);
+
+        $claim->update([
+            'claim_text' => $originalText,
+            'page_excerpt' => $originalText,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'review_reason' => 'Beste praksis uten kildegrunnlag.',
+        ]);
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            [
+                'approved_text' => $editedText,
+                'comment' => 'Presisert formulering.',
+            ],
+        );
+
+        $response->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $this->assertStringContainsString($editedText, $version->fresh()->content_markdown);
+        $this->assertStringNotContainsString($originalText, $version->fresh()->content_markdown);
+
+        $claim->refresh();
+        $this->assertTrue($claim->isApproved());
+        $this->assertSame($editedText, $claim->claim_text);
+        $this->assertSame($editedText, $claim->page_excerpt);
+        $this->assertSame('Presisert formulering.', $claim->approval_comment);
+    }
+
     public function test_bid_manager_cannot_approve_claim(): void
     {
         $customer = $this->createCustomer();
@@ -130,6 +171,52 @@ class WikiClaimControllerTest extends TestCase
         $this->assertSame($qaContributor->id, $fresh->approved_by_user_id);
         $this->assertSame('Kvalitetssikret av QA.', $fresh->approval_comment);
         $this->assertNotNull($fresh->approved_at);
+    }
+
+    public function test_document_owner_can_approve_and_undo_claim_when_claim_ties_back_to_own_document(): void
+    {
+        $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $documentOwner->id])->save();
+        $this->createDocumentSourceReference($claim, $document, 'Eierens dokument.');
+
+        $this->actingAs($documentOwner)
+            ->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve", ['comment' => 'Godkjent av dokumenteier.'])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isApproved());
+        $this->assertSame($documentOwner->id, $fresh->approved_by_user_id);
+        $this->assertSame('Godkjent av dokumenteier.', $fresh->approval_comment);
+
+        $this->actingAs($documentOwner)
+            ->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/unapprove")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isPending());
+        $this->assertNull($fresh->approved_by_user_id);
+    }
+
+    public function test_document_owner_can_reject_claim_manually(): void
+    {
+        $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $documentOwner->id])->save();
+        $this->createDocumentSourceReference($claim, $document, 'Eierens dokument.');
+
+        $this->actingAs($documentOwner)
+            ->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/reject", ['comment' => 'Avvist av dokumenteier.'])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $fresh = $claim->fresh();
+        $this->assertTrue($fresh->isRejected());
+        $this->assertSame($documentOwner->id, $fresh->approved_by_user_id);
+        $this->assertSame('Avvist av dokumenteier.', $fresh->approval_comment);
     }
 
     public function test_qa_user_can_undo_approval(): void
@@ -263,6 +350,107 @@ class WikiClaimControllerTest extends TestCase
                 ->where('code', EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE)
                 ->count(),
         );
+    }
+
+    public function test_document_owner_can_link_source_to_claim_without_source_when_page_uses_owned_document(): void
+    {
+        $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, $version, $claimWithSource] = $this->createPageWithClaim($customer);
+        $claimWithoutSource = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Mangler kilde, men hører til samme side.',
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $documentOwner->id, 'extracted_text' => 'Dokumenttekst.'])->save();
+        $this->createDocumentSourceReference($claimWithSource, $document, 'Eierens dokument.');
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => false,
+                    'manual_source_allowed' => true,
+                    'manual_source_reason' => 'Dokumentet har ikke strukturerte elementer.',
+                    'elements' => [],
+                ]);
+
+            $mock->shouldReceive('resolveSelection')->never();
+        });
+
+        $this->actingAs($documentOwner)->post(
+            "/app/wiki/{$page->slug}/claims/{$claimWithoutSource->id}/source-references",
+            [
+                'source_document_id' => $document->id,
+                'source_element_type' => 'manual',
+                'excerpt' => 'Manuelt kilderutdrag.',
+                'page_reference' => 'Side 2',
+            ],
+        )->assertRedirect(route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claimWithoutSource->id]));
+
+        $this->assertDatabaseHas('enterprise_wiki_source_references', [
+            'enterprise_wiki_claim_id' => $claimWithoutSource->id,
+            'source_id' => $document->id,
+            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_MANUAL,
+            'excerpt' => 'Manuelt kilderutdrag.',
+        ]);
+    }
+
+    public function test_document_owner_can_fetch_source_elements_for_owned_document(): void
+    {
+        $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $documentOwner->id, 'extracted_text' => 'Dokumenttekst.'])->save();
+        $this->createDocumentSourceReference($claim, $document, 'Eierens dokument.');
+
+        $this->mock(EnterpriseWikiDocumentSourceElementService::class, function ($mock): void {
+            $mock->shouldReceive('inspect')
+                ->once()
+                ->andReturn([
+                    'supports_structured_elements' => true,
+                    'manual_source_allowed' => false,
+                    'manual_source_reason' => 'Dokumentet har strukturerte elementer.',
+                    'elements' => [
+                        [
+                            'source_element_key' => 'paragraph-1',
+                            'source_element_type' => 'paragraph',
+                            'source_row_key' => null,
+                            'page_reference' => 'Avsnitt 1.1',
+                            'reference_text' => 'Kildeelement.',
+                            'display_text' => 'Kildeelement.',
+                        ],
+                    ],
+                ]);
+        });
+
+        $this->actingAs($documentOwner)
+            ->getJson("/app/wiki/{$page->slug}/claims/{$claim->id}/source-documents/{$document->id}/elements")
+            ->assertOk()
+            ->assertJsonPath('elements.0.source_element_key', 'paragraph-1');
+    }
+
+    public function test_document_owner_cannot_approve_claim_tied_only_to_foreign_document(): void
+    {
+        $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $foreignOwner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        [$page, , $claim] = $this->createPageWithClaim($customer);
+        $foreignDocument = $this->createDocument($customer);
+        $foreignDocument->forceFill(['owner_user_id' => $foreignOwner->id])->save();
+        $this->createDocumentSourceReference($claim, $foreignDocument, 'Fremmed dokument.');
+
+        $this->actingAs($documentOwner)
+            ->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve", ['comment' => 'Skal ikke være mulig.'])
+            ->assertForbidden();
+
+        $this->assertTrue($claim->fresh()->isPending());
     }
 
     // =========================================================================
@@ -793,6 +981,22 @@ class WikiClaimControllerTest extends TestCase
             'file_hash_sha256' => hash('sha256', Str::random(32)),
             'extracted_text' => 'Dette er et testutdrag som dokumenterer påstanden.',
             'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+    }
+
+    private function createDocumentSourceReference(
+        EnterpriseWikiClaim $claim,
+        EnterpriseWikiDocument $document,
+        ?string $excerpt = null,
+    ): EnterpriseWikiSourceReference {
+        return EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'source_hash' => hash('sha256', 'enterprise_wiki_document:'.$document->id),
+            'excerpt' => $excerpt,
+            'page_reference' => null,
         ]);
     }
 

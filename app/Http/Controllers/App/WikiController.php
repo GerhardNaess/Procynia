@@ -785,9 +785,26 @@ class WikiController extends Controller
                 && $user instanceof User
                 && $user->is_active
                 && $this->documentOwnerApprovalService->isRequiredDocumentOwnerForPageVersion($currentVersion, $user)
-            );
+        );
 
         abort_unless($canViewPendingPage, 404);
+
+        $claimCollection = collect();
+
+        if ($currentVersion !== null) {
+            $claimCollection = EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $currentVersion->id)
+                ->with(['sourceReferences', 'approvedBy'])
+                ->orderBy('position_order')
+                ->get();
+        }
+
+        $canHandleWikiClaims = $user instanceof User && (
+            $canApproveWikiClaims
+            || ($currentVersion !== null && $claimCollection->contains(
+                fn (EnterpriseWikiClaim $claim): bool => $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion)
+            ))
+        );
 
         $documentOwnerApprovals = [];
         $documentOwnerApprovalSummary = [
@@ -883,17 +900,13 @@ class WikiController extends Controller
             'manually_approved' => 0,
             'rejected' => 0,
             'missing_source' => 0,
+            'best_practice_review' => 0,
+            'internal_generation_error' => 0,
             'conflict' => 0,
         ];
         $claims = [];
 
         if ($currentVersion !== null) {
-            $claimCollection = EnterpriseWikiClaim::query()
-                ->where('enterprise_wiki_page_version_id', $currentVersion->id)
-                ->with(['sourceReferences', 'approvedBy'])
-                ->orderBy('position_order')
-                ->get();
-
             $claimSummary['total'] = $claimCollection->count();
 
             foreach ($claimCollection as $claim) {
@@ -907,6 +920,8 @@ class WikiController extends Controller
                     EnterpriseWikiClaim::SOURCE_STATUS_MANUALLY_APPROVED => 'manually_approved',
                     EnterpriseWikiClaim::SOURCE_STATUS_REJECTED => 'rejected',
                     EnterpriseWikiClaim::SOURCE_STATUS_MISSING => 'missing_source',
+                    EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW => 'best_practice_review',
+                    EnterpriseWikiClaim::SOURCE_STATUS_INTERNAL_ERROR => 'internal_generation_error',
                 }]++;
             }
 
@@ -914,6 +929,10 @@ class WikiController extends Controller
                 ->map(fn(EnterpriseWikiClaim $claim) => [
                     'id' => $claim->id,
                     'claim_text' => $claim->claim_text,
+                    'content_origin' => $claim->content_origin,
+                    'page_excerpt' => $claim->page_excerpt,
+                    'review_reason' => $claim->review_reason,
+                    'generation_issue' => $claim->generation_issue,
                     'confidence' => $claim->confidence,
                     'conflict_flag' => $claim->conflict_flag,
                     'approval_status' => $claim->approval_status,
@@ -937,6 +956,7 @@ class WikiController extends Controller
                                 : null,
                         ])
                         ->all(),
+                    'can_handle' => $user instanceof User && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion),
                 ])
                 ->all();
         }
@@ -993,11 +1013,29 @@ class WikiController extends Controller
 
         $sourceDocuments = [];
 
-        if ($canApproveWikiClaims) {
-            $sourceDocuments = EnterpriseWikiDocument::query()
+        if ($canHandleWikiClaims) {
+            $sourceDocumentsQuery = EnterpriseWikiDocument::query()
                 ->where('customer_id', $customerId)
                 ->where('document_status', EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED)
-                ->with('owner:id,name,email,is_active')
+                ->with('owner:id,name,email,is_active');
+
+            if (! $canApproveWikiClaims && $user instanceof User) {
+                $accessibleDocumentIds = $claimCollection
+                    ->flatMap(fn (EnterpriseWikiClaim $claim): array => $claim->sourceReferences
+                        ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                        ->pluck('source_id')
+                        ->all())
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->filter(static fn (int $value): bool => $value > 0)
+                    ->unique()
+                    ->values();
+
+                $sourceDocumentsQuery
+                    ->where('owner_user_id', $user->id)
+                    ->whereIn('id', $accessibleDocumentIds->all());
+            }
+
+            $sourceDocuments = $sourceDocumentsQuery
                 ->orderByDesc('created_at')
                 ->get()
                 ->map(fn (EnterpriseWikiDocument $doc): array => [
@@ -1041,6 +1079,7 @@ class WikiController extends Controller
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks'       => $backlinks,
+            'can_handle_wiki_claims' => $canHandleWikiClaims,
             'source_documents' => $sourceDocuments,
             'document_owner_approvals' => $documentOwnerApprovals,
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,

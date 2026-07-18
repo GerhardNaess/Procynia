@@ -225,6 +225,48 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_show_exposes_document_owner_claim_actions_and_filters_source_documents_to_owned_documents(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $foreignOwner = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Eier tilgang');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+
+        $ownDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $ownDocument->forceFill(['owner_user_id' => $owner->id])->save();
+        $foreignDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $foreignDocument->forceFill(['owner_user_id' => $foreignOwner->id])->save();
+
+        $ownClaim = $this->createClaim($page, $version, 'Egen dokumentpåstand.');
+        $this->createDocumentSourceReference($ownClaim, $ownDocument, 'Egen kilde.');
+        $foreignClaim = $this->createClaim($page, $version, 'Fremmed dokumentpåstand.', 1);
+        $this->createDocumentSourceReference($foreignClaim, $foreignDocument, 'Fremmed kilde.');
+
+        $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDocument, $foreignDocument, $ownClaim, $foreignClaim, $owner): bool {
+            $props = data_get($inertia, 'props');
+            $sourceDocuments = collect(data_get($props, 'source_documents', []));
+            $claims = collect(data_get($props, 'claims', []))->keyBy('id');
+
+            $ownSourceDocument = $sourceDocuments->firstWhere('id', $ownDocument->id);
+            $foreignSourceDocument = $sourceDocuments->firstWhere('id', $foreignDocument->id);
+            $own = $claims->get($ownClaim->id);
+            $foreign = $claims->get($foreignClaim->id);
+
+            return data_get($props, 'can_handle_wiki_claims') === true
+                && $ownSourceDocument !== null
+                && ($ownSourceDocument['owner_user_id'] ?? null) === $owner->id
+                && $foreignSourceDocument === null
+                && ($own['can_handle'] ?? null) === true
+                && ($foreign['can_handle'] ?? null) === false
+                && count($own['source_references'] ?? []) === 1
+                && count($foreign['source_references'] ?? []) === 1;
+        });
+    }
+
     public function test_show_distinguishes_page_status_from_document_owner_approval_status(): void
     {
         $customer = $this->createCustomer();
