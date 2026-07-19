@@ -344,6 +344,13 @@ class WikiClaimController extends Controller
         $claim->update([
             'claim_text' => $approvedText,
             'page_excerpt' => $approvedText,
+            // Only signal an ordinary user's UI can show — never internal enum/diagnostic data —
+            // to distinguish "Godkjent" from "Redigert og godkjent" in the Kjøringer Funn panel
+            // (EnterpriseWikiRunFindingsService). The original AI-suggested wording remains
+            // recoverable through the page version history; this flag is purely presentational.
+            'review_metadata' => array_merge((array) ($claim->review_metadata ?? []), [
+                'edited_before_approval' => true,
+            ]),
         ]);
     }
 

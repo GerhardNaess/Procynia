@@ -29,11 +29,18 @@ use Illuminate\Support\Collection;
  *      CODE_CLAIM_MISSING_SOURCE lint finding for that exact case (see
  *      resolveClaimMissingSourceFinding()/reopenClaimMissingSourceFindingIfStillMissing()), so
  *      folding it in again here would count the same underlying problem twice.
+ *   3. "Best-practice suggestions" — EnterpriseWikiClaim rows with content_origin best_practice on
+ *      the run's pages' CURRENT versions, in any approval_status. Unlike (2), this is
+ *      deliberately NEVER blocking and NEVER "critical" — it is a legitimate, human-reviewable
+ *      suggestion beyond the source document, not a defect. findClaimIntegrityDefects() already
+ *      excludes best_practice from QA gating entirely (see its own doc comment); this class must
+ *      never contradict that by treating it as a quality error.
  *
  * "Blocking" is never redecided here — every item's blocking flag is either
- * EnterpriseWikiLintFinding::isBlocking() (open lint findings) or the fixed fact that an active
- * claim-integrity defect always keeps qa_status below "passed" (claim defects) — the exact
- * predicates EnterpriseWikiPostIngestQaService already gates on.
+ * EnterpriseWikiLintFinding::isBlocking() (open lint findings), the fixed fact that an active
+ * claim-integrity defect always keeps qa_status below "passed" (claim defects), or the fixed fact
+ * that a best-practice suggestion never blocks anything — the exact predicates
+ * EnterpriseWikiPostIngestQaService already gates on.
  */
 class EnterpriseWikiRunFindingsService
 {
@@ -77,6 +84,14 @@ class EnterpriseWikiRunFindingsService
                 ->with('version')
                 ->get();
 
+        $bestPracticeSuggestions = $currentVersionIdByPageId->isEmpty()
+            ? collect()
+            : EnterpriseWikiClaim::query()
+                ->whereIn('enterprise_wiki_page_version_id', $currentVersionIdByPageId->values())
+                ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)
+                ->with(['version', 'approvedBy'])
+                ->get();
+
         $items = [];
 
         foreach ($lintFindings as $finding) {
@@ -85,6 +100,10 @@ class EnterpriseWikiRunFindingsService
 
         foreach ($claimDefects as $claim) {
             $items[] = $this->normalizeClaimDefect($claim, $pagesById, $includeTechnical);
+        }
+
+        foreach ($bestPracticeSuggestions as $claim) {
+            $items[] = $this->normalizeBestPracticeSuggestion($claim, $pagesById, $user, $includeTechnical);
         }
 
         usort($items, $this->sortComparator());
@@ -139,6 +158,7 @@ class EnterpriseWikiRunFindingsService
             'title' => $copy['label'],
             'explanation' => $copy['description'],
             'category' => $finding->code,
+            'category_label' => $copy['label'],
             'severity' => $severity,
             'severity_label' => $this->severityLabel($severity),
             'status' => $status,
@@ -197,6 +217,7 @@ class EnterpriseWikiRunFindingsService
             'title' => $copy['label'],
             'explanation' => $copy['description'],
             'category' => $category,
+            'category_label' => $copy['label'],
             'severity' => 'critical',
             'severity_label' => $this->severityLabel('critical'),
             'status' => 'requires_action',
@@ -232,6 +253,82 @@ class EnterpriseWikiRunFindingsService
         return $item;
     }
 
+    /**
+     * A best-practice suggestion is never a defect — it is a deliberate recommendation beyond
+     * the source document, always neutral severity, never blocking, with its own approve/edit-
+     * and-approve/reject workflow (WikiClaimController), never the QA/repair path (2). The
+     * "Åpne og vurder" link uses the exact same ?claim_id= deep link as everything else on this
+     * panel, but WikiController::show() resolves it into a validated review_reference that scrolls
+     * to and highlights the actual suggested text block, not just the top of the page.
+     *
+     * @param  Collection<int, EnterpriseWikiPage>  $pagesById
+     */
+    private function normalizeBestPracticeSuggestion(
+        EnterpriseWikiClaim $claim,
+        Collection $pagesById,
+        ?User $user,
+        bool $includeTechnical,
+    ): array {
+        $page = $pagesById->get($claim->enterprise_wiki_page_id);
+        $editedBeforeApproval = (bool) data_get($claim->review_metadata, 'edited_before_approval', false);
+
+        $status = match (true) {
+            $claim->isPending() => 'pending_review',
+            $claim->isApproved() && $editedBeforeApproval => 'approved_edited',
+            $claim->isApproved() => 'approved',
+            default => 'rejected',
+        };
+
+        $isPending = $status === 'pending_review';
+        $canHandle = $isPending && $user instanceof User
+            && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
+
+        $url = $this->pageUrl($page, $claim->id);
+        $action = match (true) {
+            $url === null => null,
+            $isPending => $canHandle ? 'open_and_review' : 'view_page',
+            default => 'view_page',
+        };
+
+        $item = [
+            'id' => 'best-practice-'.$claim->id,
+            'title' => $claim->claim_text,
+            'explanation' => (string) ($claim->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
+            'category' => 'best_practice_suggestion',
+            'category_label' => __('procynia.wiki.runs_findings_best_practice_category'),
+            'severity' => 'suggestion',
+            'severity_label' => $this->severityLabel('suggestion'),
+            'status' => $status,
+            'status_label' => __('procynia.wiki.runs_findings_status_'.$status),
+            'blocks_run' => false,
+            'blocks_page' => false,
+            'scope' => $page !== null ? 'page' : 'run',
+            'page_id' => $page?->id,
+            'page_title' => $page?->title,
+            'page_version_id' => $claim->enterprise_wiki_page_version_id,
+            'page_version_number' => $claim->version?->version_number,
+            'claim_id' => $claim->id,
+            'created_at' => $claim->created_at?->toIso8601String(),
+            'resolved_at' => $claim->approved_at?->toIso8601String(),
+            'decided_by_name' => $claim->approvedBy?->name,
+            'url' => $url,
+            'can_handle' => $canHandle,
+            'action' => $action,
+            'action_label' => $this->actionLabel($action),
+        ];
+
+        if ($includeTechnical) {
+            $item['technical'] = [
+                'source' => 'best_practice_suggestion',
+                'code' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'raw_severity' => null,
+                'raw_status' => $claim->approval_status,
+            ];
+        }
+
+        return $item;
+    }
+
     private function pageUrl(?EnterpriseWikiPage $page, ?int $claimId): ?string
     {
         if ($page === null) {
@@ -254,13 +351,16 @@ class EnterpriseWikiRunFindingsService
 
     /**
      * Reuses the Quality tab's existing severity vocabulary (lint_severity_error/warning/info)
-     * rather than inventing a parallel one — 'critical' (claim-integrity defects only) is the one
-     * genuinely new tier, since none of today's lint findings can reach it.
+     * rather than inventing a parallel one — 'critical' (claim-integrity defects) and
+     * 'suggestion' (best-practice) are the two genuinely new tiers, since no lint finding can
+     * reach them. 'suggestion' is deliberately neutral wording — never "low severity" — a
+     * best-practice recommendation is not a diminished defect, it is not a defect at all (Del 1).
      */
     private function severityLabel(string $severity): string
     {
         return match ($severity) {
             'critical' => __('procynia.wiki.runs_findings_severity_critical'),
+            'suggestion' => __('procynia.wiki.runs_findings_severity_suggestion'),
             'error' => __('procynia.wiki.lint_severity_error'),
             'warning' => __('procynia.wiki.lint_severity_warning'),
             default => __('procynia.wiki.lint_severity_info'),
@@ -271,6 +371,7 @@ class EnterpriseWikiRunFindingsService
     {
         return match ($action) {
             'open_and_handle' => __('procynia.wiki.runs_findings_action_open_and_handle'),
+            'open_and_review' => __('procynia.wiki.runs_findings_action_open_and_review'),
             'view_source' => __('procynia.wiki.runs_findings_action_view_source'),
             'view_page' => __('procynia.wiki.runs_findings_action_open'),
             default => null,
@@ -304,7 +405,11 @@ class EnterpriseWikiRunFindingsService
         $rank = [
             'requires_action' => 0,
             'open' => 1,
+            'pending_review' => 1,
             'resolved' => 2,
+            'approved' => 2,
+            'approved_edited' => 2,
+            'rejected' => 2,
             'informative' => 3,
             'superseded' => 4,
         ];
@@ -314,9 +419,9 @@ class EnterpriseWikiRunFindingsService
                 return $a['blocks_run'] ? -1 : 1;
             }
 
-            $severityRank = ['critical' => 0, 'error' => 1, 'warning' => 2, 'info' => 3];
-            $sa = $severityRank[$a['severity']] ?? 4;
-            $sb = $severityRank[$b['severity']] ?? 4;
+            $severityRank = ['critical' => 0, 'error' => 1, 'warning' => 2, 'suggestion' => 3, 'info' => 4];
+            $sa = $severityRank[$a['severity']] ?? 5;
+            $sb = $severityRank[$b['severity']] ?? 5;
 
             if ($sa !== $sb) {
                 return $sa <=> $sb;
@@ -344,17 +449,23 @@ class EnterpriseWikiRunFindingsService
         $resolved = 0;
         $informative = 0;
         $superseded = 0;
+        $bestPracticePending = 0;
 
         // 'requires_action' is only ever assigned to a blocking item (see normalizeLintFinding()/
-        // normalizeClaimDefect()), so these five buckets are mutually exclusive and always sum to
-        // $total — that is the invariant the "Funn" count in the main table must also honor.
+        // normalizeClaimDefect()), so these six buckets are mutually exclusive and always sum to
+        // $total — that is the invariant the "Funn" count in the main table must also honor. A
+        // decided best-practice suggestion (approved/approved_edited/rejected) counts as
+        // $resolved — it is closed, historical, and no longer needs a decision — while a pending
+        // one gets its own bucket so the UI can visibly separate "waiting for a human suggestion
+        // decision" from "an actual quality defect" (Del 1).
         foreach ($items as $item) {
             match ($item['status']) {
                 'requires_action' => $openBlocking++,
                 'open' => $openNonBlocking++,
-                'resolved' => $resolved++,
+                'resolved', 'approved', 'approved_edited', 'rejected' => $resolved++,
                 'informative' => $informative++,
                 'superseded' => $superseded++,
+                'pending_review' => $bestPracticePending++,
                 default => null,
             };
         }
@@ -366,6 +477,7 @@ class EnterpriseWikiRunFindingsService
             'resolved' => $resolved,
             'informative' => $informative,
             'superseded' => $superseded,
+            'best_practice_pending' => $bestPracticePending,
             'explanation' => $this->buildExplanation($run, $total, $openBlocking),
         ];
     }

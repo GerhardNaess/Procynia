@@ -2,11 +2,34 @@ import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     getWikiQualityCheckCopy,
     groupWikiFindingsByCode,
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
+
+function getWikiShowHelpSections(tw) {
+    return [
+        {
+            title: tw.show_page_help_section_best_practice ?? 'Forslag basert på beste praksis',
+            items: [
+                {
+                    title: tw.show_page_help_item_best_practice_what_title ?? 'Et forslag, ikke en feil',
+                    text: tw.show_page_help_item_best_practice_what_text ?? 'Beste-praksis-tekst er et bevisst forslag utover kildedokumentet, ikke dokumentert kundekunnskap. Det er ikke en teknisk feil, og det blokkerer ikke kvalitetskontrollen.',
+                },
+                {
+                    title: tw.show_page_help_item_best_practice_decide_title ?? 'Godkjenn, rediger eller avvis',
+                    text: tw.show_page_help_item_best_practice_decide_text ?? 'Du kan godkjenne forslaget som det er, redigere teksten og godkjenne, eller avvise det. Beslutningen gjelder den konkrete teksten den ble foreslått for.',
+                },
+                {
+                    title: tw.show_page_help_item_best_practice_defect_title ?? 'Udokumenterte faktapåstander er noe annet',
+                    text: tw.show_page_help_item_best_practice_defect_text ?? 'Tekst som fremstilles som et faktisk forhold hos kunden, men ikke er støttet av kilden og heller ikke er beste praksis, behandles fortsatt som en kvalitetsfeil.',
+                },
+            ],
+        },
+    ];
+}
 
 const PAGE_STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
@@ -218,6 +241,7 @@ function LinkedPageList({ pages, label }) {
 export default function WikiShow({
     page,
     current_version,
+    review_reference: reviewReference = null,
     claims,
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
@@ -237,9 +261,11 @@ export default function WikiShow({
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
-    const targetClaimId = typeof window !== 'undefined'
-        ? new URLSearchParams(window.location.search).get('claim_id')
-        : null;
+    // Backend-validated (WikiController::show()/buildReviewReference()) — never trust the raw
+    // ?claim_id= URL param alone to decide what to scroll to or highlight (Del 7). `status` is
+    // one of 'ready' | 'superseded' | 'block_missing' | 'not_found'.
+    const targetClaimId = reviewReference?.status === 'ready' ? String(reviewReference.claim_id) : null;
+    const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
     const hasVerificationContent = claims.length > 0 || lintFindings.length > 0;
 
     const [processing, setProcessing] = useState(null);
@@ -280,6 +306,24 @@ export default function WikiShow({
 
         return () => window.cancelAnimationFrame(frame);
     }, [targetClaimId, page.slug, claims.length, verificationOpen, verifiedClaimsOpen, structuralFindingsOpen]);
+
+    useEffect(() => {
+        if (!targetBlockKey) {
+            return undefined;
+        }
+
+        const targetElement = document.getElementById(`wiki-block-${targetBlockKey}`);
+
+        if (!targetElement) {
+            return undefined;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [targetBlockKey, page.slug]);
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
@@ -1066,6 +1110,15 @@ export default function WikiShow({
     // fall back to raw content_markdown for older payloads/tests that don't send it.
     const articleContent = current_version?.rendered_markdown ?? current_version?.content_markdown ?? null;
     const hasArticle = Boolean(articleContent?.trim());
+    // Rendering each block individually (rather than the whole article as one string) is what
+    // makes "scroll to and highlight the exact suggested text" (Del 3/4) possible — each block
+    // gets a stable DOM anchor from its content_block_key. Falls back to the single-blob render
+    // above for pages generated before block-level provenance existed (no content_blocks_json).
+    const contentBlocks = Array.isArray(current_version?.content_blocks_json)
+        ? [...current_version.content_blocks_json]
+            .filter((block) => block && typeof block.markdown === 'string' && block.markdown.trim() !== '')
+            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        : [];
 
     // Derive semantic traversal groups from outgoing links
     const summaryLinks = outgoingLinks.filter((p) => p.page_type === 'summary');
@@ -1099,6 +1152,12 @@ export default function WikiShow({
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             {page.title}
                         </h1>
+                        <PageHelpButton
+                            buttonLabel={tw.page_help_button ?? 'Hjelp'}
+                            title={tw.show_page_help_title ?? 'Slik fungerer Wiki-siden'}
+                            intro={tw.show_page_help_intro ?? 'Forklarer hvordan beste-praksis-forslag skiller seg fra kvalitetsfeil.'}
+                            sections={getWikiShowHelpSections(tw)}
+                        />
                         <div className="mt-1 flex flex-wrap gap-2">
                             {page.page_type && (
                                 <Badge
@@ -1196,6 +1255,28 @@ export default function WikiShow({
                     );
                 })()}
 
+                {reviewReference?.status === 'superseded' && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <p className="text-sm text-amber-800">
+                            {(tw.review_reference_superseded ?? 'Forslaget gjelder en eldre sideversjon (versjon :version) og er ikke lenger aktuelt for gjeldende innhold.')
+                                .replace(':version', reviewReference.version_number ?? '—')}
+                        </p>
+                    </div>
+                )}
+
+                {reviewReference?.status === 'block_missing' && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <div className="text-sm text-amber-800">
+                            <p>{tw.review_reference_block_missing ?? 'Teksten finnes ikke lenger i gjeldende versjon av siden.'}</p>
+                            {isSystemOwner && reviewReference.technical_block_key && (
+                                <p className="mt-1 text-xs text-amber-600">block_key: {reviewReference.technical_block_key}</p>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Article — primary content */}
                 <section className="space-y-4">
                     {!isApproved && (
@@ -1212,7 +1293,26 @@ export default function WikiShow({
                     {hasArticle ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             <div className="wiki-article">
-                                <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>
+                                {contentBlocks.length > 0 ? (
+                                    contentBlocks.map((block) => {
+                                        const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
+
+                                        return (
+                                            <div
+                                                key={block.block_key}
+                                                id={`wiki-block-${block.block_key}`}
+                                                data-block-key={block.block_key}
+                                                className={isTargetBlock
+                                                    ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
+                                                    : undefined}
+                                            >
+                                                <ReactMarkdown components={{ a: WikiArticleLink }}>{block.markdown}</ReactMarkdown>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
+                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>
+                                )}
                             </div>
                         </div>
                     ) : (

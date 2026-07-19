@@ -1089,7 +1089,7 @@ class WikiController extends Controller
         return $target;
     }
 
-    public function show(string $slug): Response
+    public function show(Request $request, string $slug): Response
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
@@ -1385,6 +1385,11 @@ class WikiController extends Controller
                 ->all();
         }
 
+        $rawReviewClaimId = $request->query('claim_id');
+        $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
+            ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims)
+            : null;
+
         return Inertia::render('App/Wiki/Show', [
             'page' => [
                 'id' => $page->id,
@@ -1401,7 +1406,9 @@ class WikiController extends Controller
                 'version_number' => $currentVersion->version_number,
                 'content_markdown' => $currentVersion->content_markdown,
                 'rendered_markdown' => $renderedMarkdown,
+                'content_blocks_json' => $this->renderedContentBlocks($currentVersion, $page, $customerId),
             ] : null,
+            'review_reference' => $reviewReference,
             'claims' => $claims,
             'claim_summary' => $claimSummary,
             'lint_findings' => $lintFindings,
@@ -1418,6 +1425,89 @@ class WikiController extends Controller
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,
             'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
         ]);
+    }
+
+    /**
+     * Resolves a `?claim_id=` deep link (e.g. from the Kjøringer "Funn" panel's best-practice
+     * suggestion "Åpne og vurder" action) into an explicit, backend-validated review target —
+     * the frontend never decides this from the raw claim/page/block data alone (Del 7).
+     *
+     * The claim is looked up scoped to THIS page only (already customer-scoped via $page), so a
+     * manipulated claim id belonging to another page or another customer simply resolves to
+     * 'not_found' — never leaks whether a differently-scoped claim id exists.
+     *
+     * @return array{status: string, claim_id?: int, block_key?: ?string, version_number?: ?int}
+     */
+    private function buildReviewReference(
+        int $claimId,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+        bool $includeTechnical,
+    ): array {
+        $claim = EnterpriseWikiClaim::query()
+            ->where('id', $claimId)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->first();
+
+        if ($claim === null) {
+            return ['status' => 'not_found'];
+        }
+
+        if ($currentVersion === null || (int) $claim->enterprise_wiki_page_version_id !== (int) $currentVersion->id) {
+            $claimVersion = $claim->version()->first();
+
+            return [
+                'status' => 'superseded',
+                'claim_id' => $claim->id,
+                'version_number' => $claimVersion?->version_number,
+            ];
+        }
+
+        $blockKey = trim((string) ($claim->content_block_key ?? ''));
+        $blockKey = $blockKey !== '' ? $blockKey : null;
+
+        if ($blockKey === null) {
+            return ['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => null];
+        }
+
+        $blocks = (array) ($currentVersion->content_blocks_json ?? []);
+        $blockExists = collect($blocks)->contains(fn ($block): bool => is_array($block) && ($block['block_key'] ?? null) === $blockKey);
+
+        if (! $blockExists) {
+            $reference = ['status' => 'block_missing', 'claim_id' => $claim->id];
+
+            if ($includeTechnical) {
+                $reference['technical_block_key'] = $blockKey;
+            }
+
+            return $reference;
+        }
+
+        return ['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => $blockKey];
+    }
+
+    /**
+     * Per-block wikilink rendering (Del 3/4) — the article body renders each block individually
+     * (see resources/js/Pages/App/Wiki/Show.jsx) so a specific block can be scrolled to and
+     * highlighted; each block therefore needs the same [[wikilink]] → clickable-link
+     * transformation `rendered_markdown` already applies to the whole joined document.
+     * EnterpriseWikiWikilinkRenderer::render() operates on a plain markdown string with no
+     * whole-document context requirement, so rendering per-block is equivalent to rendering the
+     * joined markdown once.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function renderedContentBlocks(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page, int $customerId): array
+    {
+        return collect((array) ($version->content_blocks_json ?? []))
+            ->filter(fn ($block): bool => is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '')
+            ->map(fn (array $block): array => [
+                'block_key' => $block['block_key'] ?? null,
+                'position' => $block['position'] ?? 0,
+                'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

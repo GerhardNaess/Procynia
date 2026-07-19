@@ -837,6 +837,10 @@ function getWikiRunsHelpSections(tw) {
                     title: tw.runs_page_help_item_findings_action_title ?? 'Hva krever handling?',
                     text: tw.runs_page_help_item_findings_action_text ?? 'Panelet viser hvilke funn som faktisk krever handling, og hvilken side og sideversjon funnet gjelder når dette finnes.',
                 },
+                {
+                    title: tw.runs_page_help_item_findings_best_practice_title ?? 'Forslag basert på beste praksis',
+                    text: tw.runs_page_help_item_findings_best_practice_text ?? 'Beste-praksis-tekst er et forslag, ikke en feil. Forslaget kommer ikke direkte fra kundens kildedokument, og blokkerer ikke teknisk QA. Klikk Åpne og vurder for å gå direkte til teksten og godkjenne, redigere eller avvise den. Reelle udokumenterte faktapåstander behandles fortsatt som kvalitetsfeil.',
+                },
             ],
         },
         {
@@ -2572,6 +2576,7 @@ const FINDING_SEVERITY_STYLES = {
     critical: 'bg-rose-100 text-rose-700',
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
+    suggestion: 'bg-sky-100 text-sky-700',
     info: 'bg-slate-100 text-slate-500',
 };
 
@@ -2581,6 +2586,12 @@ const FINDING_STATUS_STYLES = {
     resolved: 'bg-emerald-100 text-emerald-700',
     informative: 'bg-slate-100 text-slate-500',
     superseded: 'bg-slate-100 text-slate-400',
+    // Best-practice suggestion statuses — deliberately neutral/positive, never the rose/critical
+    // styling used for real quality defects (Del 1).
+    pending_review: 'bg-sky-100 text-sky-700',
+    approved: 'bg-emerald-100 text-emerald-700',
+    approved_edited: 'bg-emerald-100 text-emerald-700',
+    rejected: 'bg-slate-100 text-slate-500',
 };
 
 const FINDINGS_LOCAL_FILTERS = ['all', 'open', 'blocking', 'resolved', 'informative'];
@@ -2598,11 +2609,11 @@ function findingsLocalFilterLabel(filterKey, tw) {
 function matchesFindingsLocalFilter(finding, filterKey) {
     switch (filterKey) {
         case 'open':
-            return finding.status === 'requires_action' || finding.status === 'open';
+            return finding.status === 'requires_action' || finding.status === 'open' || finding.status === 'pending_review';
         case 'blocking':
             return finding.blocks_run;
         case 'resolved':
-            return finding.status === 'resolved';
+            return finding.status === 'resolved' || finding.status === 'approved' || finding.status === 'approved_edited' || finding.status === 'rejected';
         case 'informative':
             return finding.status === 'informative' || finding.status === 'superseded';
         default:
@@ -2656,6 +2667,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                     {' · '}
                     {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
                     {summary.open_non_blocking > 0 && `${summary.open_non_blocking} ${tw.runs_findings_open_non_blocking ?? 'åpne ikke-blokkerende'} · `}
+                    {summary.best_practice_pending > 0 && `${summary.best_practice_pending} ${tw.runs_findings_best_practice_pending_label ?? 'forslag venter på vurdering'} · `}
                     {summary.resolved > 0 && `${summary.resolved} ${tw.runs_findings_resolved ?? 'løst'} · `}
                     {summary.informative > 0 && `${summary.informative} ${tw.runs_findings_informative ?? 'informativt'} · `}
                     {summary.superseded > 0 && `${summary.superseded} ${tw.runs_findings_superseded ?? 'ikke lenger aktuelt'} · `}
@@ -2699,8 +2711,18 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                         {visibleFindings.map((finding) => (
                             <tr key={finding.id} className="align-top text-slate-700">
                                 <td className="max-w-[280px] px-3 py-2">
+                                    {finding.category === 'best_practice_suggestion' && (
+                                        <span className="mb-0.5 inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                                            {finding.category_label}
+                                        </span>
+                                    )}
                                     <span className="block font-medium text-slate-900">{finding.title}</span>
-                                    <span className="mt-0.5 block text-xs text-slate-500">{finding.explanation}</span>
+                                    <span className="mt-0.5 block text-xs text-slate-500">
+                                        {finding.category === 'best_practice_suggestion' && (
+                                            <span className="font-medium text-slate-400">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
+                                        )}
+                                        {finding.explanation}
+                                    </span>
                                 </td>
                                 <td className="max-w-[200px] px-3 py-2">
                                     {finding.scope === 'run' ? (
