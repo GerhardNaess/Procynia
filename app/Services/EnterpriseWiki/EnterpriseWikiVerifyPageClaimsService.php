@@ -162,6 +162,29 @@ class EnterpriseWikiVerifyPageClaimsService
                     continue;
                 }
 
+                // Best-practice classification fix: a claim already classified best_practice
+                // (inherited from its generation block) must never be run through "prove this is
+                // in the customer's source document" — that is exactly what best_practice content
+                // deliberately is not, and doing so is precisely how a legitimate suggestion used
+                // to get silently downgraded to unsupported_generated_content (or, worse, upgraded
+                // to source_based on a coincidental partial text match). Only re-validate that it
+                // is still genuinely normative and still anchored — never prove source support.
+                if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                    && $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)
+                ) {
+                    $outcome = $this->persistBestPracticeVerification($claim->id, $token, $run->customer_id, $version);
+
+                    if ($outcome === null) {
+                        $busy++;
+
+                        continue;
+                    }
+
+                    $noSupport++;
+
+                    continue;
+                }
+
                 // Cross-page overgeneration fix: before calling AI, check whether this claim
                 // expresses a fact already verified for another occurrence (same customer,
                 // content_origin, document/source version, and cited source elements — Del 3/6).
@@ -397,6 +420,73 @@ class EnterpriseWikiVerifyPageClaimsService
     }
 
     /**
+     * Del 4: confirms a claim already classified best_practice still qualifies — anchored to its
+     * block/version, and its text is still genuinely normative (re-checked under lock, not just
+     * trusted from the earlier unlocked read, in case a concurrent edit changed it) — without
+     * ever calling the "prove this is in the source" verification AI. If the anchor is broken,
+     * this is a real internal error exactly like any other claim. Reuses recordOutcome() so a
+     * later occurrence of the same suggestion on another page can be reused via
+     * findReusableFact() instead of repeating this check.
+     *
+     * @return string|null 'unsupported' (verified as a legitimate suggestion, or a real anchor
+     *                      error), or null if the reservation was lost
+     */
+    private function persistBestPracticeVerification(int $claimId, string $token, int $customerId, EnterpriseWikiPageVersion $version): ?string
+    {
+        return DB::transaction(function () use ($claimId, $token, $customerId, $version): ?string {
+            $claim = EnterpriseWikiClaim::query()
+                ->where('id', $claimId)
+                ->where('verification_claim_token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if ($claim === null) {
+                return null;
+            }
+
+            $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
+
+            if ($anchorFailure !== null) {
+                $claim->update([
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'review_reason' => null,
+                    'generation_issue' => $anchorFailure,
+                    'verified_at' => now(),
+                    'verification_claimed_at' => null,
+                    'verification_claim_token' => null,
+                ]);
+
+                return 'unsupported';
+            }
+
+            $reviewReason = trim((string) $claim->review_reason) !== ''
+                ? $claim->review_reason
+                : 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.';
+
+            $claim->update([
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                'review_reason' => $reviewReason,
+                'generation_issue' => null,
+                'verified_at' => now(),
+                'verification_claimed_at' => null,
+                'verification_claim_token' => null,
+            ]);
+
+            $this->canonicalizationService->recordOutcome(
+                $claim->fresh(['sourceReferences']),
+                $customerId,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+                null,
+            );
+
+            return 'unsupported';
+        });
+    }
+
+    /**
      * Apply an already-verified canonical fact's outcome to a NEW occurrence without calling AI
      * — the actual cost/duplication saving of cross-page canonicalization (Del 6). Only reached
      * after EnterpriseWikiClaimCanonicalizationService::findReusableFact() has already confirmed
@@ -562,8 +652,19 @@ class EnterpriseWikiVerifyPageClaimsService
         return null;
     }
 
+    /**
+     * Only reached for a claim that did NOT take the best-practice fast path above — either it
+     * was never best_practice, or it was but its wording had already drifted into an unverified
+     * factual assertion (Del 4 test: "bør" → "har" requires re-classification). In both cases the
+     * text must still genuinely read as a recommendation now, under the AI verdict this method
+     * gates — a stale content_origin/review_metadata tag is never trusted on its own.
+     */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
+        if (! $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)) {
+            return false;
+        }
+
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
             return true;
         }

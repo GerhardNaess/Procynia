@@ -311,7 +311,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertNull($claim->review_reason);
     }
 
-    public function test_explicit_best_practice_block_remains_best_practice_review_when_source_verification_finds_no_support(): void
+    public function test_explicit_best_practice_block_remains_best_practice_review_without_calling_verification_ai(): void
     {
         $customer = $this->createCustomer();
         [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
@@ -339,10 +339,11 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             ],
         ]);
 
+        // Del 4: a genuinely best-practice claim is never run through "prove this is in the
+        // source document" — the verification AI must not be called at all for it.
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
-            ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->never();
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -352,6 +353,94 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
         $this->assertSame('recommendation', $claim->review_metadata['statement_kind'] ?? null);
         $this->assertNotNull($claim->review_reason);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_best_practice_claim_whose_wording_drifted_to_a_current_state_fact_is_verified_normally(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
+
+        // The block is still a genuine best-practice recommendation, but the claim's own text
+        // (e.g. edited after extraction, or an extraction that lost the modality) now asserts the
+        // customer's current state instead of suggesting it — Del 4 test 18: this must be
+        // re-classified through real verification, not silently kept as best_practice.
+        $driftedText = 'Kunden har allerede etablert årlig tilgangsgjennomgang.';
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$driftedText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $driftedText,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ]],
+        ]);
+        $claim->update([
+            'claim_text' => $driftedText,
+            'page_excerpt' => $driftedText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn(['supported' => false, 'excerpt' => '']);
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_normative_best_practice_wording_is_accepted_without_ai_verification(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
+        $text = 'Det anbefales å etablere en fast eskaleringsrutine.';
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$text}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $text,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ]],
+        ]);
+        $claim->update([
+            'claim_text' => $text,
+            'page_excerpt' => $text,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->never();
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNotNull($claim->verified_at);
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
     }
 
     public function test_claim_without_current_page_anchor_is_internal_error_and_skips_ai(): void

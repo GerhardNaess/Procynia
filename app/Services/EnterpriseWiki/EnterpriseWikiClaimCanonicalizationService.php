@@ -49,9 +49,101 @@ class EnterpriseWikiClaimCanonicalizationService
      */
     private const NORMATIVE_MARKERS = ['skal', 'bør', 'må', 'plikter', 'kreves', 'pålagt'];
 
+    /**
+     * Words that signal a genuine best-practice RECOMMENDATION rather than a requirement or a
+     * plain factual statement — deliberately excludes "skal"/"må" (NORMATIVE_MARKERS above):
+     * those read as obligations/requirements ("Leverandøren skal levere...") which are exactly
+     * the kind of contractual/factual-sounding phrasing that must NOT be waved through as
+     * best_practice just because it contains a modal verb. A genuine improvement suggestion is
+     * phrased as advice the customer may or may not already follow, not as a requirement anyone
+     * must meet.
+     */
+    private const BEST_PRACTICE_MARKERS = [
+        'bør', 'anbefales', 'anbefaling', 'anbefalt', 'kan vurdere', 'bør vurdere', 'vurdere å',
+        'hensiktsmessig', 'kan bidra', 'kan redusere', 'kan forbedre', 'kan bedre', 'forbedring',
+        'mulig å', 'god praksis', 'beste praksis', 'recommended', 'recommendation', 'best practice',
+        'should consider', 'could', 'may want', 'may consider', 'suggested',
+    ];
+
+    /**
+     * A party noun immediately followed by a present-tense factual verb — "Kunden har",
+     * "Leverandøren følger" — asserts that a named party ALREADY has/does/is something, which is
+     * exactly what best_practice text must never claim (Del 2/4's "ikke hevder at kunden allerede
+     * gjør dette"). Deliberately a plain substring/regex check, not a full grammatical parse — it
+     * is a secondary safety-net signal alongside BEST_PRACTICE_MARKERS, never the sole mechanism
+     * (the AI's own declared content_origin, and human review of the resulting suggestion, remain
+     * the primary decision).
+     */
+    private const CURRENT_STATE_SUBJECTS = [
+        'kunden', 'leverandøren', 'systemet', 'tjenesten', 'virksomheten', 'selskapet',
+        'servicedesken', 'servicedesk', 'organisasjonen', 'avdelingen',
+        'the customer', 'the contractor', 'the supplier', 'the vendor', 'the service',
+    ];
+
+    private const CURRENT_STATE_VERBS = [
+        'har', 'er', 'bruker', 'følger', 'tilbyr', 'benytter', 'opererer', 'driver', 'besvarer',
+        'håndterer', 'gjennomfører', 'anvender', 'praktiserer',
+        'has', 'is', 'uses', 'follows', 'offers', 'operates', 'provides', 'runs', 'handles',
+    ];
+
     public function __construct(
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
     ) {}
+
+    /**
+     * Del 2/4's deterministic backend guard on top of the AI's own content_origin/best_practice
+     * choice: text only counts as a genuine best-practice suggestion when it carries a real
+     * recommendation marker AND does not itself assert that a named party already has/does the
+     * thing being suggested. Never the sole classification mechanism — the model's own declared
+     * content_origin (block-level, inherited by the claim) remains the primary signal; this is
+     * the check that stops a claim whose wording has drifted from advice ("bør") into an
+     * unverified factual assertion ("har") from silently keeping the best_practice label.
+     */
+    public function isGenuineBestPracticeText(string $text): bool
+    {
+        $normalized = $this->textNormalizer->normalize($text);
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return $this->hasBestPracticeMarker($normalized) && ! $this->assertsCurrentPartyState($normalized);
+    }
+
+    public function hasBestPracticeMarker(string $normalizedText): bool
+    {
+        foreach (self::BEST_PRACTICE_MARKERS as $marker) {
+            if ($this->containsWord($normalizedText, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function assertsCurrentPartyState(string $normalizedText): bool
+    {
+        foreach (self::CURRENT_STATE_SUBJECTS as $subject) {
+            $pattern = '/(?<!\p{L})'.preg_quote($subject, '/').'(?!\p{L})\s+\p{L}*\s{0,1}('.
+                implode('|', array_map(fn (string $verb): string => preg_quote($verb, '/'), self::CURRENT_STATE_VERBS)).
+                ')(?!\p{L})/ui';
+
+            if (preg_match($pattern, $normalizedText) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function containsWord(string $normalizedText, string $phrase): bool
+    {
+        if (str_contains($phrase, ' ')) {
+            return str_contains($normalizedText, $phrase);
+        }
+
+        return preg_match('/(?<!\p{L})'.preg_quote($phrase, '/').'(?!\p{L})/ui', $normalizedText) === 1;
+    }
 
     /**
      * Look up an existing, reusable canonical fact for $claim — null when none exists (the

@@ -205,11 +205,13 @@ class WikiPageContentAiClient
             'STRUCTURED BLOCK OUTPUT:',
             '- Return page.blocks as the only content-bearing output. Do not return a single free-form markdown field.',
             '- Each block must be one independently traceable heading, paragraph, or heading+paragraph group.',
+            '- Every ordinary content block must explicitly choose content_origin: source_based or best_practice. There is no third option and no default — choose deliberately for each block.',
             '- For source_based blocks, copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
-            '- A source_based block without source_element_keys is invalid.',
-            '- Use best_practice only for clearly marked recommendations, normative additions, established practice, or standard-based guidance beyond the source document.',
+            '- A source_based block without source_element_keys is invalid. Never mark a block source_based just because it sounds plausible or reads like something the source document would say — only when you can cite the specific source_element_keys it is drawn from.',
+            '- A block is best_practice when it deliberately goes beyond the source document with advice, a recommendation, or a possible improvement — and does NOT claim the customer or supplier already has, does, or follows the thing being suggested. It must be phrased as advice ("could", "should consider", "a recommended approach is..."), never as a statement of the customer\'s or supplier\'s current state ("the customer has...", "the service uses...", "the supplier follows...").',
+            '- General industry/framework knowledge that elaborates on a concept beyond what the source document literally states (e.g. explaining what a standard practice typically involves) is best_practice, not source_based — even if it uses similar terminology to the source. Only mark it source_based if you can cite the exact source_element_keys that state those specific facts.',
             '- For best_practice blocks, explain the positive basis in best_practice_reason and leave source_element_keys/source_element_types empty.',
-            '- Do not classify factual statements, uncertain source facts, rewritten source facts, or likely hallucinations as best_practice.',
+            '- Do not classify factual statements, uncertain source facts, rewritten source facts, statements about the customer\'s or supplier\'s current/actual state, or likely hallucinations as best_practice — those must be source_based (if genuinely grounded, with real source_element_keys) or omitted.',
             '- link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
         ]);
 

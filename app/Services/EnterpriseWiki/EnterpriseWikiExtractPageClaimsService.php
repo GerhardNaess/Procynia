@@ -65,6 +65,7 @@ class EnterpriseWikiExtractPageClaimsService
         private readonly WikiPageClaimExtractionAiClient $aiClient,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
 
     /**
@@ -259,6 +260,21 @@ class EnterpriseWikiExtractPageClaimsService
                     default => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 };
 
+                // Del 3: a block being best_practice does not automatically make every claim
+                // extracted from it best_practice — extraction must preserve the recommendation's
+                // own wording faithfully. If the extracted claim text itself has turned the
+                // suggestion into an assertion about the customer's/supplier's current state (or
+                // otherwise lost its normative framing), it is no longer a suggestion this claim
+                // can safely inherit — treat it as an unsupported factual claim instead, so it
+                // still gets real (human) scrutiny rather than silently riding through as a
+                // "harmless suggestion" it no longer actually is.
+                $bestPracticeDrifted = $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                    && ! $this->canonicalizationService->isGenuineBestPracticeText((string) $claim['text']);
+
+                if ($bestPracticeDrifted) {
+                    $contentOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;
+                }
+
                 $createdClaim = EnterpriseWikiClaim::query()->create([
                     'enterprise_wiki_page_id' => $page->id,
                     'enterprise_wiki_page_version_id' => $version->id,
@@ -278,9 +294,11 @@ class EnterpriseWikiExtractPageClaimsService
                             'link_intents' => $block['link_intents'] ?? [],
                         ]
                         : null,
-                    'generation_issue' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
-                        ? 'claim_excerpt_not_found_in_page_version'
-                        : null,
+                    'generation_issue' => match (true) {
+                        $bestPracticeDrifted => 'best_practice_claim_asserts_current_state',
+                        $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR => 'claim_excerpt_not_found_in_page_version',
+                        default => null,
+                    },
                     'position_order' => $i,
                     'confidence' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
                         ? EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN

@@ -8,6 +8,10 @@ use Illuminate\Database\Eloquent\Builder;
 
 class EnterpriseWikiClaimIntegrityRepairService
 {
+    public function __construct(
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+    ) {}
+
     /**
      * @return array{checked: int, source_based: int, best_practice: int, unsupported_generated_content: int, internal_error: int, wrong_version: int, missing_anchor: int, unchanged: int, applied: bool}
      */
@@ -248,8 +252,18 @@ class EnterpriseWikiClaimIntegrityRepairService
         return false;
     }
 
+    /**
+     * Same guard as EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion() —
+     * a stale content_origin/review_metadata tag is never trusted on its own; the claim's actual
+     * current text must still genuinely read as a recommendation (not a customer-state assertion
+     * it has drifted into since).
+     */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
+        if (! $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)) {
+            return false;
+        }
+
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
             return true;
         }

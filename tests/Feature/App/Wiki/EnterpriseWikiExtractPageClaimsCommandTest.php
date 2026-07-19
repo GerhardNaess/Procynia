@@ -497,6 +497,16 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $blocks[1]['link_intents'] = [['target_slug' => 'kontroll', 'reason' => 'Synliggjør kontrolltemaet.']];
         $version->update(['content_blocks_json' => $blocks]);
 
+        // Realistic best-practice-flavored wording (a genuine recommendation, not a bare
+        // assertion) — the extraction-time modality guard (Del 3) only preserves best_practice
+        // for claim text that is actually normative, so a generic placeholder claim would no
+        // longer qualify.
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->andReturn(['claims' => [
+                ['text' => 'Det anbefales å følge opp dette punktet jevnlig.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt alpha.', 'conflict_note' => null],
+            ]]);
+
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
         $claim = EnterpriseWikiClaim::query()
@@ -508,6 +518,40 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame('ai_block_content_origin', $claim->review_metadata['classification_basis'] ?? null);
         $this->assertSame('recommended', $claim->review_metadata['visible_wiki_link_recommendation'] ?? null);
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
+    public function test_claim_that_turns_recommendation_into_current_state_fact_is_not_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $blocks[1]['source_id'] = null;
+        $blocks[1]['source_element_key'] = null;
+        $blocks[1]['source_elements'] = [];
+        $blocks[1]['best_practice_reason'] = 'Anbefalingen er lagt til som eksplisitt beste praksis.';
+        $version->update(['content_blocks_json' => $blocks]);
+
+        // The block is a genuine recommendation, but the extracted claim text turns it into a
+        // factual assertion about the customer's current state ("Kunden har...") — Del 3 says
+        // extraction must not let this ride through as best_practice just because its block was.
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->andReturn(['claims' => [
+                ['text' => 'Kunden har allerede etablert en fast eskaleringsrutine.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt alpha.', 'conflict_note' => null],
+            ]]);
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $claim = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->firstOrFail();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
+        $this->assertNull($claim->review_reason);
     }
 
     public function test_command_does_not_create_additional_ingest_runs(): void

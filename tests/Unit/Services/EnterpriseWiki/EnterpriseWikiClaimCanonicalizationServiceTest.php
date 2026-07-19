@@ -112,4 +112,67 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     {
         $this->assertFalse($this->service()->areEquivalentTexts('', 'Servicedesk er åpen.'));
     }
+
+    // =========================================================================
+    // isGenuineBestPracticeText() — Del 2/4 deterministic backend guard, task's own examples
+    // =========================================================================
+
+    public function test_recommendation_with_boer_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det anbefales å etablere døgnbemannet vakt.'));
+    }
+
+    public function test_current_state_assertion_is_not_genuine_best_practice(): void
+    {
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kunden har døgnbemannet vaktordning.'));
+    }
+
+    public function test_boer_review_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText('Tilgangsrettigheter bør gjennomgås regelmessig.'));
+    }
+
+    public function test_kan_redusere_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText('En selvbetjeningsportal kan redusere belastningen på servicedesk.'));
+    }
+
+    public function test_hensiktsmessig_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det kan være hensiktsmessig å definere tydelige KPI-er.'));
+    }
+
+    public function test_customer_uses_tool_assertion_is_not_genuine_best_practice(): void
+    {
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Servicedesk bruker ServiceNow.'));
+    }
+
+    public function test_supplier_follows_standard_assertion_is_not_genuine_best_practice(): void
+    {
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Leverandøren følger ISO 27001.'));
+    }
+
+    public function test_plain_factual_claim_without_modal_is_not_genuine_best_practice(): void
+    {
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kritiske saker besvares innen 15 minutter.'));
+    }
+
+    public function test_skal_requirement_wording_is_not_treated_as_best_practice_signal(): void
+    {
+        // "skal"/"må" are requirement/obligation language, not recommendation language — the task
+        // explicitly excludes them from best-practice signals so a contractual requirement can't
+        // be waved through just because it contains a modal verb.
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kritiske saker skal besvares innen 15 minutter.'));
+    }
+
+    public function test_wording_drifted_from_recommendation_to_fact_is_no_longer_genuine(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det anbefales å etablere døgnbemannet vakt.'));
+        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kunden har etablert døgnbemannet vakt.'));
+    }
+
+    public function test_empty_text_is_never_genuine_best_practice(): void
+    {
+        $this->assertFalse($this->service()->isGenuineBestPracticeText(''));
+    }
 }
