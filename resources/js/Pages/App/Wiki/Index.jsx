@@ -1,5 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -397,6 +397,13 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                 {activity?.waiting ? ` · ${activity.waiting}` : ''}
             </p>
 
+            {seemsStalled && (
+                <p className="text-[11px] leading-4 text-amber-700">
+                    {(tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
+                        .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())}
+                </p>
+            )}
+
             {showCounters && counters.length > 0 && (
                 <p className="text-[11px] leading-4 text-slate-400">
                     {counters.join(' · ')}
@@ -791,6 +798,27 @@ function getWikiRunsHelpSections(tw) {
                 {
                     title: tw.runs_page_help_item_status_decision_only_title ?? 'Beslutning lagret',
                     text: tw.runs_page_help_item_status_decision_only_text ?? 'Kjøringen er brukt til å registrere en beslutning uten å starte den fulle behandlingsflyten.',
+                },
+            ],
+        },
+        {
+            title: tw.runs_page_help_section_pages ?? 'Berørte Wiki-sider',
+            items: [
+                {
+                    title: tw.runs_page_help_item_pages_what_title ?? 'Sider viser berørte Wiki-sider',
+                    text: tw.runs_page_help_item_pages_what_text ?? '«Sider» viser hvor mange Wiki-sider dokumentet opprettet eller oppdaterte. Klikk på tallet for å se hvilke sider det gjelder, uten å forlate kjøringslisten.',
+                },
+                {
+                    title: tw.runs_page_help_item_pages_created_updated_title ?? 'Opprettet og Oppdatert',
+                    text: tw.runs_page_help_item_pages_created_updated_text ?? '«Opprettet» betyr at kjøringen laget en helt ny Wiki-side. «Oppdatert» betyr at en side som allerede fantes, fikk en ny versjon.',
+                },
+                {
+                    title: tw.runs_page_help_item_pages_owner_status_title ?? 'Dokumenteierstatus',
+                    text: tw.runs_page_help_item_pages_owner_status_text ?? 'Dokumenteierstatus vises per sideversjon — den versjonen kjøringen faktisk produserte. Listen viser hvilken side eller handling som gjenstår før kjøringen kan anses som ferdig.',
+                },
+                {
+                    title: tw.runs_page_help_item_pages_stalled_title ?? '«Ser ut til å stå stille»',
+                    text: tw.runs_page_help_item_pages_stalled_text ?? '«Ser ut til å stå stille» betyr at ingen ny fremdrift er registrert på en stund. Det betyr ikke nødvendigvis at noe har feilet — kjøringen kan vente på en handling, for eksempel en Dokumenteiergodkjenning.',
                 },
             ],
         },
@@ -2089,6 +2117,8 @@ function SourcesTab({
 
 function RunsTab({ runs, runsFilters, tw, locale }) {
     const filters = runsFilters ?? {};
+    const [expandedRuns, setExpandedRuns] = useState({});
+    const [runPagesState, setRunPagesState] = useState({});
 
     const navigate = (overrides) => {
         router.get('/app/wiki', {
@@ -2101,6 +2131,31 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
     };
 
     const hasActiveFilter = !!(filters.status || filters.decision || filters.src_id);
+
+    const fetchRunPages = (runId) => {
+        setRunPagesState((current) => ({ ...current, [runId]: { status: 'loading', data: null } }));
+
+        fetch(`/app/wiki/runs/${runId}/pages`, {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then((data) => setRunPagesState((current) => ({ ...current, [runId]: { status: 'ready', data } })))
+            .catch(() => setRunPagesState((current) => ({ ...current, [runId]: { status: 'error', data: null } })));
+    };
+
+    const toggleRunPages = (run) => {
+        if (!(run.pages_count > 0)) return;
+
+        const isOpen = !!expandedRuns[run.id];
+        setExpandedRuns((current) => ({ ...current, [run.id]: !isOpen }));
+
+        if (!isOpen && !runPagesState[run.id]) {
+            fetchRunPages(run.id);
+        }
+    };
 
     return (
         <div className="space-y-4">
@@ -2197,8 +2252,11 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                 {runs.map((run) => {
                                     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
                                     const runError = run.qa_last_error ?? run.error_message;
+                                    const isExpanded = !!expandedRuns[run.id];
+                                    const panelId = `run-pages-panel-${run.id}`;
                                     return (
-                                        <tr key={run.id} className="text-sm text-slate-700">
+                                    <Fragment key={run.id}>
+                                        <tr className="text-sm text-slate-700">
                                             <td className="px-4 py-3 text-right font-mono text-xs text-slate-400 tabular-nums">
                                                 {run.id}
                                             </td>
@@ -2240,10 +2298,27 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 text-right tabular-nums">
-                                                {run.pages_count > 0
-                                                    ? <span className="font-semibold text-violet-700">{run.pages_count}</span>
-                                                    : <span className="text-slate-400">0</span>
-                                                }
+                                                {run.pages_count > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleRunPages(run)}
+                                                        aria-expanded={isExpanded}
+                                                        aria-controls={panelId}
+                                                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                    >
+                                                        {run.pages_count}
+                                                        <svg
+                                                            className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                                            viewBox="0 0 20 20"
+                                                            fill="currentColor"
+                                                            aria-hidden="true"
+                                                        >
+                                                            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                                                        </svg>
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-right tabular-nums text-slate-500">
                                                 {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
@@ -2261,6 +2336,19 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
                                         </tr>
+                                        {isExpanded && (
+                                            <tr>
+                                                <td colSpan={9} className="bg-slate-50/70 px-4 py-4">
+                                                    <RunAffectedPagesPanel
+                                                        panelId={panelId}
+                                                        state={runPagesState[run.id]}
+                                                        onRetry={() => fetchRunPages(run.id)}
+                                                        tw={tw}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
                                     );
                                 })}
                             </tbody>
@@ -2268,6 +2356,135 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     </div>
                 </section>
             )}
+        </div>
+    );
+}
+
+const OWNER_STATUS_STYLES = {
+    approved: 'bg-emerald-100 text-emerald-700',
+    rejected: 'bg-rose-100 text-rose-700',
+    pending: 'bg-amber-100 text-amber-700',
+    mixed: 'bg-amber-100 text-amber-700',
+    missing_owner: 'bg-rose-100 text-rose-700',
+    awaiting_sync: 'bg-slate-100 text-slate-500',
+    blocked_by_quality: 'bg-slate-100 text-slate-500',
+    processing: 'bg-slate-100 text-slate-500',
+    processing_failed: 'bg-rose-100 text-rose-700',
+    superseded: 'bg-slate-100 text-slate-400',
+};
+
+/**
+ * Lazily-fetched detail shown inline under an expanded Kjøringer row (Del 1-9) — never a
+ * separate admin page/side panel, so active filters and scroll position on the runs table are
+ * untouched. `state` is undefined while nothing has been fetched yet, `{status:'loading'}` while
+ * the request is in flight, `{status:'error'}` on failure, or `{status:'ready', data}` once the
+ * GET /app/wiki/runs/{run}/pages response has arrived.
+ */
+function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
+    if (!state || state.status === 'loading') {
+        return (
+            <div id={panelId} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-violet-500" aria-hidden="true" />
+                {tw.runs_pages_loading ?? 'Henter berørte Wiki-sider …'}
+            </div>
+        );
+    }
+
+    if (state.status === 'error') {
+        return (
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-sm text-rose-600">
+                <span>{tw.runs_pages_error ?? 'Kunne ikke hente Wiki-sidene. Prøv igjen.'}</span>
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    className="shrink-0 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                >
+                    {tw.runs_pages_retry ?? 'Prøv igjen'}
+                </button>
+            </div>
+        );
+    }
+
+    const pages = state.data?.pages ?? [];
+    const summary = state.data?.summary ?? {};
+    const stallExplanation = state.data?.stall_explanation;
+
+    const summaryParts = [
+        (tw.runs_pages_summary_done ?? ':done av :total ferdigbehandlet')
+            .replace(':done', summary.done ?? 0)
+            .replace(':total', summary.total ?? 0),
+    ];
+
+    if ((summary.awaiting_document_owner ?? 0) > 0) {
+        summaryParts.push(
+            (tw.runs_pages_summary_awaiting ?? ':count venter på Dokumenteier').replace(':count', summary.awaiting_document_owner),
+        );
+    }
+
+    if ((summary.blocked_by_quality ?? 0) > 0) {
+        summaryParts.push(
+            (tw.runs_pages_summary_blocked ?? ':count blokkert av kvalitetskontroll').replace(':count', summary.blocked_by_quality),
+        );
+    }
+
+    return (
+        <div id={panelId} className="space-y-3">
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
+                <p className="mt-0.5 text-xs text-slate-500">{summaryParts.join(' · ')}</p>
+                {stallExplanation && (
+                    <p className="mt-1 text-xs font-medium text-amber-700">{stallExplanation}</p>
+                )}
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-full divide-y divide-slate-100 text-sm">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <tr className="text-left">
+                            <th className="px-3 py-2">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th className="px-3 py-2">{tw.runs_pages_col_result ?? 'Resultat'}</th>
+                            <th className="px-3 py-2">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
+                            <th className="px-3 py-2">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
+                            <th className="px-3 py-2 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {pages.map((page) => (
+                            <tr key={page.page_id} className="text-slate-700">
+                                <td className="max-w-[240px] px-3 py-2">
+                                    <span className="block truncate font-medium text-slate-900" title={page.title}>
+                                        {page.title}
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span className={`${BADGE} ${page.action === 'created' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                                        {page.action === 'created'
+                                            ? (tw.runs_pages_result_created ?? 'Opprettet')
+                                            : (tw.runs_pages_result_updated ?? 'Oppdatert')}
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+                                    {page.version_number
+                                        ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
+                                        : '—'}
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-500'}`}>
+                                        {page.document_owner_status?.label ?? '—'}
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">
+                                    <Link href={page.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                        {page.can_handle
+                                            ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
+                                            : (tw.runs_pages_action_open ?? 'Åpne side')}
+                                    </Link>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 }

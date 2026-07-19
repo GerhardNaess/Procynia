@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
@@ -3745,5 +3746,321 @@ class WikiControllerTest extends TestCase
                 && $f['status'] === 'completed'
                 && $f['decision'] === 'applied';
         });
+    }
+
+    // =========================================================================
+    // Runs tab — GET /app/wiki/runs/{run}/pages (Sider detail panel)
+    // =========================================================================
+
+    public function test_run_pages_count_matches_unique_pages_in_detail_list(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $pageA = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side A');
+        $pageB = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side B');
+        $versionA = $this->createVersion($pageA, true);
+        $versionB = $this->createVersion($pageB, true);
+        $this->createRunPage($run, $pageA, $versionA, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunPage($run, $pageB, $versionB, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+
+        $tabResponse = $this->actingAs($user)->get('/app/wiki?tab=runs');
+        $pagesCount = collect(data_get($tabResponse->viewData('page'), 'props.runs', []))
+            ->firstWhere('id', $run->id)['pages_count'] ?? null;
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $ids = collect($response->json('pages'))->pluck('page_id')->unique();
+        $this->assertSame($pagesCount, $ids->count());
+        $this->assertSame(2, $response->json('summary.total'));
+    }
+
+    public function test_run_pages_classifies_created_and_updated(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $created = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Ny side');
+        $updated = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Eksisterende side');
+        $createdVersion = $this->createVersion($created, true);
+        $updatedVersion = $this->createVersion($updated, true);
+        $this->createRunPage($run, $created, $createdVersion, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunPage($run, $updated, $updatedVersion, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $pages = collect($response->json('pages'))->keyBy('page_id');
+        $this->assertSame('created', $pages[$created->id]['action']);
+        $this->assertSame('updated', $pages[$updated->id]['action']);
+    }
+
+    public function test_run_pages_returns_empty_list_for_run_without_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $this->assertSame([], $response->json('pages'));
+        $this->assertSame(0, $response->json('summary.total'));
+    }
+
+    public function test_run_pages_document_owner_status_pending_is_awaiting(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Venter side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+        $claim = $this->createClaim($page, $version, 'Testpåstand', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+        $this->createDocumentSourceReference($claim, $doc);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertContains($row['document_owner_status']['state'], ['pending', 'mixed']);
+        $this->assertSame(1, $response->json('summary.awaiting_document_owner'));
+        $this->assertNotNull($response->json('stall_explanation'));
+    }
+
+    public function test_run_pages_document_owner_status_approved(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createClaim($page, $version, 'Testpåstand', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+        $this->createDocumentSourceReference($claim, $doc);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertSame('approved', $row['document_owner_status']['state']);
+        $this->assertSame(1, $response->json('summary.done'));
+    }
+
+    public function test_run_pages_document_owner_status_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Avvist side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createClaim($page, $version, 'Testpåstand', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+        $this->createDocumentSourceReference($claim, $doc);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertSame('rejected', $row['document_owner_status']['state']);
+        $this->assertSame(1, $response->json('summary.done'));
+    }
+
+    public function test_run_pages_marks_superseded_version_distinctly(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Utdatert versjon');
+        $oldVersion = $this->createVersion($page, false);
+        $newVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => '# Utdatert versjon v2',
+        ]);
+        $this->createRunPage($run, $page, $oldVersion, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertSame('superseded', $row['document_owner_status']['state']);
+        $this->assertFalse($row['is_current_version']);
+        $this->assertFalse($row['can_handle']);
+    }
+
+    public function test_run_pages_still_generating_page_is_processing(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Under generering');
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generated_page_version_id' => null,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING,
+        ]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertSame('processing', $row['document_owner_status']['state']);
+        $this->assertNull($row['page_version_id']);
+    }
+
+    public function test_run_pages_can_handle_true_for_required_document_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Krever behandling');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+
+        $response = $this->actingAs($owner)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertTrue($row['can_handle']);
+    }
+
+    public function test_run_pages_can_handle_false_for_unrelated_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $unrelated = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Krever behandling 2');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_UPDATED);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+
+        $response = $this->actingAs($unrelated)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertFalse($row['can_handle']);
+    }
+
+    public function test_run_pages_url_points_to_wiki_show(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Lenket side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $row = collect($response->json('pages'))->firstWhere('page_id', $page->id);
+        $this->assertSame(route('app.wiki.show', $page->slug), $row['url']);
+    }
+
+    public function test_run_pages_rejects_run_from_another_customer(): void
+    {
+        $customer = $this->createCustomer('Eier');
+        $other = $this->createCustomer('Fremmed');
+        $user = $this->createUser($other, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertNotFound();
+    }
+
+    public function test_run_pages_rejects_manipulated_run_id(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/runs/999999/pages');
+
+        $response->assertNotFound();
+    }
+
+    public function test_run_pages_stall_explanation_null_when_run_not_awaiting_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Ferdig side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $this->assertNull($response->json('stall_explanation'));
+    }
+
+    public function test_run_pages_stall_explanation_reports_needs_resync_when_nothing_awaiting(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Foreldet status');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createClaim($page, $version, 'Testpåstand', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+        $this->createDocumentSourceReference($claim, $doc);
+        $this->createDocumentOwnerApproval($customer, $page, $version, $owner, [$doc->id], EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/pages");
+
+        $response->assertOk();
+        $this->assertSame(0, $response->json('summary.awaiting_document_owner'));
+        $this->assertNotNull($response->json('stall_explanation'));
+        $this->assertStringContainsString(
+            __('procynia.wiki.runs_pages_stall_needs_resync'),
+            (string) $response->json('stall_explanation'),
+        );
+    }
+
+    private function createRunPage(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $action,
+    ): EnterpriseWikiIngestRunPage {
+        return EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => $action,
+            'generated_page_version_id' => $version->id,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
     }
 }

@@ -318,6 +318,7 @@ Route::prefix('app')
             Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
             Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
+            Route::get('/runs/{run}/pages', [WikiController::class, 'runPages'])->name('runs.pages');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');

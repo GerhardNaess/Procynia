@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
@@ -19,6 +20,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -200,6 +202,28 @@ class WikiController extends Controller
             return $this->documentOwnerSummaryAwaitingSync();
         }
 
+        return $this->documentOwnerSummaryForVersion($currentVersion);
+    }
+
+    /**
+     * Same read-only summary as documentOwnerSummaryForPage(), but for a specific page version
+     * rather than always a page's current one — used by runPages() so a Kjøringer row reflects
+     * the version THIS run actually produced/applied (Del 4), which may since have been
+     * superseded by a later run (see documentOwnerSummaryForRunPageVersion()).
+     *
+     * @return array{
+     *     state: string,
+     *     label: string,
+     *     owner_count: int,
+     *     approved_count: int,
+     *     pending_count: int,
+     *     rejected_count: int,
+     *     missing_owner_count: int,
+     *     has_override: bool
+     * }
+     */
+    private function documentOwnerSummaryForVersion(EnterpriseWikiPageVersion $currentVersion): array
+    {
         $requirements = $this->documentOwnerApprovalService->previewRequirementsForPageVersion($currentVersion);
 
         if ($requirements->isEmpty()) {
@@ -371,6 +395,73 @@ class WikiController extends Controller
             'missing_owner_count' => 0,
             'has_override' => false,
         ];
+    }
+
+    /**
+     * The version this run produced/applied is no longer the page's current version — a later
+     * run has since superseded it. Document Owner approval no longer applies to a superseded
+     * version, so this must never be conflated with "still pending" (Del 4).
+     */
+    private function documentOwnerSummarySuperseded(): array
+    {
+        return [
+            'state' => 'superseded',
+            'label' => __('procynia.wiki.document_owner_superseded'),
+            'owner_count' => 0,
+            'approved_count' => 0,
+            'pending_count' => 0,
+            'rejected_count' => 0,
+            'missing_owner_count' => 0,
+            'has_override' => false,
+        ];
+    }
+
+    /**
+     * The run hasn't finished generating this page's version yet — there is nothing to approve
+     * until it exists. Reuses the exact same user-facing wording as
+     * documentOwnerSummaryBlockedByQuality() ("Behandles fortsatt") since both are the same kind
+     * of "not actionable yet, not a decision the user can make" state (Del 5).
+     */
+    private function documentOwnerSummaryProcessing(): array
+    {
+        return [
+            'state' => 'processing',
+            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
+            'owner_count' => 0,
+            'approved_count' => 0,
+            'pending_count' => 0,
+            'rejected_count' => 0,
+            'missing_owner_count' => 0,
+            'has_override' => false,
+        ];
+    }
+
+    private function documentOwnerSummaryProcessingFailed(): array
+    {
+        return [
+            'state' => 'processing_failed',
+            'label' => __('procynia.wiki.document_owner_generation_failed'),
+            'owner_count' => 0,
+            'approved_count' => 0,
+            'pending_count' => 0,
+            'rejected_count' => 0,
+            'missing_owner_count' => 0,
+            'has_override' => false,
+        ];
+    }
+
+    /**
+     * Cross-run "Sider" detail (Kjøringer tab, Del 1-9): resolve the understandable Document
+     * Owner status for the SPECIFIC version this run produced/applied — never just the run's
+     * overall status, and never the page's current version if a later run has since replaced it.
+     */
+    private function documentOwnerSummaryForRunPageVersion(EnterpriseWikiPageVersion $version, bool $isCurrent): array
+    {
+        if (! $isCurrent) {
+            return $this->documentOwnerSummarySuperseded();
+        }
+
+        return $this->documentOwnerSummaryForVersion($version);
     }
 
     private function documentOwnerApprovalSummaryText(Collection $approvalRows): string
@@ -689,6 +780,132 @@ class WikiController extends Controller
                 'src_id' => $runSrc,
             ],
         ];
+    }
+
+    /**
+     * "Sider" detail (Kjøringer tab, Del 1-9): the Wiki pages this run actually created or
+     * updated, with the Document Owner status of the SPECIFIC page version the run
+     * produced/applied — not just the run's own overall status. Read-only: reuses
+     * EnterpriseWikiDocumentOwnerApprovalService's existing preview/summary methods and never
+     * re-syncs or writes approval rows on this GET.
+     *
+     * Scoping: the pivot rows already only ever reference pages/versions belonging to the same
+     * customer as the run (Enterprise Wiki never links a page across customers), but the
+     * customer_id equality check below is kept as a defensive, cheap guard against a
+     * manipulated/foreign run id — consistent with resolvePageForClaim()'s abort_unless() style
+     * elsewhere in this codebase.
+     */
+    public function runPages(EnterpriseWikiIngestRun $run): JsonResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $runPages = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->with([
+                'page',
+                'generatedPageVersion.documentOwnerApprovals' => fn ($query) => $query->with(['documentOwner', 'decidedBy']),
+            ])
+            ->get()
+            ->filter(fn (EnterpriseWikiIngestRunPage $runPage): bool => $runPage->page instanceof EnterpriseWikiPage
+                && (int) $runPage->page->customer_id === $customerId);
+
+        $rows = $runPages->map(fn (EnterpriseWikiIngestRunPage $runPage): array => $this->buildRunPageRow($runPage, $user))->values();
+
+        $doneStates = ['approved', 'rejected', 'superseded'];
+        $blockedStates = ['blocked_by_quality', 'processing', 'processing_failed'];
+
+        $doneCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $doneStates, true))->count();
+        $blockedCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $blockedStates, true))->count();
+        $awaitingCount = $rows->count() - $doneCount - $blockedCount;
+
+        return response()->json([
+            'pages' => $rows->all(),
+            'summary' => [
+                'total' => $rows->count(),
+                'done' => $doneCount,
+                'awaiting_document_owner' => $awaitingCount,
+                'blocked_by_quality' => $blockedCount,
+            ],
+            'stall_explanation' => $this->runStallExplanation($run, $awaitingCount),
+        ]);
+    }
+
+    /**
+     * @return array{
+     *     page_id: int, title: string, slug: string, url: string, page_type: string,
+     *     page_version_id: ?int, version_number: ?int, action: string, is_current_version: bool,
+     *     document_owner_status: array, can_handle: bool, decided_at: ?string, decided_by_name: ?string
+     * }
+     */
+    private function buildRunPageRow(EnterpriseWikiIngestRunPage $runPage, ?User $user): array
+    {
+        $page = $runPage->page;
+        $version = $runPage->generatedPageVersion;
+
+        $base = [
+            'page_id' => $page->id,
+            'title' => $page->title,
+            'slug' => $page->slug,
+            'url' => route('app.wiki.show', $page->slug),
+            'page_type' => $page->page_type,
+            'action' => $runPage->action,
+            'page_version_id' => $version?->id,
+            'version_number' => $version?->version_number,
+            'is_current_version' => $version !== null && (bool) $version->is_current,
+            'can_handle' => false,
+            'decided_at' => null,
+            'decided_by_name' => null,
+        ];
+
+        if (! $version instanceof EnterpriseWikiPageVersion) {
+            $base['document_owner_status'] = $runPage->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED
+                ? $this->documentOwnerSummaryProcessingFailed()
+                : $this->documentOwnerSummaryProcessing();
+
+            return $base;
+        }
+
+        $isCurrent = (bool) $version->is_current;
+        $base['document_owner_status'] = $this->documentOwnerSummaryForRunPageVersion($version, $isCurrent);
+
+        $approvals = $version->documentOwnerApprovals;
+        $lastDecided = $approvals->whereNotNull('decided_at')->sortByDesc('decided_at')->first();
+
+        if ($lastDecided instanceof EnterpriseWikiPageVersionDocumentOwnerApproval) {
+            $base['decided_at'] = $lastDecided->decided_at?->toIso8601String();
+            $base['decided_by_name'] = $lastDecided->decidedBy?->name;
+        }
+
+        if ($isCurrent && $user instanceof User) {
+            $base['can_handle'] = $approvals
+                ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
+                ->contains(fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): bool => $this->documentOwnerApprovalService->canDecide($approval, $user));
+        }
+
+        return $base;
+    }
+
+    /**
+     * Del 9: when a run's own status is "awaiting Document Owner approval", explain WHY using
+     * the same page list already computed above — never invent a separate explanation and never
+     * pretend a reason applies when the underlying count is actually zero (a stale/unreconciled
+     * run status is reported as needing resync, not given a fabricated explanation).
+     */
+    private function runStallExplanation(EnterpriseWikiIngestRun $run, int $awaitingCount): ?string
+    {
+        if ($run->status !== EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) {
+            return null;
+        }
+
+        if ($awaitingCount > 0) {
+            return trans_choice('procynia.wiki.runs_pages_stall_awaiting_owner', $awaitingCount, ['count' => $awaitingCount]);
+        }
+
+        return __('procynia.wiki.runs_pages_stall_needs_resync');
     }
 
     private function loadQualityTab(int $customerId, Request $request): array
