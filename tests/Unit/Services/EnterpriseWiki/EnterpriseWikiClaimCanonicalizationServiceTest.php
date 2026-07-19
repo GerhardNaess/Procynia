@@ -175,4 +175,131 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     {
         $this->assertFalse($this->service()->isGenuineBestPracticeText(''));
     }
+
+    // =========================================================================
+    // detectDeterministicConflict() — Del 3's cross-language verification safety net
+    // =========================================================================
+
+    public function test_time_format_variants_are_not_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Servicedesk er tilgjengelig fra klokken 09.00 til 15.00.',
+            'The service desk is available from 09:00 to 15:00.',
+        ));
+    }
+
+    public function test_duration_format_variants_are_not_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Kritiske hendelser skal besvares innen 30 minutter.',
+            'Critical incidents shall be responded to within 30 min.',
+        ));
+    }
+
+    public function test_weekday_and_business_days_phrasing_is_not_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Servicedesk er tilgjengelig mandag til fredag.',
+            'The service desk is available Monday through Friday.',
+        ));
+    }
+
+    public function test_quarterly_and_hvert_kvartal_are_not_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Systemeier gjennomgår tilgangsrettighetene hvert kvartal.',
+            'Access rights are reviewed quarterly by the system owner.',
+        ));
+    }
+
+    public function test_cross_language_paraphrase_of_the_same_clause_is_not_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Kritiske hendelser skal besvares innen 30 minutter.',
+            'Critical incidents shall be responded to within 30 minutes.',
+        ));
+    }
+
+    public function test_changed_number_is_a_conflict(): void
+    {
+        $this->assertSame('number_mismatch', $this->service()->detectDeterministicConflict(
+            'Responstiden er 15 minutter.',
+            'Response time is 30 minutes.',
+        ));
+    }
+
+    public function test_permissive_source_upgraded_to_obligatory_claim_is_a_conflict(): void
+    {
+        $this->assertSame('modality_mismatch', $this->service()->detectDeterministicConflict(
+            'Kunden skal ha en vaktordning.',
+            'The customer may establish an on-call arrangement.',
+        ));
+    }
+
+    public function test_recommendation_upgraded_to_a_current_state_claim_is_a_conflict(): void
+    {
+        $this->assertSame('modality_mismatch', $this->service()->detectDeterministicConflict(
+            'Kunden har en selvbetjeningsportal.',
+            'A self-service portal is recommended.',
+        ));
+    }
+
+    public function test_supplier_swapped_for_customer_is_a_conflict(): void
+    {
+        $this->assertSame('actor_mismatch', $this->service()->detectDeterministicConflict(
+            'Kunden gjennomgår tilgangsrettighetene.',
+            'The supplier reviews the access rights.',
+        ));
+    }
+
+    public function test_negation_dropped_is_a_conflict(): void
+    {
+        $this->assertSame('negation_mismatch', $this->service()->detectDeterministicConflict(
+            'Tjenesten er tilgjengelig utenfor arbeidstid.',
+            'The service is not available outside business hours.',
+        ));
+    }
+
+    public function test_critical_cases_widened_to_all_cases_is_a_conflict(): void
+    {
+        $this->assertSame('scope_mismatch', $this->service()->detectDeterministicConflict(
+            'Alle saker håndteres av den døgnbemannede vaktorganisasjonen.',
+            'Critical incidents are handled by the on-call manager.',
+        ));
+    }
+
+    public function test_business_days_widened_to_every_day_is_a_conflict(): void
+    {
+        $this->assertSame('scope_mismatch', $this->service()->detectDeterministicConflict(
+            'Servicedesk er tilgjengelig alle dager.',
+            'The service desk is available Monday through Friday.',
+        ));
+    }
+
+    public function test_hyphenated_non_critical_compound_is_not_treated_as_negation(): void
+    {
+        // "ikke-kritiske" ("non-critical") is an ordinary adjective, not a negation of anything —
+        // a real production false-positive found while re-evaluating run 37.
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Det skal gis statusoppdatering ved hver statusendring for ikke-kritiske hendelser.',
+            'Status updates are provided on every status change for non-critical incidents.',
+        ));
+    }
+
+    public function test_topic_similarity_alone_is_not_flagged_as_a_conflict(): void
+    {
+        // detectDeterministicConflict() only ever flags a genuine, specific mismatch — it is not
+        // itself a substitute for a real semantic support decision (that is the AI verifier's
+        // job); two texts that merely share a topic with no numbers/actors/modality to compare
+        // must not be blocked by this deterministic net.
+        $this->assertNull($this->service()->detectDeterministicConflict(
+            'Servicedesk håndterer henvendelser og hendelser.',
+            'The service desk manages requests and incidents.',
+        ));
+    }
+
+    public function test_empty_supporting_text_is_never_a_conflict(): void
+    {
+        $this->assertNull($this->service()->detectDeterministicConflict('Responstiden er 30 minutter.', ''));
+    }
 }

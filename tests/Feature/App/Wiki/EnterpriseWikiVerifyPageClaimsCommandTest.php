@@ -16,10 +16,12 @@ use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
     private const FAKE_EXCERPT = 'This is the exact text from the source that supports the claim.';
@@ -31,7 +33,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         // No real OpenAI calls in any test.
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
-            ->andReturn(['supported' => true, 'excerpt' => self::FAKE_EXCERPT])
+            ->andReturn($this->verificationResult())
             ->byDefault();
     }
 
@@ -210,7 +212,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             ->andReturnUsing(function () use (&$verified): array {
                 $verified = true;
 
-                return ['supported' => true, 'excerpt' => self::FAKE_EXCERPT];
+                return $this->verificationResult();
             });
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
@@ -257,7 +259,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -280,7 +282,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         $refsBefore = EnterpriseWikiSourceReference::query()->count();
 
@@ -297,7 +299,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -392,7 +394,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -443,6 +445,202 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
     }
 
+    // =========================================================================
+    // Semantic (cross-language/paraphrase) verification — structured source elements
+    // =========================================================================
+
+    /**
+     * @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiPage, 2: EnterpriseWikiPageVersion, 3: EnterpriseWikiClaim, 4: EnterpriseWikiDocument}
+     */
+    private function createClaimWithStructuredSourceBlock(Customer $customer, string $claimText, array $sourceElements): array
+    {
+        [$run, $page, $version, $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$claimText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $claimText,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_elements' => $sourceElements,
+            ]],
+        ]);
+
+        $claim->update([
+            'claim_text' => $claimText,
+            'page_excerpt' => $claimText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+
+        return [$run, $page, $version, $claim->fresh(), $document];
+    }
+
+    public function test_cross_language_claim_is_verified_as_source_based_via_structured_candidate_element(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Kritiske hendelser skal besvares innen 30 minutter.',
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Critical incidents shall be responded to within 30 minutes.',
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (string $claimText, array $sourceElements) {
+                return $sourceElements !== [] && $sourceElements[0]['key'] === 'paragraph-9';
+            })
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['paragraph-9'],
+                reason: 'Same fact, stated in English in the source clause.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $ref = EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->first();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertNotNull($ref);
+        $this->assertSame('paragraph-9', $ref->source_element_key);
+    }
+
+    public function test_partially_supported_verdict_keeps_claim_blocking_with_specific_reason(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Responstiden er 30 minutter, og kunden mottar en skriftlig bekreftelse per e-post når saken er løst.',
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Critical incidents shall be responded to within 30 minutes.',
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'partially_supported',
+                supportingSourceElementKeys: ['paragraph-9'],
+                reason: 'The 30 minute response time is supported, but the written email confirmation is not stated anywhere in the source.',
+                unsupportedParts: 'kunden mottar en skriftlig bekreftelse per e-post når saken er løst',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('claim_partially_supported', $claim->generation_issue);
+        $this->assertSame('kunden mottar en skriftlig bekreftelse per e-post når saken er løst', $claim->review_reason);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_contradicted_verdict_blocks_and_is_never_reclassified_as_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Responstiden er 15 minutter.',
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Response time is 30 minutes.',
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'contradicted',
+                supportingSourceElementKeys: ['paragraph-9'],
+                reason: 'The claim states 15 minutes, but the source states 30 minutes.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('claim_contradicted_by_source', $claim->generation_issue);
+        $this->assertNotSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+    }
+
+    public function test_deterministic_number_conflict_overrides_an_ai_supported_verdict(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Responstiden er 15 minutter.',
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Response time is 30 minutes.',
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        // The AI hallucinates "supported" despite the number actually differing — the
+        // deterministic safety net (Del 3) must never let this through as source_based.
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['paragraph-9'],
+                reason: 'Matches the source response time.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
+    public function test_ai_citing_a_source_element_key_outside_the_given_candidates_is_treated_as_ungrounded(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Kritiske hendelser skal besvares innen 30 minutter.',
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Critical incidents shall be responded to within 30 minutes.',
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        // The AI client itself already filters out unknown keys (see
+        // WikiClaimVerificationAiClientTest), so this simulates what the service receives after
+        // that filtering has already stripped every key the claim was never anchored to — an
+        // empty supporting-keys list despite a "supported" verdict.
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: []));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
     public function test_claim_without_current_page_anchor_is_internal_error_and_skips_ai(): void
     {
         $customer = $this->createCustomer();
@@ -489,7 +687,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => true, 'excerpt' => self::FAKE_EXCERPT]);
+            ->andReturn($this->verificationResult());
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -562,7 +760,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
@@ -738,7 +936,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             'original_filename' => 'source-doc.pdf',
             'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
             'file_hash_sha256' => hash('sha256', Str::random(32)),
-            'extracted_text' => 'This is the exact text from the source that supports the claim. Additional context follows.',
+            'extracted_text' => self::FAKE_EXCERPT,
             'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }

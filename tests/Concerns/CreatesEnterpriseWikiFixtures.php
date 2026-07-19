@@ -100,4 +100,45 @@ trait CreatesEnterpriseWikiFixtures
             'conflict_flag' => false,
         ], $overrides));
     }
+
+    /**
+     * A fully-shaped WikiClaimVerificationAiClient::verifyClaim() result — the post-validation
+     * shape EnterpriseWikiVerifyPageClaimsService/EnterpriseWikiClaimSourceReconciliationService
+     * consume, for tests that mock the AI client directly rather than the OpenAI HTTP layer.
+     * Defaults to a clean "supported" verdict with every check matching; override just the
+     * fields a given test cares about.
+     *
+     * @param  list<string>  $supportingSourceElementKeys
+     * @param  array<string, string>  $checkOverrides
+     */
+    protected function verificationResult(
+        string $verdict = 'supported',
+        array $supportingSourceElementKeys = [],
+        string $reason = 'Claim matches the cited source excerpt.',
+        string $unsupportedParts = '',
+        array $checkOverrides = [],
+    ): array {
+        $checks = array_merge([
+            'actor' => 'match',
+            'action' => 'match',
+            'object' => 'match',
+            'modality' => 'match',
+            'negation' => 'match',
+            'numbers_and_units' => 'match',
+            'time_and_date' => 'match',
+            'scope' => 'match',
+            'conditions_and_exceptions' => 'not_applicable',
+        ], $checkOverrides);
+
+        return [
+            'verdict' => $verdict,
+            'same_meaning_across_languages' => true,
+            'claim_language' => 'no',
+            'source_language' => 'no',
+            'supporting_source_element_keys' => $supportingSourceElementKeys,
+            'reason' => $reason,
+            'unsupported_parts' => $unsupportedParts,
+            'checks' => $checks,
+        ];
+    }
 }

@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use ReflectionClass;
 use ReflectionMethod;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 /**
@@ -42,6 +43,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiClaimStepLeaseTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
     // =========================================================================
@@ -218,7 +220,7 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => true, 'excerpt' => 'Utdrag fra B.']);
+            ->andReturn($this->verificationResult());
 
         $service = app(EnterpriseWikiVerifyPageClaimsService::class);
         $result = $service->verify($run->fresh());
@@ -354,7 +356,7 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => true, 'excerpt' => 'Utdrag.']);
+            ->andReturn($this->verificationResult());
 
         $this->mockQaClaims($run, EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 

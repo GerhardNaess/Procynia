@@ -18,6 +18,7 @@ use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use DatabaseTransactions;
 
     protected function setUp(): void
@@ -182,7 +184,7 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => true, 'excerpt' => 'Revised text confirmed by the source.']);
+            ->andReturn($this->verificationResult());
 
         $versionCountBefore = EnterpriseWikiPageVersion::query()->count();
         $result = $this->service()->attempt($run);

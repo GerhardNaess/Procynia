@@ -18,6 +18,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiClaimStepResumabilityTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
     // =========================================================================
@@ -138,7 +140,7 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
             ->shouldReceive('verifyClaim')
             ->once()
             ->withArgs(fn ($claimText) => $claimText === 'Uverifisert påstand.')
-            ->andReturn(['supported' => true, 'excerpt' => 'Nytt utdrag.']);
+            ->andReturn($this->verificationResult());
 
         $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
 
@@ -168,7 +170,7 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => null]);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
 

@@ -86,6 +86,94 @@ class EnterpriseWikiClaimCanonicalizationService
         'has', 'is', 'uses', 'follows', 'offers', 'operates', 'provides', 'runs', 'handles',
     ];
 
+    /**
+     * Bilingual recurrence/period vocabulary → canonical category, used by frequencyTokens() so
+     * "quarterly" and "hvert kvartal" (Del 6/Del 9) compare equal across languages instead of
+     * being treated as two different, unrelated words.
+     */
+    private const FREQUENCY_VOCABULARY = [
+        'dag' => 'day', 'dager' => 'day', 'daglig' => 'day', 'day' => 'day', 'days' => 'day', 'daily' => 'day',
+        'uke' => 'week', 'uker' => 'week', 'ukentlig' => 'week', 'week' => 'week', 'weeks' => 'week', 'weekly' => 'week',
+        'måned' => 'month', 'måneder' => 'month', 'månedlig' => 'month', 'month' => 'month', 'months' => 'month', 'monthly' => 'month',
+        'kvartal' => 'quarter', 'kvartaler' => 'quarter', 'kvartalsvis' => 'quarter', 'quarter' => 'quarter', 'quarters' => 'quarter', 'quarterly' => 'quarter',
+        'år' => 'year', 'årlig' => 'year', 'year' => 'year', 'years' => 'year', 'yearly' => 'year', 'annual' => 'year', 'annually' => 'year',
+        'halvår' => 'half_year', 'halvårlig' => 'half_year', 'semiannual' => 'half_year', 'semi-annual' => 'half_year',
+        // Deliberately excludes "time"/"timer"/"hour(s)": in SLA/tender text these words are used
+        // constantly to mean an opening-hours window or a response-time duration, not a
+        // recurrence period ("every 2 hours") — treating them as a frequency entity caused real
+        // false-positive conflicts (e.g. "opening hours" vs "per month" reads as a frequency
+        // mismatch even though neither claim nor source actually disagrees on any recurrence).
+    ];
+
+    /**
+     * Bilingual negation markers (Del 3/Del 9 #14) — a claim must never silently drop, add, or
+     * reverse a source's negation ("not available outside business hours" vs. "available outside
+     * business hours").
+     */
+    private const NEGATION_MARKERS = [
+        'ikke', 'aldri', 'uten', 'ingen', 'not', 'never', 'without', 'no longer',
+    ];
+
+    /**
+     * Modality tiers — deliberately only two. A claim may never assert a STRONGER commitment
+     * than its source excerpt (Del 3): "may/kan" upgraded to "shall/skal", or a recommendation
+     * upgraded to a statement that something already exists, must both be rejected.
+     *
+     * "Obligatory" (skal/må/shall/must) and "unmarked/factual" (no modal marker at all, e.g.
+     * "svartiden er 30 sekunder") are DELIBERATELY the SAME tier, not two different ones: a
+     * contractual "the Contractor SHALL respond within 30 seconds" and a Wiki page factually
+     * restating "responstiden er 30 sekunder" describe the identical binding commitment — the
+     * Wiki text dropping the modal verb when summarizing an already-agreed requirement is normal
+     * paraphrase, not an escalation. Only WEAK->STRONG actually changes meaning (Del 9 #11/#12):
+     * turning a mere permission/suggestion ("may"/"kan"/"anbefales"/"recommended") into something
+     * asserted as required or already true.
+     */
+    private const MODALITY_TIER_WEAK = 0;
+
+    private const MODALITY_TIER_STRONG = 1;
+
+    // Deliberately excludes English "should" and Norwegian "mulig å": both are ambiguous in
+    // formal contract text — "the response time should be measured from..." and "det skal være
+    // mulig å kontakte..." are prescriptive/binding in this document, not mere suggestions, so
+    // including them caused real false-positive conflicts against genuinely matching claims.
+    private const MODALITY_MARKERS_WEAK = [
+        'anbefales', 'anbefaling', 'anbefalt', 'bør', 'recommended', 'recommendation', 'suggested',
+        'kan', 'may', 'could', 'optional',
+    ];
+
+    /** Del 3/Del 9 #13 — a claim must not silently swap which party performs an action. */
+    private const ACTOR_TERMS_SUPPLIER = [
+        'leverandøren', 'leverandør', 'contractor', 'supplier', 'vendor',
+    ];
+
+    private const ACTOR_TERMS_CUSTOMER = [
+        'kunden', 'kunde', 'customer', 'oppdragsgiver', 'client',
+    ];
+
+    /** Del 3/Del 9 #15 — a claim must not widen a source's case scope ("critical" → "all"). */
+    private const SCOPE_TERMS_NARROW_CASE = [
+        'kritisk', 'kritiske', 'critical', 'alvorlig', 'alvorlige',
+    ];
+
+    private const SCOPE_TERMS_BROAD_CASE = [
+        'alle saker', 'alle henvendelser', 'samtlige saker', 'all cases', 'all requests', 'every case',
+    ];
+
+    /** Del 3/Del 9 #10/#16 — a claim must not widen a source's day/hour scope. */
+    private const SCOPE_TERMS_NARROW_DAY = [
+        'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag', 'søndag',
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'virkedager', 'hverdager', 'business days', 'weekdays', 'åpningstid', 'opening hours',
+    ];
+
+    private const SCOPE_TERMS_BROAD_DAY = [
+        'alle dager', 'hele døgnet', 'døgnet rundt', 'daglig', '24/7', '24/7/365',
+        'every day', 'around the clock', 'all day',
+    ];
+
+    /** Del 3 — currency amounts, checked as a distinguishing entity class like numbers. */
+    private const CURRENCY_MARKERS = ['kr', 'nok', 'eur', 'usd', 'gbp', '$', '€', '£'];
+
     public function __construct(
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
     ) {}
@@ -143,6 +231,181 @@ class EnterpriseWikiClaimCanonicalizationService
         }
 
         return preg_match('/(?<!\p{L})'.preg_quote($phrase, '/').'(?!\p{L})/ui', $normalizedText) === 1;
+    }
+
+    /**
+     * Del 3's conservative safety net for cross-language/paraphrase verification: a deterministic,
+     * non-AI check for a genuine MEANING change between a claim and the specific source excerpt(s)
+     * the AI verifier cited as support. This never runs against the whole candidate pool — only
+     * against the excerpt(s) actually cited — so it can't be defeated by an unrelated candidate
+     * elsewhere in the same block "diluting" a real conflict (Del 5).
+     *
+     * Deliberately conservative: an AI verdict of "supported"/"partially_supported" must never
+     * override a conflict found here (Del 3) — the caller downgrades to not_supported instead.
+     * Returns the first conflict found, or null when no conflict is detected (which is not proof
+     * of support — it only means this specific safety net found nothing wrong).
+     */
+    public function detectDeterministicConflict(string $claimText, string $supportingText): ?string
+    {
+        $claimNorm = $this->textNormalizer->normalize($claimText);
+        $sourceNorm = $this->textNormalizer->normalize($supportingText);
+
+        if ($claimNorm === '' || $sourceNorm === '') {
+            return null;
+        }
+
+        $claimNumbers = $this->numberTokens($claimNorm);
+        $sourceNumbers = $this->numberTokens($sourceNorm);
+
+        if ($claimNumbers !== [] && $sourceNumbers !== [] && array_diff($claimNumbers, $sourceNumbers) !== []) {
+            return 'number_mismatch';
+        }
+
+        $claimFrequency = $this->frequencyTokens($claimNorm);
+        $sourceFrequency = $this->frequencyTokens($sourceNorm);
+
+        if ($claimFrequency !== [] && $sourceFrequency !== [] && $claimFrequency !== $sourceFrequency) {
+            return 'frequency_mismatch';
+        }
+
+        if ($this->hasNegationMarker($claimNorm) !== $this->hasNegationMarker($sourceNorm)) {
+            return 'negation_mismatch';
+        }
+
+        if ($this->modalityTier($claimNorm) > $this->modalityTier($sourceNorm)) {
+            return 'modality_mismatch';
+        }
+
+        if ($this->actorMismatch($claimNorm, $sourceNorm)) {
+            return 'actor_mismatch';
+        }
+
+        if ($this->scopeMismatch($claimNorm, $sourceNorm)) {
+            return 'scope_mismatch';
+        }
+
+        if ($this->currencyMismatch($claimNorm, $sourceNorm)) {
+            return 'currency_mismatch';
+        }
+
+        return null;
+    }
+
+    /**
+     * "ikke-kritisk"/"ikke-kritiske" ("non-critical") is an ordinary hyphenated adjective, not a
+     * negation of anything — excluded explicitly, since a bare word-boundary match on "ikke"
+     * would otherwise treat every mention of a non-critical case as if the claim negated
+     * something, causing false conflicts against claims that are actually a faithful match.
+     */
+    private function hasNegationMarker(string $normalizedText): bool
+    {
+        $withoutNegatedCompounds = preg_replace('/\bikke-/u', '', $normalizedText) ?? $normalizedText;
+
+        foreach (self::NEGATION_MARKERS as $marker) {
+            if ($this->containsWord($withoutNegatedCompounds, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * MODALITY_TIER_STRONG (binding/factual) unless a WEAK (permissive/recommendation) marker is
+     * present — text with an obligatory marker ("skal"/"shall"/"must") and unmarked declarative
+     * text ("Kunden har...", "The service is...") are the SAME tier: both describe a binding
+     * commitment, never a mere suggestion or permission.
+     */
+    private function modalityTier(string $normalizedText): int
+    {
+        foreach (self::MODALITY_MARKERS_WEAK as $marker) {
+            if ($this->containsWord($normalizedText, $marker)) {
+                return self::MODALITY_TIER_WEAK;
+            }
+        }
+
+        return self::MODALITY_TIER_STRONG;
+    }
+
+    /**
+     * True only when the claim names EXCLUSIVELY one party (supplier or customer) and the cited
+     * source excerpt names EXCLUSIVELY the other — deliberately conservative, since real source
+     * text routinely names both parties in the same sentence (e.g. "the Contractor shall report
+     * to the Customer"), which must never be flagged as a mismatch.
+     */
+    private function actorMismatch(string $claimNormalized, string $sourceNormalized): bool
+    {
+        $claimHasSupplier = $this->containsAny($claimNormalized, self::ACTOR_TERMS_SUPPLIER);
+        $claimHasCustomer = $this->containsAny($claimNormalized, self::ACTOR_TERMS_CUSTOMER);
+        $sourceHasSupplier = $this->containsAny($sourceNormalized, self::ACTOR_TERMS_SUPPLIER);
+        $sourceHasCustomer = $this->containsAny($sourceNormalized, self::ACTOR_TERMS_CUSTOMER);
+
+        $claimOnlySupplier = $claimHasSupplier && ! $claimHasCustomer;
+        $claimOnlyCustomer = $claimHasCustomer && ! $claimHasSupplier;
+        $sourceOnlySupplier = $sourceHasSupplier && ! $sourceHasCustomer;
+        $sourceOnlyCustomer = $sourceHasCustomer && ! $sourceHasSupplier;
+
+        return ($claimOnlySupplier && $sourceOnlyCustomer) || ($claimOnlyCustomer && $sourceOnlySupplier);
+    }
+
+    /**
+     * True when the claim widens a scope the source excerpt keeps narrow — "critical cases"
+     * generalized to "all cases", or specific weekdays/business hours generalized to "every day"
+     * (Del 3/Del 9 #10, #15, #16). Conservative in the same way as actorMismatch(): only flags
+     * when the source contains the narrow term but never the broad one.
+     */
+    private function scopeMismatch(string $claimNormalized, string $sourceNormalized): bool
+    {
+        $caseWidened = $this->containsAny($claimNormalized, self::SCOPE_TERMS_BROAD_CASE)
+            && $this->containsAny($sourceNormalized, self::SCOPE_TERMS_NARROW_CASE)
+            && ! $this->containsAny($sourceNormalized, self::SCOPE_TERMS_BROAD_CASE);
+
+        if ($caseWidened) {
+            return true;
+        }
+
+        return $this->containsAny($claimNormalized, self::SCOPE_TERMS_BROAD_DAY)
+            && $this->containsAny($sourceNormalized, self::SCOPE_TERMS_NARROW_DAY)
+            && ! $this->containsAny($sourceNormalized, self::SCOPE_TERMS_BROAD_DAY);
+    }
+
+    /**
+     * True only when claim and source each name a DIFFERENT, non-empty set of currency markers —
+     * e.g. a claim stating an amount in NOK when the source excerpt states it in EUR.
+     */
+    private function currencyMismatch(string $claimNormalized, string $sourceNormalized): bool
+    {
+        $claimCurrencies = $this->foundTerms($claimNormalized, self::CURRENCY_MARKERS);
+        $sourceCurrencies = $this->foundTerms($sourceNormalized, self::CURRENCY_MARKERS);
+
+        return $claimCurrencies !== [] && $sourceCurrencies !== [] && $claimCurrencies !== $sourceCurrencies;
+    }
+
+    /**
+     * @param  list<string>  $terms
+     */
+    private function containsAny(string $normalizedText, array $terms): bool
+    {
+        return $this->foundTerms($normalizedText, $terms) !== [];
+    }
+
+    /**
+     * @param  list<string>  $terms
+     * @return list<string>
+     */
+    private function foundTerms(string $normalizedText, array $terms): array
+    {
+        $found = [];
+
+        foreach ($terms as $term) {
+            if ($this->containsWord($normalizedText, $term)) {
+                $found[] = $term;
+            }
+        }
+
+        sort($found);
+
+        return $found;
     }
 
     /**
@@ -399,23 +662,27 @@ class EnterpriseWikiClaimCanonicalizationService
     }
 
     /**
-     * Recurrence/period words present in the text, as a sorted set — a closed vocabulary
-     * treated as a distinguishing entity class exactly like numbers (Del 3): "hver måned" and
-     * "hvert kvartal" share almost every other word but describe different facts.
+     * Recurrence/period words present in the text, normalized to a bilingual canonical category
+     * ("quarterly" and "hvert kvartal" both become "quarter") and returned as a sorted set — a
+     * closed vocabulary treated as a distinguishing entity class exactly like numbers (Del 3):
+     * "hver måned" and "hvert kvartal" share almost every other word but describe different
+     * facts. Canonicalizing across languages (rather than comparing the raw words) is what lets
+     * a Norwegian claim reuse a canonical fact recorded from an English source clause, and vice
+     * versa (Del 6), without treating a same-meaning translation as a differing frequency.
      *
      * @return list<string>
      */
     private function frequencyTokens(string $normalizedText): array
     {
-        $vocabulary = ['dag', 'dager', 'uke', 'uker', 'måned', 'måneder', 'kvartal', 'kvartaler', 'år', 'halvår', 'time', 'timer'];
         $found = [];
 
-        foreach ($vocabulary as $word) {
-            if (preg_match('/(?<!\p{L})'.preg_quote($word, '/').'(?!\p{L})/u', $normalizedText) === 1) {
-                $found[] = $word;
+        foreach (self::FREQUENCY_VOCABULARY as $word => $category) {
+            if (preg_match('/(?<!\p{L})'.preg_quote($word, '/').'(?!\p{L})/ui', $normalizedText) === 1) {
+                $found[] = $category;
             }
         }
 
+        $found = array_values(array_unique($found));
         sort($found);
 
         return $found;

@@ -22,6 +22,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDeepRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintenanceCycleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiDeepRepairServiceTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
     private const HASH_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -78,7 +80,7 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
 
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
-            ->andReturn(['supported' => true, 'excerpt' => 'Source excerpt.'])
+            ->andReturn($this->verificationResult())
             ->byDefault();
     }
 

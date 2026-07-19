@@ -16,6 +16,7 @@ use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimSourceReconciliationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
 
 /**
@@ -25,6 +26,7 @@ use Tests\TestCase;
  */
 class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
 {
+    use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
     private const FAKE_EXCERPT = 'Advania er leverandør av IT-driftstjenester til norske virksomheter.';
@@ -39,7 +41,7 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
 
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
-            ->andReturn(['supported' => true, 'excerpt' => self::FAKE_EXCERPT])
+            ->andReturn($this->verificationResult())
             ->byDefault();
     }
 
@@ -106,7 +108,7 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => false, 'excerpt' => '']);
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
 
         $customer = $this->createCustomer();
         $page = $this->createPage($customer);
@@ -131,7 +133,7 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn(['supported' => true, 'excerpt' => self::FAKE_EXCERPT]);
+            ->andReturn($this->verificationResult());
 
         $customer = $this->createCustomer();
         $page = $this->createPage($customer);

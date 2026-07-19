@@ -39,6 +39,7 @@ class EnterpriseWikiClaimSourceReconciliationService
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
 
     /**
@@ -77,9 +78,11 @@ class EnterpriseWikiClaimSourceReconciliationService
 
             try {
                 $result = $this->aiClient->verifyClaim(
-                    $claim->claim_text,
-                    (string) $document->extracted_text,
-                    $languageCode,
+                    claimText: $claim->claim_text,
+                    sourceElements: [],
+                    fallbackSourceText: (string) $document->extracted_text,
+                    languageCode: $languageCode,
+                    documentLabel: $document->original_filename,
                 );
             } catch (Throwable $e) {
                 $this->markError($attempt, $e->getMessage());
@@ -88,13 +91,26 @@ class EnterpriseWikiClaimSourceReconciliationService
                 continue;
             }
 
-            if (! $result['supported']) {
+            $verdict = $result['verdict'];
+
+            if ($verdict === WikiClaimVerificationAiClient::VERDICT_SUPPORTED) {
+                $conflict = $this->canonicalizationService->detectDeterministicConflict(
+                    $claim->claim_text,
+                    (string) $document->extracted_text,
+                );
+
+                if ($conflict !== null) {
+                    $verdict = WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+                }
+            }
+
+            if ($verdict !== WikiClaimVerificationAiClient::VERDICT_SUPPORTED) {
                 $this->markUnsupported($attempt);
 
                 continue;
             }
 
-            if ($this->persistSupported($claim, $document, $attempt, $result['excerpt'])) {
+            if ($this->persistSupported($claim, $document, $attempt, mb_substr((string) $document->extracted_text, 0, 500))) {
                 $counts['sources_found']++;
             }
         }
