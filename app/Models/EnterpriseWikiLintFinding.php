@@ -179,4 +179,29 @@ class EnterpriseWikiLintFinding extends Model
     {
         return $this->status === self::STATUS_RESOLVED;
     }
+
+    /**
+     * The single definition of "this finding, while open, prevents qa_status from reaching
+     * passed" — error severity, or a broken wikilink specifically (a structural break regardless
+     * of the severity it was logged with). EnterpriseWikiPostIngestQaService::findCriticalDefects()
+     * and the Kjøringer "Funn" panel (EnterpriseWikiRunFindingsService) both read this same
+     * definition; neither is allowed to grow its own copy of the predicate.
+     */
+    public function isBlocking(): bool
+    {
+        return $this->severity === self::SEVERITY_ERROR || $this->code === self::CODE_BROKEN_WIKILINK;
+    }
+
+    /**
+     * Query-level equivalent of isBlocking(), for callers that need to filter/count in SQL
+     * rather than load models — e.g. EnterpriseWikiPostIngestQaService::findCriticalDefects() and
+     * WikiController::loadRunsTab()'s cheap per-run subqueries.
+     */
+    public function scopeBlocking($query)
+    {
+        return $query->where(function ($q): void {
+            $q->where('severity', self::SEVERITY_ERROR)
+                ->orWhere('code', self::CODE_BROKEN_WIKILINK);
+        });
+    }
 }

@@ -4063,4 +4063,398 @@ class WikiControllerTest extends TestCase
             'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
         ]);
     }
+
+    // =========================================================================
+    // Runs tab — GET /app/wiki/runs/{run}/findings (Funn detail panel)
+    // =========================================================================
+
+    public function test_run_findings_count_matches_total_in_response(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Funn-side');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_OPEN);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_INFO, EnterpriseWikiLintFinding::STATUS_RESOLVED);
+        $this->createClaimDefect($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
+
+        $lintCountFromTab = null;
+        $this->actingAs($user)->get('/app/wiki?tab=runs')->assertViewHas('page', function (array $inertia) use ($run, &$lintCountFromTab): bool {
+            $lintCountFromTab = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id)['lint_count'] ?? null;
+
+            return true;
+        });
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame(4, $response->json('summary.total'));
+        $this->assertSame($lintCountFromTab, $response->json('summary.total'));
+        $this->assertCount(4, $response->json('findings'));
+    }
+
+    public function test_run_findings_returns_empty_list_for_run_without_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame([], $response->json('findings'));
+        $this->assertSame(0, $response->json('summary.total'));
+    }
+
+    public function test_run_findings_classifies_open_blocking_finding(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Blokkerende funn');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('requires_action', $finding['status']);
+        $this->assertTrue($finding['blocks_run']);
+        $this->assertSame(1, $response->json('summary.open_blocking'));
+    }
+
+    public function test_run_findings_classifies_open_non_blocking_finding(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Ikke-blokkerende funn');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('open', $finding['status']);
+        $this->assertFalse($finding['blocks_run']);
+        $this->assertSame(1, $response->json('summary.open_non_blocking'));
+    }
+
+    public function test_run_findings_classifies_resolved_finding(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Løst funn');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_RESOLVED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('resolved', $finding['status']);
+        $this->assertSame(1, $response->json('summary.resolved'));
+    }
+
+    public function test_run_findings_classifies_informative_finding(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Informativt funn');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_INFO, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('informative', $finding['status']);
+        $this->assertSame(1, $response->json('summary.informative'));
+    }
+
+    public function test_run_findings_does_not_duplicate_claim_missing_source_as_a_claim_defect(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kilde mangler');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createClaim($page, $version, 'Påstand uten kilde', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Claim has no source reference.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame(1, $response->json('summary.total'));
+        $this->assertCount(1, $response->json('findings'));
+    }
+
+    public function test_run_findings_run_level_finding_has_no_page_scope(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_APPLIED_RUN_WITHOUT_PAGES,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
+            'message' => 'Run produced no pages.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('run', $finding['scope']);
+        $this->assertNull($finding['page_id']);
+        $this->assertNull($finding['url']);
+    }
+
+    public function test_run_findings_marks_finding_on_superseded_version_as_not_blocking(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Utdatert funn');
+        $oldVersion = $this->createVersion($page, false);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => '# v2',
+        ]);
+        $this->createRunPage($run, $page, $oldVersion, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $oldVersion, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('superseded', $finding['status']);
+        $this->assertFalse($finding['blocks_run']);
+        $this->assertSame(0, $response->json('summary.open_blocking'));
+    }
+
+    public function test_run_findings_explanation_passed_with_no_blocking(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED]);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Bestått');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_INFO, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame(
+            __('procynia.wiki.runs_findings_explanation_passed_no_blocking', ['count' => 1]),
+            $response->json('summary.explanation'),
+        );
+    }
+
+    public function test_run_findings_explanation_flags_inconsistency_when_passed_but_blocking(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED]);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Inkonsistent');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame(
+            __('procynia.wiki.runs_findings_explanation_inconsistent_passed'),
+            $response->json('summary.explanation'),
+        );
+    }
+
+    public function test_run_findings_explanation_needs_resync_when_repair_required_but_no_blocking(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $this->assertSame(0, $response->json('summary.open_blocking'));
+        $this->assertSame(
+            __('procynia.wiki.runs_findings_explanation_needs_resync'),
+            $response->json('summary.explanation'),
+        );
+    }
+
+    public function test_run_findings_rejects_run_from_another_customer(): void
+    {
+        $customer = $this->createCustomer('Eier Funn');
+        $other = $this->createCustomer('Fremmed Funn');
+        $user = $this->createUser($other, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertNotFound();
+    }
+
+    public function test_run_findings_rejects_manipulated_run_id(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/runs/999999/findings');
+
+        $response->assertNotFound();
+    }
+
+    public function test_run_findings_hides_technical_diagnostics_from_ordinary_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Teknisk skjult');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($contributor)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertArrayNotHasKey('technical', $finding);
+    }
+
+    public function test_run_findings_includes_technical_diagnostics_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Teknisk synlig');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($owner)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertArrayHasKey('technical', $finding);
+        $this->assertSame('lint_finding', $finding['technical']['source']);
+    }
+
+    public function test_run_findings_open_and_handle_shown_when_document_owner_can_handle_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kan behandles');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createClaim($page, $version, 'Krever kilde', 0, ['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
+        $this->createDocumentSourceReference($claim, $doc);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'code' => EnterpriseWikiLintFinding::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Source reference has no excerpt.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($owner)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertTrue($finding['can_handle']);
+        $this->assertSame('open_and_handle', $finding['action']);
+    }
+
+    private function createRunLintFinding(
+        Customer $customer,
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $severity,
+        string $status,
+    ): EnterpriseWikiLintFinding {
+        return EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'code' => EnterpriseWikiLintFinding::CODE_EMPTY_PAGE_CONTENT,
+            'severity' => $severity,
+            'message' => 'Testfunn for Funn-panelet.',
+            'status' => $status,
+            'detected_at' => now(),
+            'resolved_at' => $status === EnterpriseWikiLintFinding::STATUS_RESOLVED ? now() : null,
+        ]);
+    }
+
+    private function createClaimDefect(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $contentOrigin,
+    ): EnterpriseWikiClaim {
+        return $this->createClaim($page, $version, 'Defekt påstand', 0, ['content_origin' => $contentOrigin]);
+    }
 }

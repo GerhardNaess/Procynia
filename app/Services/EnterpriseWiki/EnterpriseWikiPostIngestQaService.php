@@ -487,10 +487,7 @@ class EnterpriseWikiPostIngestQaService
             ->where('customer_id', $run->customer_id)
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->where(function ($q): void {
-                $q->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)
-                    ->orWhere('code', EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK);
-            })
+            ->blocking()
             ->exists();
 
         if ($hasCriticalLint) {

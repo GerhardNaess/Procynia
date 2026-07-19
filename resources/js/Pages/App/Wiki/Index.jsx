@@ -823,6 +823,23 @@ function getWikiRunsHelpSections(tw) {
             ],
         },
         {
+            title: tw.runs_page_help_section_findings ?? 'Kvalitetsfunn',
+            items: [
+                {
+                    title: tw.runs_page_help_item_findings_what_title ?? 'Funn viser alle kvalitetsfunn',
+                    text: tw.runs_page_help_item_findings_what_text ?? '«Funn» viser alle kvalitetsfunn som ble registrert under kjøringen. Klikk på tallet for å se hva funnene gjelder.',
+                },
+                {
+                    title: tw.runs_page_help_item_findings_not_error_title ?? 'Ikke nødvendigvis en feil',
+                    text: tw.runs_page_help_item_findings_not_error_text ?? 'Et funn er ikke nødvendigvis en feil som blokkerer. Funn kan være åpne, løste, aksepterte eller informative, og en kjøring kan være bestått selv om historiske eller ikke-blokkerende funn finnes.',
+                },
+                {
+                    title: tw.runs_page_help_item_findings_action_title ?? 'Hva krever handling?',
+                    text: tw.runs_page_help_item_findings_action_text ?? 'Panelet viser hvilke funn som faktisk krever handling, og hvilken side og sideversjon funnet gjelder når dette finnes.',
+                },
+            ],
+        },
+        {
             title: tw.runs_page_help_section_workflow ?? 'Aktiv behandling eller venter på en person?',
             items: [
                 {
@@ -2115,10 +2132,25 @@ function SourcesTab({
 
 // ─── Runs tab ────────────────────────────────────────────────────────────────
 
+function findingsCountToneClass(run) {
+    if ((run.findings_open_blocking_count ?? 0) > 0) {
+        return 'text-rose-600 hover:bg-rose-50 focus-visible:ring-rose-400';
+    }
+
+    if ((run.findings_open_non_blocking_count ?? 0) > 0) {
+        return 'text-amber-600 hover:bg-amber-50 focus-visible:ring-amber-400';
+    }
+
+    return 'text-slate-500 hover:bg-slate-100 focus-visible:ring-slate-400';
+}
+
 function RunsTab({ runs, runsFilters, tw, locale }) {
     const filters = runsFilters ?? {};
+    // expandedRuns[runId] is null (closed) | 'pages' | 'findings' — only one panel is ever shown
+    // per row, so switching panels never stacks two overlapping detail areas under the same row.
     const [expandedRuns, setExpandedRuns] = useState({});
     const [runPagesState, setRunPagesState] = useState({});
+    const [runFindingsState, setRunFindingsState] = useState({});
 
     const navigate = (overrides) => {
         router.get('/app/wiki', {
@@ -2146,14 +2178,33 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
             .catch(() => setRunPagesState((current) => ({ ...current, [runId]: { status: 'error', data: null } })));
     };
 
-    const toggleRunPages = (run) => {
-        if (!(run.pages_count > 0)) return;
+    const fetchRunFindings = (runId) => {
+        setRunFindingsState((current) => ({ ...current, [runId]: { status: 'loading', data: null } }));
 
-        const isOpen = !!expandedRuns[run.id];
-        setExpandedRuns((current) => ({ ...current, [run.id]: !isOpen }));
+        fetch(`/app/wiki/runs/${runId}/findings`, {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then((data) => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'ready', data } })))
+            .catch(() => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'error', data: null } })));
+    };
 
-        if (!isOpen && !runPagesState[run.id]) {
+    const togglePanel = (run, panel, hasData) => {
+        if (!hasData) return;
+
+        const currentPanel = expandedRuns[run.id] ?? null;
+        const nextPanel = currentPanel === panel ? null : panel;
+        setExpandedRuns((current) => ({ ...current, [run.id]: nextPanel }));
+
+        if (nextPanel === 'pages' && !runPagesState[run.id]) {
             fetchRunPages(run.id);
+        }
+
+        if (nextPanel === 'findings' && !runFindingsState[run.id]) {
+            fetchRunFindings(run.id);
         }
     };
 
@@ -2252,8 +2303,8 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                 {runs.map((run) => {
                                     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
                                     const runError = run.qa_last_error ?? run.error_message;
-                                    const isExpanded = !!expandedRuns[run.id];
-                                    const panelId = `run-pages-panel-${run.id}`;
+                                    const activePanel = expandedRuns[run.id] ?? null;
+                                    const panelId = `run-panel-${run.id}`;
                                     return (
                                     <Fragment key={run.id}>
                                         <tr className="text-sm text-slate-700">
@@ -2301,14 +2352,14 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 {run.pages_count > 0 ? (
                                                     <button
                                                         type="button"
-                                                        onClick={() => toggleRunPages(run)}
-                                                        aria-expanded={isExpanded}
+                                                        onClick={() => togglePanel(run, 'pages', true)}
+                                                        aria-expanded={activePanel === 'pages'}
                                                         aria-controls={panelId}
                                                         className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                     >
                                                         {run.pages_count}
                                                         <svg
-                                                            className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                                            className={`h-3.5 w-3.5 transition-transform ${activePanel === 'pages' ? 'rotate-180' : ''}`}
                                                             viewBox="0 0 20 20"
                                                             fill="currentColor"
                                                             aria-hidden="true"
@@ -2324,10 +2375,28 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
                                             </td>
                                             <td className="px-4 py-3 text-right tabular-nums">
-                                                {run.lint_count > 0
-                                                    ? <span className="font-semibold text-rose-600">{run.lint_count}</span>
-                                                    : <span className="text-slate-400">0</span>
-                                                }
+                                                {run.lint_count > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => togglePanel(run, 'findings', true)}
+                                                        aria-expanded={activePanel === 'findings'}
+                                                        aria-controls={panelId}
+                                                        aria-label={(tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
+                                                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
+                                                    >
+                                                        {run.lint_count}
+                                                        <svg
+                                                            className={`h-3.5 w-3.5 transition-transform ${activePanel === 'findings' ? 'rotate-180' : ''}`}
+                                                            viewBox="0 0 20 20"
+                                                            fill="currentColor"
+                                                            aria-hidden="true"
+                                                        >
+                                                            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                                                        </svg>
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
+                                                )}
                                             </td>
                                             <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
                                                 {formatDate(run.created_at, locale)}
@@ -2336,15 +2405,25 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
                                         </tr>
-                                        {isExpanded && (
+                                        {activePanel !== null && (
                                             <tr>
                                                 <td colSpan={9} className="bg-slate-50/70 px-4 py-4">
-                                                    <RunAffectedPagesPanel
-                                                        panelId={panelId}
-                                                        state={runPagesState[run.id]}
-                                                        onRetry={() => fetchRunPages(run.id)}
-                                                        tw={tw}
-                                                    />
+                                                    {activePanel === 'pages' ? (
+                                                        <RunAffectedPagesPanel
+                                                            panelId={panelId}
+                                                            state={runPagesState[run.id]}
+                                                            onRetry={() => fetchRunPages(run.id)}
+                                                            tw={tw}
+                                                        />
+                                                    ) : (
+                                                        <RunFindingsPanel
+                                                            panelId={panelId}
+                                                            state={runFindingsState[run.id]}
+                                                            onRetry={() => fetchRunFindings(run.id)}
+                                                            tw={tw}
+                                                            locale={locale}
+                                                        />
+                                                    )}
                                                 </td>
                                             </tr>
                                         )}
@@ -2479,6 +2558,175 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
                                             ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
                                             : (tw.runs_pages_action_open ?? 'Åpne side')}
                                     </Link>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+const FINDING_SEVERITY_STYLES = {
+    critical: 'bg-rose-100 text-rose-700',
+    error: 'bg-rose-100 text-rose-700',
+    warning: 'bg-amber-100 text-amber-700',
+    info: 'bg-slate-100 text-slate-500',
+};
+
+const FINDING_STATUS_STYLES = {
+    requires_action: 'bg-rose-100 text-rose-700',
+    open: 'bg-amber-100 text-amber-700',
+    resolved: 'bg-emerald-100 text-emerald-700',
+    informative: 'bg-slate-100 text-slate-500',
+    superseded: 'bg-slate-100 text-slate-400',
+};
+
+const FINDINGS_LOCAL_FILTERS = ['all', 'open', 'blocking', 'resolved', 'informative'];
+
+function findingsLocalFilterLabel(filterKey, tw) {
+    return {
+        all: tw.runs_findings_filter_all ?? 'Alle',
+        open: tw.runs_findings_filter_open ?? 'Åpne',
+        blocking: tw.runs_findings_filter_blocking ?? 'Blokkerende',
+        resolved: tw.runs_findings_filter_resolved ?? 'Løst',
+        informative: tw.runs_findings_filter_informative ?? 'Informasjon',
+    }[filterKey] ?? filterKey;
+}
+
+function matchesFindingsLocalFilter(finding, filterKey) {
+    switch (filterKey) {
+        case 'open':
+            return finding.status === 'requires_action' || finding.status === 'open';
+        case 'blocking':
+            return finding.blocks_run;
+        case 'resolved':
+            return finding.status === 'resolved';
+        case 'informative':
+            return finding.status === 'informative' || finding.status === 'superseded';
+        default:
+            return true;
+    }
+}
+
+/**
+ * Kjøringer "Funn" detail — same inline-under-the-row placement and lazy-fetch pattern as
+ * RunAffectedPagesPanel (Del 7); shares the same expansion row, switching in as an alternative to
+ * it rather than stacking a second independent panel. Local status/blocking filters apply only
+ * within this open panel and never touch the Kjøringer tab's own filter bar.
+ */
+function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
+    const [localFilter, setLocalFilter] = useState('all');
+
+    if (!state || state.status === 'loading') {
+        return (
+            <div id={panelId} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-rose-500" aria-hidden="true" />
+                {tw.runs_findings_loading ?? 'Henter kvalitetsfunn …'}
+            </div>
+        );
+    }
+
+    if (state.status === 'error') {
+        return (
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-sm text-rose-600">
+                <span>{tw.runs_findings_error ?? 'Kunne ikke hente kvalitetsfunnene. Prøv igjen.'}</span>
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    className="shrink-0 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                >
+                    {tw.runs_pages_retry ?? 'Prøv igjen'}
+                </button>
+            </div>
+        );
+    }
+
+    const findings = state.data?.findings ?? [];
+    const summary = state.data?.summary ?? {};
+    const visibleFindings = findings.filter((f) => matchesFindingsLocalFilter(f, localFilter));
+
+    return (
+        <div id={panelId} className="space-y-3">
+            <div>
+                <h4 className="text-sm font-semibold text-slate-700">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h4>
+                <p className="mt-0.5 text-xs text-slate-500">
+                    {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
+                    {' · '}
+                    {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
+                    {summary.open_non_blocking > 0 && `${summary.open_non_blocking} ${tw.runs_findings_open_non_blocking ?? 'åpne ikke-blokkerende'} · `}
+                    {summary.resolved > 0 && `${summary.resolved} ${tw.runs_findings_resolved ?? 'løst'} · `}
+                    {summary.informative > 0 && `${summary.informative} ${tw.runs_findings_informative ?? 'informativt'} · `}
+                    {summary.superseded > 0 && `${summary.superseded} ${tw.runs_findings_superseded ?? 'ikke lenger aktuelt'} · `}
+                </p>
+                {summary.explanation && (
+                    <p className="mt-1 text-xs font-medium text-slate-600">{summary.explanation}</p>
+                )}
+            </div>
+
+            {findings.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                    {FINDINGS_LOCAL_FILTERS.map((filterKey) => (
+                        <button
+                            key={filterKey}
+                            type="button"
+                            onClick={() => setLocalFilter(filterKey)}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                                localFilter === filterKey
+                                    ? 'bg-slate-800 text-white'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                        >
+                            {findingsLocalFilterLabel(filterKey, tw)}
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="min-w-full divide-y divide-slate-100 text-sm">
+                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        <tr className="text-left">
+                            <th className="px-3 py-2">{tw.runs_findings_col_finding ?? 'Funn'}</th>
+                            <th className="px-3 py-2">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th className="px-3 py-2">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
+                            <th className="px-3 py-2">{tw.runs_findings_col_status ?? 'Status'}</th>
+                            <th className="px-3 py-2 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {visibleFindings.map((finding) => (
+                            <tr key={finding.id} className="align-top text-slate-700">
+                                <td className="max-w-[280px] px-3 py-2">
+                                    <span className="block font-medium text-slate-900">{finding.title}</span>
+                                    <span className="mt-0.5 block text-xs text-slate-500">{finding.explanation}</span>
+                                </td>
+                                <td className="max-w-[200px] px-3 py-2">
+                                    {finding.scope === 'run' ? (
+                                        <span className="text-slate-500">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
+                                    ) : (
+                                        <span className="block truncate" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
+                                    )}
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span className={`${BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-500'}`}>
+                                        {finding.severity_label}
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                    <span className={`${BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                                        {finding.status_label}
+                                    </span>
+                                </td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">
+                                    {finding.url && finding.action ? (
+                                        <Link href={finding.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                            {finding.action_label}
+                                        </Link>
+                                    ) : (
+                                        <span className="text-slate-400">—</span>
+                                    )}
                                 </td>
                             </tr>
                         ))}

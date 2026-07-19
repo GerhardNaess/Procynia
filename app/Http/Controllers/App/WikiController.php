@@ -18,6 +18,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
@@ -36,6 +37,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiRunFindingsService $runFindingsService,
     ) {}
 
     public function index(Request $request): Response
@@ -713,14 +715,54 @@ class WikiController extends Controller
         $runSrc = is_numeric($request->query('run_src'))
             ? (int) $request->query('run_src') : null;
 
-        $lintCountSub = DB::table('enterprise_wiki_lint_findings')
+        // Kjøringer "Funn" — definition change (documented, see loadRunsTab()'s row map below):
+        // the column used to count only OPEN enterprise_wiki_lint_findings rows. It now counts
+        // every finding a user could ever see in the new detail panel — every lint finding
+        // status (open+resolved), PLUS live claim-integrity defects (internal_error/
+        // unsupported_generated_content claims on the run's pages' CURRENT versions), which
+        // previously had no visible "Funn" representation at all even though they are exactly
+        // what keeps qa_status from reaching "passed" — see
+        // EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(). This keeps the
+        // invariant "Funn-tallet = totalt antall elementer i detaljlisten" true against
+        // EnterpriseWikiRunFindingsService, which the new GET .../findings endpoint uses. A
+        // source_based claim missing its source reference is NOT folded in a second time here —
+        // EnterpriseWikiAppliedRunLintService already writes a real CODE_CLAIM_MISSING_SOURCE
+        // lint finding for that, so it is already counted once via $lintTotalSub.
+        $lintTotalSub = DB::table('enterprise_wiki_lint_findings')
+            ->selectRaw('count(*)')
+            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id');
+
+        $lintOpenSub = DB::table('enterprise_wiki_lint_findings')
             ->selectRaw('count(*)')
             ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
 
+        $lintOpenBlockingSub = DB::table('enterprise_wiki_lint_findings')
+            ->selectRaw('count(*)')
+            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->where(function ($q): void {
+                $q->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)
+                    ->orWhere('code', EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK);
+            });
+
+        $claimDefectCountSub = DB::table('enterprise_wiki_claims as fdc')
+            ->join('enterprise_wiki_page_versions as fdpv', 'fdpv.id', '=', 'fdc.enterprise_wiki_page_version_id')
+            ->join('enterprise_wiki_ingest_run_pages as fdrp', 'fdrp.enterprise_wiki_page_id', '=', 'fdpv.enterprise_wiki_page_id')
+            ->whereColumn('fdrp.enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
+            ->where('fdpv.is_current', true)
+            ->whereIn('fdc.content_origin', [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            ])
+            ->selectRaw('count(*)');
+
         $query = EnterpriseWikiIngestRun::query()
             ->select('enterprise_wiki_ingest_runs.*')
-            ->selectSub($lintCountSub, 'lint_count')
+            ->selectSub($lintTotalSub, 'lint_total_count')
+            ->selectSub($lintOpenSub, 'lint_open_count')
+            ->selectSub($lintOpenBlockingSub, 'lint_open_blocking_count')
+            ->selectSub($claimDefectCountSub, 'claim_defect_count')
             ->withCount(['sections', 'pages'])
             ->where('enterprise_wiki_ingest_runs.customer_id', $customerId)
             ->where('enterprise_wiki_ingest_runs.source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
@@ -751,29 +793,41 @@ class WikiController extends Controller
             : collect();
 
         return [
-            'runs' => $runs->map(fn (EnterpriseWikiIngestRun $run) => [
-                'id' => $run->id,
-                'status' => $run->status,
-                'maintainer_decision_status' => $run->maintainer_decision_status,
-                'source_document_filename' => $docFilenames->get($run->source_id),
-                'source_id' => $run->source_id,
-                'error_message' => $run->error_message,
-                'qa_status' => $run->qa_status,
-                'qa_last_error' => $run->qa_last_error,
-                'claim_content_repair_attempt_count' => $run->claim_content_repair_attempt_count,
-                'claim_content_repair_result' => $run->claim_content_repair_result,
-                'model_used' => $run->model_used,
-                'input_tokens' => $run->input_tokens,
-                'output_tokens' => $run->output_tokens,
-                'pages_count' => (int) ($run->pages_count ?? 0),
-                'sections_count' => (int) ($run->sections_count ?? 0),
-                'lint_count' => (int) ($run->lint_count ?? 0),
-                'created_at' => $run->created_at,
-                'started_at' => $run->started_at,
-                'finished_at' => $run->finished_at,
-                'updated_at' => $run->updated_at,
-                'last_progress_at' => $run->updated_at,
-            ])->all(),
+            'runs' => $runs->map(function (EnterpriseWikiIngestRun $run) use ($docFilenames) {
+                $lintTotal = (int) ($run->lint_total_count ?? 0);
+                $lintOpen = (int) ($run->lint_open_count ?? 0);
+                $lintOpenBlocking = (int) ($run->lint_open_blocking_count ?? 0);
+                $claimDefects = (int) ($run->claim_defect_count ?? 0);
+
+                $findingsOpenBlocking = $lintOpenBlocking + $claimDefects;
+                $findingsOpenNonBlocking = max(0, $lintOpen - $lintOpenBlocking);
+
+                return [
+                    'id' => $run->id,
+                    'status' => $run->status,
+                    'maintainer_decision_status' => $run->maintainer_decision_status,
+                    'source_document_filename' => $docFilenames->get($run->source_id),
+                    'source_id' => $run->source_id,
+                    'error_message' => $run->error_message,
+                    'qa_status' => $run->qa_status,
+                    'qa_last_error' => $run->qa_last_error,
+                    'claim_content_repair_attempt_count' => $run->claim_content_repair_attempt_count,
+                    'claim_content_repair_result' => $run->claim_content_repair_result,
+                    'model_used' => $run->model_used,
+                    'input_tokens' => $run->input_tokens,
+                    'output_tokens' => $run->output_tokens,
+                    'pages_count' => (int) ($run->pages_count ?? 0),
+                    'sections_count' => (int) ($run->sections_count ?? 0),
+                    'lint_count' => $lintTotal + $claimDefects,
+                    'findings_open_blocking_count' => $findingsOpenBlocking,
+                    'findings_open_non_blocking_count' => $findingsOpenNonBlocking,
+                    'created_at' => $run->created_at,
+                    'started_at' => $run->started_at,
+                    'finished_at' => $run->finished_at,
+                    'updated_at' => $run->updated_at,
+                    'last_progress_at' => $run->updated_at,
+                ];
+            })->all(),
             'runs_filters' => [
                 'status' => $runStatus,
                 'decision' => $runDecision,
@@ -906,6 +960,31 @@ class WikiController extends Controller
         }
 
         return __('procynia.wiki.runs_pages_stall_needs_resync');
+    }
+
+    /**
+     * "Funn" detail (Kjøringer tab): every quality finding for this run, normalized from
+     * EnterpriseWikiLintFinding rows and live claim-integrity defects by
+     * EnterpriseWikiRunFindingsService — see that class for why both sources are needed and how
+     * double-counting is avoided. Read-only: never re-runs lint, never re-evaluates QA, never
+     * writes a reconciliation.
+     *
+     * Technical diagnostics (raw code, raw severity/status) are included only for System Owner
+     * or a QA-capable user — the same gate EnterpriseWikiDocumentOwnerApprovalService::
+     * canHandleClaim() already uses, so an ordinary Document Owner never sees internal enum
+     * values (Del 13).
+     */
+    public function runFindings(EnterpriseWikiIngestRun $run): JsonResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $includeTechnical = $user instanceof User && ($user->isSystemOwner() || $user->canApproveWikiClaims());
+
+        return response()->json($this->runFindingsService->buildForRun($run, $user, $includeTechnical));
     }
 
     private function loadQualityTab(int $customerId, Request $request): array
