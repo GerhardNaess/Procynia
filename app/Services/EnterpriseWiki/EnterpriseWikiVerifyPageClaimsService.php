@@ -220,11 +220,35 @@ class EnterpriseWikiVerifyPageClaimsService
                 }
 
                 $block = $this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''));
+                $candidateElements = $this->candidateElementsForAi($block);
+
+                // Run-38 fix: a verbatim/near-verbatim claim never needs an AI call at all — see
+                // EnterpriseWikiClaimCanonicalizationService::detectDeterministicSupport().
+                if ($this->canonicalizationService->detectDeterministicSupport(
+                    $claim->claim_text,
+                    array_column($candidateElements, 'excerpt'),
+                )) {
+                    $outcome = $this->persistDeterministicSupport($claim->id, $token, $document, $version, $block);
+
+                    if ($outcome === null) {
+                        $busy++;
+
+                        continue;
+                    }
+
+                    if ($outcome === 'unsupported') {
+                        $noSupport++;
+                    } else {
+                        $references++;
+                    }
+
+                    continue;
+                }
 
                 try {
                     $result = $this->aiClient->verifyClaim(
                         claimText: $claim->claim_text,
-                        sourceElements: $this->candidateElementsForAi($block),
+                        sourceElements: $candidateElements,
                         fallbackSourceText: $sourceText,
                         languageCode: $languageCode,
                         blockMarkdown: $block['markdown'] ?? null,
@@ -324,24 +348,48 @@ class EnterpriseWikiVerifyPageClaimsService
         $languageCode = $this->resolveLanguageCode($run->customer_id);
         $fallbackSourceText = mb_substr((string) ($document->extracted_text ?? ''), 0, 8000);
 
-        $result = $this->aiClient->verifyClaim(
-            claimText: $claim->claim_text,
-            sourceElements: $this->candidateElementsForAi($block),
-            fallbackSourceText: $fallbackSourceText,
-            languageCode: $languageCode,
-            blockMarkdown: $block['markdown'] ?? null,
-            documentLabel: $document->original_filename,
+        $candidateElements = $this->candidateElementsForAi($block);
+        $elementsByKey = $this->elementsByKey($block);
+
+        // Run-38 fix: same deterministic verbatim/near-verbatim fast path as verify() — never
+        // spend an AI call re-confirming what a plain substring check already proves.
+        $deterministicMatch = $this->canonicalizationService->detectDeterministicSupport(
+            $claim->claim_text,
+            array_column($candidateElements, 'excerpt'),
         );
 
-        $elementsByKey = $this->elementsByKey($block);
-        $finalVerdict = $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
+        if ($deterministicMatch) {
+            $result = [
+                'verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED,
+                'same_meaning_across_languages' => true,
+                'claim_language' => '',
+                'source_language' => '',
+                'supporting_source_element_keys' => array_keys($elementsByKey),
+                'reason' => 'Ordrett eller nær-ordrett samsvar med kildeteksten, bekreftet deterministisk uten AI-kall.',
+                'unsupported_parts' => '',
+                'checks' => [],
+            ];
+        } else {
+            $result = $this->aiClient->verifyClaim(
+                claimText: $claim->claim_text,
+                sourceElements: $candidateElements,
+                fallbackSourceText: $fallbackSourceText,
+                languageCode: $languageCode,
+                blockMarkdown: $block['markdown'] ?? null,
+                documentLabel: $document->original_filename,
+            );
+        }
+
+        $finalVerdict = $deterministicMatch
+            ? WikiClaimVerificationAiClient::VERDICT_SUPPORTED
+            : $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
 
         $report = [
             'eligible' => true,
             'skipped_reason' => null,
-            'ai_verdict' => $result['verdict'],
+            'ai_verdict' => $deterministicMatch ? 'deterministic_verbatim_match' : $result['verdict'],
             'final_verdict' => $finalVerdict,
-            'deterministic_override' => $finalVerdict !== $result['verdict'],
+            'deterministic_override' => ! $deterministicMatch && $finalVerdict !== $result['verdict'],
             'reason' => $result['reason'],
             'applied' => false,
             'new_content_origin' => null,
@@ -351,7 +399,7 @@ class EnterpriseWikiVerifyPageClaimsService
             return $report;
         }
 
-        $newContentOrigin = DB::transaction(function () use ($claim, $result, $elementsByKey, $document, $finalVerdict, $run, $fallbackSourceText): ?string {
+        $newContentOrigin = DB::transaction(function () use ($claim, $result, $elementsByKey, $document, $finalVerdict, $run, $fallbackSourceText, $deterministicMatch): ?string {
             $locked = EnterpriseWikiClaim::query()->whereKey($claim->id)->lockForUpdate()->first();
 
             if ($locked === null || $locked->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT) {
@@ -361,7 +409,7 @@ class EnterpriseWikiVerifyPageClaimsService
             $originalContentOrigin = (string) $locked->content_origin;
 
             $this->applyVerdictOutcome($locked, $finalVerdict, $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText, [
-                'classification_basis' => 'scoped_run_reevaluation',
+                'classification_basis' => $deterministicMatch ? 'deterministic_verbatim_match' : 'scoped_run_reevaluation',
                 'reevaluated_at' => now()->toIso8601String(),
                 'reevaluated_from_content_origin' => $originalContentOrigin,
                 'reevaluated_run_id' => $run->id,
@@ -540,6 +588,72 @@ class EnterpriseWikiVerifyPageClaimsService
     }
 
     /**
+     * Persist a claim matched by
+     * EnterpriseWikiClaimCanonicalizationService::detectDeterministicSupport() — reuses the exact
+     * same verdict-outcome mapping as an AI-confirmed "supported" result (applyVerdictOutcome())
+     * so a deterministically-matched claim ends up in an identical final state to one AI
+     * confirmed, just tagged with classification_basis = 'deterministic_verbatim_match' in
+     * review_metadata for traceability. No AI call is made for this claim at all.
+     *
+     * @return string|null 'supported', 'unsupported' (anchor failure), or null if the reservation was lost
+     */
+    private function persistDeterministicSupport(int $claimId, string $token, EnterpriseWikiDocument $document, EnterpriseWikiPageVersion $version, ?array $block): ?string
+    {
+        return DB::transaction(function () use ($claimId, $token, $document, $version, $block): ?string {
+            $claim = EnterpriseWikiClaim::query()
+                ->where('id', $claimId)
+                ->where('verification_claim_token', $token)
+                ->lockForUpdate()
+                ->first();
+
+            if ($claim === null) {
+                return null;
+            }
+
+            $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
+
+            if ($anchorFailure !== null) {
+                $claim->update([
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'review_reason' => null,
+                    'generation_issue' => $anchorFailure,
+                    'verified_at' => now(),
+                    'verification_claimed_at' => null,
+                    'verification_claim_token' => null,
+                ]);
+
+                return 'unsupported';
+            }
+
+            $originalContentOrigin = (string) $claim->content_origin;
+            $elementsByKey = $this->elementsByKey($block);
+
+            $result = [
+                'verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED,
+                'same_meaning_across_languages' => true,
+                'claim_language' => '',
+                'source_language' => '',
+                'supporting_source_element_keys' => array_keys($elementsByKey),
+                'reason' => 'Ordrett eller nær-ordrett samsvar med kildeteksten, bekreftet deterministisk uten AI-kall.',
+                'unsupported_parts' => '',
+                'checks' => [],
+            ];
+
+            return $this->applyVerdictOutcome(
+                $claim,
+                WikiClaimVerificationAiClient::VERDICT_SUPPORTED,
+                $result,
+                $elementsByKey,
+                $document,
+                $originalContentOrigin,
+                '',
+                ['classification_basis' => 'deterministic_verbatim_match'],
+            );
+        });
+    }
+
+    /**
      * Shared verdict → claim-state mapping used both by the live verify() pipeline (persist())
      * and the narrow, single-run Del 7 re-evaluation command — one mechanism, never a parallel
      * one. Must be called from inside a transaction with $claim already locked.
@@ -596,6 +710,15 @@ class EnterpriseWikiVerifyPageClaimsService
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED) {
             $bestPractice = $this->isPositiveBestPracticeSuggestion($claim);
 
+            // Run-38 fix: a plain not_supported verdict used to store review_reason/review_metadata
+            // as null — leaving no trace of why AI rejected the claim, unlike the contradicted/
+            // partially_supported branch above. Always keep the AI's own reason (or, for the rarer
+            // case where the safety net downgraded an AI "supported"/"partially_supported" verdict
+            // to not_supported, whatever conflict reason came through in $extraReviewMetadata).
+            $notSupportedReason = trim((string) ($result['reason'] ?? '')) !== ''
+                ? $result['reason']
+                : 'Ingen kildeutdrag støtter påstanden.';
+
             $claim->update([
                 'content_origin' => $bestPractice
                     ? EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
@@ -603,7 +726,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                 'review_reason' => $bestPractice
                     ? 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.'
-                    : null,
+                    : $notSupportedReason,
                 'review_metadata' => $bestPractice
                     ? array_merge([
                         'statement_kind' => 'recommendation',
@@ -611,7 +734,12 @@ class EnterpriseWikiVerifyPageClaimsService
                         'suggested_placement' => $claim->content_block_key,
                         'visible_wiki_link_recommendation' => 'auto_evaluate',
                     ], $extraReviewMetadata)
-                    : ($extraReviewMetadata !== [] ? $extraReviewMetadata : null),
+                    : array_merge([
+                        'classification_basis' => 'semantic_verification',
+                        'verdict' => $verdict,
+                        'reason' => $result['reason'] ?? '',
+                        'checks' => $result['checks'] ?? [],
+                    ], $extraReviewMetadata),
                 'generation_issue' => $bestPractice ? null : 'unsupported_generated_content',
                 'verified_at' => now(),
                 'verification_claimed_at' => null,
@@ -623,7 +751,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 $document->customer_id,
                 $originalContentOrigin,
                 EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
-                null,
+                $bestPractice ? null : $notSupportedReason,
             );
 
             return 'unsupported';
@@ -708,6 +836,21 @@ class EnterpriseWikiVerifyPageClaimsService
             return $verdict;
         }
 
+        // Run-38 fix: misattribution (the claim's named subject borrowing an action/property the
+        // excerpts actually describe for a DIFFERENT named subject) is not something numbers/
+        // negation/modality/actor/scope text-matching can detect — those check FACTS, not WHICH
+        // named entity a fact belongs to. The AI is asked to reason about this explicitly as its
+        // own "subject_entity" check (see WikiClaimVerificationAiClient's prompt); a
+        // self-reported mismatch there is never allowed to still resolve as supported, exactly
+        // like the raw-text conflict check below.
+        if (($result['checks']['subject_entity'] ?? null) === 'mismatch') {
+            Log::warning('[WIKI_CLAIM_VERIFICATION] AI-reported subject-entity mismatch overrode a supported/partially_supported verdict.', [
+                'ai_verdict' => $verdict,
+            ]);
+
+            return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+        }
+
         $hadStructuredCandidates = $elementsByKey !== [];
         $supportingKeys = (array) ($result['supporting_source_element_keys'] ?? []);
 
@@ -718,7 +861,11 @@ class EnterpriseWikiVerifyPageClaimsService
                 $excerpt = trim((string) ($elementsByKey[$key]['source_excerpt'] ?? ''));
 
                 if ($excerpt !== '') {
-                    $supportingTexts[] = $excerpt;
+                    // Run-38 fix: narrow each cited excerpt to its claim-relevant sentence(s)
+                    // before combining — see EnterpriseWikiClaimCanonicalizationService::
+                    // filterToRelevantSentences() for why this is needed now that a claim may
+                    // legitimately cite several full paragraphs at once.
+                    $supportingTexts[] = $this->canonicalizationService->filterToRelevantSentences($claimText, $excerpt);
                 }
             }
 
@@ -731,6 +878,17 @@ class EnterpriseWikiVerifyPageClaimsService
             }
 
             $supportingText = implode("\n", $supportingTexts);
+
+            // Backstop for when the AI's own subject_entity self-report (checked above) misses a
+            // real misattribution — see detectSubjectMismatch()'s docblock for the concrete
+            // production case that motivated this.
+            if ($this->canonicalizationService->detectSubjectMismatch($claimText, $supportingTexts)) {
+                Log::warning('[WIKI_CLAIM_VERIFICATION] Deterministic subject-entity mismatch overrode an AI verdict of support.', [
+                    'ai_verdict' => $verdict,
+                ]);
+
+                return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+            }
         } else {
             // Legacy claim with no structured block source elements — the AI verified against
             // the whole-document fallback text, so that is what the deterministic check compares

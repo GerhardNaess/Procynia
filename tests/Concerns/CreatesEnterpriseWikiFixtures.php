@@ -128,6 +128,7 @@ trait CreatesEnterpriseWikiFixtures
             'time_and_date' => 'match',
             'scope' => 'match',
             'conditions_and_exceptions' => 'not_applicable',
+            'subject_entity' => 'match',
         ], $checkOverrides);
 
         return [

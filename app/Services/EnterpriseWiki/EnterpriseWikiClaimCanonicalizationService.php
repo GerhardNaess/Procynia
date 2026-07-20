@@ -234,6 +234,144 @@ class EnterpriseWikiClaimCanonicalizationService
     }
 
     /**
+     * Run-38 fix: a claim is deterministically SUPPORTED — without any AI call at all — when its
+     * own text is already, verbatim or near-verbatim (after the same markdown/whitespace/case
+     * normalization EnterpriseWikiClaimAnchorTextNormalizer uses for anchor checking), a
+     * CONTIGUOUS substring of its candidate source excerpts combined in source-document order.
+     *
+     * Deliberately a strict substring check, not a bag-of-words token-overlap measure: a
+     * token-overlap score across a combined multi-paragraph corpus produces false positives for
+     * misattribution — a claim naming the WRONG named entity/process can still score high word
+     * overlap purely because the right words appear somewhere else in the combined text (verified
+     * against real run-38 data: claim "Hendelseshåndtering bidrar til forutsigbar registrering,
+     * prioritering og oppfølging..." scores 90% token coverage against its combined excerpts
+     * despite that function actually being described for "Brukerstøtte", not "Hendelseshåndtering",
+     * in the source — a substring check correctly finds no match and correctly leaves this claim
+     * to full semantic AI judgment instead of silently approving a misattribution).
+     *
+     * Genuine paraphrase/synthesis across excerpts that is NOT a verbatim substring is
+     * deliberately left to WikiClaimVerificationAiClient, whose prompt explicitly allows combining
+     * excerpts about the same named entity while still rejecting misattribution and reinforcement
+     * — a substring check has no way to make that judgment safely, so it does not try to.
+     *
+     * @param  list<string>  $orderedCandidateExcerpts  in source-document order
+     */
+    public function detectDeterministicSupport(string $claimText, array $orderedCandidateExcerpts): bool
+    {
+        $combined = trim(implode(' ', array_filter(
+            $orderedCandidateExcerpts,
+            static fn (string $excerpt): bool => trim($excerpt) !== '',
+        )));
+
+        if ($combined === '' || trim($claimText) === '') {
+            return false;
+        }
+
+        return $this->textNormalizer->contains($combined, $claimText);
+    }
+
+    /**
+     * Run-38 fix: restricts a candidate excerpt to only the sentence(s) sharing at least one
+     * significant token with the claim, before it is combined with other cited excerpts for
+     * detectDeterministicConflict(). Necessary now that a claim may legitimately combine evidence
+     * from several full paragraphs (Del: combined-evidence synthesis): a long cited excerpt
+     * routinely contains an entirely unrelated sentence elsewhere — different clause, different
+     * topic — that happens to carry its own incidental negation/modality/scope marker. Comparing
+     * the claim against the WHOLE excerpt treats that irrelevant sentence's marker as if it were
+     * part of the evidence actually supporting the claim (verified against real run-38 data:
+     * paragraph-11's closing sentence "... endringer gjennomføres uten å sette stabilitet ... i
+     * fare" shares no token with a claim about ITIL governance, yet its "uten" alone triggered a
+     * false negation_mismatch once paragraph-11 was legitimately cited alongside others).
+     *
+     * This never changes what counts as a conflict, only which text is considered "the specific
+     * excerpt(s) cited as support" — detectDeterministicConflict() itself, and every actor/
+     * negation/modality/number/scope rule inside it, is untouched. Falls back to the full excerpt
+     * when no sentence shares a token with the claim (a stricter, safer default than silently
+     * discarding an excerpt this check cannot confidently narrow down).
+     */
+    public function filterToRelevantSentences(string $claimText, string $excerptText): string
+    {
+        $claimTokens = array_unique($this->significantTokens($this->textNormalizer->normalize($claimText)));
+
+        if ($claimTokens === [] || trim($excerptText) === '') {
+            return $excerptText;
+        }
+
+        $sentences = preg_split('/(?<=[.!?])\s+/u', trim($excerptText), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $relevant = array_values(array_filter($sentences, function (string $sentence) use ($claimTokens): bool {
+            $sentenceTokens = $this->significantTokens($this->textNormalizer->normalize($sentence));
+
+            return array_intersect($claimTokens, $sentenceTokens) !== [];
+        }));
+
+        return $relevant !== [] ? implode(' ', $relevant) : $excerptText;
+    }
+
+    /**
+     * Run-38 fix: a deterministic backstop against misattribution, for when the AI's own
+     * self-reported "subject_entity" check (WikiClaimVerificationAiClient) is not reliable enough
+     * on its own — verified against real production data (run 38, claim 4048): the model
+     * repeatedly self-reported "subject_entity: match" for a claim that borrows "Brukerstøtte"'s
+     * specifically-described function ("registrering, prioritering og oppfølging") and attaches
+     * it to "Hendelseshåndtering", which is named only in a DIFFERENT excerpt's generic list of
+     * related ITIL practices — even after two rounds of explicit prompt refinement including a
+     * worked example of exactly this pattern.
+     *
+     * Only relevant once 2+ excerpts are combined (Del: combined-evidence synthesis) — a single-
+     * excerpt claim was never affected by this failure mode before that fix. Flags a likely
+     * misattribution when a cited excerpt does NOT mention the claim's own leading subject term at
+     * all, yet still covers a large share of the claim's OTHER distinguishing tokens — i.e. an
+     * excerpt that describes almost the whole claim in detail while never naming the claim's
+     * subject is a strong signal that description belongs to a different, unnamed-here entity.
+     *
+     * @param  list<string>  $citedExcerptTexts  the (already claim-relevant-sentence-filtered) text
+     *                                           of each excerpt the AI cited as support
+     */
+    public function detectSubjectMismatch(string $claimText, array $citedExcerptTexts): bool
+    {
+        if (count($citedExcerptTexts) < 2) {
+            return false;
+        }
+
+        $claimNorm = $this->textNormalizer->normalize($claimText);
+        $claimTokens = $this->significantTokens($claimNorm);
+
+        if (count($claimTokens) < 2) {
+            return false;
+        }
+
+        $subjectTerm = $claimTokens[0];
+        $otherTokens = array_values(array_unique(array_slice($claimTokens, 1)));
+
+        if ($otherTokens === []) {
+            return false;
+        }
+
+        foreach ($citedExcerptTexts as $excerpt) {
+            $excerptNorm = $this->textNormalizer->normalize($excerpt);
+
+            if ($excerptNorm === '' || $this->containsWord($excerptNorm, $subjectTerm)) {
+                continue;
+            }
+
+            $covered = 0;
+
+            foreach ($otherTokens as $token) {
+                if ($this->containsWord($excerptNorm, $token)) {
+                    $covered++;
+                }
+            }
+
+            if (($covered / count($otherTokens)) >= 0.4) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Del 3's conservative safety net for cross-language/paraphrase verification: a deterministic,
      * non-AI check for a genuine MEANING change between a claim and the specific source excerpt(s)
      * the AI verifier cited as support. This never runs against the whole candidate pool — only
@@ -296,13 +434,27 @@ class EnterpriseWikiClaimCanonicalizationService
      * negation of anything — excluded explicitly, since a bare word-boundary match on "ikke"
      * would otherwise treat every mention of a non-critical case as if the claim negated
      * something, causing false conflicts against claims that are actually a faithful match.
+     *
+     * Run-38 fix: a rhetorical "ikke X, men Y" / "not X, but Y" CONTRAST (e.g. "Leverandøren
+     * bruker ITIL ikke som en teoretisk modell, men som et styringsverktøy...") asserts Y — it is
+     * not a negation of any fact a claim would need to also state, unlike a plain negation
+     * ("ikke tilgjengelig i helgene"). This became a real false-positive source once claims were
+     * allowed to combine evidence from several candidate excerpts (Del: combined-evidence
+     * synthesis) — a long, multi-sentence excerpt cited only for its unrelated Y-clause could
+     * still contain an incidental "ikke ... men" elsewhere, wrongly blocking a claim that never
+     * negates anything itself. Only the contrastive span itself is stripped; a genuine standalone
+     * negation anywhere else in the same text still counts.
      */
     private function hasNegationMarker(string $normalizedText): bool
     {
         $withoutNegatedCompounds = preg_replace('/\bikke-/u', '', $normalizedText) ?? $normalizedText;
 
+        $withoutContrast = preg_replace('/\bikke\b[^.!?]*?\bmen\b/ui', '', $withoutNegatedCompounds)
+            ?? $withoutNegatedCompounds;
+        $withoutContrast = preg_replace('/\bnot\b[^.!?]*?\bbut\b/ui', '', $withoutContrast) ?? $withoutContrast;
+
         foreach (self::NEGATION_MARKERS as $marker) {
-            if ($this->containsWord($withoutNegatedCompounds, $marker)) {
+            if ($this->containsWord($withoutContrast, $marker)) {
                 return true;
             }
         }

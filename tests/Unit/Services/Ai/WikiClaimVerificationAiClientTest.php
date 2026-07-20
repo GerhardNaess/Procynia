@@ -60,6 +60,23 @@ class WikiClaimVerificationAiClientTest extends TestCase
         $this->assertSame([WikiClaimVerificationAiClient::FALLBACK_SOURCE_ELEMENT_KEY], $enum);
     }
 
+    public function test_developer_prompt_allows_combining_excerpts_about_the_same_entity(): void
+    {
+        $payload = $this->capturePayload();
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('synthesizes ONE topic/entity/process', $prompt);
+    }
+
+    public function test_developer_prompt_still_rejects_misattribution_and_reinforcement(): void
+    {
+        $payload = $this->capturePayload();
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('misattribution', $prompt);
+        $this->assertStringContainsString('reinforcement', $prompt);
+    }
+
     public function test_rejects_an_unknown_verdict(): void
     {
         $this->expectException(RuntimeException::class);
@@ -159,6 +176,7 @@ class WikiClaimVerificationAiClientTest extends TestCase
                 'time_and_date' => 'match',
                 'scope' => 'match',
                 'conditions_and_exceptions' => 'not_applicable',
+                'subject_entity' => 'match',
             ],
         ], $overrides);
     }

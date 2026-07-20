@@ -105,6 +105,25 @@ class EnterpriseWikiReevaluateRunClaimVerificationCommandTest extends TestCase
         );
     }
 
+    public function test_deterministic_verbatim_match_skips_ai_entirely(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createRunWithUnsupportedClaim(
+            $customer,
+            claimText: 'Critical incidents shall be responded to within 30 minutes.',
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldReceive('verifyClaim')->never();
+
+        $this->artisan('wiki:reevaluate-run-claim-verification', ['--run-id' => $run->id, '--apply' => true])
+            ->expectsOutputToContain('Newly supported (cross-language/paraphrase):    1')
+            ->assertExitCode(0);
+
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $fresh->content_origin);
+        $this->assertSame('deterministic_verbatim_match', $fresh->review_metadata['classification_basis'] ?? null);
+    }
+
     public function test_deterministic_conflict_keeps_the_claim_not_supported_and_is_reported(): void
     {
         $customer = $this->createCustomer();

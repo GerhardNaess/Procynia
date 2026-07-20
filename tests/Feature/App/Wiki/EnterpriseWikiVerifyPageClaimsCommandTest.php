@@ -310,7 +310,10 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT, $claim->sourceStatus());
         $this->assertFalse($claim->needsSourceWarning());
         $this->assertSame('unsupported_generated_content', $claim->generation_issue);
-        $this->assertNull($claim->review_reason);
+        // Run-38 fix: a not_supported verdict must keep the AI's own reason, not null — see
+        // EnterpriseWikiVerifyPageClaimsService::applyVerdictOutcome().
+        $this->assertSame('No candidate excerpt supports this claim.', $claim->review_reason);
+        $this->assertSame('semantic_verification', $claim->review_metadata['classification_basis'] ?? null);
     }
 
     public function test_explicit_best_practice_block_remains_best_practice_review_without_calling_verification_ai(): void
@@ -475,6 +478,125 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         ]);
 
         return [$run, $page, $version, $claim->fresh(), $document];
+    }
+
+    // =========================================================================
+    // Run-38 fix: deterministic verbatim/near-verbatim support — never calls AI
+    // =========================================================================
+
+    public function test_verbatim_claim_across_combined_excerpts_is_supported_without_calling_ai(): void
+    {
+        $customer = $this->createCustomer();
+        $claimText = 'Brukerstøtte fungerer som inngang til tjenestene og håndterer registrering, prioritering og oppfølging av hendelser og forespørsler.';
+
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            $claimText,
+            [
+                [
+                    'source_element_key' => 'paragraph-11',
+                    'source_element_type' => 'paragraph',
+                    'source_excerpt' => 'ITIL-praksiser som hendelseshåndtering, forespørselshåndtering, problemhåndtering, endringsstyring og kunnskapsforvaltning brukes som et felles fundament.',
+                    'page_reference' => 'Avsnitt 11',
+                ],
+                [
+                    'source_element_key' => 'paragraph-15',
+                    'source_element_type' => 'paragraph',
+                    // Word-for-word identical to the claim, exactly like run-38's real claim 4037.
+                    'source_excerpt' => $claimText,
+                    'page_reference' => 'Avsnitt 15',
+                ],
+            ],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->never();
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertSame('deterministic_verbatim_match', $claim->review_metadata['classification_basis'] ?? null);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_paraphrased_synthesis_claim_still_calls_ai_and_is_not_deterministically_matched(): void
+    {
+        $customer = $this->createCustomer();
+
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Leverandøren legger ITIL-rammeverk til grunn for styring, utvikling og daglig gjennomføring av IT-tjenester.',
+            [
+                [
+                    'source_element_key' => 'paragraph-8',
+                    'source_element_type' => 'paragraph',
+                    'source_excerpt' => 'Leverandøren legger ITIL til grunn for styring og videreutvikling av IT-tjenestene, og bruker rammeverket aktivt for å sikre kontroll, forutsigbarhet og etterprøvbarhet i leveransen.',
+                    'page_reference' => 'Avsnitt 8',
+                ],
+                [
+                    'source_element_key' => 'paragraph-9',
+                    'source_element_type' => 'paragraph',
+                    'source_excerpt' => 'Leverandøren bruker rammeverket som et styringsverktøy i det daglige arbeidet.',
+                    'page_reference' => 'Avsnitt 9',
+                ],
+            ],
+        );
+
+        // Not a verbatim/near-verbatim substring of either excerpt combined — this is exactly the
+        // kind of legitimate cross-paragraph synthesis the AI prompt (not the deterministic
+        // shortcut) must now be able to confirm.
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['paragraph-8', 'paragraph-9'],
+                reason: 'The claim synthesizes paragraph-8 (styring/videreutvikling) and paragraph-9 (daglig styringsverktøy) about the same process.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+    }
+
+    public function test_not_supported_verdict_stores_review_reason_and_metadata(): void
+    {
+        $customer = $this->createCustomer();
+
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Hendelseshåndtering bidrar til forutsigbar registrering, prioritering og oppfølging av saker som påvirker Kundens IT-tjenester.',
+            [[
+                'source_element_key' => 'paragraph-15',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Brukerstøtte fungerer som inngang til tjenestene og håndterer registrering, prioritering og oppfølging av hendelser og forespørsler.',
+                'page_reference' => 'Avsnitt 15',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'The described function is stated in the source about "Brukerstøtte", not "Hendelseshåndtering" — misattribution.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame(
+            'The described function is stated in the source about "Brukerstøtte", not "Hendelseshåndtering" — misattribution.',
+            $claim->review_reason,
+        );
+        $this->assertSame('semantic_verification', $claim->review_metadata['classification_basis'] ?? null);
+        $this->assertSame('not_supported', $claim->review_metadata['verdict'] ?? null);
     }
 
     public function test_cross_language_claim_is_verified_as_source_based_via_structured_candidate_element(): void
