@@ -16,8 +16,9 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -64,7 +65,7 @@ class WikiControllerTest extends TestCase
             $pages = data_get($inertia, 'props.pages', []);
 
             return data_get($inertia, 'component') === 'App/Wiki/Index'
-                && collect($pages)->contains(fn(array $p) => $p['id'] === $page->id);
+                && collect($pages)->contains(fn (array $p) => $p['id'] === $page->id);
         });
     }
 
@@ -80,7 +81,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($draft): bool {
             $pages = collect(data_get($inertia, 'props.pages', []));
 
-            return ! $pages->contains(fn(array $p) => $p['id'] === $draft->id);
+            return ! $pages->contains(fn (array $p) => $p['id'] === $draft->id);
         });
     }
 
@@ -96,7 +97,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($pending): bool {
             $pages = collect(data_get($inertia, 'props.pages', []));
 
-            return ! $pages->contains(fn(array $p) => $p['id'] === $pending->id);
+            return ! $pages->contains(fn (array $p) => $p['id'] === $pending->id);
         });
     }
 
@@ -739,6 +740,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $claims = data_get($inertia, 'props.claims', []);
             $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+
             return $ref !== null && ($ref['page_reference'] ?? null) === 'Avsnitt 3.2';
         });
     }
@@ -756,6 +758,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $claims = data_get($inertia, 'props.claims', []);
+
             return count($claims) === 1 && ($claims[0]['source_references'] ?? null) === [];
         });
     }
@@ -774,6 +777,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $claims = data_get($inertia, 'props.claims', []);
+
             return count($claims) === 1
                 && count($claims[0]['source_references'] ?? []) === 1;
         });
@@ -802,9 +806,10 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $claims = data_get($inertia, 'props.claims', []);
             $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+
             return $ref !== null
                 && count($claims[0]['source_references']) === 1
-                && !empty($ref['excerpt']);
+                && ! empty($ref['excerpt']);
         });
     }
 
@@ -823,6 +828,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $claims = data_get($inertia, 'props.claims', []);
             $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+
             return $ref !== null
                 && count($claims[0]['source_references']) === 1
                 && ($ref['excerpt'] === null || $ref['excerpt'] === '');
@@ -897,6 +903,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return $source !== null
                 && data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_COMPLETED;
         });
@@ -914,6 +921,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return $source !== null && $source['latest_ingest_run'] === null;
         });
     }
@@ -937,6 +945,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $ownDoc->id);
+
             // own doc has no run → null; foreign run must not appear
             return $source !== null && $source['latest_ingest_run'] === null;
         });
@@ -955,6 +964,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_QUEUED;
         });
     }
@@ -983,6 +993,130 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Actions layout: can_delete determines whether a user sees the row's delete action
+    // =========================================================================
+
+    public function test_sources_tab_marks_can_delete_true_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+
+            return $source !== null && $source['can_delete'] === true;
+        });
+    }
+
+    public function test_sources_tab_marks_can_delete_true_for_the_documents_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $owner->id])->save();
+
+        $response = $this->actingAs($owner)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+
+            return $source !== null && $source['can_delete'] === true;
+        });
+    }
+
+    public function test_sources_tab_marks_can_delete_false_for_an_unrelated_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $otherContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer);
+        $document->forceFill(['owner_user_id' => $owner->id])->save();
+
+        $response = $this->actingAs($otherContributor)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+
+            return $source !== null && $source['can_delete'] === false;
+        });
+    }
+
+    public function test_sources_tab_marks_can_delete_false_for_viewer(): void
+    {
+        $customer = $this->createCustomer();
+        $viewer = $this->createUser($customer, User::BID_ROLE_VIEWER);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($viewer)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+
+            return $source !== null && $source['can_delete'] === false;
+        });
+    }
+
+    // =========================================================================
+    // Actions layout: row action labels are short/button-like; the long delete text only
+    // appears in the confirmation dialog, never in the narrow table cell.
+    // =========================================================================
+
+    public function test_row_delete_action_label_is_short_not_the_full_confirmation_text(): void
+    {
+        $locale = app()->getLocale();
+        app()->setLocale('no');
+
+        $this->assertSame('Slett', trans('procynia.wiki.source_delete_button'));
+        $this->assertSame('Slett dokument og generert Wiki-innhold', trans('procynia.wiki.delete_confirm_button'));
+
+        app()->setLocale('en');
+        $this->assertSame('Delete', trans('procynia.wiki.source_delete_button'));
+        $this->assertSame('Delete document and generated Wiki content', trans('procynia.wiki.delete_confirm_button'));
+        app()->setLocale($locale);
+    }
+
+    public function test_ingest_action_label_reads_as_a_button_not_a_status(): void
+    {
+        $locale = app()->getLocale();
+        app()->setLocale('no');
+
+        $label = trans('procynia.wiki.source_ingest_button');
+        $this->assertSame('Lag Wiki-utkast', $label);
+        // Not a status word — this is the specific bug this layout fix corrects (Del: the button
+        // must never read like one of the Wiki-status chip labels, e.g. "I kø"/"Kjører"/"Fullført").
+        $this->assertNotContains($label, ['I kø', 'Kjører', 'Fullført', 'Feilet', 'Venter']);
+
+        app()->setLocale('en');
+        $this->assertSame('Create Wiki draft', trans('procynia.wiki.source_ingest_button'));
+        app()->setLocale($locale);
+    }
+
+    public function test_download_and_actions_column_translations_exist(): void
+    {
+        $locale = app()->getLocale();
+        app()->setLocale('no');
+
+        $this->assertSame('Last ned', trans('procynia.wiki.source_download_button'));
+        $this->assertSame('Handlinger', trans('procynia.wiki.source_col_actions'));
+
+        app()->setLocale('en');
+        $this->assertSame('Download', trans('procynia.wiki.source_download_button'));
+        $this->assertSame('Actions', trans('procynia.wiki.source_col_actions'));
+        app()->setLocale($locale);
+    }
+
+    // =========================================================================
     // Phase 4A-9: generated pages per source
     // =========================================================================
 
@@ -1002,7 +1136,8 @@ class WikiControllerTest extends TestCase
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
             $generatedPages = data_get($source, 'generated_pages', []);
-            return collect($generatedPages)->contains(fn(array $p) => $p['id'] === $page->id);
+
+            return collect($generatedPages)->contains(fn (array $p) => $p['id'] === $page->id);
         });
     }
 
@@ -1018,6 +1153,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return $source !== null && data_get($source, 'generated_pages', null) === [];
         });
     }
@@ -1041,6 +1177,7 @@ class WikiControllerTest extends TestCase
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $ownDoc->id);
             $pageIds = collect(data_get($source, 'generated_pages', []))->pluck('id');
+
             return ! $pageIds->contains($foreignPage->id);
         });
     }
@@ -1060,7 +1197,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
-            return collect($sources)->contains(fn(array $s) => $s['id'] === $document->id);
+
+            return collect($sources)->contains(fn (array $s) => $s['id'] === $document->id);
         });
     }
 
@@ -1077,6 +1215,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignDoc): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($ownDoc->id) && ! $ids->contains($foreignDoc->id);
         });
     }
@@ -1111,6 +1250,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $health = data_get($inertia, 'props.lint_health');
+
             return $health !== null
                 && $health['error'] === 0
                 && $health['warning'] === 0
@@ -1134,6 +1274,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $health = data_get($inertia, 'props.lint_health');
+
             return $health !== null
                 && $health['error'] === 1
                 && $health['warning'] === 2
@@ -1154,6 +1295,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $health = data_get($inertia, 'props.lint_health');
+
             return $health !== null && $health['total'] === 0;
         });
     }
@@ -1173,6 +1315,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $health = data_get($inertia, 'props.lint_health');
+
             return $health !== null && $health['total'] === 0;
         });
     }
@@ -1189,7 +1332,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
             $findings = data_get($inertia, 'props.lint_findings', []);
-            return collect($findings)->contains(fn(array $f) => $f['id'] === $finding->id);
+
+            return collect($findings)->contains(fn (array $f) => $f['id'] === $finding->id);
         });
     }
 
@@ -1222,6 +1366,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($own, $foreign): bool {
             $ids = collect(data_get($inertia, 'props.lint_findings', []))->pluck('id');
+
             return $ids->contains($own->id) && ! $ids->contains($foreign->id);
         });
     }
@@ -1240,6 +1385,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($foreignFinding): bool {
             $ids = collect(data_get($inertia, 'props.lint_findings', []))->pluck('id');
+
             return ! $ids->contains($foreignFinding->id);
         });
     }
@@ -1498,7 +1644,7 @@ class WikiControllerTest extends TestCase
             $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
 
             $response->assertOk();
-            $response->assertViewHas('page', function (array $inertia) use ($target, $pageType): bool {
+            $response->assertViewHas('page', function (array $inertia) use ($target): bool {
                 $rendered = data_get($inertia, 'props.current_version.rendered_markdown');
 
                 return $rendered !== null && str_contains($rendered, "(/app/wiki/{$target->slug})");
@@ -1570,7 +1716,7 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+        $response->assertViewHas('page', function (array $inertia): bool {
             return data_get($inertia, 'props.page.page_type') === EnterpriseWikiPage::PAGE_TYPE_ARTICLE;
         });
     }
@@ -1617,6 +1763,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($summary): bool {
             $links = data_get($inertia, 'props.outgoing_links', []);
             $found = collect($links)->firstWhere('id', $summary->id);
+
             return $found !== null
                 && $found['title'] === $summary->title
                 && $found['slug'] === $summary->slug
@@ -1637,7 +1784,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($summary): bool {
             $links = data_get($inertia, 'props.incoming_links', []);
-            return collect($links)->contains(fn(array $p) => $p['id'] === $summary->id);
+
+            return collect($links)->contains(fn (array $p) => $p['id'] === $summary->id);
         });
     }
 
@@ -1654,7 +1802,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($concept): bool {
             $concepts = data_get($inertia, 'props.related_concepts', []);
-            return collect($concepts)->contains(fn(array $p) => $p['id'] === $concept->id);
+
+            return collect($concepts)->contains(fn (array $p) => $p['id'] === $concept->id);
         });
     }
 
@@ -1671,7 +1820,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($entity): bool {
             $entities = data_get($inertia, 'props.related_entities', []);
-            return collect($entities)->contains(fn(array $p) => $p['id'] === $entity->id);
+
+            return collect($entities)->contains(fn (array $p) => $p['id'] === $entity->id);
         });
     }
 
@@ -1688,7 +1838,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($article): bool {
             $articles = data_get($inertia, 'props.related_articles', []);
-            return collect($articles)->contains(fn(array $p) => $p['id'] === $article->id);
+
+            return collect($articles)->contains(fn (array $p) => $p['id'] === $article->id);
         });
     }
 
@@ -1703,6 +1854,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $summary = data_get($inertia, 'props.lint_summary');
+
             return $summary !== null
                 && $summary['error'] === 0
                 && $summary['warning'] === 0
@@ -1725,6 +1877,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $summary = data_get($inertia, 'props.lint_summary');
+
             return $summary !== null
                 && $summary['error'] === 1
                 && $summary['warning'] === 2
@@ -1749,7 +1902,8 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($page2): bool {
             $incoming = data_get($inertia, 'props.incoming_links', []);
-            return ! collect($incoming)->contains(fn(array $p) => $p['id'] === $page2->id);
+
+            return ! collect($incoming)->contains(fn (array $p) => $p['id'] === $page2->id);
         });
     }
 
@@ -1779,8 +1933,8 @@ class WikiControllerTest extends TestCase
         $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
         $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
-        $linksBefore    = EnterpriseWikiPageLink::query()->count();
-        $claimsBefore   = EnterpriseWikiClaim::query()->count();
+        $linksBefore = EnterpriseWikiPageLink::query()->count();
+        $claimsBefore = EnterpriseWikiClaim::query()->count();
         $findingsBefore = EnterpriseWikiLintFinding::query()->count();
 
         $this->actingAs($user)->get('/app/wiki/'.$article->slug)->assertOk();
@@ -2092,16 +2246,16 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Skal overleve preview');
         $this->createIngestRunPage($run, $page);
 
-        $docsBefore  = EnterpriseWikiDocument::query()->count();
-        $runsBefore  = EnterpriseWikiIngestRun::query()->count();
+        $docsBefore = EnterpriseWikiDocument::query()->count();
+        $runsBefore = EnterpriseWikiIngestRun::query()->count();
         $pagesBefore = EnterpriseWikiPage::query()->count();
 
         $this->actingAs($user)
             ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
             ->assertOk();
 
-        $this->assertSame($docsBefore,  EnterpriseWikiDocument::query()->count());
-        $this->assertSame($runsBefore,  EnterpriseWikiIngestRun::query()->count());
+        $this->assertSame($docsBefore, EnterpriseWikiDocument::query()->count());
+        $this->assertSame($runsBefore, EnterpriseWikiIngestRun::query()->count());
         $this->assertSame($pagesBefore, EnterpriseWikiPage::query()->count());
     }
 
@@ -2329,12 +2483,12 @@ class WikiControllerTest extends TestCase
         string $linkType,
     ): EnterpriseWikiPageLink {
         return EnterpriseWikiPageLink::query()->create([
-            'customer_id'  => $customer->id,
+            'customer_id' => $customer->id,
             'from_page_id' => $from->id,
-            'to_page_id'   => $to->id,
-            'link_type'    => $linkType,
-            'source'       => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-            'confidence'   => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+            'to_page_id' => $to->id,
+            'link_type' => $linkType,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
         ]);
     }
 
@@ -2380,7 +2534,7 @@ class WikiControllerTest extends TestCase
     private function createIngestRun(Customer $customer, EnterpriseWikiDocument $document, string $status): EnterpriseWikiIngestRun
     {
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'customer_id' => $customer->id,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
@@ -2484,7 +2638,7 @@ class WikiControllerTest extends TestCase
         }
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'customer_id' => $customer->id,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
@@ -2498,7 +2652,7 @@ class WikiControllerTest extends TestCase
 
     private function createIngestRunPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $action = 'created'): void
     {
-        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insertOrIgnore([
+        DB::table('enterprise_wiki_ingest_run_pages')->insertOrIgnore([
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $page->id,
             'action' => $action,
@@ -2524,6 +2678,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_DECISION_ONLY;
         });
     }
@@ -2542,6 +2697,7 @@ class WikiControllerTest extends TestCase
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
             $json = data_get($source, 'latest_ingest_run.maintainer_decision_json');
+
             return is_array($json) && array_key_exists('source_article', $json);
         });
     }
@@ -2559,6 +2715,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return data_get($source, 'latest_ingest_run.maintainer_decision_status') === EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING;
         });
     }
@@ -2576,6 +2733,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return data_get($source, 'latest_ingest_run.maintainer_decision_generated_at') !== null;
         });
     }
@@ -2592,7 +2750,7 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($document, $run): bool {
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
             $latestRun = data_get($source, 'latest_ingest_run');
@@ -2621,6 +2779,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $ownDoc->id);
+
             // Own doc has no run; foreign decision must not appear
             return $source !== null && $source['latest_ingest_run'] === null;
         });
@@ -2639,6 +2798,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
             $sources = data_get($inertia, 'props.sources', []);
             $source = collect($sources)->firstWhere('id', $document->id);
+
             return data_get($source, 'latest_ingest_run.maintainer_decision_json') === null;
         });
     }
@@ -2718,8 +2878,9 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($run): bool {
             $runs = data_get($inertia, 'props.runs', []);
+
             return data_get($inertia, 'props.active_tab') === 'runs'
-                && collect($runs)->contains(fn(array $r) => $r['id'] === $run->id);
+                && collect($runs)->contains(fn (array $r) => $r['id'] === $run->id);
         });
     }
 
@@ -2738,6 +2899,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownRun, $foreignRun): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($ownRun->id) && ! $ids->contains($foreignRun->id);
         });
     }
@@ -2754,8 +2916,9 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
             $findings = data_get($inertia, 'props.quality_findings', []);
+
             return data_get($inertia, 'props.active_tab') === 'quality'
-                && collect($findings)->contains(fn(array $f) => $f['id'] === $finding->id);
+                && collect($findings)->contains(fn (array $f) => $f['id'] === $finding->id);
         });
     }
 
@@ -2773,6 +2936,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($foreignFinding): bool {
             $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+
             return ! $ids->contains($foreignFinding->id);
         });
     }
@@ -2794,6 +2958,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($error, $warning): bool {
             $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+
             return $ids->contains($error->id) && ! $ids->contains($warning->id);
         });
     }
@@ -2828,6 +2993,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($missingSource, $missingExcerpt): bool {
             $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+
             return $ids->contains($missingSource->id) && ! $ids->contains($missingExcerpt->id);
         });
     }
@@ -2840,14 +3006,14 @@ class WikiControllerTest extends TestCase
         $articlePage = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'title' => 'Article side',
-            'slug' => 'article-side-' . uniqid(),
+            'slug' => 'article-side-'.uniqid(),
             'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
         ]);
         $conceptPage = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'title' => 'Concept side',
-            'slug' => 'concept-side-' . uniqid(),
+            'slug' => 'concept-side-'.uniqid(),
             'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
         ]);
@@ -2860,6 +3026,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($articleFinding, $conceptFinding): bool {
             $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+
             return $ids->contains($articleFinding->id) && ! $ids->contains($conceptFinding->id);
         });
     }
@@ -2876,6 +3043,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
             $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+
             return $ids->contains($finding->id);
         });
     }
@@ -2890,6 +3058,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $f = data_get($inertia, 'props.quality_filters');
+
             return $f !== null
                 && $f['severity'] === 'error'
                 && $f['page_type'] === 'article';
@@ -2921,6 +3090,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($finding, $run): bool {
             $found = collect(data_get($inertia, 'props.quality_findings', []))
                 ->firstWhere('id', $finding->id);
+
             return $found !== null
                 && $found['run_id'] === $run->id
                 && isset($found['page_type'])
@@ -3042,6 +3212,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $findings = data_get($inertia, 'props.quality_findings', []);
+
             return is_array($findings) && count($findings) === 0;
         });
     }
@@ -3066,6 +3237,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $coverage = data_get($inertia, 'props.coverage');
+
             return is_array($coverage)
                 && array_key_exists('source_coverage', $coverage)
                 && array_key_exists('page_quality', $coverage)
@@ -3080,7 +3252,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'uuid' => (string) Str::uuid(),
             'customer_id' => $customer->id,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $doc->id,
@@ -3097,6 +3269,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $sc = data_get($inertia, 'props.coverage.source_coverage');
+
             return is_array($sc)
                 && $sc['extracted_documents'] === 1
                 && $sc['documents_with_applied_run'] === 1;
@@ -3115,6 +3288,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $pq = data_get($inertia, 'props.coverage.page_quality');
+
             return is_array($pq) && $pq['total'] === 2;
         });
     }
@@ -3132,6 +3306,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $cc = data_get($inertia, 'props.coverage.claim_coverage');
+
             return is_array($cc)
                 && $cc['claims_total'] === 1
                 && $cc['claims_without_source_reference'] === 1;
@@ -3151,6 +3326,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $lint = data_get($inertia, 'props.coverage.lint');
+
             return is_array($lint)
                 && $lint['open_errors'] === 1
                 && $lint['open_warnings'] === 1;
@@ -3168,6 +3344,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $gaps = data_get($inertia, 'props.coverage.source_coverage.gaps', []);
+
             return count($gaps) === 1;
         });
     }
@@ -3186,6 +3363,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $pq = data_get($inertia, 'props.coverage.page_quality');
             $sc = data_get($inertia, 'props.coverage.source_coverage');
+
             return $pq['total'] === 0 && $sc['extracted_documents'] === 0;
         });
     }
@@ -3216,6 +3394,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($match, $noMatch): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($match->id) && ! $ids->contains($noMatch->id);
         });
     }
@@ -3231,6 +3410,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($match): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($match->id);
         });
     }
@@ -3247,6 +3427,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($concept, $article): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($concept->id) && ! $ids->contains($article->id);
         });
     }
@@ -3263,6 +3444,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($draft, $approved): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($draft->id) && ! $ids->contains($approved->id);
         });
     }
@@ -3280,6 +3462,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($errorPage, $cleanPage): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($errorPage->id) && ! $ids->contains($cleanPage->id);
         });
     }
@@ -3297,6 +3480,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($warnPage, $cleanPage): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($warnPage->id) && ! $ids->contains($cleanPage->id);
         });
     }
@@ -3314,6 +3498,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($cleanPage, $errorPage): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($cleanPage->id) && ! $ids->contains($errorPage->id);
         });
     }
@@ -3331,6 +3516,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($match, $wrongType, $wrongTitle): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($match->id)
                 && ! $ids->contains($wrongType->id)
                 && ! $ids->contains($wrongTitle->id);
@@ -3348,6 +3534,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($page): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($page->id);
         });
     }
@@ -3363,6 +3550,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($page): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($page->id);
         });
     }
@@ -3379,6 +3567,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($approved): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($approved->id);
         });
     }
@@ -3397,6 +3586,7 @@ class WikiControllerTest extends TestCase
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id')->values();
             $posA = $ids->search($a->id);
             $posB = $ids->search($b->id);
+
             return $posA !== false && $posB !== false && $posA < $posB;
         });
     }
@@ -3411,6 +3601,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $filters = data_get($inertia, 'props.pages_filters');
+
             return $filters !== null && $filters['sort'] === 'updated_at_desc';
         });
     }
@@ -3425,6 +3616,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $f = data_get($inertia, 'props.pages_filters');
+
             return $f !== null
                 && $f['search'] === 'foo'
                 && $f['page_type'] === 'concept'
@@ -3443,6 +3635,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $meta = data_get($inertia, 'props.pages_meta');
+
             return $meta !== null
                 && array_key_exists('current_page', $meta)
                 && array_key_exists('per_page', $meta)
@@ -3464,6 +3657,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownPage, $foreignPage): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
             return $ids->contains($ownPage->id) && ! $ids->contains($foreignPage->id);
         });
     }
@@ -3497,6 +3691,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($matchDoc, $noMatchDoc): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($matchDoc->id) && ! $ids->contains($noMatchDoc->id);
         });
     }
@@ -3513,6 +3708,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($extracted, $failed): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($extracted->id) && ! $ids->contains($failed->id);
         });
     }
@@ -3541,6 +3737,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($match, $wrongStatus): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($match->id) && ! $ids->contains($wrongStatus->id);
         });
     }
@@ -3556,6 +3753,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($doc): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($doc->id);
         });
     }
@@ -3570,6 +3768,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $f = data_get($inertia, 'props.sources_filters');
+
             return $f !== null
                 && $f['search'] === 'test'
                 && $f['status'] === 'extracted';
@@ -3589,6 +3788,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignDoc): bool {
             $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+
             return $ids->contains($ownDoc->id) && ! $ids->contains($foreignDoc->id);
         });
     }
@@ -3612,6 +3812,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownRun, $foreignRun): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($ownRun->id) && ! $ids->contains($foreignRun->id);
         });
     }
@@ -3622,7 +3823,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
-        $page = $this->createPage($customer, \App\Models\EnterpriseWikiPage::STATUS_APPROVED, 'Testside');
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Testside');
         $this->createIngestRunPage($run, $page);
 
         $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
@@ -3631,6 +3832,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($run, $doc): bool {
             $runs = data_get($inertia, 'props.runs', []);
             $found = collect($runs)->firstWhere('id', $run->id);
+
             return $found !== null
                 && $found['source_document_filename'] === $doc->original_filename
                 && isset($found['pages_count'])
@@ -3657,6 +3859,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($completed, $failed): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($completed->id) && ! $ids->contains($failed->id);
         });
     }
@@ -3676,6 +3879,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($applied, $pending): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($applied->id) && ! $ids->contains($pending->id);
         });
     }
@@ -3694,6 +3898,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($noDecision, $withDecision): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($noDecision->id) && ! $ids->contains($withDecision->id);
         });
     }
@@ -3712,6 +3917,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($runA, $runB): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($runA->id) && ! $ids->contains($runB->id);
         });
     }
@@ -3728,6 +3934,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($run): bool {
             $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+
             return $ids->contains($run->id);
         });
     }
@@ -3742,6 +3949,7 @@ class WikiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia): bool {
             $f = data_get($inertia, 'props.runs_filters');
+
             return $f !== null
                 && $f['status'] === 'completed'
                 && $f['decision'] === 'applied';

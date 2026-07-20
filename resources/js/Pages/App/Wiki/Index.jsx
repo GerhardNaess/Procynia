@@ -23,6 +23,15 @@ function formatTime(value, locale) {
 
 const BADGE = 'inline-flex h-6 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap';
 
+// Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
+// border, no hover/focus state) so an action always reads as a clickable control, never as a
+// status label. Base carries layout + a11y (focus ring, disabled state, no word-wrapping inside
+// the label); variants only change color/emphasis.
+const ACTION_BUTTON_BASE = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
+const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
+const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
+const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
+
 const STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     pending_review: 'bg-amber-100 text-amber-700',
@@ -1814,12 +1823,11 @@ function SourcesTab({
                             <table className="min-w-full table-fixed divide-y divide-slate-100">
                                 <colgroup>
                                     <col />
-                                    <col style={{ width: '130px' }} />
-                                    <col style={{ width: '120px' }} />
+                                    <col style={{ width: '110px' }} />
+                                    <col style={{ width: '110px' }} />
                                     <col style={{ width: '220px' }} />
-                                    <col style={{ width: '260px' }} />
-                                    <col style={{ width: '56px' }} />
-                                    <col style={{ width: '210px' }} />
+                                    <col style={{ width: '200px' }} />
+                                    <col style={{ width: '420px' }} />
                                 </colgroup>
                                 <thead className="bg-slate-50">
                                     <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
@@ -1828,8 +1836,7 @@ function SourcesTab({
                                         <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
                                         <th className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
                                         <th className="px-4 py-3">{tw.source_col_owner ?? 'Dokumenteier'}</th>
-                                        <th className="px-4 py-3 text-center">{tw.source_col_source ?? 'Kilde'}</th>
-                                        <th className="px-4 py-3 text-right">{tw.source_col_actions ?? 'Handlinger'}</th>
+                                        <th className="px-4 py-3">{tw.source_col_actions ?? 'Handlinger'}</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50 bg-white">
@@ -1916,28 +1923,30 @@ function SourcesTab({
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 align-top text-center">
-                                                <a
-                                                    href={`/app/wiki/sources/${source.id}/download`}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    aria-label={tw.source_open_document ?? 'Åpne kildedokument'}
-                                                    title={tw.source_open_document ?? 'Åpne kildedokument'}
-                                                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                                                >
-                                                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                        <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                                                        <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                                                    </svg>
-                                                </a>
-                                            </td>
                                             <td className="px-4 py-3 align-top">
-                                                <div className="flex flex-col items-end gap-2">
-                                                    <div className="flex items-center gap-3">
+                                                <div className="flex flex-col items-start gap-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <a
+                                                            href={`/app/wiki/sources/${source.id}/download`}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className={ACTION_BUTTON_SECONDARY}
+                                                        >
+                                                            <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                            </svg>
+                                                            {tw.source_download_button ?? 'Last ned'}
+                                                        </a>
                                                         {source.document_status === 'extracted' && (
                                                             <button
                                                                 type="button"
                                                                 disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
+                                                                title={
+                                                                    !wikiGenerationAvailable
+                                                                        ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
+                                                                        : (isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined)
+                                                                }
                                                                 onClick={() => {
                                                                     if (ingestingIds.has(source.id)) return;
                                                                     setIngestingIds((prev) => new Set(prev).add(source.id));
@@ -1954,11 +1963,14 @@ function SourcesTab({
                                                                         },
                                                                     );
                                                                 }}
-                                                                className="inline-flex h-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                className={ACTION_BUTTON_PRIMARY}
                                                             >
+                                                                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.25a.75.75 0 00-1.5 0v2.5h-2.5a.75.75 0 000 1.5h2.5v2.5a.75.75 0 001.5 0v-2.5h2.5a.75.75 0 000-1.5h-2.5v-2.5z" clipRule="evenodd" />
+                                                                </svg>
                                                                 {ingestingIds.has(source.id)
                                                                     ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                    : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                                    : (tw.source_ingest_button ?? 'Lag Wiki-utkast')}
                                                             </button>
                                                         )}
                                                         {canDelete && (
@@ -1967,23 +1979,23 @@ function SourcesTab({
                                                                 disabled={isInProgress}
                                                                 title={isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
                                                                 onClick={() => handleDeleteClick(source)}
-                                                                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                                                                className={ACTION_BUTTON_DESTRUCTIVE}
                                                             >
-                                                                <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                                     <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
                                                                 </svg>
-                                                                {tw.source_delete_button ?? 'Slett dokument og generert Wiki-innhold'}
+                                                                {tw.source_delete_button ?? 'Slett'}
                                                             </button>
                                                         )}
                                                     </div>
                                                     <Link
                                                         href={`/app/wiki?tab=runs&run_src=${source.id}`}
-                                                        className="text-right text-[11px] text-slate-400 hover:text-violet-600 hover:underline"
+                                                        className="text-[11px] text-slate-400 hover:text-violet-600 hover:underline"
                                                     >
                                                         {tw.runs_view_runs ?? 'Kjøringer'}
                                                     </Link>
                                                     {source.document_status === 'extracted' && !wikiGenerationAvailable && (
-                                                        <span className="text-right text-[11px] text-slate-400">
+                                                        <span className="text-[11px] text-slate-400">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
                                                         </span>
                                                     )}
