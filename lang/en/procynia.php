@@ -3008,6 +3008,13 @@ return [
         'show_page_help_item_best_practice_decide_text' => 'You can approve the suggestion as-is, edit the text and approve it, or reject it. The decision applies to the specific text it was suggested for.',
         'show_page_help_item_best_practice_defect_title' => 'Undocumented factual claims are different',
         'show_page_help_item_best_practice_defect_text' => 'Text presented as an actual fact about the customer, but not supported by the source and not classified as best practice either, is still treated as a quality defect.',
+        'show_page_help_section_blocking' => 'Severity and blocking',
+        'show_page_help_item_blocking_categories_title' => 'Every finding gets a concrete explanation',
+        'show_page_help_item_blocking_categories_text' => "Findings are no longer shown with one generic default message. Every finding shows the specific claim, what the system thinks deviates, and why.",
+        'show_page_help_item_blocking_technical_title' => 'A technical uncertainty is not the same as a content error',
+        'show_page_help_item_blocking_technical_text' => "When the system could not find a confident link between a claim and a source paragraph, this is shown as a technical uncertainty — not as a confirmed content error. Such findings usually do not block by default.",
+        'show_page_help_item_blocking_override_title' => 'You can keep or remove blocking',
+        'show_page_help_item_blocking_override_text' => "The system suggests whether a finding should block, but an authorized user can override this. The decision is stored with the user, timestamp, and any comment.",
         'page_help_section_workflow' => 'The workflow',
         'page_help_item_workflow_source_title' => 'The source document comes first',
         'page_help_item_workflow_source_text' => 'A source document is uploaded and becomes the basis for a new Wiki page.',
@@ -3470,9 +3477,128 @@ return [
         'verification_basis_best_practice_no_source_search' => 'This is not presented as documented customer knowledge. Review the wording or reject it. You should not search for a missing source.',
         'verification_basis_best_practice_edit_label' => 'Edit and approve',
         'verification_basis_page_excerpt_label' => 'Text in the Wiki page',
-        'verification_basis_internal_issues_heading' => 'Internal generation deviations',
-        'verification_basis_internal_issues_intro' => 'These claims are hidden from ordinary Document Owner work because they lack stable basis or are not supported by the sources.',
+        'verification_basis_internal_issues_heading' => 'Technical uncertainties',
+        'verification_basis_internal_issues_intro' => 'The system could not find a confident link between this claim, the Wiki text, and a source paragraph. That does not necessarily mean the claim is wrong — see the explanation under each finding.',
         'verification_basis_generation_issue_label' => 'Reason',
+
+        // Claim finding categories (Runs → Findings and Verification basis) — every finding gets a
+        // concrete category, title, and explanation instead of one generic default message. See
+        // App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer.
+        'claim_finding_category_undocumented_or_incorrect_claim' => 'Undocumented or incorrect factual claim',
+        'claim_finding_category_possible_content_deviation' => 'Possible content deviation',
+        'claim_finding_category_technical_uncertainty' => 'Technical uncertainty',
+        'claim_finding_action_undocumented_or_incorrect_claim' => 'Check the claim against the source. Approve it if it still holds, reject it if it is wrong, or keep/remove the blocking as you see fit.',
+        'claim_finding_action_possible_content_deviation' => 'Compare the claim with the source text. The deviation is not confirmed — assess whether it is real before deciding.',
+        'claim_finding_action_technical_uncertainty' => 'This is a technical linking uncertainty, not a confirmed content error. Review the page, and keep or remove the blocking as you see fit.',
+        'claim_finding' => [
+            'stale_version' => [
+                'title' => 'Stale page link',
+                'explanation' => 'The claim is linked to an earlier version of the Wiki page, not the one that applies now.',
+            ],
+            'missing_block' => [
+                'title' => 'Text block not found',
+                'explanation' => 'The text block the claim was linked to no longer exists in the current page version.',
+            ],
+            'ambiguous_block_link' => [
+                'title' => 'Uncertain block link',
+                'explanation' => 'The system found two possible text blocks for this claim and could not safely choose between them.',
+            ],
+            'no_confident_source_link' => [
+                'title' => 'No confident source link',
+                'explanation' => 'The system found no confident link to a source paragraph for this text.',
+            ],
+            'technical_link_issue' => [
+                'title' => 'Technical linking deviation',
+                'explanation' => 'The system could not confidently link the claim to the page content for technical reasons.',
+            ],
+            'contradicted' => [
+                'title' => 'Contradicts the source',
+                'explanation' => 'The claim directly contradicts the content in the source.',
+            ],
+            'partially_supported' => [
+                'title' => 'Partially documented',
+                'explanation' => 'Part of the claim is documented in the source, but not all of it.',
+            ],
+            'actor_mismatch' => [
+                'title' => 'Wrong actor',
+                'explanation' => 'The claim attributes the action to the wrong actor compared with the source.',
+            ],
+            'modality_mismatch' => [
+                'title' => 'Stronger than the source',
+                'explanation' => 'The claim is stronger than the source. The source uses a weaker word (e.g. "may"), while the claim uses a stronger one (e.g. "shall").',
+            ],
+            'negation_mismatch' => [
+                'title' => 'Contradicts a negation in the source',
+                'explanation' => 'The source states that something does not happen (or vice versa), while the claim states the opposite.',
+            ],
+            'scope_mismatch' => [
+                'title' => 'Broader than the source',
+                'explanation' => 'The claim covers a broader scope than the source (e.g. "all cases", where the source only describes a limited case).',
+            ],
+            'number_mismatch' => [
+                'title' => 'Number deviation',
+                'explanation' => 'A number or quantity in the claim does not match the source.',
+            ],
+            'currency_mismatch' => [
+                'title' => 'Amount deviation',
+                'explanation' => 'An amount or currency in the claim does not match the source.',
+            ],
+            'subject_mismatch' => [
+                'title' => 'Wrong attribution',
+                'explanation' => 'The claim attributes information to a different subject or actor than the one the source actually describes.',
+            ],
+            'possible_actor' => [
+                'title' => 'Possible wrong actor',
+                'explanation' => 'The system found a possible deviation in who performs the action, compared with the source. Not confirmed.',
+            ],
+            'possible_action' => [
+                'title' => 'Possible action deviation',
+                'explanation' => 'The system found a possible deviation in which action is described, compared with the source. Not confirmed.',
+            ],
+            'possible_object' => [
+                'title' => 'Possible object deviation',
+                'explanation' => 'The system found a possible deviation in what the action concerns, compared with the source. Not confirmed.',
+            ],
+            'possible_modality' => [
+                'title' => 'Possible strength deviation',
+                'explanation' => 'The system found a possible deviation in how strongly the claim is phrased compared with the source (e.g. "may" vs "shall"). Not confirmed.',
+            ],
+            'possible_negation' => [
+                'title' => 'Possible contradiction',
+                'explanation' => 'The system found a possible negation that does not match the source. Not confirmed.',
+            ],
+            'possible_numbers_and_units' => [
+                'title' => 'Possible number deviation',
+                'explanation' => 'The system found a possible deviation in numbers or quantities compared with the source. Not confirmed.',
+            ],
+            'possible_time_and_date' => [
+                'title' => 'Possible time or date deviation',
+                'explanation' => 'The system found a possible deviation in time or date compared with the source. Not confirmed.',
+            ],
+            'possible_scope' => [
+                'title' => 'Possible scope deviation',
+                'explanation' => 'The system found a possible deviation in the scope of the claim compared with the source. Not confirmed.',
+            ],
+            'possible_conditions_and_exceptions' => [
+                'title' => 'Possible condition or exception deviation',
+                'explanation' => 'The system found a possible deviation in conditions or exceptions compared with the source. Not confirmed.',
+            ],
+            'no_source_support' => [
+                'title' => 'No source coverage found',
+                'explanation_no_detail' => 'The system found no source excerpt supporting this claim, and has no further detail stored for this finding.',
+            ],
+        ],
+
+        // Blocking — separate from severity. See the product rules in CLAUDE.md.
+        'claim_blocking_label' => 'Blocks',
+        'claim_blocking_yes' => 'Yes, blocks',
+        'claim_blocking_no' => 'No, does not block',
+        'claim_blocking_reason_label' => 'Why',
+        'claim_blocking_reason_default' => "The system's suggestion, not yet overridden by a user.",
+        'claim_blocking_reason_overridden' => 'Overridden by :name on :date.',
+        'keep_blocking_button' => 'Keep blocking',
+        'remove_blocking_button' => 'Remove blocking / approve the deviation',
+        'blocking_comment_placeholder' => 'Optional comment for the decision',
         'claim_source_status_found' => 'Source basis found',
         'claim_source_status_missing_excerpt' => 'Source basis is missing an excerpt',
         'claim_source_status_manually_approved' => 'Manually approved without a source reference',

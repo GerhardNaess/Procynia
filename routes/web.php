@@ -332,5 +332,6 @@ Route::prefix('app')
             Route::patch('/{slug}/claims/{claim}/approve', [WikiClaimController::class, 'approve'])->name('claims.approve');
             Route::patch('/{slug}/claims/{claim}/reject', [WikiClaimController::class, 'reject'])->name('claims.reject');
             Route::patch('/{slug}/claims/{claim}/unapprove', [WikiClaimController::class, 'unapprove'])->name('claims.unapprove');
+            Route::patch('/{slug}/claims/{claim}/blocking', [WikiClaimController::class, 'updateBlockingOverride'])->name('claims.blocking.update');
         });
     });

@@ -44,14 +44,35 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
     // QA gating (Del 10, items 5-9)
     // =========================================================================
 
-    public function test_active_internal_error_claim_blocks_qa_passed(): void
+    public function test_active_internal_error_claim_does_not_block_qa_passed_by_default(): void
     {
+        // Product rule: internal_error is a technical uncertainty (missing/ambiguous block-source
+        // link), not a confirmed content error — it no longer suggests blocking by default (see
+        // EnterpriseWikiClaimFindingExplainer::suggestedBlocking()). An authorized user can still
+        // opt back in via blocking_override — see the next test.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
         $version = $this->currentVersion($article);
         $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertNotContains('active_internal_error_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_active_internal_error_claim_blocks_qa_passed_when_override_kept(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, blockingOverride: true);
         $this->markStepsComplete($run);
 
         $result = $this->qaService()->runForRun($run);
@@ -263,7 +284,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $customer = $this->createCustomer();
         $page = $this->createPendingPage($customer, 'preview-blocked-page');
         $version = $this->createCurrentVersion($page);
-        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
+        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, blockingOverride: true);
 
         $requirements = app(EnterpriseWikiDocumentOwnerApprovalService::class)->previewRequirementsForPageVersion($version);
 
@@ -496,13 +517,14 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
             ->firstOrFail();
     }
 
-    private function createClaim(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $contentOrigin): EnterpriseWikiClaim
+    private function createClaim(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $contentOrigin, ?bool $blockingOverride = null): EnterpriseWikiClaim
     {
         return EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Test claim.',
             'content_origin' => $contentOrigin,
+            'blocking_override' => $blockingOverride,
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,

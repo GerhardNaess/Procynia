@@ -88,6 +88,9 @@ class EnterpriseWikiClaim extends Model
         'review_reason',
         'review_metadata',
         'generation_issue',
+        'blocking_override',
+        'blocking_override_by_user_id',
+        'blocking_override_at',
         'position_order',
         'confidence',
         'conflict_flag',
@@ -105,6 +108,8 @@ class EnterpriseWikiClaim extends Model
         return [
             'position_order' => 'integer',
             'conflict_flag' => 'boolean',
+            'blocking_override' => 'boolean',
+            'blocking_override_at' => 'datetime',
             'approved_at' => 'datetime',
             'verified_at' => 'datetime',
             'verification_claimed_at' => 'datetime',
@@ -130,6 +135,11 @@ class EnterpriseWikiClaim extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by_user_id');
+    }
+
+    public function blockingOverrideBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'blocking_override_by_user_id');
     }
 
     public function sourceReferences(): HasMany
@@ -160,6 +170,11 @@ class EnterpriseWikiClaim extends Model
     public function reconciliationAttempts(): HasMany
     {
         return $this->hasMany(EnterpriseWikiClaimSourceReconciliationAttempt::class);
+    }
+
+    public function decisions(): HasMany
+    {
+        return $this->hasMany(EnterpriseWikiClaimDecision::class)->latest('created_at');
     }
 
     public function hasSourceReference(): bool

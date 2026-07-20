@@ -36,16 +36,19 @@ use Illuminate\Support\Collection;
  *      excludes best_practice from QA gating entirely (see its own doc comment); this class must
  *      never contradict that by treating it as a quality error.
  *
- * "Blocking" is never redecided here — every item's blocking flag is either
- * EnterpriseWikiLintFinding::isBlocking() (open lint findings), the fixed fact that an active
- * claim-integrity defect always keeps qa_status below "passed" (claim defects), or the fixed fact
- * that a best-practice suggestion never blocks anything — the exact predicates
- * EnterpriseWikiPostIngestQaService already gates on.
+ * Blocking is a SUGGESTION the system computes (EnterpriseWikiClaimFindingExplainer), never a
+ * silent redecision — an authorized user's recorded override (EnterpriseWikiClaim::blocking_override)
+ * always wins when present. EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects() applies
+ * the exact same effective-blocking rule, so this panel and the QA gate can never disagree about
+ * whether a given claim is actually holding the run back. Lint findings and best-practice
+ * suggestions are unaffected by this — the former's isBlocking() is unconditional by design, and
+ * the latter never blocks at all.
  */
 class EnterpriseWikiRunFindingsService
 {
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
     ) {}
 
     /**
@@ -99,7 +102,7 @@ class EnterpriseWikiRunFindingsService
         }
 
         foreach ($claimDefects as $claim) {
-            $items[] = $this->normalizeClaimDefect($claim, $pagesById, $includeTechnical);
+            $items[] = $this->normalizeClaimDefect($claim, $pagesById, $user, $includeTechnical);
         }
 
         foreach ($bestPracticeSuggestions as $claim) {
@@ -196,34 +199,57 @@ class EnterpriseWikiRunFindingsService
      * scopes $claim to the page's CURRENT version only (see buildForRun()), matching
      * EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()'s own scoping.
      *
+     * Every finding gets a concrete, per-case title/explanation/recommended action from
+     * EnterpriseWikiClaimFindingExplainer — never the one-size-fits-all "unsupported_generated_content"/
+     * "internal_generation_error" label the old version of this method used regardless of why the
+     * claim actually failed. Severity and blocking are now genuinely separate: severity reflects
+     * the explainer's category, while blocking is the system's SUGGESTION unless an authorized
+     * user has recorded an explicit override (EnterpriseWikiClaim::blocking_override) — the exact
+     * same effective-blocking rule EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()
+     * uses, so the QA gate and this panel can never disagree about whether a given claim is
+     * actually holding the run back.
+     *
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
      */
     private function normalizeClaimDefect(
         EnterpriseWikiClaim $claim,
         Collection $pagesById,
+        ?User $user,
         bool $includeTechnical,
     ): array {
         $page = $pagesById->get($claim->enterprise_wiki_page_id);
-        $category = $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR
-            ? 'internal_generation_error'
-            : 'unsupported_generated_content';
-        $copy = $this->qualityCheckCopy($category);
-        $url = $this->pageUrl($page, $claim->id);
+        $explanation = $this->claimFindingExplainer->explain($claim);
+        $isBlocking = $claim->blocking_override ?? $explanation['suggested_blocking'];
+        $severity = match ($explanation['category']) {
+            EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM => 'critical',
+            default => 'warning',
+        };
 
-        $action = $url !== null ? 'view_page' : null;
+        $canHandleClaim = $user instanceof User
+            && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
+
+        $url = $this->pageUrl($page, $claim->id);
+        $actionKey = match (true) {
+            $url === null => null,
+            $canHandleClaim => 'open_and_handle',
+            default => 'view_source',
+        };
 
         $item = [
             'id' => 'claim-defect-'.$claim->id,
-            'title' => $copy['label'],
-            'explanation' => $copy['description'],
-            'category' => $category,
-            'category_label' => $copy['label'],
-            'severity' => 'critical',
-            'severity_label' => $this->severityLabel('critical'),
-            'status' => 'requires_action',
-            'status_label' => __('procynia.wiki.runs_findings_status_requires_action'),
-            'blocks_run' => true,
-            'blocks_page' => true,
+            'title' => $explanation['title'],
+            'explanation' => $explanation['explanation'],
+            'recommended_action' => $explanation['recommended_action'],
+            'category' => $explanation['category'],
+            'category_label' => $explanation['category_label'],
+            'severity' => $severity,
+            'severity_label' => $this->severityLabel($severity),
+            'status' => $isBlocking ? 'requires_action' : 'open',
+            'status_label' => __('procynia.wiki.runs_findings_status_'.($isBlocking ? 'requires_action' : 'open')),
+            'blocks_run' => $isBlocking,
+            'blocks_page' => $isBlocking && $page !== null,
+            'blocking_is_override' => $claim->blocking_override !== null,
+            'blocking_reason' => $this->blockingReasonText($claim),
             'scope' => $page !== null ? 'page' : 'run',
             'page_id' => $page?->id,
             'page_title' => $page?->title,
@@ -233,24 +259,38 @@ class EnterpriseWikiRunFindingsService
             'created_at' => $claim->created_at?->toIso8601String(),
             'resolved_at' => null,
             'url' => $url,
-            // Neither content_origin has a manual approve/reject workflow (unlike best_practice) —
-            // this is always a technical regeneration/repair concern, never a task an ordinary
-            // Document Owner can action from this panel (Del 10).
-            'can_handle' => false,
-            'action' => $action,
-            'action_label' => $this->actionLabel($action),
+            'can_handle' => $canHandleClaim,
+            'action' => $actionKey,
+            'action_label' => $this->actionLabel($actionKey),
         ];
 
         if ($includeTechnical) {
             $item['technical'] = [
                 'source' => 'claim_integrity',
                 'code' => $claim->content_origin,
+                'generation_issue' => $claim->generation_issue,
                 'raw_severity' => null,
                 'raw_status' => null,
             ];
         }
 
         return $item;
+    }
+
+    /**
+     * Human-readable "why is/isn't this blocking" — the system's own suggestion until an
+     * authorized user overrides it, after which it names who and when.
+     */
+    private function blockingReasonText(EnterpriseWikiClaim $claim): string
+    {
+        if ($claim->blocking_override === null) {
+            return __('procynia.wiki.claim_blocking_reason_default');
+        }
+
+        return __('procynia.wiki.claim_blocking_reason_overridden', [
+            'name' => $claim->blockingOverrideBy?->name ?? '—',
+            'date' => $claim->blocking_override_at?->toIso8601String() ?? '',
+        ]);
     }
 
     /**

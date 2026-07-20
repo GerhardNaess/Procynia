@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
-use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiClaim;
-use App\Models\EnterpriseWikiSourceReference;
+use App\Models\EnterpriseWikiClaimDecision;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
@@ -274,6 +275,15 @@ class WikiClaimController extends Controller
             abort(422, 'Claim is not manually decided.');
         }
 
+        $this->recordDecision(
+            $claim,
+            $user->id,
+            EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
+            ['approval_status' => $claim->approval_status],
+            ['approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING],
+            null,
+        );
+
         $claim->update([
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
             'approved_by_user_id' => null,
@@ -286,12 +296,71 @@ class WikiClaimController extends Controller
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Beslutningen er angret.');
     }
 
+    /**
+     * The "behold/fjern blokkering" decision (product rule item 3) — deliberately independent of
+     * approval_status: a user can reject a claim yet still remove its blocking (e.g. "this text
+     * will be regenerated, no need to hold the run for it"), or keep a claim pending while still
+     * confirming its suggested block is warranted. Uses the exact same authorization as approve/
+     * reject/unapprove (canHandleClaimForPage()) — no new permission surface.
+     */
+    public function updateBlockingOverride(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+
+        $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
+
+        // Blocking only ever applies to a claim-integrity finding (internal_error/
+        // unsupported_generated_content) — best_practice suggestions never block by design and go
+        // through their own approve/edit/reject workflow, and a source_based claim's provenance
+        // gap is a lint finding, not something this per-claim decision axis applies to.
+        abort_unless(in_array($claim->content_origin, [
+            EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        ], true), 422, 'Blocking can only be set for a claim-integrity finding.');
+
+        $validated = $request->validate([
+            'blocking' => ['required', 'boolean'],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $newBlocking = (bool) $validated['blocking'];
+
+        $this->recordDecision(
+            $claim,
+            $user->id,
+            EnterpriseWikiClaimDecision::TYPE_BLOCKING_OVERRIDE,
+            ['blocking_override' => $claim->blocking_override],
+            ['blocking_override' => $newBlocking],
+            $validated['comment'] ?? null,
+        );
+
+        $claim->update([
+            'blocking_override' => $newBlocking,
+            'blocking_override_by_user_id' => $user->id,
+            'blocking_override_at' => now(),
+        ]);
+
+        return redirect()
+            ->route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id])
+            ->with('success', $newBlocking ? 'Blokkeringen er beholdt.' : 'Blokkeringen er fjernet.');
+    }
+
     private function storeDecision(
         EnterpriseWikiClaim $claim,
         int $userId,
         string $status,
         ?string $comment,
     ): void {
+        $this->recordDecision(
+            $claim,
+            $userId,
+            EnterpriseWikiClaimDecision::TYPE_APPROVAL_STATUS,
+            ['approval_status' => $claim->approval_status],
+            ['approval_status' => $status],
+            $comment,
+        );
+
         $claim->update([
             'approval_status' => $status,
             'approved_by_user_id' => $userId,
@@ -300,6 +369,33 @@ class WikiClaimController extends Controller
         ]);
 
         $this->lintService->resolveClaimMissingSourceFinding($claim);
+    }
+
+    /**
+     * Append-only audit trail (product rule: every decision stores who, when, any comment, and
+     * the previous/new decision) — never updated or deleted, unlike EnterpriseWikiClaim's own
+     * approval_status/blocking_override columns which only hold the CURRENT state. Written before
+     * the claim itself is updated so "previous_state" always reflects genuinely pre-decision data.
+     *
+     * @param  array<string, mixed>  $previousState
+     * @param  array<string, mixed>  $newState
+     */
+    private function recordDecision(
+        EnterpriseWikiClaim $claim,
+        int $userId,
+        string $decisionType,
+        array $previousState,
+        array $newState,
+        ?string $comment,
+    ): void {
+        EnterpriseWikiClaimDecision::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'decided_by_user_id' => $userId,
+            'decision_type' => $decisionType,
+            'previous_state' => $previousState,
+            'new_state' => $newState,
+            'comment' => $comment,
+        ]);
     }
 
     private function applyBestPracticeTextEdit(EnterpriseWikiClaim $claim, ?string $approvedText): void

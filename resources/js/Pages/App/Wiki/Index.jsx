@@ -2830,7 +2830,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                         {visibleFindings.map((finding) => (
                             <tr key={finding.id} className="align-top text-slate-700">
                                 <td className="max-w-[280px] px-3 py-2">
-                                    {finding.category === 'best_practice_suggestion' && (
+                                    {finding.category_label && (
                                         <span className="mb-0.5 inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
                                             {finding.category_label}
                                         </span>
@@ -2842,6 +2842,11 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                         )}
                                         {finding.explanation}
                                     </span>
+                                    {finding.recommended_action && (
+                                        <span className="mt-1 block text-xs text-slate-400">
+                                            {finding.recommended_action}
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="max-w-[200px] px-3 py-2">
                                     {finding.scope === 'run' ? (
@@ -2859,6 +2864,13 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                     <span className={`${BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-500'}`}>
                                         {finding.status_label}
                                     </span>
+                                    {typeof finding.blocks_run === 'boolean' && (
+                                        <span className="mt-1 block text-[11px] text-slate-400" title={finding.blocking_reason ?? ''}>
+                                            {finding.blocks_run
+                                                ? (tw.runs_findings_blocks_run ?? 'Blokkerer')
+                                                : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
+                                        </span>
+                                    )}
                                 </td>
                                 <td className="px-3 py-2 text-right whitespace-nowrap">
                                     {finding.url && finding.action ? (

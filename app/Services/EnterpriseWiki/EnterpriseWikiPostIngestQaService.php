@@ -75,6 +75,7 @@ class EnterpriseWikiPostIngestQaService
     public function __construct(
         private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiQaSnapshotService $snapshotService,
+        private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
     ) {}
 
     /**
@@ -517,6 +518,14 @@ class EnterpriseWikiPostIngestQaService
      * explicit human decision (approve/edit-and-approve/reject) via the ordinary claim review
      * flow and must not, on their own, block technical QA from passing.
      *
+     * A claim only counts as an active defect when its EFFECTIVE blocking state is true — an
+     * authorized user's recorded EnterpriseWikiClaim::blocking_override if present, otherwise the
+     * system's own suggestion (EnterpriseWikiClaimFindingExplainer::suggestedBlocking(): false for
+     * internal_error/"technical uncertainty" such as a missing or ambiguous block/source link,
+     * true for unsupported_generated_content/"undocumented or incorrect claim"). This means a
+     * technical linking uncertainty no longer automatically keeps a run in repair_required — only
+     * a genuine content problem does, unless a human has explicitly overridden it either way.
+     *
      * @return list<string>
      */
     private function findClaimIntegrityDefects(Collection $pageIds): array
@@ -532,21 +541,33 @@ class EnterpriseWikiPostIngestQaService
 
         $defects = [];
 
-        $hasInternalError = EnterpriseWikiClaim::query()
+        // Effective blocking = an authorized user's recorded override if present, otherwise the
+        // system's own suggestion (EnterpriseWikiClaimFindingExplainer::suggestedBlocking() —
+        // false for internal_error/"technical uncertainty", true for unsupported_generated_content/
+        // "undocumented or incorrect claim"). The SAME rule EnterpriseWikiRunFindingsService uses
+        // for the Funn panel, so the panel and this gate can never disagree about whether a given
+        // claim is actually holding the run back.
+        $claimIntegrityClaims = EnterpriseWikiClaim::query()
             ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
-            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)
-            ->exists();
+            ->whereIn('content_origin', [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            ])
+            ->get(['id', 'content_origin', 'blocking_override']);
 
-        if ($hasInternalError) {
+        $hasBlockingInternalError = $claimIntegrityClaims
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim));
+
+        if ($hasBlockingInternalError) {
             $defects[] = 'active_internal_error_claims';
         }
 
-        $hasUnsupported = EnterpriseWikiClaim::query()
-            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+        $hasBlockingUnsupported = $claimIntegrityClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->exists();
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim));
 
-        if ($hasUnsupported) {
+        if ($hasBlockingUnsupported) {
             $defects[] = 'active_unsupported_generated_content_claims';
         }
 

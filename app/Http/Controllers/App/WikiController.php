@@ -14,6 +14,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
@@ -41,6 +42,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
+        private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
     ) {}
 
     public function index(Request $request): Response
@@ -1172,7 +1174,7 @@ class WikiController extends Controller
         if ($currentVersion !== null) {
             $claimCollection = EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $currentVersion->id)
-                ->with(['sourceReferences', 'approvedBy'])
+                ->with(['sourceReferences', 'approvedBy', 'blockingOverrideBy'])
                 ->orderBy('position_order')
                 ->get();
         }
@@ -1306,40 +1308,61 @@ class WikiController extends Controller
             }
 
             $claims = $claimCollection
-                ->map(fn (EnterpriseWikiClaim $claim) => [
-                    'id' => $claim->id,
-                    'claim_text' => $claim->claim_text,
-                    'content_origin' => $claim->content_origin,
-                    'page_excerpt' => $claim->page_excerpt,
-                    'content_block_key' => $claim->content_block_key,
-                    'review_reason' => $claim->review_reason,
-                    'review_metadata' => $claim->review_metadata,
-                    'generation_issue' => $claim->generation_issue,
-                    'confidence' => $claim->confidence,
-                    'conflict_flag' => $claim->conflict_flag,
-                    'approval_status' => $claim->approval_status,
-                    'position_order' => $claim->position_order,
-                    'source_status' => $claim->sourceStatus(),
-                    'approved_by_name' => $claim->approvedBy?->name,
-                    'approved_at' => $claim->approved_at,
-                    'approval_comment' => $claim->approval_comment,
-                    'source_references' => $claim->sourceReferences
-                        ->map(fn ($ref) => [
-                            'id' => $ref->id,
-                            'source_type' => $ref->source_type,
-                            'source_element_key' => $ref->source_element_key,
-                            'source_element_type' => $ref->source_element_type,
-                            'source_row_key' => $ref->source_row_key,
-                            'source_label' => $ref->source_label,
-                            'excerpt' => $ref->excerpt,
-                            'page_reference' => $ref->page_reference,
-                            'download_url' => $ref->source_type === EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT
-                                ? route('app.wiki.sources.download', $ref->source_id)
-                                : null,
-                        ])
-                        ->all(),
-                    'can_handle' => $user instanceof User && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion),
-                ])
+                ->map(function (EnterpriseWikiClaim $claim) use ($user, $currentVersion): array {
+                    $isClaimDefect = in_array($claim->content_origin, [
+                        EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
+                        EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                    ], true);
+                    $finding = $isClaimDefect ? $this->claimFindingExplainer->explain($claim) : null;
+                    $isBlocking = $isClaimDefect ? ($claim->blocking_override ?? $finding['suggested_blocking']) : null;
+
+                    return [
+                        'id' => $claim->id,
+                        'claim_text' => $claim->claim_text,
+                        'content_origin' => $claim->content_origin,
+                        'page_excerpt' => $claim->page_excerpt,
+                        'content_block_key' => $claim->content_block_key,
+                        'review_reason' => $claim->review_reason,
+                        'review_metadata' => $claim->review_metadata,
+                        'generation_issue' => $claim->generation_issue,
+                        'confidence' => $claim->confidence,
+                        'conflict_flag' => $claim->conflict_flag,
+                        'approval_status' => $claim->approval_status,
+                        'position_order' => $claim->position_order,
+                        'source_status' => $claim->sourceStatus(),
+                        'approved_by_name' => $claim->approvedBy?->name,
+                        'approved_at' => $claim->approved_at,
+                        'approval_comment' => $claim->approval_comment,
+                        // Per-case finding for internal_error/unsupported_generated_content claims
+                        // (EnterpriseWikiClaimFindingExplainer) — null for every other claim, since
+                        // only these two content_origins are ever a "finding" needing this shape.
+                        'finding_category' => $finding['category'] ?? null,
+                        'finding_category_label' => $finding['category_label'] ?? null,
+                        'finding_title' => $finding['title'] ?? null,
+                        'finding_explanation' => $finding['explanation'] ?? null,
+                        'finding_recommended_action' => $finding['recommended_action'] ?? null,
+                        'is_blocking' => $isBlocking,
+                        'blocking_is_override' => $claim->blocking_override !== null,
+                        'blocking_override_by_name' => $claim->blockingOverrideBy?->name,
+                        'blocking_override_at' => $claim->blocking_override_at,
+                        'source_references' => $claim->sourceReferences
+                            ->map(fn ($ref) => [
+                                'id' => $ref->id,
+                                'source_type' => $ref->source_type,
+                                'source_element_key' => $ref->source_element_key,
+                                'source_element_type' => $ref->source_element_type,
+                                'source_row_key' => $ref->source_row_key,
+                                'source_label' => $ref->source_label,
+                                'excerpt' => $ref->excerpt,
+                                'page_reference' => $ref->page_reference,
+                                'download_url' => $ref->source_type === EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT
+                                    ? route('app.wiki.sources.download', $ref->source_id)
+                                    : null,
+                            ])
+                            ->all(),
+                        'can_handle' => $user instanceof User && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $currentVersion),
+                    ];
+                })
                 ->all();
         }
 

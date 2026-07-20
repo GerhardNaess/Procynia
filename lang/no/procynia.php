@@ -3008,6 +3008,13 @@ return [
         'show_page_help_item_best_practice_decide_text' => 'Du kan godkjenne forslaget som det er, redigere teksten og godkjenne, eller avvise det. Beslutningen gjelder den konkrete teksten den ble foreslått for.',
         'show_page_help_item_best_practice_defect_title' => 'Udokumenterte faktapåstander er noe annet',
         'show_page_help_item_best_practice_defect_text' => 'Tekst som fremstilles som et faktisk forhold hos kunden, men ikke er støttet av kilden og heller ikke er beste praksis, behandles fortsatt som en kvalitetsfeil.',
+        'show_page_help_section_blocking' => 'Alvorlighet og blokkering',
+        'show_page_help_item_blocking_categories_title' => 'Hvert funn har en konkret forklaring',
+        'show_page_help_item_blocking_categories_text' => 'Funn vises ikke lenger med én generell standardtekst. Hvert funn viser den konkrete påstanden, hva systemet mener avviker, og hvorfor.',
+        'show_page_help_item_blocking_technical_title' => 'Teknisk usikkerhet er ikke det samme som en innholdsfeil',
+        'show_page_help_item_blocking_technical_text' => 'Når systemet ikke fant en sikker kobling mellom en påstand og et kildeavsnitt, vises dette som en teknisk usikkerhet — ikke som en bekreftet feil i innholdet. Slike funn er som regel ikke blokkerende i utgangspunktet.',
+        'show_page_help_item_blocking_override_title' => 'Du kan beholde eller fjerne blokkering',
+        'show_page_help_item_blocking_override_text' => 'Systemet foreslår om et funn bør blokkere, men en autorisert bruker kan overstyre dette. Beslutningen lagres med bruker, tidspunkt og eventuell kommentar.',
         'page_help_section_workflow' => 'Arbeidsflyten',
         'page_help_item_workflow_source_title' => 'Kildedokumentet kommer først',
         'page_help_item_workflow_source_text' => 'Et kildedokument lastes opp og blir grunnlaget for en ny Wiki-side.',
@@ -3470,9 +3477,128 @@ return [
         'verification_basis_best_practice_no_source_search' => 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.',
         'verification_basis_best_practice_edit_label' => 'Rediger og godkjenn',
         'verification_basis_page_excerpt_label' => 'Tekst i Wiki-siden',
-        'verification_basis_internal_issues_heading' => 'Interne genereringsavvik',
-        'verification_basis_internal_issues_intro' => 'Disse claimene skjules fra ordinær Dokumenteierbehandling fordi de mangler stabilt grunnlag eller ikke er støttet av kildene.',
+        'verification_basis_internal_issues_heading' => 'Tekniske usikkerheter',
+        'verification_basis_internal_issues_intro' => 'Systemet fant ikke en sikker kobling mellom denne påstanden, Wiki-teksten og et kildeavsnitt. Det betyr ikke nødvendigvis at påstanden er feil — se forklaringen under hvert funn.',
         'verification_basis_generation_issue_label' => 'Årsak',
+
+        // Claim finding categories (Kjøringer → Funn og Verifikasjonsgrunnlag) — hvert funn får en
+        // konkret kategori, tittel og forklaring i stedet for én generell standardtekst. Se
+        // App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer.
+        'claim_finding_category_undocumented_or_incorrect_claim' => 'Udokumentert eller feilaktig faktapåstand',
+        'claim_finding_category_possible_content_deviation' => 'Mulig innholdsavvik',
+        'claim_finding_category_technical_uncertainty' => 'Teknisk usikkerhet',
+        'claim_finding_action_undocumented_or_incorrect_claim' => 'Kontroller påstanden mot kilden. Godkjenn den dersom den likevel stemmer, avvis den dersom den er feil, eller behold/fjern blokkeringen etter eget skjønn.',
+        'claim_finding_action_possible_content_deviation' => 'Sammenlign påstanden med kildeteksten. Avviket er ikke bekreftet — vurder om det er reelt før du bestemmer deg.',
+        'claim_finding_action_technical_uncertainty' => 'Dette er en teknisk koblingsusikkerhet, ikke en bekreftet innholdsfeil. Se gjennom siden, og behold eller fjern blokkeringen etter eget skjønn.',
+        'claim_finding' => [
+            'stale_version' => [
+                'title' => 'Utdatert sidekobling',
+                'explanation' => 'Påstanden er koblet til en tidligere versjon av Wiki-siden, ikke den som gjelder nå.',
+            ],
+            'missing_block' => [
+                'title' => 'Tekstblokk ikke funnet',
+                'explanation' => 'Tekstblokken påstanden var koblet til, finnes ikke lenger i gjeldende sideversjon.',
+            ],
+            'ambiguous_block_link' => [
+                'title' => 'Usikker blokk-kobling',
+                'explanation' => 'Systemet fant to mulige tekstblokker for denne påstanden og kunne ikke velge trygt mellom dem.',
+            ],
+            'no_confident_source_link' => [
+                'title' => 'Ingen sikker kildekobling',
+                'explanation' => 'Systemet fant ingen sikker kobling til et kildeavsnitt for denne teksten.',
+            ],
+            'technical_link_issue' => [
+                'title' => 'Teknisk koblingsavvik',
+                'explanation' => 'Systemet kunne ikke knytte påstanden trygt til innholdet på siden av tekniske årsaker.',
+            ],
+            'contradicted' => [
+                'title' => 'Motsier kilden',
+                'explanation' => 'Påstanden motsier innholdet i kilden direkte.',
+            ],
+            'partially_supported' => [
+                'title' => 'Delvis dokumentert',
+                'explanation' => 'Deler av påstanden er dokumentert i kilden, men ikke alt.',
+            ],
+            'actor_mismatch' => [
+                'title' => 'Feil aktør',
+                'explanation' => 'Påstanden tilskriver handlingen til feil aktør sammenlignet med kilden.',
+            ],
+            'modality_mismatch' => [
+                'title' => 'Sterkere enn kilden',
+                'explanation' => 'Påstanden er sterkere enn kilden. Kilden bruker et svakere ord (for eksempel «kan»), mens påstanden bruker et sterkere (for eksempel «skal»).',
+            ],
+            'negation_mismatch' => [
+                'title' => 'Motsier en negasjon i kilden',
+                'explanation' => 'Kilden sier at noe ikke skjer (eller omvendt), mens påstanden sier det motsatte.',
+            ],
+            'scope_mismatch' => [
+                'title' => 'Videre enn kilden',
+                'explanation' => 'Påstanden gjelder et videre omfang enn kilden (for eksempel «alle tilfeller», der kilden bare beskriver et avgrenset tilfelle).',
+            ],
+            'number_mismatch' => [
+                'title' => 'Tallavvik',
+                'explanation' => 'Et tall eller en mengde i påstanden stemmer ikke med kilden.',
+            ],
+            'currency_mismatch' => [
+                'title' => 'Beløpsavvik',
+                'explanation' => 'Et beløp eller en valuta i påstanden stemmer ikke med kilden.',
+            ],
+            'subject_mismatch' => [
+                'title' => 'Feil tilskrivning',
+                'explanation' => 'Påstanden tilskriver informasjon til et annet emne eller en annen aktør enn det kilden faktisk beskriver.',
+            ],
+            'possible_actor' => [
+                'title' => 'Mulig feil aktør',
+                'explanation' => 'Systemet fant et mulig avvik i hvem som utfører handlingen, sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_action' => [
+                'title' => 'Mulig avvik i handlingen',
+                'explanation' => 'Systemet fant et mulig avvik i hvilken handling som beskrives, sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_object' => [
+                'title' => 'Mulig avvik i objektet',
+                'explanation' => 'Systemet fant et mulig avvik i hva handlingen gjelder, sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_modality' => [
+                'title' => 'Mulig avvik i styrke',
+                'explanation' => 'Systemet fant et mulig avvik i hvor sterkt påstanden er formulert sammenlignet med kilden (for eksempel «kan» mot «skal»). Ikke bekreftet.',
+            ],
+            'possible_negation' => [
+                'title' => 'Mulig motsigelse',
+                'explanation' => 'Systemet fant en mulig negasjon som ikke stemmer med kilden. Ikke bekreftet.',
+            ],
+            'possible_numbers_and_units' => [
+                'title' => 'Mulig tallavvik',
+                'explanation' => 'Systemet fant et mulig avvik i tall eller mengder sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_time_and_date' => [
+                'title' => 'Mulig tids- eller datoavvik',
+                'explanation' => 'Systemet fant et mulig avvik i tidspunkt eller dato sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_scope' => [
+                'title' => 'Mulig omfangsavvik',
+                'explanation' => 'Systemet fant et mulig avvik i omfanget av påstanden sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'possible_conditions_and_exceptions' => [
+                'title' => 'Mulig avvik i vilkår eller unntak',
+                'explanation' => 'Systemet fant et mulig avvik i vilkår eller unntak sammenlignet med kilden. Ikke bekreftet.',
+            ],
+            'no_source_support' => [
+                'title' => 'Ingen kildedekning funnet',
+                'explanation_no_detail' => 'Systemet fant ingen kildeutdrag som støtter denne påstanden, og har ingen mer detaljert forklaring lagret for dette funnet.',
+            ],
+        ],
+
+        // Blokkering — separat fra alvorlighet. Se produktreglene i CLAUDE.md.
+        'claim_blocking_label' => 'Blokkerer',
+        'claim_blocking_yes' => 'Ja, blokkerer',
+        'claim_blocking_no' => 'Nei, blokkerer ikke',
+        'claim_blocking_reason_label' => 'Hvorfor',
+        'claim_blocking_reason_default' => 'Systemets forslag, ikke overstyrt av en bruker ennå.',
+        'claim_blocking_reason_overridden' => 'Overstyrt av :name den :date.',
+        'keep_blocking_button' => 'Behold blokkering',
+        'remove_blocking_button' => 'Fjern blokkering / godkjenn avviket',
+        'blocking_comment_placeholder' => 'Valgfri kommentar til beslutningen',
         'claim_source_status_found' => 'Kildegrunnlag funnet',
         'claim_source_status_missing_excerpt' => 'Kildegrunnlag mangler utdrag',
         'claim_source_status_manually_approved' => 'Manuelt godkjent uten kildereferanse',

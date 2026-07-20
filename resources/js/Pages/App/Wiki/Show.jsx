@@ -28,6 +28,23 @@ function getWikiShowHelpSections(tw) {
                 },
             ],
         },
+        {
+            title: tw.show_page_help_section_blocking ?? 'Alvorlighet og blokkering',
+            items: [
+                {
+                    title: tw.show_page_help_item_blocking_categories_title ?? 'Hvert funn har en konkret forklaring',
+                    text: tw.show_page_help_item_blocking_categories_text ?? 'Funn vises ikke lenger med én generell standardtekst. Hvert funn viser den konkrete påstanden, hva systemet mener avviker, og hvorfor.',
+                },
+                {
+                    title: tw.show_page_help_item_blocking_technical_title ?? 'Teknisk usikkerhet er ikke det samme som en innholdsfeil',
+                    text: tw.show_page_help_item_blocking_technical_text ?? 'Når systemet ikke fant en sikker kobling mellom en påstand og et kildeavsnitt, vises dette som en teknisk usikkerhet — ikke som en bekreftet feil i innholdet. Slike funn er som regel ikke blokkerende i utgangspunktet.',
+                },
+                {
+                    title: tw.show_page_help_item_blocking_override_title ?? 'Du kan beholde eller fjerne blokkering',
+                    text: tw.show_page_help_item_blocking_override_text ?? 'Systemet foreslår om et funn bør blokkere, men en autorisert bruker kan overstyre dette. Beslutningen lagres med bruker, tidspunkt og eventuell kommentar.',
+                },
+            ],
+        },
     ];
 }
 
@@ -81,6 +98,12 @@ const CLAIM_SOURCE_STATUS_STYLES = {
     best_practice_review: 'bg-amber-100 text-amber-700',
     internal_generation_error: 'bg-slate-200 text-slate-700',
     unsupported_generated_content: 'bg-slate-200 text-slate-700',
+};
+
+const FINDING_CATEGORY_STYLES = {
+    undocumented_or_incorrect_claim: 'bg-rose-100 text-rose-700',
+    possible_content_deviation: 'bg-amber-100 text-amber-700',
+    technical_uncertainty: 'bg-sky-100 text-sky-700',
 };
 
 const HIGH_VOLUME_THRESHOLD = 100;
@@ -329,24 +352,16 @@ export default function WikiShow({
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
     const openClaims = claims.filter((claim) => (
         claim.approval_status === 'pending'
-        && claim.content_origin !== 'internal_error'
-        && claim.content_origin !== 'unsupported_generated_content'
         && (
             claim.content_origin === 'best_practice'
+            || claim.content_origin === 'internal_error'
+            || claim.content_origin === 'unsupported_generated_content'
             || claim.conflict_flag
             || claim.source_status === 'missing_source'
             || claim.source_status === 'missing_excerpt'
         )
     ));
-    const internalClaimIssues = claims.filter((claim) => (
-        claim.content_origin === 'internal_error'
-        || claim.content_origin === 'unsupported_generated_content'
-    ));
-    const verifiedClaims = claims.filter((claim) => (
-        !openClaims.includes(claim)
-        && claim.content_origin !== 'internal_error'
-        && claim.content_origin !== 'unsupported_generated_content'
-    ));
+    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim));
 
     const sendAction = (action) => {
         if (processing) return;
@@ -521,6 +536,16 @@ export default function WikiShow({
         );
     };
 
+    const updateClaimBlocking = (claim, blocking) => {
+        if (claimProcessing) return;
+        setClaimProcessing(claim.id);
+        router.patch(
+            `/app/wiki/${page.slug}/claims/${claim.id}/blocking`,
+            { blocking, comment: approvalComments[claim.id] || undefined },
+            { onFinish: () => setClaimProcessing(null) },
+        );
+    };
+
     const approveDocumentOwnerApproval = (approval) => {
         if (documentOwnerApprovalProcessing) return;
         setDocumentOwnerApprovalProcessing(approval.id);
@@ -598,6 +623,12 @@ export default function WikiShow({
     }[s] ?? s);
 
     const claimProblemLabel = (claim) => {
+        // internal_error / unsupported_generated_content — per-case finding from
+        // EnterpriseWikiClaimFindingExplainer, never one generic default message.
+        if (claim.finding_explanation) {
+            return claim.finding_explanation;
+        }
+
         if (claim.content_origin === 'best_practice') {
             return claim.review_reason
                 || tw.verification_basis_best_practice_reason_fallback
@@ -683,6 +714,20 @@ export default function WikiShow({
                                     cls="bg-amber-100 text-amber-700"
                                 />
                             )}
+                            {claim.finding_category_label && (
+                                <Badge
+                                    label={claim.finding_category_label}
+                                    cls={FINDING_CATEGORY_STYLES[claim.finding_category] ?? 'bg-slate-200 text-slate-600'}
+                                />
+                            )}
+                            {claim.is_blocking !== null && claim.is_blocking !== undefined && (
+                                <Badge
+                                    label={claim.is_blocking
+                                        ? (tw.claim_blocking_yes ?? 'Ja, blokkerer')
+                                        : (tw.claim_blocking_no ?? 'Nei, blokkerer ikke')}
+                                    cls={claim.is_blocking ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}
+                                />
+                            )}
                             {claim.conflict_flag && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
                                     <WarnIcon className="h-3 w-3" />
@@ -705,6 +750,47 @@ export default function WikiShow({
                     <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                         {problemLabel}
                     </p>
+                )}
+
+                {claim.finding_recommended_action && (
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                        {claim.finding_recommended_action}
+                    </p>
+                )}
+
+                {claim.is_blocking !== null && claim.is_blocking !== undefined && (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <span className="text-xs text-slate-500">
+                            {(tw.claim_blocking_reason_label ?? 'Hvorfor')}: {claim.blocking_is_override
+                                ? (tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
+                                    .replace(':name', claim.blocking_override_by_name ?? '—')
+                                    .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')
+                                : (tw.claim_blocking_reason_default ?? 'Systemets forslag, ikke overstyrt av en bruker ennå.')}
+                        </span>
+                        {canHandleClaim && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                {claim.is_blocking ? (
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id}
+                                        onClick={() => updateClaimBlocking(claim, false)}
+                                        className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                                    >
+                                        {tw.remove_blocking_button ?? 'Fjern blokkering / godkjenn avviket'}
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id}
+                                        onClick={() => updateClaimBlocking(claim, true)}
+                                        className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                    >
+                                        {tw.keep_blocking_button ?? 'Behold blokkering'}
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 )}
 
                 <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
@@ -1511,11 +1597,6 @@ export default function WikiShow({
                                 {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
                             </span>
                         )}
-                        {isSystemOwner && internalClaimIssues.length > 0 && (
-                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-normal text-slate-700">
-                                {internalClaimIssues.length} {tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}
-                            </span>
-                        )}
                     </button>
 
                     {verificationOpen && (
@@ -1537,12 +1618,6 @@ export default function WikiShow({
                                         label={`${structuralFindings.length} ${tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}`}
                                         cls="bg-slate-100 text-slate-600"
                                     />
-                                    {isSystemOwner && (
-                                        <Badge
-                                            label={`${internalClaimIssues.length} ${tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}`}
-                                            cls="bg-slate-200 text-slate-700"
-                                        />
-                                    )}
                                 </div>
                                 {claimLintFindings.length > 0 && (
                                     <p className="mt-3 text-xs text-slate-500">
@@ -1576,40 +1651,6 @@ export default function WikiShow({
                                     </div>
                                 )}
                             </section>
-
-                            {isSystemOwner && internalClaimIssues.length > 0 && (
-                                <section className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                                    <div className="space-y-1">
-                                        <h3 className="text-sm font-semibold text-slate-700">
-                                            {tw.verification_basis_internal_issues_heading ?? 'Interne genereringsavvik'}
-                                        </h3>
-                                        <p className="text-sm text-slate-500">
-                                            {tw.verification_basis_internal_issues_intro ?? 'Disse claimene skjules fra ordinær Dokumenteierbehandling fordi de mangler stabilt grunnlag eller ikke er støttet av kildene.'}
-                                        </p>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {internalClaimIssues.map((claim) => (
-                                            <article key={claim.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <Badge
-                                                        label={claimSourceStatusLabel(claim.source_status)}
-                                                        cls={CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}
-                                                    />
-                                                    {claim.content_block_key && (
-                                                        <Badge label={claim.content_block_key} cls="bg-slate-100 text-slate-600" />
-                                                    )}
-                                                </div>
-                                                <p className="mt-2 text-sm leading-6 text-slate-800">{claim.claim_text}</p>
-                                                {claim.generation_issue && (
-                                                    <p className="mt-2 text-xs text-slate-500">
-                                                        {tw.verification_basis_generation_issue_label ?? 'Årsak'}: {claim.generation_issue}
-                                                    </p>
-                                                )}
-                                            </article>
-                                        ))}
-                                    </div>
-                                </section>
-                            )}
 
                             <section className="space-y-3">
                                 <button

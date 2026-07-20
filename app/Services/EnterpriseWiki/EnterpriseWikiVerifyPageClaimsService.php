@@ -380,9 +380,10 @@ class EnterpriseWikiVerifyPageClaimsService
             );
         }
 
-        $finalVerdict = $deterministicMatch
-            ? WikiClaimVerificationAiClient::VERDICT_SUPPORTED
+        $safetyNet = $deterministicMatch
+            ? ['verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED, 'deterministic_reason' => null]
             : $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
+        $finalVerdict = $safetyNet['verdict'];
 
         $report = [
             'eligible' => true,
@@ -399,7 +400,7 @@ class EnterpriseWikiVerifyPageClaimsService
             return $report;
         }
 
-        $newContentOrigin = DB::transaction(function () use ($claim, $result, $elementsByKey, $document, $finalVerdict, $run, $fallbackSourceText, $deterministicMatch): ?string {
+        $newContentOrigin = DB::transaction(function () use ($claim, $result, $elementsByKey, $document, $finalVerdict, $run, $fallbackSourceText, $deterministicMatch, $safetyNet): ?string {
             $locked = EnterpriseWikiClaim::query()->whereKey($claim->id)->lockForUpdate()->first();
 
             if ($locked === null || $locked->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT) {
@@ -408,12 +409,13 @@ class EnterpriseWikiVerifyPageClaimsService
 
             $originalContentOrigin = (string) $locked->content_origin;
 
-            $this->applyVerdictOutcome($locked, $finalVerdict, $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText, [
+            $this->applyVerdictOutcome($locked, $finalVerdict, $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText, array_filter([
                 'classification_basis' => $deterministicMatch ? 'deterministic_verbatim_match' : 'scoped_run_reevaluation',
                 'reevaluated_at' => now()->toIso8601String(),
                 'reevaluated_from_content_origin' => $originalContentOrigin,
                 'reevaluated_run_id' => $run->id,
-            ]);
+                'deterministic_reason' => $safetyNet['deterministic_reason'],
+            ], static fn ($value): bool => $value !== null));
 
             return $locked->fresh()->content_origin;
         });
@@ -581,9 +583,11 @@ class EnterpriseWikiVerifyPageClaimsService
             $originalContentOrigin = (string) $claim->content_origin;
 
             $elementsByKey = $this->elementsByKey($block);
-            $verdict = $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
+            $safetyNet = $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
 
-            return $this->applyVerdictOutcome($claim, $verdict, $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText);
+            return $this->applyVerdictOutcome($claim, $safetyNet['verdict'], $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText, array_filter([
+                'deterministic_reason' => $safetyNet['deterministic_reason'],
+            ]));
         });
     }
 
@@ -824,8 +828,9 @@ class EnterpriseWikiVerifyPageClaimsService
      * the AI concluded.
      *
      * @param  array<string, array<string, mixed>>  $elementsByKey
+     * @return array{verdict: string, deterministic_reason: ?string}
      */
-    private function applyDeterministicSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): string
+    private function applyDeterministicSafetyNet(string $claimText, array $result, array $elementsByKey, ?array $block, string $fallbackSourceText): array
     {
         $verdict = $result['verdict'];
 
@@ -833,7 +838,7 @@ class EnterpriseWikiVerifyPageClaimsService
             WikiClaimVerificationAiClient::VERDICT_SUPPORTED,
             WikiClaimVerificationAiClient::VERDICT_PARTIALLY_SUPPORTED,
         ], true)) {
-            return $verdict;
+            return ['verdict' => $verdict, 'deterministic_reason' => null];
         }
 
         // Run-38 fix: misattribution (the claim's named subject borrowing an action/property the
@@ -848,7 +853,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'ai_verdict' => $verdict,
             ]);
 
-            return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+            return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => 'subject_mismatch'];
         }
 
         $hadStructuredCandidates = $elementsByKey !== [];
@@ -877,7 +882,7 @@ class EnterpriseWikiVerifyPageClaimsService
                     'ai_verdict' => $verdict,
                 ]);
 
-                return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+                return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => null];
             }
 
             $supportingText = implode("\n", $supportingTexts);
@@ -904,7 +909,7 @@ class EnterpriseWikiVerifyPageClaimsService
                     'ai_verdict' => $verdict,
                 ]);
 
-                return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+                return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => 'subject_mismatch'];
             }
         } else {
             // Legacy claim with no structured block source elements — the AI verified against
@@ -921,10 +926,10 @@ class EnterpriseWikiVerifyPageClaimsService
                 'conflict' => $conflict,
             ]);
 
-            return WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED;
+            return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => $conflict];
         }
 
-        return $verdict;
+        return ['verdict' => $verdict, 'deterministic_reason' => null];
     }
 
     /**

@@ -16,6 +16,10 @@ use Illuminate\Support\Collection;
 
 class EnterpriseWikiDocumentOwnerApprovalService
 {
+    public function __construct(
+        private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+    ) {}
+
     /**
      * Sync approvals for one page version from its current provenance.
      *
@@ -426,7 +430,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             ], true)) {
-                return true;
+                // Same effective-blocking rule as EnterpriseWikiPostIngestQaService::
+                // findClaimIntegrityDefects() — an authorized user's recorded override wins,
+                // otherwise the system's own suggestion (false for internal_error/"technical
+                // uncertainty", true for unsupported_generated_content).
+                return $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim);
             }
 
             return $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
