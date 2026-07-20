@@ -1394,6 +1394,15 @@ export default function WikiShow({
                     </div>
                 )}
 
+                {reviewReference?.status === 'ready' && reviewReference.block_key === null && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <p className="text-sm text-amber-800">
+                            {tw.review_reference_no_confident_block ?? 'Systemet fant ingen sikker tekstblokk å markere for denne påstanden. Se hele siden under.'}
+                        </p>
+                    </div>
+                )}
+
                 {/* Article — primary content */}
                 <section className="space-y-4">
                     {!isApproved && (

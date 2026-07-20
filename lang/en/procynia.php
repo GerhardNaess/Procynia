@@ -3452,6 +3452,7 @@ return [
         'pending_review_draft_notice' => 'This page is under review. The content is AI-generated.',
         'review_reference_superseded' => 'The suggestion applies to an older page version (version :version) and is no longer relevant to the current content.',
         'review_reference_block_missing' => 'The text no longer exists in the current version of the page.',
+        'review_reference_no_confident_block' => 'The system found no confident text block to highlight for this claim. See the full page below.',
         'verification_heading' => 'Verification basis',
         'verification_description' => 'Claims and source evidence this page is built on.',
         'verification_basis_intro' => 'Verification basis brings together source-based content, best-practice suggestions, and structural findings so each kind of review stays separate.',

@@ -9,9 +9,11 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
@@ -91,8 +93,14 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $this->assertSame(1, $response->json('summary.best_practice_pending'));
     }
 
-    public function test_unsupported_generated_content_still_blocks(): void
+    public function test_verified_unsupported_generated_content_still_blocks(): void
     {
+        // Stale-test fix: 'unsupported_generated_content' was never a valid finding category
+        // (EnterpriseWikiClaimFindingExplainer's categories are undocumented_or_incorrect_claim /
+        // possible_content_deviation / technical_uncertainty since 25a0055), and an unverified
+        // claim with no content_block_key/review_metadata no longer blocks by default since the
+        // run-39 fix (5c9d48c) — it is technical_uncertainty, not a confirmed defect. A claim that
+        // actually reached a semantic verdict is still a confirmed, blocking defect.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -102,20 +110,29 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $this->createRunPage($run, $page, $version);
         $this->createClaim($page, $version, 'Udokumentert faktapåstand.', 0, [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+                'deterministic_reason' => 'actor_mismatch',
+            ],
         ]);
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = collect($response->json('findings'))->firstWhere('category', 'unsupported_generated_content');
+        $finding = collect($response->json('findings'))->firstWhere('category', 'undocumented_or_incorrect_claim');
         $this->assertNotNull($finding);
         $this->assertSame('critical', $finding['severity']);
         $this->assertTrue($finding['blocks_run']);
         $this->assertSame(1, $response->json('summary.open_blocking'));
     }
 
-    public function test_internal_error_still_blocks(): void
+    public function test_internal_error_is_technical_uncertainty_and_does_not_block_by_default(): void
     {
+        // Stale-test fix: internal_error has been ALWAYS technical_uncertainty and non-blocking
+        // by default since ed42684 — 'internal_generation_error' was never a finding category.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -130,11 +147,11 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = collect($response->json('findings'))->firstWhere('category', 'internal_generation_error');
+        $finding = collect($response->json('findings'))->firstWhere('category', 'technical_uncertainty');
         $this->assertNotNull($finding);
-        $this->assertSame('critical', $finding['severity']);
-        $this->assertTrue($finding['blocks_run']);
-        $this->assertSame(1, $response->json('summary.open_blocking'));
+        $this->assertSame('warning', $finding['severity']);
+        $this->assertFalse($finding['blocks_run']);
+        $this->assertSame(0, $response->json('summary.open_blocking'));
     }
 
     // =========================================================================
@@ -538,7 +555,7 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
         ]);
 
-        $service = app(\App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService::class);
+        $service = app(EnterpriseWikiVerifyPageClaimsService::class);
         $reflection = new \ReflectionClass($service);
         $method = $reflection->getMethod('isPositiveBestPracticeSuggestion');
         $method->setAccessible(true);
@@ -658,9 +675,9 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
 
     private function createDocumentSourceReference(EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document): void
     {
-        \App\Models\EnterpriseWikiSourceReference::query()->create([
+        EnterpriseWikiSourceReference::query()->create([
             'enterprise_wiki_claim_id' => $claim->id,
-            'source_type' => \App\Models\EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
             'source_label' => $document->original_filename,
             'source_hash' => hash('sha256', 'enterprise_wiki_document:'.$document->id),

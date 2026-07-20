@@ -3452,6 +3452,7 @@ return [
         'pending_review_draft_notice' => 'Denne siden er til gjennomgang. Innholdet er AI-generert.',
         'review_reference_superseded' => 'Forslaget gjelder en eldre sideversjon (versjon :version) og er ikke lenger aktuelt for gjeldende innhold.',
         'review_reference_block_missing' => 'Teksten finnes ikke lenger i gjeldende versjon av siden.',
+        'review_reference_no_confident_block' => 'Systemet fant ingen sikker tekstblokk å markere for denne påstanden. Se hele siden under.',
         'verification_heading' => 'Verifikasjonsgrunnlag',
         'verification_description' => 'Påstander og kildebevis som siden bygger på.',
         'verification_basis_intro' => 'Verifikasjonsgrunnlag samler kildebasert innhold, forslag basert på beste praksis og strukturelle funn slik at du kan vurdere riktig type arbeid på riktig måte.',
