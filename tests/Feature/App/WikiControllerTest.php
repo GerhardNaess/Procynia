@@ -69,7 +69,13 @@ class WikiControllerTest extends TestCase
         });
     }
 
-    public function test_contributor_does_not_see_draft_pages_in_index(): void
+    /**
+     * Approval status is a workflow concern, not a read-access concern — any authorized
+     * customer Wiki user can see a draft page (e.g. the person who uploaded its source document,
+     * or the Document Owner, neither of which is otherwise represented by bid_role). Status only
+     * gates which actions are available (submit()/approve()/reject() remain System-Owner-only).
+     */
+    public function test_contributor_sees_draft_pages_in_index(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
@@ -81,11 +87,11 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($draft): bool {
             $pages = collect(data_get($inertia, 'props.pages', []));
 
-            return ! $pages->contains(fn (array $p) => $p['id'] === $draft->id);
+            return $pages->contains(fn (array $p) => $p['id'] === $draft->id && $p['status'] === EnterpriseWikiPage::STATUS_DRAFT);
         });
     }
 
-    public function test_contributor_does_not_see_pending_review_pages_in_index(): void
+    public function test_contributor_sees_pending_review_pages_in_index(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
@@ -97,7 +103,7 @@ class WikiControllerTest extends TestCase
         $response->assertViewHas('page', function (array $inertia) use ($pending): bool {
             $pages = collect(data_get($inertia, 'props.pages', []));
 
-            return ! $pages->contains(fn (array $p) => $p['id'] === $pending->id);
+            return $pages->contains(fn (array $p) => $p['id'] === $pending->id);
         });
     }
 
@@ -320,25 +326,26 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
-    // show() — visibility by status
+    // show() — read access is not gated by status (approval status is a workflow
+    // concern, not a read-access concern — see User::visibleEnterpriseWikiPageStatuses())
     // =========================================================================
 
-    public function test_show_returns_404_for_draft_page_to_contributor(): void
+    public function test_contributor_can_view_draft_page(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast kun for SO');
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast');
 
-        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
-    public function test_show_returns_404_for_pending_review_page_to_contributor(): void
+    public function test_contributor_can_view_pending_review_page(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Under review');
 
-        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
     public function test_system_owner_can_view_pending_review_page(): void
@@ -350,12 +357,6 @@ class WikiControllerTest extends TestCase
         $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
-    /**
-     * QA needs the narrowest possible read access to do its job: a Contributor with QA must be
-     * able to open a draft/pending_review page (and its claims) to approve them, even though
-     * plain Contributor visibility would 404 it (see test_show_returns_404_for_draft_page_to_
-     * contributor above).
-     */
     public function test_contributor_with_qa_can_view_draft_page(): void
     {
         $customer = $this->createCustomer();
@@ -388,6 +389,116 @@ class WikiControllerTest extends TestCase
         $this->actingAs($user)->get('/app/wiki/'.$foreignPage->slug)->assertNotFound();
     }
 
+    public function test_guest_cannot_access_wiki_index(): void
+    {
+        $this->get('/app/wiki')->assertRedirect();
+    }
+
+    public function test_guest_cannot_access_wiki_show(): void
+    {
+        $customer = $this->createCustomer();
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+
+        $this->get('/app/wiki/'.$page->slug)->assertRedirect();
+    }
+
+    // =========================================================================
+    // Bug regression: the document uploader and the Document Owner must be able to
+    // see a page generated from their document, in the ordinary list, search, and
+    // show() — regardless of its approval status. Neither role is otherwise
+    // represented by bid_role, so this must hold for a plain Contributor.
+    // =========================================================================
+
+    public function test_document_uploader_can_see_generated_draft_page_in_list_and_show(): void
+    {
+        $customer = $this->createCustomer();
+        $uploader = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer);
+        $document->update(['owner_user_id' => $uploader->id]);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Generert fra opplastet dokument');
+        $this->createIngestRunPage($run, $page);
+
+        $listResponse = $this->actingAs($uploader)->get('/app/wiki?tab=pages');
+        $listResponse->assertOk();
+        $listResponse->assertViewHas('page', function (array $inertia) use ($page): bool {
+            return collect(data_get($inertia, 'props.pages', []))->pluck('id')->contains($page->id);
+        });
+
+        $this->actingAs($uploader)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    public function test_document_owner_can_see_generated_page_even_when_not_the_uploader(): void
+    {
+        $customer = $this->createCustomer();
+        $uploader = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer);
+        $document->update(['owner_user_id' => $owner->id]);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Dokumenteiers side');
+
+        $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
+        // A different, unrelated authorized Wiki user at the same customer can read it too.
+        $this->actingAs($uploader)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    public function test_another_authorized_wiki_user_at_same_customer_can_see_someone_elses_draft_page(): void
+    {
+        $customer = $this->createCustomer();
+        $otherContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'En annens utkast');
+
+        $this->actingAs($otherContributor)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    public function test_user_from_another_customer_cannot_see_the_page(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $foreignUser = $this->createUser($other, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Ikke for andre kunder');
+
+        $this->actingAs($foreignUser)->get('/app/wiki/'.$page->slug)->assertNotFound();
+
+        $listResponse = $this->actingAs($foreignUser)->get('/app/wiki?tab=pages');
+        $listResponse->assertViewHas('page', function (array $inertia) use ($page): bool {
+            return ! collect(data_get($inertia, 'props.pages', []))->pluck('id')->contains($page->id);
+        });
+    }
+
+    public function test_draft_page_is_findable_via_search_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Unik søkbar utkasttittel');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=søkbar');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            return collect(data_get($inertia, 'props.pages', []))->pluck('id')->contains($draft->id);
+        });
+    }
+
+    public function test_page_visible_in_graph_is_also_visible_in_ordinary_page_list_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Wiki-utkast fra graf');
+
+        $graphResponse = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+        $graphResponse->assertOk();
+        $this->assertTrue(collect($graphResponse->json('nodes'))->pluck('page_id')->contains($draft->id));
+
+        $listResponse = $this->actingAs($user)->get('/app/wiki?tab=pages');
+        $listResponse->assertOk();
+        $listResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            return collect(data_get($inertia, 'props.pages', []))->pluck('id')->contains($draft->id);
+        });
+
+        $this->actingAs($user)->get('/app/wiki/'.$draft->slug)->assertOk();
+    }
+
     // =========================================================================
     // show() — System Owner visibility of rejected pages (phase 3A)
     // =========================================================================
@@ -401,13 +512,13 @@ class WikiControllerTest extends TestCase
         $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
-    public function test_contributor_cannot_view_rejected_page(): void
+    public function test_contributor_can_view_rejected_page(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_REJECTED, 'Avvist for bidrag');
 
-        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertOk();
     }
 
     // =========================================================================
@@ -3555,20 +3666,39 @@ class WikiControllerTest extends TestCase
         });
     }
 
-    public function test_pages_tab_invalid_status_not_in_visible_statuses_is_ignored(): void
+    public function test_pages_tab_status_filter_accepts_draft_for_any_authorized_viewer(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast');
+        $approved = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent');
+
+        // status is a user-chosen filter, not a role-based read-access gate — a Contributor may
+        // explicitly filter down to drafts just like any other authorized Wiki user.
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&status=draft');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft, $approved): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return $ids->contains($draft->id) && ! $ids->contains($approved->id);
+        });
+    }
+
+    public function test_pages_tab_invalid_status_value_is_ignored(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $approved = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent');
 
-        // contributor cannot see draft, so ?status=draft should be ignored
-        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&status=draft');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&status=not_a_real_status');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($approved): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            $filters = data_get($inertia, 'props.pages_filters');
 
-            return $ids->contains($approved->id);
+            return $ids->contains($approved->id) && $filters['status'] === null;
         });
     }
 
@@ -3663,41 +3793,8 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
-    // Pages tab — hidden_by_status_count (graph/list visibility consistency)
+    // Pages tab — read access is not gated by status (graph/list visibility consistency)
     // =========================================================================
-
-    public function test_pages_tab_hidden_by_status_count_is_zero_for_system_owner(): void
-    {
-        $customer = $this->createCustomer();
-        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
-
-        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
-
-        $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia): bool {
-            return data_get($inertia, 'props.pages_meta.hidden_by_status_count') === 0;
-        });
-    }
-
-    public function test_pages_tab_hidden_by_status_count_reflects_invisible_drafts_for_contributor(): void
-    {
-        $customer = $this->createCustomer();
-        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast en');
-        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast to');
-        $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
-
-        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
-
-        $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia): bool {
-            $pageIds = collect(data_get($inertia, 'props.pages', []))->pluck('id');
-
-            return data_get($inertia, 'props.pages_meta.hidden_by_status_count') === 2
-                && $pageIds->count() === 1;
-        });
-    }
 
     public function test_pages_tab_draft_page_visible_to_system_owner_with_draft_status_not_auto_approved(): void
     {
@@ -3715,17 +3812,17 @@ class WikiControllerTest extends TestCase
         });
     }
 
-    public function test_pages_tab_hidden_drafts_reappear_for_system_owner(): void
+    public function test_pages_tab_draft_page_visible_to_both_contributor_and_system_owner(): void
     {
         $customer = $this->createCustomer();
         $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
 
         $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
-        $hiddenResponse = $this->actingAs($contributor)->get('/app/wiki?tab=pages');
-        $hiddenResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
+        $contributorResponse = $this->actingAs($contributor)->get('/app/wiki?tab=pages');
+        $contributorResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
             $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
 
-            return ! $ids->contains($draft->id);
+            return $ids->contains($draft->id);
         });
 
         $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);

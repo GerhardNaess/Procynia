@@ -345,30 +345,29 @@ class User extends Authenticatable implements FilamentUser
     }
 
     /**
-     * Which EnterpriseWikiPage statuses this user is allowed to see, anywhere in the Enterprise
-     * Wiki UI — the ordinary page list (WikiController::visibleStatuses()) and the graph
-     * (EnterpriseWikiGraphDataService) must both call this so they never disagree about which
-     * pages belong to a customer's Wiki view. Approved pages are visible to everyone; draft and
-     * pending_review are only for roles actually expected to review them (System Owner, Bid
-     * Manager, or anyone with QA and access to the approve_wiki_claims permission); rejected is
-     * System-Owner-only since it is that role's own moderation decision.
+     * Which EnterpriseWikiPage statuses this user may READ, anywhere in the Enterprise Wiki UI
+     * — the ordinary page list (WikiController::visibleStatuses()), the single-page view
+     * (WikiController::show()), and the graph (EnterpriseWikiGraphDataService) all call this so
+     * they never disagree about which pages belong to a customer's Wiki view.
+     *
+     * Approval status is a workflow/authority concern, not a read-access concern: any user who
+     * can access this customer's Enterprise Wiki at all may read a page regardless of whether it
+     * is draft, pending_review, approved, rejected, archived, or superseded — including a page
+     * they uploaded the source document for, or that they are the Document Owner of, neither of
+     * which is otherwise represented by bid_role. Status still fully controls which WORKFLOW
+     * ACTIONS are available (submit/approve/reject remain System-Owner-only in
+     * WikiController::submit()/approve()/reject(); claim approval remains gated by
+     * canApproveWikiClaims()/canHandleClaim()) — this method governs reading only.
      *
      * @return list<string>
      */
     public function visibleEnterpriseWikiPageStatuses(): array
     {
-        $statuses = [EnterpriseWikiPage::STATUS_APPROVED];
-
-        if ($this->isSystemOwner() || $this->isBidManager() || $this->canApproveWikiClaims()) {
-            $statuses[] = EnterpriseWikiPage::STATUS_DRAFT;
-            $statuses[] = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return [];
         }
 
-        if ($this->isSystemOwner()) {
-            $statuses[] = EnterpriseWikiPage::STATUS_REJECTED;
-        }
-
-        return $statuses;
+        return EnterpriseWikiPage::STATUSES;
     }
 
     public static function customerRoleForBidRole(string $bidRole): string

@@ -519,8 +519,8 @@ function getWikiPagesHelpSections(tw) {
                     text: tw.page_help_item_status_rejected_text ?? 'Minst én nødvendig Dokumenteier har avvist materialet. Materialet kan ikke fullføres før avviket er behandlet.',
                 },
                 {
-                    title: tw.page_help_item_status_visibility_title ?? 'Hvorfor ser jeg ikke alle utkast?',
-                    text: tw.page_help_item_status_visibility_text ?? 'Utkast og sider til gjennomgang vises bare for roller som skal behandle dem — Systemansvarlig, Bid Manager, eller andre med QA-tilgang til claim-godkjenning. Andre roller ser først siden når den er Godkjent. Wiki-grafen bruker samme synlighetsregler som denne oversikten, slik at en side aldri vises i grafen uten også å telle med her.',
+                    title: tw.page_help_item_status_visibility_title ?? 'Hvem kan se en side, uansett status?',
+                    text: tw.page_help_item_status_visibility_text ?? 'Alle autoriserte Wiki-brukere hos kunden kan åpne og lese en side uansett status — status styrer kun hvem som kan godkjenne, avvise, redigere eller publisere. Wiki-grafen bruker samme regel, slik at en side aldri vises i grafen uten også å kunne åpnes her.',
                 },
             ],
         },
@@ -1426,7 +1426,6 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
     }[type] ?? type);
 
     const hasActiveFilters = !!(filters.search || filters.page_type || filters.status || filters.lint);
-    const hiddenByStatusCount = meta.hidden_by_status_count ?? 0;
 
     return (
         <div className="space-y-4">
@@ -1515,24 +1514,10 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                 )}
             </div>
 
-            {hiddenByStatusCount > 0 && (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    {(tw.pages_hidden_by_status_note
-                        ?? '{count} wiki-side(r) er ikke synlige for din rolle ennå fordi de venter på gjennomgang og godkjenning.'
-                    ).replace('{count}', hiddenByStatusCount)}
-                </div>
-            )}
-
             {pages.length === 0 ? (
                 <EmptyStateBox
                     title={tw.empty_title ?? 'Ingen wiki-sider ennå'}
-                    description={
-                        !hasActiveFilters && hiddenByStatusCount > 0
-                            ? (tw.empty_description_hidden_by_status
-                                ?? 'Det finnes {count} wiki-side(r) for denne kunden, men de er ikke synlige for din rolle ennå. De venter på gjennomgang og godkjenning fra systemansvarlig eller bid manager.'
-                            ).replace('{count}', hiddenByStatusCount)
-                            : (tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.')
-                    }
+                    description={tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.'}
                 />
             ) : (
                 <>

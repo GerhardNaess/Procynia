@@ -291,35 +291,6 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * Whether the user owns at least one source document referenced by any claim on this page
-     * version — computed directly from claims' source references, independent of
-     * syncForPageVersion()/previewRequirementsForPageVersion(), which return no requirement at
-     * all once the version has an active claim-integrity defect (see
-     * hasActiveClaimIntegrityDefects()). A legitimate Document Owner for a page's *good* claims
-     * must still be able to reach the page (to see the "still processing" state — Del 9) even
-     * while other claims on the same version are blocked; gating solely on
-     * isRequiredDocumentOwnerForPageVersion() would 404 them out entirely in that case.
-     */
-    public function isOwnerOfAnySourceDocumentForPageVersion(EnterpriseWikiPageVersion $version, User $user): bool
-    {
-        $documentIds = EnterpriseWikiClaim::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->whereHas('sourceReferences', fn ($query) => $query
-                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT))
-            ->with(['sourceReferences' => fn ($query) => $query
-                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
-            ->get()
-            ->flatMap(fn (EnterpriseWikiClaim $claim) => $claim->sourceReferences->pluck('source_id'))
-            ->map(static fn (mixed $value): int => (int) $value)
-            ->filter(static fn (int $value): bool => $value > 0)
-            ->unique()
-            ->values()
-            ->all();
-
-        return $this->userOwnsAnySourceDocument($user, $documentIds);
-    }
-
-    /**
      * @return Collection<int, EnterpriseWikiPageVersionDocumentOwnerApproval>
      */
     private function buildRequirementsForPageVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): Collection

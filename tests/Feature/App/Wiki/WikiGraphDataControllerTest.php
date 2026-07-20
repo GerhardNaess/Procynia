@@ -613,11 +613,12 @@ class WikiGraphDataControllerTest extends TestCase
     }
 
     // =========================================================================
-    // Status visibility — the graph must not show pages the ordinary page
-    // list (WikiController::visibleStatuses()) would hide from this viewer.
+    // Status visibility — read access is not gated by status. Any authorized customer
+    // Wiki viewer (including a plain Contributor) sees the same pages in the graph as
+    // in the ordinary page list, regardless of draft/pending_review/approved/rejected.
     // =========================================================================
 
-    public function test_customer_wide_excludes_draft_page_for_contributor(): void
+    public function test_customer_wide_includes_draft_page_for_contributor(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
@@ -629,7 +630,7 @@ class WikiGraphDataControllerTest extends TestCase
         $response->assertOk();
         $nodeIds = collect($response->json('nodes'))->pluck('page_id');
         $this->assertTrue($nodeIds->contains($approved->id));
-        $this->assertFalse($nodeIds->contains($draft->id));
+        $this->assertTrue($nodeIds->contains($draft->id));
     }
 
     public function test_customer_wide_includes_draft_page_for_system_owner(): void
@@ -645,7 +646,7 @@ class WikiGraphDataControllerTest extends TestCase
         $this->assertTrue($nodeIds->contains($draft->id));
     }
 
-    public function test_customer_wide_excludes_edge_when_one_endpoint_is_a_hidden_draft(): void
+    public function test_customer_wide_includes_edge_when_one_endpoint_is_a_draft(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
@@ -657,10 +658,10 @@ class WikiGraphDataControllerTest extends TestCase
 
         $response->assertOk();
         $linkIds = collect($response->json('edges'))->pluck('link_id');
-        $this->assertFalse($linkIds->contains($link->id));
+        $this->assertTrue($linkIds->contains($link->id));
     }
 
-    public function test_run_scoped_graph_excludes_draft_page_for_contributor(): void
+    public function test_run_scoped_graph_includes_draft_page_for_contributor(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
@@ -671,10 +672,10 @@ class WikiGraphDataControllerTest extends TestCase
 
         $response->assertOk();
         $nodeIds = collect($response->json('nodes'))->pluck('page_id');
-        $this->assertFalse($nodeIds->contains($draft->id));
+        $this->assertTrue($nodeIds->contains($draft->id));
     }
 
-    public function test_neighborhood_treats_hidden_center_page_as_not_found_for_contributor(): void
+    public function test_neighborhood_includes_draft_center_page_for_contributor(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
@@ -682,7 +683,23 @@ class WikiGraphDataControllerTest extends TestCase
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?page_id='.$draft->id);
 
-        $response->assertStatus(422);
+        $response->assertOk();
+        $nodeIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertTrue($nodeIds->contains($draft->id));
+    }
+
+    public function test_customer_wide_still_excludes_other_customer_draft_page(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer);
+        $foreignDraft = $this->createPage($other, 'article', 'Fremmed utkast', EnterpriseWikiPage::STATUS_DRAFT);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $nodeIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertFalse($nodeIds->contains($foreignDraft->id));
     }
 
     // =========================================================================

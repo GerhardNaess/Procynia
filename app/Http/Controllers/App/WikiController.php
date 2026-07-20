@@ -175,16 +175,6 @@ class WikiController extends Controller
             'updated_at' => $page->updated_at,
         ]);
 
-        // How many pages exist for this customer that this viewer's role can never see here
-        // (e.g. a Contributor without QA can only ever see 'approved') — independent of search/
-        // type/lint filters, so the list can explain their absence instead of silently looking
-        // empty (see EnterpriseWikiGraphDataService, which used to show these same pages with no
-        // status filter at all — the graph/list inconsistency this count exists to explain).
-        $hiddenByStatusCount = EnterpriseWikiPage::query()
-            ->where('customer_id', $customerId)
-            ->whereNotIn('status', $this->visibleStatuses($user))
-            ->count();
-
         return [
             'pages' => $pages,
             'pages_meta' => [
@@ -192,7 +182,6 @@ class WikiController extends Controller
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
-                'hidden_by_status_count' => $hiddenByStatusCount,
             ],
             'pages_filters' => [
                 'search' => $search,
@@ -661,8 +650,6 @@ class WikiController extends Controller
                 ->get()
             : collect();
 
-        $visibleStatuses = $this->visibleStatuses($user);
-
         $latestRuns = $allRuns
             ->groupBy('source_id')
             ->map(fn ($group) => $group->first());
@@ -672,7 +659,6 @@ class WikiController extends Controller
             ->groupBy('source_id')
             ->map(fn ($runs) => $runs
                 ->map(fn ($run) => $run->page)
-                ->filter(fn ($page) => in_array($page->status, $visibleStatuses, true))
                 ->unique('id')
                 ->values()
             );
@@ -1174,21 +1160,12 @@ class WikiController extends Controller
         $currentVersion = $page->currentVersion()->first();
         $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
 
-        $canViewPendingPage = $page->status === EnterpriseWikiPage::STATUS_APPROVED
-            || $user?->isSystemOwner()
-            || $user?->isBidManager()
-            || $user?->canApproveWikiClaims()
-            || (
-                $currentVersion !== null
-                && $user instanceof User
-                && $user->is_active
-                && (
-                    $this->documentOwnerApprovalService->isRequiredDocumentOwnerForPageVersion($currentVersion, $user)
-                    || $this->documentOwnerApprovalService->isOwnerOfAnySourceDocumentForPageVersion($currentVersion, $user)
-                )
-            );
-
-        abort_unless($canViewPendingPage, 404);
+        // Read access is not gated by page status: any authorized user of this customer's
+        // Enterprise Wiki may open the page regardless of draft/pending_review/approved/rejected
+        // — see User::visibleEnterpriseWikiPageStatuses(). Status still fully controls which
+        // workflow actions are available (submit()/approve()/reject() below, and claim handling
+        // via $canApproveWikiClaims/canHandleWikiClaims further down).
+        abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend(), 404);
 
         $claimCollection = collect();
 
