@@ -553,7 +553,8 @@ class EnterpriseWikiPostIngestQaService
                 EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             ])
-            ->get(['id', 'content_origin', 'blocking_override']);
+            ->withCount('sourceReferences')
+            ->get(['id', 'content_origin', 'blocking_override', 'generation_issue', 'review_metadata', 'content_block_key']);
 
         $hasBlockingInternalError = $claimIntegrityClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)

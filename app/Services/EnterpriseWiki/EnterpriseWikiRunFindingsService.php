@@ -84,7 +84,7 @@ class EnterpriseWikiRunFindingsService
                     EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                 ])
-                ->with('version')
+                ->with(['version', 'sourceReferences'])
                 ->get();
 
         $bestPracticeSuggestions = $currentVersionIdByPageId->isEmpty()

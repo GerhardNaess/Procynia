@@ -82,14 +82,58 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
     }
 
-    public function test_active_unsupported_generated_content_claim_blocks_qa_passed(): void
+    public function test_unverified_unsupported_generated_content_claim_does_not_block_qa_passed_by_default(): void
     {
+        // Product rule (run-38 follow-up fix): a claim that never actually reached a semantic
+        // verdict (no content_block_key, no source reference, no review_metadata) is a technical
+        // linking uncertainty, not a confirmed content error — it must not suggest blocking by
+        // default even though its content_origin is unsupported_generated_content. See
+        // EnterpriseWikiClaimFindingExplainer.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
         $version = $this->currentVersion($article);
         $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_unverified_unsupported_generated_content_claim_blocks_qa_passed_when_override_kept(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, blockingOverride: true);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    public function test_verified_unsupported_generated_content_claim_blocks_qa_passed(): void
+    {
+        // A claim that DID reach a real semantic verdict (block key + source reference +
+        // review_metadata with a verdict) is a genuine, confirmed content error and still
+        // suggests blocking by default — the fix above only changes claims that were never
+        // actually checked.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $this->createVerifiedUnsupportedClaim($article, $version, $document);
         $this->markStepsComplete($run);
 
         $result = $this->qaService()->runForRun($run);
@@ -291,17 +335,68 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $this->assertTrue($requirements->isEmpty());
     }
 
-    public function test_has_active_claim_integrity_defects_for_version_true_for_unsupported_claim(): void
+    public function test_has_active_claim_integrity_defects_for_version_true_for_verified_unsupported_claim(): void
     {
         $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
         $page = $this->createPendingPage($customer, 'flagged-page');
+        $version = $this->createCurrentVersion($page);
+        $this->createVerifiedUnsupportedClaim($page, $version, $document);
+
+        $hasDefects = app(EnterpriseWikiDocumentOwnerApprovalService::class)
+            ->hasActiveClaimIntegrityDefectsForVersion($version);
+
+        $this->assertTrue($hasDefects);
+    }
+
+    public function test_has_active_claim_integrity_defects_for_version_false_for_unverified_unsupported_claim(): void
+    {
+        // Same rule as the QA gate (findClaimIntegrityDefects()) — an unsupported_generated_content
+        // claim that never actually reached a verdict is technical uncertainty, not a confirmed
+        // defect, so it must not suppress the Document Owner approval requirement either.
+        $customer = $this->createCustomer();
+        $page = $this->createPendingPage($customer, 'unverified-page');
         $version = $this->createCurrentVersion($page);
         $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
 
         $hasDefects = app(EnterpriseWikiDocumentOwnerApprovalService::class)
             ->hasActiveClaimIntegrityDefectsForVersion($version);
 
-        $this->assertTrue($hasDefects);
+        $this->assertFalse($hasDefects);
+    }
+
+    public function test_qa_gate_and_document_owner_approval_agree_on_effective_blocking(): void
+    {
+        // The QA gate (EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()) and
+        // Document Owner approval suppression (EnterpriseWikiDocumentOwnerApprovalService::
+        // hasActiveClaimIntegrityDefects()) must never disagree about whether the same claim is
+        // effectively blocking — both consult EnterpriseWikiClaimFindingExplainer the same way.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $unverifiedVersion = $this->currentVersion($article);
+        $this->createClaim($article, $unverifiedVersion, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
+        $this->markStepsComplete($run);
+
+        $qaResult = $this->qaService()->runForRun($run);
+        $docOwnerService = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+
+        $this->assertNotContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
+        $this->assertFalse($docOwnerService->hasActiveClaimIntegrityDefectsForVersion($unverifiedVersion));
+
+        $verifiedRun = $this->createAppliedRun($customer, $document);
+        $verifiedArticle = $this->createVersionedPage($customer, $verifiedRun, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Verified Article');
+        $this->createVersionedPage($customer, $verifiedRun, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Verified Summary');
+        $verifiedVersion = $this->currentVersion($verifiedArticle);
+        $this->createVerifiedUnsupportedClaim($verifiedArticle, $verifiedVersion, $document);
+        $this->markStepsComplete($verifiedRun);
+
+        $verifiedQaResult = $this->qaService()->runForRun($verifiedRun);
+
+        $this->assertContains('active_unsupported_generated_content_claims', $verifiedQaResult['claim_integrity_defects']);
+        $this->assertTrue($docOwnerService->hasActiveClaimIntegrityDefectsForVersion($verifiedVersion));
     }
 
     public function test_has_active_claim_integrity_defects_for_version_false_for_clean_source_based_claim(): void
@@ -335,7 +430,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $version = $this->createCurrentVersion($page);
         $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
         $this->createSourceReference($goodClaim, $document);
-        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
+        $this->createVerifiedUnsupportedClaim($page, $version, $document);
 
         $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
         $response->assertOk();
@@ -517,20 +612,51 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
             ->firstOrFail();
     }
 
-    private function createClaim(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $contentOrigin, ?bool $blockingOverride = null): EnterpriseWikiClaim
-    {
+    private function createClaim(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $contentOrigin,
+        ?bool $blockingOverride = null,
+        ?string $contentBlockKey = null,
+        ?array $reviewMetadata = null,
+    ): EnterpriseWikiClaim {
         return EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Test claim.',
             'content_origin' => $contentOrigin,
             'blocking_override' => $blockingOverride,
+            'content_block_key' => $contentBlockKey,
+            'review_metadata' => $reviewMetadata,
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
             'verified_at' => now(),
         ]);
+    }
+
+    /**
+     * A source_based-anchored unsupported_generated_content claim: content_block_key set, a real
+     * source reference linked, and review_metadata carrying an actual 'verdict' — i.e. one that
+     * genuinely reached a semantic verdict, as opposed to createClaim()'s plain
+     * unsupported_generated_content fixture (no block key, no metadata), which now represents a
+     * claim that never reached a verdict at all (technical uncertainty, see
+     * EnterpriseWikiClaimFindingExplainer).
+     */
+    private function createVerifiedUnsupportedClaim(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        EnterpriseWikiDocument $document,
+    ): EnterpriseWikiClaim {
+        $claim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'reason' => 'The source describes a different process than the one claimed.',
+        ]);
+        $this->createSourceReference($claim, $document);
+
+        return $claim;
     }
 
     private function createSourceReference(EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document): EnterpriseWikiSourceReference

@@ -3587,6 +3587,22 @@ return [
                 'title' => 'Ingen kildedekning funnet',
                 'explanation_no_detail' => 'Systemet fant ingen kildeutdrag som støtter denne påstanden, og har ingen mer detaljert forklaring lagret for dette funnet.',
             ],
+            'possible_no_source_support' => [
+                'title' => 'Ikke bekreftet innholdsavvik',
+                'explanation_no_detail' => 'Systemet vurderte påstanden som ikke bekreftet av kilden, men har ingen mer detaljert forklaring lagret for dette funnet. Avviket er ikke sikkert bekreftet.',
+            ],
+            'no_block_link' => [
+                'title' => 'Ingen blokk-kobling',
+                'explanation' => 'Påstanden er ikke koblet til noen bestemt tekstblokk på siden, og kunne derfor ikke kontrolleres mot et kildeavsnitt.',
+            ],
+            'ambiguous_source_candidate' => [
+                'title' => 'Usikker kildekandidat',
+                'explanation' => 'Systemet fant flere mulige kildeutdrag for denne påstanden, men kunne ikke bekrefte automatisk hvilket som er riktig.',
+            ],
+            'no_confident_source_candidate' => [
+                'title' => 'Ingen sikker kildekandidat',
+                'explanation' => 'Systemet fant ingen kildekandidat det var trygt å bruke for å bekrefte eller avkrefte denne påstanden.',
+            ],
         ],
 
         // Blokkering — separat fra alvorlighet. Se produktreglene i CLAUDE.md.

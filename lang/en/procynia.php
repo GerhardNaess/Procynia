@@ -3587,6 +3587,22 @@ return [
                 'title' => 'No source coverage found',
                 'explanation_no_detail' => 'The system found no source excerpt supporting this claim, and has no further detail stored for this finding.',
             ],
+            'possible_no_source_support' => [
+                'title' => 'Unconfirmed content deviation',
+                'explanation_no_detail' => 'The system judged the claim as not supported by the source, but has no further detail stored for this finding. The deviation is not confirmed.',
+            ],
+            'no_block_link' => [
+                'title' => 'No block link',
+                'explanation' => 'The claim is not linked to any specific text block on the page, so it could not be checked against a source paragraph.',
+            ],
+            'ambiguous_source_candidate' => [
+                'title' => 'Uncertain source candidate',
+                'explanation' => 'The system found several possible source excerpts for this claim but could not automatically confirm which one is correct.',
+            ],
+            'no_confident_source_candidate' => [
+                'title' => 'No confident source candidate',
+                'explanation' => 'The system found no source candidate it was safe to use to confirm or refute this claim.',
+            ],
         ],
 
         // Blocking — separate from severity. See the product rules in CLAUDE.md.

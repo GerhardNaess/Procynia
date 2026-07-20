@@ -24,16 +24,26 @@ use App\Models\EnterpriseWikiClaim;
  *   claim, its Wiki text block, and a source paragraph. This is a system/pipeline limitation, not
  *   evidence the claim itself is wrong, so it is never presented as a content error and does not
  *   suggest blocking by default.
- * - unsupported_generated_content is always at least "undocumented or incorrect factual claim" —
- *   content was generated that the source material does not confirm, which is itself already a
- *   real, actionable fact regardless of how much diagnostic detail is available for the specific
- *   reason. It suggests blocking by default (an authorized user must actively decide otherwise).
- *   When a genuine deterministic conflict was found (an actor/modality/negation/scope/number/
- *   currency/subject mismatch — see EnterpriseWikiClaimCanonicalizationService), the explanation
- *   names it concretely. Absent that, an AI self-reported check mismatch is surfaced as merely
- *   "possible" (that self-report is known to be unreliable — see
- *   project_wiki_run38_combined_evidence_verification_fix memory), and absent even that, the
- *   AI's own free-text verification reason is shown verbatim rather than one generic sentence.
+ * - unsupported_generated_content is classified by the ACTUAL cause, not by the label alone (see
+ *   CLAUDE.md: "Klassifisering skal følge den faktiske årsaken, ikke bare content_origin"):
+ *     - If the claim never actually reached a semantic verdict — no content_block_key, or a block
+ *       but no linked EnterpriseWikiSourceReference, or some review_metadata without a 'verdict'
+ *       — the system never confirmed the CONTENT is wrong, only that it could not confidently
+ *       link/check it. That is "technical uncertainty" too, and does not suggest blocking.
+ *     - Otherwise a semantic verdict was actually reached, so it is at least "undocumented or
+ *       incorrect factual claim" and suggests blocking by default. When a genuine deterministic
+ *       conflict was found (an actor/modality/negation/scope/number/currency/subject mismatch —
+ *       see EnterpriseWikiClaimCanonicalizationService) or the claim was reconfirmed by the
+ *       stricter combined-evidence run re-evaluation (review_metadata.classification_basis ===
+ *       'scoped_run_reevaluation' — see EnterpriseWikiVerifyPageClaimsService::
+ *       reevaluateClaimForRun()), the finding is a confirmed content error. A first-pass verdict
+ *       with no specific dimension flagged (every self-reported check "match", no deterministic
+ *       reason) is hedged as "possible content deviation" instead — the checks found nothing
+ *       concrete, so it should not be presented as a confirmed error. Absent even that, an AI
+ *       self-reported check mismatch is surfaced as merely "possible" (that self-report is known
+ *       to be unreliable — see project_wiki_run38_combined_evidence_verification_fix memory), and
+ *       absent even that, the AI's own free-text verification reason is shown verbatim rather
+ *       than one generic sentence.
  */
 class EnterpriseWikiClaimFindingExplainer
 {
@@ -91,10 +101,14 @@ class EnterpriseWikiClaimFindingExplainer
      * blocking state must combine this with EnterpriseWikiClaim::blocking_override themselves
      * (null → this suggestion applies; true/false → the recorded human decision wins), since only
      * the caller knows whether an override should be consulted at all.
+     *
+     * Delegates to explain() rather than re-deriving the rule independently — the QA gate,
+     * Document Owner approval, the Funn panel, and the claim detail view must never be able to
+     * disagree about whether a given claim is blocking.
      */
     public function suggestedBlocking(EnterpriseWikiClaim $claim): bool
     {
-        return $claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR;
+        return $this->explain($claim)['suggested_blocking'];
     }
 
     /**
@@ -104,38 +118,28 @@ class EnterpriseWikiClaimFindingExplainer
     {
         $issue = (string) $claim->generation_issue;
 
-        [$title, $explanation] = match ($issue) {
-            'claim_not_tied_to_current_page_version', 'wrong_version' => [
+        return match ($issue) {
+            'claim_not_tied_to_current_page_version', 'wrong_version' => $this->buildTechnicalFinding(
                 __('procynia.wiki.claim_finding.stale_version.title'),
                 __('procynia.wiki.claim_finding.stale_version.explanation'),
-            ],
-            'missing_block' => [
+            ),
+            'missing_block' => $this->buildTechnicalFinding(
                 __('procynia.wiki.claim_finding.missing_block.title'),
                 __('procynia.wiki.claim_finding.missing_block.explanation'),
-            ],
-            'claim_missing_unique_content_block_anchor' => [
+            ),
+            'claim_missing_unique_content_block_anchor' => $this->buildTechnicalFinding(
                 __('procynia.wiki.claim_finding.ambiguous_block_link.title'),
                 __('procynia.wiki.claim_finding.ambiguous_block_link.explanation'),
-            ],
-            'genuine_content_mismatch' => [
+            ),
+            'genuine_content_mismatch' => $this->buildTechnicalFinding(
                 __('procynia.wiki.claim_finding.no_confident_source_link.title'),
                 __('procynia.wiki.claim_finding.no_confident_source_link.explanation'),
-            ],
-            default => [
+            ),
+            default => $this->buildTechnicalFinding(
                 __('procynia.wiki.claim_finding.technical_link_issue.title'),
                 __('procynia.wiki.claim_finding.technical_link_issue.explanation'),
-            ],
+            ),
         };
-
-        return [
-            'category' => self::CATEGORY_TECHNICAL_UNCERTAINTY,
-            'category_label' => __('procynia.wiki.claim_finding_category_technical_uncertainty'),
-            'title' => $title,
-            'explanation' => $explanation,
-            'recommended_action' => __('procynia.wiki.claim_finding_action_technical_uncertainty'),
-            'suggested_blocking' => false,
-            'has_confident_source' => false,
-        ];
     }
 
     /**
@@ -144,6 +148,15 @@ class EnterpriseWikiClaimFindingExplainer
     private function explainUnsupportedContent(EnterpriseWikiClaim $claim): array
     {
         $meta = (array) ($claim->review_metadata ?? []);
+
+        // The claim was never actually checked against a confidently identified source excerpt —
+        // no block anchor, or a block with no linked source reference, or review_metadata with no
+        // recorded verdict at all. That is a technical linking failure, not evidence of an
+        // incorrect claim, regardless of the unsupported_generated_content label (see class
+        // docblock and CLAUDE.md's "Klassifisering skal følge den faktiske årsaken" rule).
+        if (! $this->hasVerifiedVerdict($meta)) {
+            return $this->explainUnverifiedLink($claim);
+        }
 
         if ($claim->generation_issue === 'claim_contradicted_by_source') {
             return $this->buildContentFinding(
@@ -181,21 +194,93 @@ class EnterpriseWikiClaimFindingExplainer
             );
         }
 
+        // Reached a not_supported verdict with no specific dimension flagged as wrong (every
+        // self-reported check "match", no deterministic reason). A stricter combined-evidence run
+        // re-evaluation (scoped_run_reevaluation) reaching the same verdict is a confirmed error —
+        // the more rigorous re-check still found nothing to support it. A first-pass verdict with
+        // nothing specific flagged is only a possible deviation: the checks found no concrete
+        // problem, so the claim should not be presented as confirmed wrong.
+        $confirmed = ($meta['classification_basis'] ?? null) === 'scoped_run_reevaluation';
+        $category = $confirmed ? self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM : self::CATEGORY_POSSIBLE_CONTENT_DEVIATION;
+        $titleKey = $confirmed ? 'no_source_support' : 'possible_no_source_support';
+
         $reasonText = $this->preferredReasonText($claim, $meta);
 
         if ($reasonText !== null) {
             return $this->buildContentFinding(
-                self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
-                __('procynia.wiki.claim_finding.no_source_support.title'),
+                $category,
+                __('procynia.wiki.claim_finding.'.$titleKey.'.title'),
                 $reasonText,
             );
         }
 
         return $this->buildContentFinding(
-            self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
-            __('procynia.wiki.claim_finding.no_source_support.title'),
-            __('procynia.wiki.claim_finding.no_source_support.explanation_no_detail'),
+            $category,
+            __('procynia.wiki.claim_finding.'.$titleKey.'.title'),
+            __('procynia.wiki.claim_finding.'.$titleKey.'.explanation_no_detail'),
         );
+    }
+
+    /**
+     * A generation_issue of unsupported_generated_content with no verified verdict at all — the
+     * verification pipeline never reached (or never persisted) a semantic comparison for this
+     * claim. Distinguishes WHICH link is missing so the explanation stays concrete rather than one
+     * generic "technical problem" sentence.
+     */
+    private function explainUnverifiedLink(EnterpriseWikiClaim $claim): array
+    {
+        if ($claim->content_block_key === null) {
+            return $this->buildTechnicalFinding(
+                __('procynia.wiki.claim_finding.no_block_link.title'),
+                __('procynia.wiki.claim_finding.no_block_link.explanation'),
+            );
+        }
+
+        if ($this->hasSourceReference($claim)) {
+            return $this->buildTechnicalFinding(
+                __('procynia.wiki.claim_finding.ambiguous_source_candidate.title'),
+                __('procynia.wiki.claim_finding.ambiguous_source_candidate.explanation'),
+            );
+        }
+
+        return $this->buildTechnicalFinding(
+            __('procynia.wiki.claim_finding.no_confident_source_candidate.title'),
+            __('procynia.wiki.claim_finding.no_confident_source_candidate.explanation'),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $meta
+     */
+    private function hasVerifiedVerdict(array $meta): bool
+    {
+        return ! empty($meta['verdict']);
+    }
+
+    private function hasSourceReference(EnterpriseWikiClaim $claim): bool
+    {
+        if ($claim->relationLoaded('sourceReferences')) {
+            return $claim->sourceReferences->isNotEmpty();
+        }
+
+        if (array_key_exists('source_references_count', $claim->getAttributes())) {
+            return (int) $claim->getAttribute('source_references_count') > 0;
+        }
+
+        return $claim->sourceReferences()->exists();
+    }
+
+    private function buildTechnicalFinding(string $title, string $explanation): array
+    {
+        return [
+            'category' => self::CATEGORY_TECHNICAL_UNCERTAINTY,
+            'category_label' => __('procynia.wiki.claim_finding_category_technical_uncertainty'),
+            'title' => $title,
+            'explanation' => $explanation,
+            'recommended_action' => __('procynia.wiki.claim_finding_action_technical_uncertainty'),
+            'suggested_blocking' => false,
+            'has_confident_source' => false,
+        ];
     }
 
     private function buildContentFinding(string $category, string $title, string $explanation): array

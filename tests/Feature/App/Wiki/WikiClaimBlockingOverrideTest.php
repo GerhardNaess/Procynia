@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiClaimDecision;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -167,13 +168,29 @@ class WikiClaimBlockingOverrideTest extends TestCase
 
     public function test_real_unsupported_claim_still_suggests_blocking_without_any_override(): void
     {
+        // A claim that actually reached a semantic verdict (content_block_key + a linked source
+        // reference + review_metadata with a real verdict) — as opposed to one that was never
+        // checked at all, which is technical uncertainty and does not suggest blocking (see
+        // EnterpriseWikiClaimFindingExplainer and the run-38 follow-up fix it implements).
         [, , $claim] = $this->createClaimDefect($this->createCustomer());
+        $claim->update([
+            'content_block_key' => 'block-0001',
+            'review_metadata' => ['classification_basis' => 'semantic_verification', 'verdict' => 'not_supported'],
+        ]);
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 1,
+            'source_label' => 'Test source.docx',
+            'excerpt' => 'Utdrag fra kilden.',
+        ]);
 
         $this->assertNull($claim->blocking_override);
         // No override recorded — the system's own suggestion (always true for a genuinely
-        // unsupported factual claim) is what remains in effect until a human decides otherwise.
+        // unsupported factual claim that was actually checked) is what remains in effect until a
+        // human decides otherwise.
         $this->assertTrue(
-            app(EnterpriseWikiClaimFindingExplainer::class)->suggestedBlocking($claim->fresh()),
+            app(EnterpriseWikiClaimFindingExplainer::class)->suggestedBlocking($claim->fresh(['sourceReferences'])),
         );
     }
 

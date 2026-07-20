@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use Tests\TestCase;
 
@@ -53,15 +54,34 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
         ]);
     }
 
+    /**
+     * An unsupported_generated_content claim that actually reached a semantic verdict — a
+     * content_block_key, a linked source reference, and review_metadata carrying a real 'verdict'
+     * key (every real write via EnterpriseWikiVerifyPageClaimsService::applyVerdictOutcome() sets
+     * this alongside 'reason'/'checks', so a realistic fixture always has one). Contrast with the
+     * "unchecked" claims built directly via unsupportedClaim() with review_metadata: null, which
+     * represent a claim that never reached a verdict at all — see the
+     * test_missing_block_link_.../test_ambiguous_source_candidate_.../
+     * test_missing_confident_source_candidate_... tests below.
+     */
+    private function verifiedUnsupportedClaim(array $reviewMetadata, string $contentBlockKey = 'block-0001'): EnterpriseWikiClaim
+    {
+        $claim = $this->unsupportedClaim([
+            'content_block_key' => $contentBlockKey,
+            'review_metadata' => array_merge(['verdict' => 'not_supported'], $reviewMetadata),
+        ]);
+        $claim->setRelation('sourceReferences', collect([new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-1'])]));
+
+        return $claim;
+    }
+
     // =========================================================================
     // Concrete explanations instead of one generic default message
     // =========================================================================
 
     public function test_actor_mismatch_gets_a_concrete_explanation(): void
     {
-        $claim = $this->unsupportedClaim([
-            'review_metadata' => ['deterministic_reason' => 'actor_mismatch'],
-        ]);
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'actor_mismatch']);
 
         $finding = $this->explainer()->explain($claim);
 
@@ -72,9 +92,7 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
 
     public function test_modality_mismatch_gets_a_concrete_explanation(): void
     {
-        $claim = $this->unsupportedClaim([
-            'review_metadata' => ['deterministic_reason' => 'modality_mismatch'],
-        ]);
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'modality_mismatch']);
 
         $finding = $this->explainer()->explain($claim);
 
@@ -105,11 +123,9 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
 
     public function test_ai_own_verification_reason_is_shown_verbatim_when_no_deterministic_reason_exists(): void
     {
-        $claim = $this->unsupportedClaim([
-            'review_metadata' => [
-                'reason' => 'The source discusses request handling, not incident response times.',
-                'checks' => ['actor' => 'match', 'modality' => 'match', 'negation' => 'match'],
-            ],
+        $claim = $this->verifiedUnsupportedClaim([
+            'reason' => 'The source discusses request handling, not incident response times.',
+            'checks' => ['actor' => 'match', 'modality' => 'match', 'negation' => 'match'],
         ]);
 
         $finding = $this->explainer()->explain($claim);
@@ -120,14 +136,19 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
         );
     }
 
-    public function test_no_stored_detail_at_all_still_gives_an_honest_specific_message(): void
+    public function test_verified_verdict_with_no_stored_detail_still_gives_an_honest_specific_message(): void
     {
-        $claim = $this->unsupportedClaim(); // no review_metadata, no review_reason
+        // A verdict was actually reached (content_block_key + source reference + a real
+        // review_metadata['verdict']), but no reason/checks detail was stored for it. Contrast
+        // with test_missing_block_link_is_technical_uncertainty_...() below, which covers a claim
+        // that never reached a verdict at all.
+        $claim = $this->verifiedUnsupportedClaim([]);
 
         $finding = $this->explainer()->explain($claim);
 
         $this->assertNotSame('', trim($finding['explanation']));
-        $this->assertSame('Ingen kildedekning funnet', $finding['title']);
+        $this->assertSame('Ikke bekreftet innholdsavvik', $finding['title']);
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_POSSIBLE_CONTENT_DEVIATION, $finding['category']);
     }
 
     // =========================================================================
@@ -158,12 +179,15 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
         $this->assertFalse($this->explainer()->suggestedBlocking($claim));
     }
 
-    public function test_unsupported_content_suggests_blocking_by_default(): void
+    public function test_unsupported_content_suggests_blocking_by_default_when_verified(): void
     {
-        // Real, existing factual claims that are simply unsupported must still suggest blocking —
-        // regardless of how much diagnostic detail is available for the specific reason.
-        $withDetail = $this->unsupportedClaim(['review_metadata' => ['deterministic_reason' => 'negation_mismatch']]);
-        $withoutDetail = $this->unsupportedClaim();
+        // Real, existing factual claims that were actually checked against a source and found
+        // unsupported must still suggest blocking — regardless of how much diagnostic detail is
+        // available for the specific reason. A claim that was NEVER checked (no block link, no
+        // source candidate) is technical uncertainty instead — see
+        // test_missing_block_link_is_technical_uncertainty_and_does_not_suggest_blocking().
+        $withDetail = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'negation_mismatch']);
+        $withoutDetail = $this->verifiedUnsupportedClaim([]);
 
         $this->assertTrue($this->explainer()->suggestedBlocking($withDetail));
         $this->assertTrue($this->explainer()->suggestedBlocking($withoutDetail));
@@ -173,9 +197,7 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
     {
         // A self-reported AI check mismatch (not deterministically confirmed) is known to be
         // unreliable — it must be hedged as "possible", never presented as a confirmed error.
-        $claim = $this->unsupportedClaim([
-            'review_metadata' => ['checks' => ['actor' => 'mismatch']],
-        ]);
+        $claim = $this->verifiedUnsupportedClaim(['checks' => ['actor' => 'mismatch']]);
 
         $finding = $this->explainer()->explain($claim);
 
@@ -185,10 +207,11 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
 
     public function test_contradicted_verdict_is_a_confirmed_content_problem(): void
     {
-        $claim = $this->unsupportedClaim([
-            'generation_issue' => 'claim_contradicted_by_source',
-            'review_metadata' => ['unsupported_parts' => 'The source states the opposite.'],
+        $claim = $this->verifiedUnsupportedClaim([
+            'verdict' => 'contradicted',
+            'unsupported_parts' => 'The source states the opposite.',
         ]);
+        $claim->generation_issue = 'claim_contradicted_by_source';
 
         $finding = $this->explainer()->explain($claim);
 
@@ -198,10 +221,11 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
 
     public function test_partially_supported_verdict_is_a_possible_deviation(): void
     {
-        $claim = $this->unsupportedClaim([
-            'generation_issue' => 'claim_partially_supported',
-            'review_metadata' => ['unsupported_parts' => 'Only the first half is documented.'],
+        $claim = $this->verifiedUnsupportedClaim([
+            'verdict' => 'partially_supported',
+            'unsupported_parts' => 'Only the first half is documented.',
         ]);
+        $claim->generation_issue = 'claim_partially_supported';
 
         $finding = $this->explainer()->explain($claim);
 
@@ -209,14 +233,114 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
     }
 
     // =========================================================================
-    // Different causes never look identical
+    // Cause-based classification for unsupported_generated_content (run-38 follow-up fix):
+    // a claim that never actually reached a verified verdict is technical uncertainty, not a
+    // confirmed content error, regardless of the unsupported_generated_content label.
     // =========================================================================
+
+    public function test_missing_block_link_is_technical_uncertainty_and_does_not_suggest_blocking(): void
+    {
+        $claim = $this->unsupportedClaim(['content_block_key' => null, 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect());
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY, $finding['category']);
+        $this->assertSame('Ingen blokk-kobling', $finding['title']);
+        $this->assertFalse($finding['suggested_blocking']);
+        $this->assertFalse($this->explainer()->suggestedBlocking($claim));
+    }
+
+    public function test_ambiguous_source_candidate_is_technical_uncertainty_and_does_not_suggest_blocking(): void
+    {
+        $claim = $this->unsupportedClaim(['content_block_key' => 'block-0004', 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect([
+            new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-1']),
+            new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-2']),
+        ]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY, $finding['category']);
+        $this->assertSame('Usikker kildekandidat', $finding['title']);
+        $this->assertFalse($finding['suggested_blocking']);
+    }
+
+    public function test_missing_confident_source_candidate_is_technical_uncertainty_and_does_not_suggest_blocking(): void
+    {
+        $claim = $this->unsupportedClaim(['content_block_key' => 'block-0004', 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect());
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY, $finding['category']);
+        $this->assertSame('Ingen sikker kildekandidat', $finding['title']);
+        $this->assertFalse($finding['suggested_blocking']);
+    }
+
+    public function test_verified_verdict_with_no_specific_mismatch_is_only_a_possible_deviation(): void
+    {
+        // Mirrors run-38 claim 3874: a first-pass semantic verification reached not_supported, but
+        // every itemized check came back "match" — no specific dimension was flagged as wrong, so
+        // this is not yet a confirmed content error.
+        $claim = $this->unsupportedClaim([
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+                'reason' => 'Both excerpts describe the same controlled change process.',
+                'checks' => ['actor' => 'match', 'modality' => 'match', 'subject_entity' => 'match'],
+            ],
+        ]);
+        $claim->setRelation('sourceReferences', collect([new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-11'])]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_POSSIBLE_CONTENT_DEVIATION, $finding['category']);
+        $this->assertSame('Both excerpts describe the same controlled change process.', $finding['explanation']);
+        $this->assertTrue($finding['suggested_blocking']);
+    }
+
+    public function test_scoped_run_reevaluation_with_no_specific_mismatch_is_a_confirmed_content_error(): void
+    {
+        // Mirrors run-38 claim 4048: reached not_supported again under the stricter, combined-
+        // evidence run re-evaluation — a more rigorous re-check that still found no support is a
+        // confirmed error, not merely a possible one.
+        $claim = $this->unsupportedClaim([
+            'content_block_key' => 'block-0002',
+            'review_metadata' => [
+                'classification_basis' => 'scoped_run_reevaluation',
+                'verdict' => 'not_supported',
+                'reason' => 'The cited paragraphs describe support handling, not incident response times.',
+                'checks' => ['actor' => 'match', 'modality' => 'match', 'subject_entity' => 'match'],
+                'reevaluated_run_id' => 38,
+            ],
+        ]);
+        $claim->setRelation('sourceReferences', collect([new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-9'])]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM, $finding['category']);
+        $this->assertSame('The cited paragraphs describe support handling, not incident response times.', $finding['explanation']);
+        $this->assertTrue($finding['suggested_blocking']);
+    }
+
+    public function test_misattribution_via_deterministic_subject_mismatch_remains_a_confirmed_content_error(): void
+    {
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'subject_mismatch'], 'block-0003');
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM, $finding['category']);
+        $this->assertTrue($finding['suggested_blocking']);
+        $this->assertTrue($this->explainer()->suggestedBlocking($claim));
+    }
 
     public function test_different_causes_produce_different_titles_and_explanations(): void
     {
-        $actor = $this->explainer()->explain($this->unsupportedClaim(['review_metadata' => ['deterministic_reason' => 'actor_mismatch']]));
-        $modality = $this->explainer()->explain($this->unsupportedClaim(['review_metadata' => ['deterministic_reason' => 'modality_mismatch']]));
-        $scope = $this->explainer()->explain($this->unsupportedClaim(['review_metadata' => ['deterministic_reason' => 'scope_mismatch']]));
+        $actor = $this->explainer()->explain($this->verifiedUnsupportedClaim(['deterministic_reason' => 'actor_mismatch']));
+        $modality = $this->explainer()->explain($this->verifiedUnsupportedClaim(['deterministic_reason' => 'modality_mismatch']));
+        $scope = $this->explainer()->explain($this->verifiedUnsupportedClaim(['deterministic_reason' => 'scope_mismatch']));
         $noSource = $this->explainer()->explain($this->internalErrorClaim('genuine_content_mismatch'));
         $ambiguousBlock = $this->explainer()->explain($this->internalErrorClaim('claim_missing_unique_content_block_anchor'));
 
