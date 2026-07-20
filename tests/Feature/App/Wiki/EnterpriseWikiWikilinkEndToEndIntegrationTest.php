@@ -186,19 +186,40 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
         $this->assertTrue($traversalService->outgoing($article)->contains('id', $concept->id));
         $this->assertTrue($traversalService->incoming($concept)->contains('id', $article->id));
 
-        // --- 51: no combinatoric relations were created by the new flow ---
+        // --- 51: no CONCEPT/ENTITY combinatoric relations were created by the new flow — that
+        // remains an explicit, opt-in operation (wiki:build-page-links), unlike
+        // article<->summary below, which the automatic flow now creates deterministically (see
+        // FinalizeEnterpriseWikiPageGeneration / EnterpriseWikiBuildPageLinksService::
+        // buildArticleSummaryLinks()) so the mutual link between an article and its paired
+        // summary is never something a user has to add by hand.
         $this->assertSame(
             0,
             EnterpriseWikiPageLink::query()
                 ->where('customer_id', $customer->id)
                 ->whereIn('link_type', [
-                    EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
                     EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT,
                     EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY,
                     EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT,
                     EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ENTITY,
                 ])
                 ->count(),
+        );
+
+        $this->assertTrue(
+            EnterpriseWikiPageLink::query()
+                ->where('customer_id', $customer->id)
+                ->where('from_page_id', $article->id)
+                ->where('to_page_id', $summary->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY)
+                ->exists(),
+        );
+        $this->assertTrue(
+            EnterpriseWikiPageLink::query()
+                ->where('customer_id', $customer->id)
+                ->where('from_page_id', $summary->id)
+                ->where('to_page_id', $article->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE)
+                ->exists(),
         );
 
         // --- 52: claims/verification/lint/QA ran and the run completed ---

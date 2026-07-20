@@ -39,7 +39,80 @@ class EnterpriseWikiBuildPageLinksService
     ) {}
 
     /**
+     * Narrow, automatic-flow counterpart to build(): only the article<->summary structural pair
+     * (the article_to_summary/summary_to_article types EnterpriseWikiAppliedRunLintService::
+     * checkArticleLinks()/checkSummaryLinks() require) — never the article/summary<->concept/
+     * entity combinatoric types, which remain an explicit, opt-in operation via build() itself
+     * (wiki:build-page-links / EnterpriseWikiDeepRepairService) so as not to change that
+     * feature's existing "never automatic" behavior.
+     *
+     * Idempotent (firstOrCreate) and a safe no-op when the run does not have exactly the pages
+     * needed — an ambiguous run (0, or 2+, of either type) simply creates 0 or more links per
+     * pairing, same as build()'s existing cross-join behavior.
+     *
+     * @return array{links_created: int, links_skipped: int}
+     *
+     * @throws \InvalidArgumentException if the run is not applied
+     */
+    public function buildArticleSummaryLinks(EnterpriseWikiIngestRun $run): array
+    {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have page links built."
+            );
+        }
+
+        [$articles, $summaries] = $this->articlesAndSummariesForRun($run);
+
+        [$created, $skipped] = $this->buildBidirectional(
+            $run, $articles, $summaries,
+            EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
+            EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE,
+        );
+
+        return ['links_created' => $created, 'links_skipped' => $skipped];
+    }
+
+    /**
+     * @return array{0: list<array{page: EnterpriseWikiPage, version: ?EnterpriseWikiPageVersion}>, 1: list<array{page: EnterpriseWikiPage, version: ?EnterpriseWikiPageVersion}>}
+     */
+    private function articlesAndSummariesForRun(EnterpriseWikiIngestRun $run): array
+    {
+        $pivotRows = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->with('page')
+            ->get();
+
+        $articles = [];
+        $summaries = [];
+
+        foreach ($pivotRows as $row) {
+            $page = $row->page;
+
+            if ($page === null) {
+                continue;
+            }
+
+            $version = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('is_current', true)
+                ->first();
+
+            $entry = ['page' => $page, 'version' => $version];
+
+            match ($page->page_type) {
+                EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $articles[] = $entry,
+                EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $summaries[] = $entry,
+                default => null,
+            };
+        }
+
+        return [$articles, $summaries];
+    }
+
+    /**
      * @return array{pages_checked: int, links_created: int, links_skipped: int, missing_versions: int, failed: int}
+     *
      * @throws \InvalidArgumentException if the run is not applied
      */
     public function build(EnterpriseWikiIngestRun $run): array
@@ -55,11 +128,11 @@ class EnterpriseWikiBuildPageLinksService
             ->with('page')
             ->get();
 
-        $articles        = [];
-        $summaries       = [];
-        $concepts        = [];
-        $entities        = [];
-        $pagesChecked    = 0;
+        $articles = [];
+        $summaries = [];
+        $concepts = [];
+        $entities = [];
+        $pagesChecked = 0;
         $missingVersions = 0;
 
         foreach ($pivotRows as $row) {
@@ -83,11 +156,11 @@ class EnterpriseWikiBuildPageLinksService
             $entry = ['page' => $page, 'version' => $version];
 
             match ($page->page_type) {
-                EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $articles[]  = $entry,
+                EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $articles[] = $entry,
                 EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $summaries[] = $entry,
-                EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $concepts[]  = $entry,
-                EnterpriseWikiPage::PAGE_TYPE_ENTITY  => $entities[]  = $entry,
-                default                               => null,
+                EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $concepts[] = $entry,
+                EnterpriseWikiPage::PAGE_TYPE_ENTITY => $entities[] = $entry,
+                default => null,
             };
         }
 
@@ -135,11 +208,11 @@ class EnterpriseWikiBuildPageLinksService
         $linksSkipped += $s;
 
         return [
-            'pages_checked'    => $pagesChecked,
-            'links_created'    => $linksCreated,
-            'links_skipped'    => $linksSkipped,
+            'pages_checked' => $pagesChecked,
+            'links_created' => $linksCreated,
+            'links_skipped' => $linksSkipped,
             'missing_versions' => $missingVersions,
-            'failed'           => 0,
+            'failed' => 0,
         ];
     }
 
@@ -254,18 +327,18 @@ class EnterpriseWikiBuildPageLinksService
 
                 $link = EnterpriseWikiPageLink::query()->updateOrCreate(
                     [
-                        'customer_id'  => $page->customer_id,
+                        'customer_id' => $page->customer_id,
                         'from_page_id' => $page->id,
-                        'to_page_id'   => $toPage->id,
-                        'link_type'    => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+                        'to_page_id' => $toPage->id,
+                        'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
                     ],
                     [
                         'enterprise_wiki_ingest_run_id' => $ingestRunId,
                         'from_page_version_id' => $currentVersion?->id,
-                        'to_page_version_id'   => $targetCurrentVersionsByPageId->get($toPage->id)?->id,
-                        'source'               => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-                        'confidence'           => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
-                        'metadata'             => ['anchor_text' => $target['anchor_text']],
+                        'to_page_version_id' => $targetCurrentVersionsByPageId->get($toPage->id)?->id,
+                        'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+                        'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+                        'metadata' => ['anchor_text' => $target['anchor_text']],
                     ],
                 );
 
@@ -340,17 +413,17 @@ class EnterpriseWikiBuildPageLinksService
     ): array {
         $link = EnterpriseWikiPageLink::firstOrCreate(
             [
-                'customer_id'  => $run->customer_id,
+                'customer_id' => $run->customer_id,
                 'from_page_id' => $from['page']->id,
-                'to_page_id'   => $to['page']->id,
-                'link_type'    => $linkType,
+                'to_page_id' => $to['page']->id,
+                'link_type' => $linkType,
             ],
             [
                 'enterprise_wiki_ingest_run_id' => $run->id,
-                'from_page_version_id'          => $from['version']?->id,
-                'to_page_version_id'            => $to['version']?->id,
-                'source'                        => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
-                'confidence'                    => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+                'from_page_version_id' => $from['version']?->id,
+                'to_page_version_id' => $to['version']?->id,
+                'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+                'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
             ]
         );
 

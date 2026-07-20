@@ -5,6 +5,7 @@ namespace App\Jobs\EnterpriseWiki;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -62,7 +63,12 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
     public function handle(): void
     {
-        $result = DB::transaction(function (): array {
+        // Resolved via the container rather than a typed handle() parameter — this job is
+        // frequently constructed and its handle() called directly in tests (bypassing queue
+        // dispatch, and therefore Laravel's automatic method-injection).
+        $buildPageLinksService = app(EnterpriseWikiBuildPageLinksService::class);
+
+        $result = DB::transaction(function () use ($buildPageLinksService): array {
             $run = EnterpriseWikiIngestRun::query()
                 ->lockForUpdate()
                 ->find($this->runId);
@@ -72,7 +78,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             }
 
             return match ($run->status) {
-                EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES => $this->finalizeArticleSummaryPhase($run),
+                EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES => $this->finalizeArticleSummaryPhase($run, $buildPageLinksService),
                 EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES => $this->finalizeConceptEntityPhase($run),
                 default => ['outcome' => 'already_advanced'],
             };
@@ -88,7 +94,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     /**
      * @return array{outcome: string, page_ids?: Collection}
      */
-    private function finalizeArticleSummaryPhase(EnterpriseWikiIngestRun $run): array
+    private function finalizeArticleSummaryPhase(EnterpriseWikiIngestRun $run, EnterpriseWikiBuildPageLinksService $buildPageLinksService): array
     {
         $pivots = $this->pivotsForTypes(self::ARTICLE_SUMMARY_TYPES);
 
@@ -103,6 +109,14 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
             return ['outcome' => 'failed'];
         }
+
+        // Article and summary pages both exist and generated successfully — this is the exact,
+        // single, guaranteed-once point to build the structural article<->summary link graph
+        // (co-membership, not content-derived — see
+        // EnterpriseWikiBuildPageLinksService::buildArticleSummaryLinks()). Deliberately narrower
+        // than build(): concept/entity combinatoric linking stays an explicit, opt-in operation
+        // (wiki:build-page-links), unaffected by this automatic step.
+        $buildPageLinksService->buildArticleSummaryLinks($run);
 
         // All article/summary pages are done — this is the single atomic claim that
         // guarantees concept/entity jobs are dispatched exactly once: a concurrent

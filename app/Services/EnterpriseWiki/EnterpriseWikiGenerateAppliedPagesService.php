@@ -43,23 +43,25 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
+        private readonly EnterpriseWikiArticleSummaryLinkService $articleSummaryLinkService,
     ) {}
 
     /**
      * @return array{article: int, summary: int, concept: int, entity: int, skipped: int}
-     * @throws \InvalidArgumentException if the run is not in a state that permits generation
+     *
+     * @throws InvalidArgumentException if the run is not in a state that permits generation
      * @throws \RuntimeException if AI is unavailable or generation fails
      */
     public function generate(EnterpriseWikiIngestRun $run): array
     {
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
-            throw new \InvalidArgumentException(
+            throw new InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have pages generated."
             );
         }
 
         if ($run->source_type !== EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
-            throw new \InvalidArgumentException(
+            throw new InvalidArgumentException(
                 "Run [{$run->id}] source_type is not enterprise_wiki_document."
             );
         }
@@ -70,12 +72,12 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->first();
 
         if ($document === null) {
-            throw new \InvalidArgumentException(
+            throw new InvalidArgumentException(
                 "Source document [{$run->source_id}] not found for customer [{$run->customer_id}]."
             );
         }
 
-        $sourceText   = (string) ($document->extracted_text ?? '');
+        $sourceText = (string) ($document->extracted_text ?? '');
         $languageCode = $this->resolveLanguageCode($run->customer_id);
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
@@ -86,11 +88,11 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $counts = [
             EnterpriseWikiPage::PAGE_TYPE_ARTICLE => 0,
-            EnterpriseWikiPage::PAGE_TYPE_SUMMARY  => 0,
-            EnterpriseWikiPage::PAGE_TYPE_CONCEPT  => 0,
-            EnterpriseWikiPage::PAGE_TYPE_ENTITY   => 0,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => 0,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => 0,
+            EnterpriseWikiPage::PAGE_TYPE_ENTITY => 0,
         ];
-        $skipped               = 0;
+        $skipped = 0;
         $articleSummaryPageIds = [];
 
         // --- Pass 1: article and summary ---
@@ -105,6 +107,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             if ($this->pageHasVersion($page->id)) {
                 $skipped++;
+
                 continue;
             }
 
@@ -114,18 +117,22 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
 
             $generated = $this->aiClient->generatePageFromSource(
-                pageTitle:    $page->title,
-                pageType:     $page->page_type,
-                sourceText:   $sourceText,
+                pageTitle: $page->title,
+                pageType: $page->page_type,
+                sourceText: $sourceText,
                 languageCode: $languageCode,
                 sourceElements: $sourceElements,
             );
 
-            $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
+            $contentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
                 $generated['blocks'],
                 $sourceElements,
-            ));
+            );
+
+            [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $generated['markdown'], $contentBlocks, $languageCode);
+
+            $this->writeVersion($page->id, $markdown, $contentBlocks);
             $counts[$page->page_type]++;
         }
 
@@ -142,6 +149,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             if ($this->pageHasVersion($page->id)) {
                 $skipped++;
+
                 continue;
             }
 
@@ -153,12 +161,12 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
 
             $generated = $this->aiClient->generatePageFromSource(
-                pageTitle:         $page->title,
-                pageType:          $page->page_type,
-                sourceText:        $sourceText,
-                languageCode:      $languageCode,
+                pageTitle: $page->title,
+                pageType: $page->page_type,
+                sourceText: $sourceText,
+                languageCode: $languageCode,
                 additionalContext: $additionalContext,
-                sourceElements:    $sourceElements,
+                sourceElements: $sourceElements,
             );
 
             $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
@@ -182,7 +190,7 @@ class EnterpriseWikiGenerateAppliedPagesService
      * that a new run can regenerate a page even though an older run already produced a version.
      *
      * @throws InvalidArgumentException if the run is not in a state that permits generation,
-     *                                   or the page is not linked to the run
+     *                                  or the page is not linked to the run
      * @throws \RuntimeException if AI is unavailable or generation fails
      */
     public function generatePageForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
@@ -240,7 +248,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
         }
 
-        $sourceText   = (string) ($document->extracted_text ?? '');
+        $sourceText = (string) ($document->extracted_text ?? '');
         $languageCode = $this->resolveLanguageCode($run->customer_id);
 
         $additionalContext = in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)
@@ -255,13 +263,13 @@ class EnterpriseWikiGenerateAppliedPagesService
         );
 
         $generated = $this->aiClient->generatePageFromSource(
-            pageTitle:         $page->title,
-            pageType:          $page->page_type,
-            sourceText:        $sourceText,
-            languageCode:      $languageCode,
+            pageTitle: $page->title,
+            pageType: $page->page_type,
+            sourceText: $sourceText,
+            languageCode: $languageCode,
             additionalContext: $additionalContext,
-            linkCatalog:       $catalogResult['catalog'],
-            sourceElements:    $sourceElements,
+            linkCatalog: $catalogResult['catalog'],
+            sourceElements: $sourceElements,
         );
 
         // Deterministically rewrite unambiguous near-miss wikilinks (e.g. the model writing a
@@ -281,6 +289,8 @@ class EnterpriseWikiGenerateAppliedPagesService
             $generated['blocks'],
             $sourceElements,
         );
+
+        [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
             $pivot = EnterpriseWikiIngestRunPage::query()
@@ -399,11 +409,11 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $version = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $pageId,
-            'version_number'          => $next,
-            'is_current'              => true,
-            'content_markdown'        => $markdown,
-            'content_blocks_json'      => $contentBlocks,
-            'generated_by_model'      => WikiPageContentAiClient::MODEL,
+            'version_number' => $next,
+            'is_current' => true,
+            'content_markdown' => $markdown,
+            'content_blocks_json' => $contentBlocks,
+            'generated_by_model' => WikiPageContentAiClient::MODEL,
         ]);
 
         return $version;
@@ -416,6 +426,35 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->exists();
     }
 
+    /**
+     * Deterministically ensures a freshly-generated article/summary page links to its paired
+     * summary/article page, without relying on the AI to reliably do so on its own (it is only
+     * ever required to link to *something* in the run — see validateWikilinks()). A no-op when
+     * the pair is ambiguous (not exactly one page of the opposite type in this run — never
+     * guessed) or the generated content already contains a link to the pair.
+     *
+     * @param  list<array<string, mixed>>  $contentBlocks
+     * @return array{0: string, 1: list<array<string, mixed>>}
+     */
+    private function appendMutualLinkIfPaired(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        string $markdown,
+        array $contentBlocks,
+        string $languageCode,
+    ): array {
+        $pairedPage = $this->articleSummaryLinkService->findPairedPage($run, $page);
+
+        if ($pairedPage === null || $this->articleSummaryLinkService->hasLinkToPage($page, $markdown, $pairedPage)) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $linkBlock = $this->articleSummaryLinkService->buildLinkBlock($pairedPage, count($contentBlocks), $languageCode);
+        $contentBlocks[] = $linkBlock;
+
+        return [trim($markdown."\n\n".$linkBlock['markdown']), $contentBlocks];
+    }
+
     private function writeVersion(int $pageId, string $markdown, array $contentBlocks = []): void
     {
         $next = ((int) EnterpriseWikiPageVersion::query()
@@ -424,11 +463,11 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $pageId,
-            'version_number'          => $next,
-            'is_current'              => true,
-            'content_markdown'        => $markdown,
-            'content_blocks_json'      => $contentBlocks,
-            'generated_by_model'      => WikiPageContentAiClient::MODEL,
+            'version_number' => $next,
+            'is_current' => true,
+            'content_markdown' => $markdown,
+            'content_blocks_json' => $contentBlocks,
+            'generated_by_model' => WikiPageContentAiClient::MODEL,
         ]);
     }
 
