@@ -5,24 +5,16 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
-use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
-use App\Models\EnterpriseWikiIngestRun;
-use App\Models\EnterpriseWikiIngestSection;
-use App\Models\EnterpriseWikiLintFinding;
-use App\Models\EnterpriseWikiPage;
-use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
-use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
-use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -38,8 +30,7 @@ class WikiSourceController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
-        private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
-        private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiDocumentDeletionService $deletionService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -195,132 +186,81 @@ class WikiSourceController extends Controller
     public function deletePreview(EnterpriseWikiDocument $document): JsonResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
 
         if ($document->customer_id !== $customerId) {
             abort(404);
         }
 
-        $runs = EnterpriseWikiIngestRun::query()
-            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-            ->where('source_id', $document->id)
-            ->where('customer_id', $customerId)
-            ->get(['id', 'status']);
+        abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
 
-        if ($runs->contains(fn (EnterpriseWikiIngestRun $run) => ! $run->isTerminal())) {
-            return response()->json([
-                'blocked' => true,
-                'reason' => 'in_progress_run',
-            ]);
-        }
-
-        [$soleSourcePageIds, $sharedPageIds] = $this->classifyPages($runs->pluck('id'));
-        $staleImpact = $this->wikiAnswerStalenessService->previewDeletionImpact($document, $runs->pluck('id'), $soleSourcePageIds);
-
-        return response()->json([
-            'blocked' => false,
-            'document_name' => $document->original_filename,
-            'document_owner_name' => $document->owner?->name,
-            'run_count' => $runs->count(),
-            'sole_source_page_count' => $soleSourcePageIds->count(),
-            'shared_page_count' => $sharedPageIds->count(),
-            'stale_wiki_answer_count' => $staleImpact['stale_wiki_answer_count'],
-            'impacted_claim_count' => $staleImpact['impacted_claim_count'],
-            'impacted_source_reference_count' => $staleImpact['impacted_source_reference_count'],
-        ]);
+        return response()->json($this->deletionService->preview($document));
     }
 
     public function destroy(EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
 
         if ($document->customer_id !== $customerId) {
             abort(404);
         }
 
-        $runs = EnterpriseWikiIngestRun::query()
-            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-            ->where('source_id', $document->id)
-            ->where('customer_id', $customerId)
-            ->get(['id', 'status']);
+        abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
 
-        if ($runs->contains(fn (EnterpriseWikiIngestRun $run) => ! $run->isTerminal())) {
+        $documentId = $document->id;
+        $result = $this->deletionService->delete($document);
+
+        if ($result['blocked'] ?? false) {
             return redirect()->route('app.wiki.index')
-                ->with('error', 'Kan ikke slette dokumentet mens ingest-jobben kjører.');
+                ->with('error', __('procynia.wiki.delete_preview_blocked_in_progress'));
         }
 
-        $runIds = $runs->pluck('id');
-        [$soleSourcePageIds] = $this->classifyPages($runIds);
-        $staleImpact = $this->wikiAnswerStalenessService->previewDeletionImpact($document, $runIds, $soleSourcePageIds);
-        $impactedClaimIds = EnterpriseWikiSourceReference::query()
-            ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-            ->where('source_id', $document->id)
-            ->whereNotNull('enterprise_wiki_claim_id')
-            ->distinct()
-            ->pluck('enterprise_wiki_claim_id');
-
-        DB::transaction(function () use ($document, $runIds, $soleSourcePageIds, $impactedClaimIds): void {
-            $this->wikiAnswerStalenessService->markAnswersStaleForDeletedDocument($document, $runIds, $soleSourcePageIds);
-
-            // Delete lint findings for sole-source pages
-            if ($soleSourcePageIds->isNotEmpty()) {
-                EnterpriseWikiLintFinding::query()
-                    ->whereIn('enterprise_wiki_page_id', $soleSourcePageIds)
-                    ->delete();
-            }
-
-            // Delete lint findings tied to this document's runs
-            if ($runIds->isNotEmpty()) {
-                EnterpriseWikiLintFinding::query()
-                    ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
-                    ->delete();
-            }
-
-            // Delete lint findings tied directly to this document
-            EnterpriseWikiLintFinding::query()
-                ->where('enterprise_wiki_document_id', $document->id)
-                ->delete();
-
-            // Delete source references on any page's claims that point to this document
-            EnterpriseWikiSourceReference::query()
-                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-                ->where('source_id', $document->id)
-                ->delete();
-
-            $this->resetClaimsThatLostTheirOnlySource($impactedClaimIds);
-
-            // Delete sole-source pages (cascades: claims, source refs, versions, page links, run_pages)
-            if ($soleSourcePageIds->isNotEmpty()) {
-                EnterpriseWikiPage::query()
-                    ->whereIn('id', $soleSourcePageIds)
-                    ->delete();
-            }
-
-            // Delete ingest sections and runs
-            if ($runIds->isNotEmpty()) {
-                EnterpriseWikiIngestSection::query()
-                    ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
-                    ->delete();
-
-                EnterpriseWikiIngestRun::query()
-                    ->whereIn('id', $runIds)
-                    ->delete();
-            }
-
-            // Delete the uploaded file
-            Storage::disk('local')->delete($document->file_path);
-
-            $document->delete();
-        });
-
         Log::info('[PROCYNIA][WIKI_SOURCE] Deleted wiki source document.', [
-            'document_id' => $document->id,
+            'document_id' => $documentId,
             'customer_id' => $customerId,
-            'sole_source_pages_deleted' => $soleSourcePageIds->count(),
-            'stale_wiki_answers_marked' => $staleImpact['stale_wiki_answer_count'],
+            'runs_deleted' => $result['runs_deleted'],
+            'sole_source_pages_deleted' => $result['sole_source_pages_deleted'],
+            'shared_pages_kept' => $result['shared_pages_kept'],
+            'page_versions_deleted' => $result['page_versions_deleted'],
+            'claims_affected' => $result['claims_affected'],
+            'findings_deleted' => $result['findings_deleted'],
+            'stale_wiki_answers_marked' => $result['stale_wiki_answers_marked'],
+            'storage_deleted' => $result['storage_deleted'],
+            'storage_error' => $result['storage_error'],
         ]);
 
         return redirect()->route('app.wiki.index')
-            ->with('success', 'Kildedokumentet er slettet.');
+            ->with('success', $this->deletionSuccessMessage($result));
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function deletionSuccessMessage(array $result): string
+    {
+        if (! ($result['storage_deleted'] ?? true)) {
+            return __('procynia.wiki.source_delete_failure_storage');
+        }
+
+        $message = __('procynia.wiki.source_delete_success');
+
+        $soleSourcePages = (int) ($result['sole_source_pages_deleted'] ?? 0);
+        $runs = (int) ($result['runs_deleted'] ?? 0);
+        $sharedPages = (int) ($result['shared_pages_kept'] ?? 0);
+
+        $message .= ' '.__('procynia.wiki.source_delete_success_summary', [
+            'pages' => $soleSourcePages,
+            'runs' => $runs,
+        ]);
+
+        if ($sharedPages > 0) {
+            $message .= ' '.trans_choice('procynia.wiki.source_delete_shared_pages_kept', $sharedPages, [
+                'count' => $sharedPages,
+            ]);
+        }
+
+        return $message;
     }
 
     public function ingest(EnterpriseWikiDocument $document): RedirectResponse
@@ -372,43 +312,6 @@ class WikiSourceController extends Controller
             );
     }
 
-    /**
-     * Classify pages linked to the given run IDs as sole-source or shared.
-     *
-     * Sole-source: page only appears in run_pages rows for these runs.
-     * Shared: page also appears in run_pages rows from other runs (other documents).
-     *
-     * @param  Collection<int, int>  $runIds
-     * @return array{Collection<int, int>, Collection<int, int>}  [soleSourcePageIds, sharedPageIds]
-     */
-    private function classifyPages(Collection $runIds): array
-    {
-        if ($runIds->isEmpty()) {
-            return [collect(), collect()];
-        }
-
-        $allPageIds = DB::table('enterprise_wiki_ingest_run_pages')
-            ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
-            ->pluck('enterprise_wiki_page_id')
-            ->unique()
-            ->values();
-
-        if ($allPageIds->isEmpty()) {
-            return [collect(), collect()];
-        }
-
-        $sharedPageIds = DB::table('enterprise_wiki_ingest_run_pages')
-            ->whereIn('enterprise_wiki_page_id', $allPageIds)
-            ->whereNotIn('enterprise_wiki_ingest_run_id', $runIds)
-            ->pluck('enterprise_wiki_page_id')
-            ->unique()
-            ->values();
-
-        $soleSourcePageIds = $allPageIds->diff($sharedPageIds)->values();
-
-        return [$soleSourcePageIds, $sharedPageIds];
-    }
-
     private function resolveOwnerUserIdForCustomer(int $customerId, int $ownerUserId): int
     {
         $owner = User::query()
@@ -425,48 +328,5 @@ class WikiSourceController extends Controller
         }
 
         return $owner->id;
-    }
-
-    /**
-     * @param  Collection<int, int|string>  $claimIds
-     */
-    private function resetClaimsThatLostTheirOnlySource(Collection $claimIds): void
-    {
-        $resolvedClaimIds = $claimIds
-            ->map(static fn (mixed $value): int => (int) $value)
-            ->filter(static fn (int $value): bool => $value > 0)
-            ->unique()
-            ->values();
-
-        if ($resolvedClaimIds->isEmpty()) {
-            return;
-        }
-
-        $claims = EnterpriseWikiClaim::query()
-            ->whereIn('id', $resolvedClaimIds->all())
-            ->withCount('sourceReferences')
-            ->get();
-
-        foreach ($claims as $claim) {
-            if ($claim->source_references_count > 0) {
-                continue;
-            }
-
-            if (! in_array($claim->approval_status, [
-                EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
-                EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
-            ], true)) {
-                continue;
-            }
-
-            $claim->update([
-                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-                'approved_by_user_id' => null,
-                'approved_at' => null,
-                'approval_comment' => null,
-            ]);
-
-            $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
-        }
     }
 }

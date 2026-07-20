@@ -681,6 +681,10 @@ function getWikiSourcesHelpSections(tw) {
                     title: tw.sources_page_help_item_changes_delete_title ?? 'Sletting viser konsekvenser først',
                     text: tw.sources_page_help_item_changes_delete_text ?? 'Før du sletter et dokument, viser Procynia hvilke Wiki-sider, claims og lagrede Wiki-svar som kan bli påvirket. Et dokument kan være én av flere kilder, så ikke alt materiale forsvinner nødvendigvis.',
                 },
+                {
+                    title: tw.sources_page_help_item_delete_full_title ?? '«Slett dokument og generert Wiki-innhold»',
+                    text: tw.sources_page_help_item_delete_full_text ?? 'Denne handlingen sletter kildedokumentet og alt Enterprise Wiki-innhold som kun er generert fra det — dokumentversjoner, kjøringer, claims, kildehenvisninger og funn. Wiki-sider som også bygger på andre kildedokumenter blir ikke slettet, bare koblingen til dette dokumentet fjernes fra dem. Handlingen kan ikke angres. Dokumentet kan ikke slettes mens en Wiki-kjøring pågår for det. Sletting påvirker ikke kunden, andre brukere eller andre kildedokumenter.',
+                },
             ],
         },
         {
@@ -1831,7 +1835,12 @@ function SourcesTab({
                                 <tbody className="divide-y divide-slate-50 bg-white">
                                     {sources.map((source) => {
                                         const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
-                                        const canDelete = !isInProgress;
+                                        // Frontend only reflects authorization/state for UX — the backend
+                                        // (deletePreview/destroy) independently re-checks both, since the
+                                        // frontend is never the security boundary. Authorized users still see
+                                        // the button while a run is active, but it is disabled with a clear
+                                        // explanation rather than silently disappearing.
+                                        const canDelete = !!source.can_delete;
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
                                         <tr key={source.id} className="text-sm">
@@ -1955,13 +1964,15 @@ function SourcesTab({
                                                         {canDelete && (
                                                             <button
                                                                 type="button"
+                                                                disabled={isInProgress}
+                                                                title={isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
                                                                 onClick={() => handleDeleteClick(source)}
-                                                                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
+                                                                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                                                             >
                                                                 <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                                                     <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
                                                                 </svg>
-                                                                {tw.source_delete_button ?? 'Slett'}
+                                                                {tw.source_delete_button ?? 'Slett dokument og generert Wiki-innhold'}
                                                             </button>
                                                         )}
                                                     </div>
@@ -2071,7 +2082,7 @@ function SourcesTab({
 
                         {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
                             <p className="text-sm text-rose-600">
-                                {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes fordi det pågår en aktiv ingest-jobb. Vent til jobben er fullført og prøv igjen.'}
+                                {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
                             </p>
                         )}
 
@@ -2080,11 +2091,10 @@ function SourcesTab({
                                 <p className="text-sm font-medium text-slate-800 break-all">
                                     {deletePreview.data.document_name}
                                 </p>
+                                <p className="text-sm text-slate-600">
+                                    {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
+                                </p>
                                 <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm space-y-1.5">
-                                    <div className="flex justify-between">
-                                        <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Ingest-kjøringer som slettes'}</dt>
-                                        <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
-                                    </div>
                                     <div className="flex justify-between">
                                         <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
                                         <dd className="font-semibold text-slate-800">
@@ -2092,19 +2102,46 @@ function SourcesTab({
                                         </dd>
                                     </div>
                                     <div className="flex justify-between">
-                                        <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Wiki-sider som slettes'}</dt>
+                                        <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Kjøringer som slettes'}</dt>
+                                        <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Sider som bare tilhører dokumentet'}</dt>
                                         <dd className="font-semibold text-rose-600">{deletePreview.data.sole_source_page_count}</dd>
                                     </div>
                                     <div className="flex justify-between">
-                                        <dt className="text-slate-500">{tw.delete_preview_shared_pages ?? 'Delte wiki-sider som beholdes'}</dt>
+                                        <dt className="text-slate-500">{tw.delete_preview_page_versions ?? 'Sideversjoner som slettes'}</dt>
+                                        <dd className="font-semibold text-slate-800">{deletePreview.data.page_version_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_claims ?? 'Claims som slettes'}</dt>
+                                        <dd className="font-semibold text-slate-800">{deletePreview.data.claim_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_findings ?? 'Funn som slettes'}</dt>
+                                        <dd className="font-semibold text-slate-800">{deletePreview.data.finding_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_shared_pages ?? 'Delte sider som beholdes'}</dt>
                                         <dd className="font-semibold text-emerald-600">{deletePreview.data.shared_page_count}</dd>
                                     </div>
                                 </dl>
                                 {deletePreview.data.sole_source_page_count === 0 && (
                                     <p className="text-xs text-slate-400">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
                                 )}
+                                {deletePreview.data.shared_page_count > 0 && (
+                                    <p className="text-xs text-emerald-600">
+                                        {(tw.delete_preview_shared_pages_note ?? '{count} sider beholdes fordi de også bygger på andre kildedokumenter.')
+                                            .replace('{count}', deletePreview.data.shared_page_count)}
+                                    </p>
+                                )}
+                                {!deletePreview.data.storage_file_exists && (
+                                    <p className="text-xs text-amber-600">
+                                        {tw.delete_preview_storage_missing ?? 'Dokumentfilen finnes ikke lenger i lagring.'}
+                                    </p>
+                                )}
                                 <p className="text-xs font-semibold text-rose-600">
-                                    {tw.delete_preview_irreversible ?? 'Denne handlingen kan ikke angres.'}
+                                    {tw.delete_preview_irreversible ?? 'Handlingen kan ikke angres.'}
                                 </p>
                             </div>
                         )}
@@ -2123,7 +2160,7 @@ function SourcesTab({
                                     onClick={handleDeleteConfirm}
                                     className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
                                 >
-                                    {tw.delete_confirm_button ?? 'Slett permanent'}
+                                    {tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold'}
                                 </button>
                             )}
                         </div>

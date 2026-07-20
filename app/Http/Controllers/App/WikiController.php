@@ -661,6 +661,7 @@ class WikiController extends Controller
             'owner_name' => $doc->owner?->name,
             'owner_email' => $doc->owner?->email,
             'owner_is_active' => $doc->owner?->is_active,
+            'can_delete' => $user?->canDeleteEnterpriseWikiDocument($doc) ?? false,
             'created_at' => $doc->created_at,
             'latest_ingest_run' => $latestRuns->has($doc->id) ? [
                 'status' => $latestRuns[$doc->id]->status,

@@ -320,6 +320,30 @@ class User extends Authenticatable implements FilamentUser
             && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER, $this->isQa());
     }
 
+    /**
+     * No configurable permission for this exists yet, so the fallback rule is applied directly:
+     * System Owner may delete any Enterprise Wiki source document in their customer; any other
+     * user may only delete a document they are the registered owner of; everyone else is
+     * read-only. The caller must still enforce customer scoping (this only decides role/ownership
+     * once the document is already confirmed to belong to the user's own customer).
+     */
+    public function canDeleteEnterpriseWikiDocument(EnterpriseWikiDocument $document): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        if ((int) $this->customer_id !== (int) $document->customer_id) {
+            return false;
+        }
+
+        if ($this->isSystemOwner()) {
+            return true;
+        }
+
+        return $document->owner_user_id !== null && (int) $document->owner_user_id === (int) $this->id;
+    }
+
     public static function customerRoleForBidRole(string $bidRole): string
     {
         return in_array($bidRole, [self::BID_ROLE_SYSTEM_OWNER, self::BID_ROLE_BID_MANAGER], true)

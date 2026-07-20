@@ -75,10 +75,26 @@ class WikiPageHelpTest extends TestCase
 
         $this->assertSame('Slik fungerer Kildedokumenter', trans('procynia.wiki.sources_page_help_title'));
         $this->assertSame('Faglig grunnlag for Wiki', trans('procynia.wiki.sources_page_help_item_what_title'));
+        $this->assertSame(
+            '«Slett dokument og generert Wiki-innhold»',
+            trans('procynia.wiki.sources_page_help_item_delete_full_title'),
+        );
+        $this->assertStringContainsString(
+            'kan ikke angres',
+            trans('procynia.wiki.sources_page_help_item_delete_full_text'),
+        );
+        $this->assertStringContainsString(
+            'Wiki-kjøring pågår',
+            trans('procynia.wiki.sources_page_help_item_delete_full_text'),
+        );
 
         app()->setLocale('en');
         $this->assertSame('How source documents work', trans('procynia.wiki.sources_page_help_title'));
         $this->assertSame('Grounding for Wiki content', trans('procynia.wiki.sources_page_help_item_what_title'));
+        $this->assertSame(
+            '"Delete document and generated Wiki content"',
+            trans('procynia.wiki.sources_page_help_item_delete_full_title'),
+        );
         app()->setLocale($locale);
     }
 

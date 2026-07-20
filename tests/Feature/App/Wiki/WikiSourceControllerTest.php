@@ -5,6 +5,7 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -14,6 +15,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\KnowledgeItem;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -782,7 +784,7 @@ class WikiSourceControllerTest extends TestCase
         $page = $this->createWikiPage($customer);
         $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
 
-        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $page->id,
             'action' => 'created',
@@ -808,7 +810,7 @@ class WikiSourceControllerTest extends TestCase
 
         $page = $this->createWikiPage($customer);
         $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
-        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $page->id,
             'action' => 'created',
@@ -846,8 +848,8 @@ class WikiSourceControllerTest extends TestCase
         $preview->assertOk();
         $preview->assertJsonPath('document_owner_name', null);
         $preview->assertJsonPath('stale_wiki_answer_count', 1);
-        $preview->assertJsonPath('impacted_claim_count', 0);
-        $preview->assertJsonPath('impacted_source_reference_count', 0);
+        $preview->assertJsonPath('claim_count', 0);
+        $preview->assertJsonPath('source_reference_count', 0);
 
         $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
 
@@ -874,7 +876,7 @@ class WikiSourceControllerTest extends TestCase
         $page = $this->createWikiPage($customer);
         $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
         $supportingRun = $this->createIngestRun($customer, $supportingDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
-        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $page->id,
             'action' => 'created',
@@ -1045,6 +1047,308 @@ class WikiSourceControllerTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
     }
 
+    // ─── Authorization (Del 6) ────────────────────────────────────────────────
+
+    public function test_document_owner_can_delete_own_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $document->update(['owner_user_id' => $owner->id]);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $response = $this->actingAs($owner)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_contributor_cannot_delete_another_users_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $otherContributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $document->update(['owner_user_id' => $owner->id]);
+
+        $this->actingAs($otherContributor)
+            ->delete("/app/wiki/sources/{$document->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_contributor_without_ownership_cannot_delete_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($contributor)
+            ->delete("/app/wiki/sources/{$document->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_viewer_cannot_delete_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $viewer = $this->createUser($customer, User::BID_ROLE_VIEWER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($viewer)
+            ->delete("/app/wiki/sources/{$document->id}")
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_unauthorized_user_cannot_load_delete_preview(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($contributor)
+            ->getJson("/app/wiki/sources/{$document->id}/delete-preview")
+            ->assertForbidden();
+    }
+
+    public function test_delete_preview_rejects_other_customer_document_with_404_not_403(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignDoc = $this->createDocument($other, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$foreignDoc->id}/delete-preview")
+            ->assertNotFound();
+    }
+
+    // ─── Preview payload (Del 2) ──────────────────────────────────────────────
+
+    public function test_preview_reports_page_versions_claims_findings_and_storage_flag(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'En påstand.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 0,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'excerpt' => 'Utdrag.',
+        ]);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id' => $claim->id,
+            'enterprise_wiki_document_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Test finding.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
+
+        $preview->assertOk();
+        $preview->assertJsonPath('blocked', false);
+        $preview->assertJsonPath('sole_source_page_count', 1);
+        $preview->assertJsonPath('page_version_count', 1);
+        $preview->assertJsonPath('claim_count', 1);
+        $preview->assertJsonPath('finding_count', 1);
+        $preview->assertJsonPath('storage_file_exists', true);
+    }
+
+    public function test_preview_reports_storage_file_missing(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        // Deliberately not writing the file to the fake disk.
+
+        $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
+
+        $preview->assertOk();
+        $preview->assertJsonPath('storage_file_exists', false);
+    }
+
+    public function test_preview_does_not_change_any_data(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, null);
+
+        $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview")->assertOk();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseCount('enterprise_wiki_ingest_runs', 1);
+        Storage::disk('local')->assertExists($document->file_path);
+    }
+
+    // ─── Deletion edge cases (Del 3/7) ────────────────────────────────────────
+
+    public function test_delete_removes_canonical_facts_scoped_to_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $fact = EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => $document->file_hash_sha256,
+            'source_element_keys' => ['paragraph-0'],
+            'source_element_keys_hash' => hash('sha256', json_encode(['paragraph-0'])),
+            'normalized_fingerprint' => hash('sha256', 'en pastand'),
+            'canonical_text' => 'En påstand.',
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+        ]);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+
+        $this->assertDatabaseMissing('enterprise_wiki_canonical_facts', ['id' => $fact->id]);
+    }
+
+    public function test_delete_does_not_remove_a_storage_file_shared_with_another_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'shared content');
+
+        // Contrived edge case: another document row pointing at the exact same stored path.
+        $sameFileDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $sameFileDocument->update(['file_path' => $document->file_path]);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        Storage::disk('local')->assertExists($document->file_path);
+    }
+
+    public function test_repeated_delete_request_is_idempotent_and_returns_404(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$document->id}")
+            ->assertNotFound();
+    }
+
+    public function test_shared_page_document_owner_approval_is_resynced_after_deletion(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $supportingDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($supportingDocument->file_path, 'supporting content');
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $supportingDocument->update(['owner_user_id' => $owner->id]);
+
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        $supportingRun = $this->createIngestRun($customer, $supportingDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            ['enterprise_wiki_ingest_run_id' => $run->id, 'enterprise_wiki_page_id' => $page->id, 'action' => 'created', 'created_at' => now(), 'updated_at' => now()],
+            ['enterprise_wiki_ingest_run_id' => $supportingRun->id, 'enterprise_wiki_page_id' => $page->id, 'action' => 'created', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Supplerende påstand som holder siden delt.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 0,
+        ])->sourceReferences()->create([
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $supportingDocument->id,
+            'source_label' => $supportingDocument->original_filename,
+            'excerpt' => 'Støttende dokumentasjon.',
+        ]);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+
+        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $page->id]);
+
+        $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->first();
+
+        $this->assertNotNull($approval);
+        $this->assertSame([$supportingDocument->id], $approval->source_document_ids);
+    }
+
     // ─── No knowledge_* models touched ───────────────────────────────────────
 
     public function test_no_knowledge_item_rows_are_created_during_upload(): void
@@ -1059,7 +1363,7 @@ class WikiSourceControllerTest extends TestCase
             'file' => UploadedFile::fake()->create('isolation.pdf', 64, 'application/pdf'),
         ]);
 
-        $this->assertSame(0, \App\Models\KnowledgeItem::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(0, KnowledgeItem::query()->where('customer_id', $customer->id)->count());
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -1124,8 +1428,7 @@ class WikiSourceControllerTest extends TestCase
         SavedNotice $savedNotice,
         SavedNoticeAiDocument $document,
         SavedNoticeAiDocumentChunk $chunk,
-    ): SavedNoticeAiRequirement
-    {
+    ): SavedNoticeAiRequirement {
         return SavedNoticeAiRequirement::query()->create([
             'saved_notice_id' => $savedNotice->id,
             'saved_notice_ai_document_id' => $document->id,
