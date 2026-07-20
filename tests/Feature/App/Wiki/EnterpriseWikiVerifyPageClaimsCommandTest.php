@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -13,6 +14,8 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
@@ -887,6 +890,331 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
 
         $this->assertStringContainsString('No support found:    1', Artisan::output());
+    }
+
+    // =========================================================================
+    // Run-39 fix: a verified_unsupported canonical fact is never reused as a final result —
+    // the claim is always re-verified against its OWN current text/block/source references.
+    // A verified_supported fact is still reused (unchanged behavior).
+    // =========================================================================
+
+    public function test_stale_unsupported_canonical_fact_does_not_short_circuit_new_verification(): void
+    {
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: ['paragraph-9']));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_supported_canonical_fact_still_short_circuits_verification(): void
+    {
+        // Unchanged behavior: a verified_supported fact is still reused without calling AI.
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_claim_is_verified_against_its_own_current_source_references(): void
+    {
+        [$run, $claim, $document] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (string $claimText, array $sourceElements) use ($claim, $document): bool {
+                return $claimText === $claim->claim_text
+                    && $sourceElements !== []
+                    && $sourceElements[0]['key'] === 'paragraph-9'
+                    && $sourceElements[0]['excerpt'] === $document->extracted_text;
+            })
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: ['paragraph-9']));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+    }
+
+    public function test_old_incorrect_rejection_can_become_source_based(): void
+    {
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+            oldReason: 'Old verification logic judged this unsupported due to a wording mismatch.',
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['paragraph-9'],
+                reason: 'The current source excerpt now clearly supports the claim.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertTrue(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
+    public function test_a_real_deviation_remains_unsupported_generated_content(): void
+    {
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'The current source excerpt still does not support this claim.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+    }
+
+    public function test_new_assessment_stores_concrete_review_reason_and_metadata(): void
+    {
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'The current source excerpt describes a different process than the one claimed.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(
+            'The current source excerpt describes a different process than the one claimed.',
+            $claim->review_reason,
+        );
+        $this->assertSame('semantic_verification', $claim->review_metadata['classification_basis'] ?? null);
+        $this->assertSame('not_supported', $claim->review_metadata['verdict'] ?? null);
+    }
+
+    public function test_missing_current_source_basis_becomes_technical_uncertainty_not_content_error(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $customer,
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        // The claim's current anchor text is no longer present in its own current block —
+        // no confident current source basis, regardless of the stale reusable fact. page_excerpt
+        // takes precedence over claim_text as the anchor (claimAnchorFailureReason()), so both
+        // must be broken.
+        $claim->update([
+            'claim_text' => 'This text no longer exists anywhere in the current block.',
+            'page_excerpt' => 'This text no longer exists anywhere in the current block.',
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, $claim->content_origin);
+        $this->assertSame(
+            EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY,
+            app(EnterpriseWikiClaimFindingExplainer::class)->explain($claim)['category'],
+        );
+    }
+
+    public function test_reverification_is_idempotent(): void
+    {
+        [$run, $claim] = $this->createClaimWithStaleReusableFact(
+            $this->createCustomer(),
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'Still not supported by the current excerpt.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+        $claim->refresh();
+        $contentOriginAfterFirstRun = $claim->content_origin;
+        $reviewMetadataAfterFirstRun = $claim->review_metadata;
+
+        // Second pass: verified_at is now set, so the claim must be skipped without another AI
+        // call — re-running the command must never change an already-settled result.
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+        $claim->refresh();
+
+        $this->assertSame($contentOriginAfterFirstRun, $claim->content_origin);
+        $this->assertSame($reviewMetadataAfterFirstRun, $claim->review_metadata);
+    }
+
+    public function test_best_practice_claims_are_unaffected_by_the_reuse_fix(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\nTilganger bør gjennomgås jevnlig av systemeier.",
+        ]);
+        $claim->update([
+            'claim_text' => 'Tilganger bør gjennomgås jevnlig av systemeier.',
+            'page_excerpt' => 'Tilganger bør gjennomgås jevnlig av systemeier.',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+
+        // An unrelated stale unsupported fact existing for this customer must not interfere with
+        // the best-practice branch, which is checked before any canonical-fact lookup at all.
+        EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 999999,
+            'source_hash' => 'unrelated-hash',
+            'source_element_keys' => ['paragraph-1'],
+            'source_element_keys_hash' => hash('sha256', json_encode(['paragraph-1'], JSON_THROW_ON_ERROR)),
+            'normalized_fingerprint' => hash('sha256', 'unrelated fact'),
+            'canonical_text' => 'Unrelated fact.',
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+            'is_stale' => false,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+    }
+
+    public function test_customer_and_document_scoping_is_preserved_for_reuse(): void
+    {
+        $customerA = $this->createCustomer('Customer A');
+        $customerB = $this->createCustomer('Customer B');
+
+        [$runA, $claimA, $documentA] = $this->createClaimWithStaleReusableFact(
+            $customerA,
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+        );
+
+        // A fact recorded for customer B, with the exact same source hash/element keys/text,
+        // must never be reused for customer A's claim.
+        EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customerB->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $documentA->id,
+            'source_hash' => $documentA->file_hash_sha256,
+            'source_element_keys' => ['paragraph-9'],
+            'source_element_keys_hash' => hash('sha256', json_encode(['paragraph-9'], JSON_THROW_ON_ERROR)),
+            'normalized_fingerprint' => hash('sha256', $claimA->claim_text),
+            'canonical_text' => $claimA->claim_text,
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+            'is_stale' => false,
+        ]);
+
+        // Still expect exactly one reusable (customer A's own) fact to short-circuit — if
+        // customer scoping ever broke, this would still pass at 1 call, so also assert directly
+        // that findReusableFact only ever returns customer A's own fact.
+        $ownFact = app(EnterpriseWikiClaimCanonicalizationService::class)->findReusableFact($claimA, $customerA->id);
+        $this->assertNotNull($ownFact);
+        $this->assertSame($customerA->id, $ownFact->customer_id);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $runA->id]);
+
+        $claimA->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claimA->content_origin);
+    }
+
+    /**
+     * A claim anchored to a structured source block, already carrying its OWN
+     * EnterpriseWikiSourceReference (e.g. from extraction-time candidate discovery, before this
+     * claim was ever individually verified — verified_at is still null), plus a pre-existing
+     * EnterpriseWikiCanonicalFact whose identity (customer/content_origin/source/element keys)
+     * and canonical_text exactly match this claim — simulating a stale reusable fact recorded by
+     * a DIFFERENT occurrence elsewhere.
+     *
+     * @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiClaim, 2: EnterpriseWikiDocument, 3: EnterpriseWikiCanonicalFact}
+     */
+    private function createClaimWithStaleReusableFact(
+        Customer $customer,
+        string $verificationStatus,
+        ?string $oldReason = null,
+    ): array {
+        $claimText = 'Hendelseshåndtering bidrar til forutsigbar registrering, prioritering og oppfølging av saker.';
+
+        [$run, , , $claim, $document] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            $claimText,
+            [[
+                'source_element_key' => 'paragraph-9',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => $document->extracted_text ?? self::FAKE_EXCERPT,
+                'page_reference' => 'Avsnitt 9',
+            ]],
+        );
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'paragraph-9',
+            'source_element_type' => 'paragraph',
+            'source_label' => $document->original_filename,
+            'excerpt' => $document->extracted_text,
+            'source_hash' => $document->file_hash_sha256,
+        ]);
+
+        $fact = EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => $document->file_hash_sha256,
+            'source_element_keys' => ['paragraph-9'],
+            'source_element_keys_hash' => hash('sha256', json_encode(['paragraph-9'], JSON_THROW_ON_ERROR)),
+            'normalized_fingerprint' => hash('sha256', $claimText),
+            'canonical_text' => $claimText,
+            'verification_status' => $verificationStatus,
+            'verification_reason' => $oldReason,
+            'is_stale' => false,
+        ]);
+
+        return [$run, $claim->fresh(), $document, $fact];
     }
 
     // =========================================================================

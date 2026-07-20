@@ -186,14 +186,24 @@ class EnterpriseWikiVerifyPageClaimsService
                 }
 
                 // Cross-page overgeneration fix: before calling AI, check whether this claim
-                // expresses a fact already verified for another occurrence (same customer,
-                // content_origin, document/source version, and cited source elements — Del 3/6).
-                // Only claims carrying a real structured source reference are eligible; a claim
-                // with none (e.g. an unstructured/manual reference) has nothing safe to key on
-                // and is always verified independently.
+                // expresses a fact already verified SUPPORTED for another occurrence (same
+                // customer, content_origin, document/source version, and cited source elements —
+                // Del 3/6). Only claims carrying a real structured source reference are eligible;
+                // a claim with none (e.g. an unstructured/manual reference) has nothing safe to
+                // key on and is always verified independently.
+                //
+                // A verified_unsupported fact is deliberately NEVER reused as a final result (run-
+                // 39 fix): a negative outcome can be based on different wording, a different Wiki
+                // block, different source excerpts, an earlier verification bug, or since-improved
+                // verification logic — copying it forward would block a claim without this
+                // specific occurrence ever having been checked against its OWN current text, block,
+                // and source references. An unsupported fact only marks the claim as eligible for
+                // deterministic-support/AI verification below, exactly like a claim with no
+                // reusable fact at all — canonical_fact_id may end up pointing at the same or a new
+                // fact once recordOutcome() runs, but the fact never decides the outcome itself.
                 $reusableFact = $this->canonicalizationService->findReusableFact($claim, $run->customer_id);
 
-                if ($reusableFact !== null) {
+                if ($reusableFact !== null && $reusableFact->verification_status === EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED) {
                     Log::info('[WIKI_CLAIM_VERIFICATION] Reusing an existing canonical fact verification result.', [
                         'claim_id' => $claim->id,
                         'canonical_fact_id' => $reusableFact->id,
@@ -209,14 +219,16 @@ class EnterpriseWikiVerifyPageClaimsService
                     }
 
                     $reused++;
-
-                    if ($outcome === 'unsupported') {
-                        $noSupport++;
-                    } else {
-                        $references++;
-                    }
+                    $references++;
 
                     continue;
+                }
+
+                if ($reusableFact !== null) {
+                    Log::info('[WIKI_CLAIM_VERIFICATION] Found a verified_unsupported canonical fact but re-verifying this occurrence independently instead of reusing it.', [
+                        'claim_id' => $claim->id,
+                        'canonical_fact_id' => $reusableFact->id,
+                    ]);
                 }
 
                 $block = $this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''));
