@@ -532,12 +532,58 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
         $this->assertStringNotContainsString('helt annet', $filtered);
     }
 
-    public function test_falls_back_to_full_excerpt_when_no_sentence_shares_a_token(): void
+    public function test_returns_empty_string_when_no_clause_shares_a_token(): void
     {
+        // Run-38 fix (second pass): falling back to the raw excerpt here reintroduced exactly the
+        // risk-marker clauses this method exists to exclude (verified against real run-38 data,
+        // claim 3780's paragraph-15) — an excerpt with zero relevant clauses now contributes
+        // nothing rather than being kept in full.
         $claim = 'Responstiden er 30 minutter.';
         $excerpt = 'Dette avsnittet handler om noe helt annet tema.';
 
-        $this->assertSame($excerpt, $this->service()->filterToRelevantSentences($claim, $excerpt));
+        $this->assertSame('', $this->service()->filterToRelevantSentences($claim, $excerpt));
+    }
+
+    public function test_clause_with_uten_sharing_only_a_generic_noun_is_dropped(): void
+    {
+        // Real run-38 excerpt (claim 3783's paragraph-11): the risk-marker clause shares only the
+        // generic, ubiquitous noun "endringer" with the claim — not specific enough to trust its
+        // "uten" as relevant to a claim about a different topic entirely.
+        $claim = 'Endringer vurderes for risiko, påvirkning og gjennomførbarhet før beslutning tas.';
+        $excerpt = 'Dette sikrer forutsigbar håndtering av henvendelser, kontroll på endringer og god sporbarhet, '
+            .'og endringer gjennomføres uten å sette stabilitet eller etterlevelse i fare.';
+
+        $filtered = $this->service()->filterToRelevantSentences($claim, $excerpt);
+
+        $this->assertStringNotContainsString('uten å sette', $filtered);
+    }
+
+    public function test_ikke_kun_scope_qualifier_is_not_treated_as_negation(): void
+    {
+        // Real run-38 excerpt cited by several claims (3788, 3789, 3790, 4041, 4059, 3881, 3943):
+        // "ikke kun forståelse" ("not just understanding") is a scope qualifier — it affirms the
+        // practical-application half, it does not negate anything the claim would need to also
+        // state.
+        $claim = 'Innføring av prosesser gjennomføres kontrollert og med tydelig oppfølging av etterlevelse.';
+        $excerpt = 'Innføring av prosessene gjennomføres kontrollert og med tydelig oppfølging av etterlevelse. '
+            .'Opplæring og oppfølging rettes mot praktisk anvendelse, ikke kun forståelse av prinsipper.';
+
+        $filtered = $this->service()->filterToRelevantSentences($claim, $excerpt);
+
+        $this->assertNull($this->service()->detectDeterministicConflict($claim, $filtered));
+    }
+
+    public function test_ikke_bare_scope_qualifier_is_not_treated_as_negation(): void
+    {
+        // Real run-38 excerpt (claim 3880's paragraph-29): "ikke bare beskriver" ("not just
+        // describes") is the same scope-qualifier pattern as "ikke kun", not a negation.
+        $claim = 'Endringsstyring etableres og innføres som et målrettet forbedringsløp som tar utgangspunkt i faktisk praksis.';
+        $excerpt = 'På denne bakgrunn etableres forbedrede arbeidsprosesser for de prioriterte områdene, '
+            .'og ikke bare beskriver ønsket praksis.';
+
+        $filtered = $this->service()->filterToRelevantSentences($claim, $excerpt);
+
+        $this->assertNull($this->service()->detectDeterministicConflict($claim, $filtered));
     }
 
     // =========================================================================
@@ -601,5 +647,70 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     public function test_empty_claim_tokens_are_never_flagged(): void
     {
         $this->assertFalse($this->service()->detectSubjectMismatch('', ['Tekst en.', 'Tekst to.']));
+    }
+
+    public function test_subject_named_only_by_a_low_coverage_candidate_is_not_flagged(): void
+    {
+        // Run-38 fix (second pass): a mismatch requires that NO relevant candidate contains the
+        // subject — not that some candidate happens to lack it. Real run-38 claim 4062: paragraph-
+        // 11 names the claim's subject "forespørselshåndtering" directly; a different, more
+        // generically-worded excerpt that also reaches the coverage bar must not cancel that out.
+        $this->assertFalse($this->service()->detectSubjectMismatch(
+            'Forespørselshåndtering er en ITIL-praksis Leverandøren benytter i den daglige tjenesteleveransen, sammen med blant annet hendelseshåndtering, problemhåndtering og endringsstyring.',
+            [
+                'ITIL-praksiser som hendelseshåndtering, forespørselshåndtering, problemhåndtering, endringsstyring og kunnskapsforvaltning brukes som et felles fundament for samhandlingen mellom Kunden og Leverandøren.',
+                'Leverandøren benytter ITIL-praksiser som grunnlag for hvordan tjenesteleveransen gjennomføres i det daglige, for eksempel innenfor hendelseshåndtering, problemhåndtering og endringsstyring.',
+            ],
+        ));
+    }
+
+    public function test_leading_generic_party_noun_is_never_treated_as_the_subject(): void
+    {
+        // Requirement: "leverandøren" and "innføringen" must never serve as "the entity" — a claim
+        // leading with either has no specific, named ITIL practice for this check to verify.
+        $this->assertFalse($this->service()->detectSubjectMismatch(
+            'Leverandøren etablerer forbedrede arbeidsprosesser med tydelige krav til hvordan saker registreres, vurderes, besluttes og følges opp.',
+            [
+                'Leverandøren videreutvikler prosessene der dagens arbeidsmåter ikke gir tilstrekkelig styring eller oversikt.',
+                'På denne bakgrunn etableres forbedrede arbeidsprosesser for de prioriterte områdene, med tydelige krav til hvordan saker registreres, vurderes, besluttes og følges opp.',
+            ],
+        ));
+
+        $this->assertFalse($this->service()->detectSubjectMismatch(
+            'Innføringen skjer kontrollert med vekt på praktisk anvendelse og etterlevelse.',
+            [
+                'Innføring av prosessene gjennomføres kontrollert og med tydelig oppfølging av etterlevelse.',
+                'Roller og ansvar avklares samtidig, med klare forventninger til hvem som beslutter.',
+            ],
+        ));
+    }
+
+    public function test_claim_without_a_known_practice_name_is_never_flagged(): void
+    {
+        // detectSubjectMismatch() only has a well-defined job when the claim names one of the
+        // known ITIL practices; a claim that names none of them has no specific subject to check.
+        $this->assertFalse($this->service()->detectSubjectMismatch(
+            'Kontinuerlig forbedring gir et faktabasert grunnlag for å videreutvikle prosesser og arbeidsmåter.',
+            [
+                'ITIL-praksiser brukes som et felles fundament for samhandlingen mellom Kunden og Leverandøren.',
+                'Erfaringer fra drift gir et faktabasert grunnlag for å identifisere forbedringsområder.',
+            ],
+        ));
+    }
+
+    public function test_run_38_claim_4048_misattribution_still_rejected_after_the_fix(): void
+    {
+        // Requirement: claim 4048 must remain rejected under the revised detectSubjectMismatch().
+        // "Hendelseshåndtering" is only named (as one item in a list) in the first excerpt; the
+        // second excerpt describes the specific claimed function in detail for "Brukerstøtte"
+        // instead, and reaches the coverage bar without ever mentioning "hendelseshåndtering".
+        $this->assertTrue($this->service()->detectSubjectMismatch(
+            'Hendelseshåndtering bidrar til forutsigbar registrering, prioritering og oppfølging av saker som påvirker Kundens IT-tjenester.',
+            [
+                'ITIL-praksiser som hendelseshåndtering, forespørselshåndtering, problemhåndtering, endringsstyring og kunnskapsforvaltning brukes som et felles fundament for samhandlingen mellom Kunden og Leverandøren.',
+                'Brukerstøtte fungerer som inngang til tjenestene og håndterer registrering, prioritering og oppfølging av hendelser og forespørsler. '
+                .'Dette sikrer forutsigbar håndtering av henvendelser og god sporbarhet i alle aktiviteter som påvirker Kundens IT-tjenester.',
+            ],
+        ));
     }
 }

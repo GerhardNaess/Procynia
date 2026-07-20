@@ -49,12 +49,49 @@ class EnterpriseWikiClaimAnchorTextNormalizer
     /**
      * Whether $needle (raw claim anchor text) is found inside $haystack (raw block/page
      * markdown) after both are normalized identically.
+     *
+     * Run-38 fix: two further, deliberately last-resort fallbacks for claim-extraction
+     * boundary artifacts that are not really content mismatches:
+     *
+     * 1. Comma-for-period at a clause boundary — claim extraction sometimes closes an anchor
+     *    with a period where the source itself continues the sentence with a comma + conjunction
+     *    ("...redusere risiko for nye avbrudd, mens endringer vurderes...", extracted as
+     *    "...redusere risiko for nye avbrudd."). A needle ending in "." also matches a haystack
+     *    that has "," at the same position.
+     * 2. Whitespace-insensitive fallback — a bare inflectional suffix immediately after a
+     *    resolved wikilink can pick up a stray space during extraction that the source itself
+     *    never had (source: "[[itil|ITIL-rammeverk]]et" → "ITIL-rammeverket", one word; claim
+     *    anchor: "ITIL-rammeverk et", two words). Comparing with all whitespace stripped from
+     *    both sides catches this (and similar stray-space artifacts) without weakening a genuine
+     *    mismatch — a claim-length string matching only once every space is removed is, in
+     *    practice, always the same content with a formatting glitch, never a coincidence.
      */
     public function contains(string $haystack, string $needle): bool
     {
         $normalizedNeedle = $this->normalize($needle);
 
-        return $normalizedNeedle !== '' && str_contains($this->normalize($haystack), $normalizedNeedle);
+        if ($normalizedNeedle === '') {
+            return false;
+        }
+
+        $normalizedHaystack = $this->normalize($haystack);
+
+        if (str_contains($normalizedHaystack, $normalizedNeedle)) {
+            return true;
+        }
+
+        if (str_ends_with($normalizedNeedle, '.')) {
+            $needleWithoutPeriod = rtrim(substr($normalizedNeedle, 0, -1));
+
+            if ($needleWithoutPeriod !== '' && str_contains($normalizedHaystack, $needleWithoutPeriod.',')) {
+                return true;
+            }
+        }
+
+        $needleNoSpace = preg_replace('/\s+/u', '', $normalizedNeedle) ?? $normalizedNeedle;
+        $haystackNoSpace = preg_replace('/\s+/u', '', $normalizedHaystack) ?? $normalizedHaystack;
+
+        return $needleNoSpace !== '' && str_contains($haystackNoSpace, $needleNoSpace);
     }
 
     private function resolveWikilinks(string $text): string

@@ -106,6 +106,30 @@ class EnterpriseWikiClaimAnchorTextNormalizerTest extends TestCase
     }
 
     // =========================================================================
+    // Run-38 fix: comma-for-period and wikilink-suffix boundary artifacts
+    // =========================================================================
+
+    public function test_comma_at_clause_boundary_matches_a_needle_ending_in_a_period(): void
+    {
+        // Claim extraction closed the anchor with a period, but the source itself continues the
+        // sentence past that point with a comma + conjunction.
+        $haystack = 'Prosessen reduserer risiko for nye driftsavbrudd, mens endringer vurderes separat.';
+        $needle = 'Prosessen reduserer risiko for nye driftsavbrudd.';
+
+        $this->assertTrue($this->normalizer()->contains($haystack, $needle));
+    }
+
+    public function test_wikilink_with_inflectional_suffix_matches_despite_stray_space(): void
+    {
+        // Source: "[[itil|ITIL-rammeverk]]et" resolves to "ITIL-rammeverket" (one word); the
+        // claim's captured anchor text has a stray space before the suffix: "ITIL-rammeverk et".
+        $haystack = 'Leverandøren bruker [[itil|ITIL-rammeverk]]et som styringsverktøy.';
+        $needle = 'Leverandøren bruker ITIL-rammeverk et som styringsverktøy.';
+
+        $this->assertTrue($this->normalizer()->contains($haystack, $needle));
+    }
+
+    // =========================================================================
     // Genuine mismatches remain mismatches
     // =========================================================================
 

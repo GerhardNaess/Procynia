@@ -855,12 +855,15 @@ class EnterpriseWikiVerifyPageClaimsService
         $supportingKeys = (array) ($result['supporting_source_element_keys'] ?? []);
 
         if ($hadStructuredCandidates) {
+            $rawExcerpts = [];
             $supportingTexts = [];
 
             foreach ($supportingKeys as $key) {
                 $excerpt = trim((string) ($elementsByKey[$key]['source_excerpt'] ?? ''));
 
                 if ($excerpt !== '') {
+                    $rawExcerpts[] = $excerpt;
+
                     // Run-38 fix: narrow each cited excerpt to its claim-relevant sentence(s)
                     // before combining — see EnterpriseWikiClaimCanonicalizationService::
                     // filterToRelevantSentences() for why this is needed now that a claim may
@@ -869,7 +872,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 }
             }
 
-            if ($supportingTexts === []) {
+            if ($rawExcerpts === []) {
                 Log::warning('[WIKI_CLAIM_VERIFICATION] AI verdict cited no valid candidate source element — downgrading.', [
                     'ai_verdict' => $verdict,
                 ]);
@@ -878,6 +881,20 @@ class EnterpriseWikiVerifyPageClaimsService
             }
 
             $supportingText = implode("\n", $supportingTexts);
+
+            // Run-38 fix (second pass): filterToRelevantSentences() now discards a clause entirely
+            // rather than falling back to the raw excerpt (see its docblock) — correct when at
+            // least one OTHER cited excerpt still contributes real content, but if EVERY cited
+            // excerpt filtered down to nothing, that empty text would silently skip every
+            // remaining deterministic check below (number/negation/modality/actor/scope/currency),
+            // including genuine conflicts a lexically-unrelated excerpt can still carry (e.g. "15
+            // minutter" vs. "30 minutes" sharing no words at all). Falling back to the raw cited
+            // excerpts only in this all-empty case keeps the original claim-3780 fix (drop a
+            // genuinely irrelevant clause from an otherwise-useful combination) while still
+            // checking something instead of nothing when filtering discarded everything.
+            if (trim($supportingText) === '') {
+                $supportingText = implode("\n", $rawExcerpts);
+            }
 
             // Backstop for when the AI's own subject_entity self-report (checked above) misses a
             // real misattribution — see detectSubjectMismatch()'s docblock for the concrete

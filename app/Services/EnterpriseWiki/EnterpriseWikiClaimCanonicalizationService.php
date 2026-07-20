@@ -87,6 +87,19 @@ class EnterpriseWikiClaimCanonicalizationService
     ];
 
     /**
+     * Terms too generic to count toward "this excerpt is relevant enough to check for the
+     * subject" in detectSubjectMismatch() — bare party nouns (reuses CURRENT_STATE_SUBJECTS:
+     * "leverandøren", "kunden", ...) and process-stage nouns that recur across nearly every
+     * claim/excerpt in this document regardless of which specific ITIL practice is actually being
+     * described (see the meaningfulOtherTokens filtering in detectSubjectMismatch()).
+     */
+    private const GENERIC_SUBJECT_TERMS = [
+        ...self::CURRENT_STATE_SUBJECTS,
+        'innføringen', 'innføring', 'innføringene',
+        'prosessen', 'prosessene', 'prosesser', 'prosess',
+    ];
+
+    /**
      * Bilingual recurrence/period vocabulary → canonical category, used by frequencyTokens() so
      * "quarterly" and "hvert kvartal" (Del 6/Del 9) compare equal across languages instead of
      * being treated as two different, unrelated words.
@@ -271,41 +284,165 @@ class EnterpriseWikiClaimCanonicalizationService
     }
 
     /**
-     * Run-38 fix: restricts a candidate excerpt to only the sentence(s) sharing at least one
+     * A clause containing one of these marker words («uten»/«without», «kan»/«may», «må»/«must»,
+     * «mens»/«while», «men»/«but») needs a more specific reason than an ordinary sentence to be
+     * trusted as relevant evidence — see filterToRelevantSentences()'s docblock. Also includes the
+     * rest of NEGATION_MARKERS («ikke», «aldri», «ingen», «not», «never», «no longer») — verified
+     * against real run-38 data that a clause carrying a bare "ikke" (with no "uten"/"kan"/etc. at
+     * all) was passing through unfiltered and then tripping hasNegationMarker() on the combined
+     * text, the same false-positive this whole clause-filtering mechanism exists to prevent.
+     */
+    private const CLAUSE_RISK_MARKERS = [
+        'uten', 'kan', 'må', 'mens', 'men', 'without', 'may', 'must', 'while', 'but',
+        'ikke', 'aldri', 'ingen', 'not', 'never', 'no longer',
+    ];
+
+    /**
+     * Comma-boundary split triggers — deliberately EXCLUDES "men"/"but", even though both are
+     * still full CLAUSE_RISK_MARKERS. "ikke X, men Y" ("not X, but Y") is a single contrastive
+     * unit: hasNegationMarker()'s own "ikke ... men" exclusion only works when both halves stay
+     * together in the same combined text. Splitting there separated them in testing and broke
+     * that exclusion — the "ikke" half then read as a bare, unpaired negation once "men Y" was
+     * filtered out as a separate, less-relevant clause. "mens"/"while" does not have this
+     * problem — it genuinely introduces a parallel, separable clause, not a contrastive
+     * assertion — so it stays a split trigger.
+     */
+    private const CLAUSE_SPLIT_MARKERS = ['uten', 'kan', 'må', 'mens', 'without', 'may', 'must', 'while'];
+
+    /**
+     * Generic verbs AND nouns ubiquitous across this kind of corporate-speak/ITIL document — on
+     * their own, never a specific enough reason to trust a risk-marker clause (see
+     * filterToRelevantSentences()). A real, on-topic overlap uses a more specific/distinguishing
+     * word than these. Verified against real run-38 data: "endringer"/"hendelser" ("changes"/
+     * "incidents") recur in nearly every paragraph of this document regardless of which specific
+     * ITIL practice a given claim is actually about, exactly like the generic verbs below — e.g.
+     * "...og endringer gjennomføres uten å sette stabilitet ... i fare" shares only "endringer"
+     * with a claim about a different practice entirely, which is not specific enough to let its
+     * "uten" into the comparison.
+     */
+    private const GENERIC_ACTION_VERBS = [
+        'gjennomføres', 'gjennomføring', 'gjennomfører', 'gjennomført',
+        'sikrer', 'sikres', 'sikret', 'håndteres', 'håndterer', 'håndtert',
+        'bidrar', 'gir', 'følges', 'benyttes', 'benytter', 'brukes', 'bruker',
+        'endringer', 'endring', 'endringen', 'endringene',
+        'hendelser', 'hendelse', 'hendelsen', 'hendelsene',
+        'prosessene', 'prosessen', 'prosesser', 'prosess',
+        'arbeidsmåter', 'arbeidsmåte', 'arbeidsmåten', 'arbeidsmåtene',
+        // Two recurring boilerplate closers describing generic outcomes/collaboration, shared
+        // verbatim across SEVERAL different practice-specific paragraphs in this document —
+        // verified against real run-38 data via detectSubjectMismatch()'s meaningfulOtherTokens
+        // filtering (claim 4048: "...sikrer forutsigbar håndtering... som påvirker Kundens
+        // IT-tjenester"; claim 3879: "...samspillet mellom brukerstøtte, tekniske miljøer,
+        // fagmiljøer... og tredjeparter fungerer effektivt"). Neither phrase names a specific
+        // practice, so letting either satisfy the "is this excerpt relevant" coverage bar on its
+        // own let a misattributed/unrelated excerpt masquerade as on-topic.
+        'forutsigbar', 'påvirker', 'kundens', 'tjenester',
+        'samspillet', 'brukerstøtte', 'tekniske', 'miljøer', 'fagmiljøer', 'tredjeparter',
+        'fungerer', 'effektivt',
+    ];
+
+    /**
+     * Run-38 fix: restricts a candidate excerpt to only the clause(s) sharing at least one
      * significant token with the claim, before it is combined with other cited excerpts for
      * detectDeterministicConflict(). Necessary now that a claim may legitimately combine evidence
      * from several full paragraphs (Del: combined-evidence synthesis): a long cited excerpt
-     * routinely contains an entirely unrelated sentence elsewhere — different clause, different
-     * topic — that happens to carry its own incidental negation/modality/scope marker. Comparing
-     * the claim against the WHOLE excerpt treats that irrelevant sentence's marker as if it were
-     * part of the evidence actually supporting the claim (verified against real run-38 data:
-     * paragraph-11's closing sentence "... endringer gjennomføres uten å sette stabilitet ... i
-     * fare" shares no token with a claim about ITIL governance, yet its "uten" alone triggered a
-     * false negation_mismatch once paragraph-11 was legitimately cited alongside others).
+     * routinely contains an entirely unrelated clause elsewhere — different topic, same
+     * grammatical "sentence" — that happens to carry its own incidental negation/modality marker.
+     *
+     * Clause-aware, not merely sentence-aware: Norwegian source paragraphs in this corpus are
+     * routinely ONE long comma-joined sentence (a single period only at the very end), so
+     * splitting on `.!?` alone never separates the individual clauses inside it (verified against
+     * real run-38 data — see test_full_claim_conflict_check_no_longer_false_positives_on_a_combined_unrelated_sentence()
+     * and its sibling in the clause-splitting test suite). Splits further at clause-coordinating
+     * commas and "og" ("and"). A clause that survives splitting but contains one of
+     * CLAUSE_RISK_MARKERS is held to a stricter bar: an overlap consisting only of a
+     * GENERIC_ACTION_VERBS word (present in nearly every sentence of this document) is not
+     * enough to trust it — e.g. "...og endringer gjennomføres uten å sette stabilitet ... i fare"
+     * shares only "gjennomføres" with a claim about ITIL governance, which is not a specific
+     * enough reason to let its "uten" into the comparison.
      *
      * This never changes what counts as a conflict, only which text is considered "the specific
      * excerpt(s) cited as support" — detectDeterministicConflict() itself, and every actor/
-     * negation/modality/number/scope rule inside it, is untouched. Falls back to the full excerpt
-     * when no sentence shares a token with the claim (a stricter, safer default than silently
-     * discarding an excerpt this check cannot confidently narrow down).
+     * negation/modality/number/scope rule inside it, is untouched.
+     *
+     * Run-38 fix (second pass): returns an EMPTY string, not the raw excerpt, when no clause is
+     * relevant — verified against real production data that an excerpt can share zero tokens
+     * with the claim across every one of its clauses despite having been cited (the AI's known
+     * over-citation tendency, see EnterpriseWikiVerifyPageClaimsCommandTest's docblock). Falling
+     * back to the full raw excerpt in that case reintroduced the exact risk-marker clauses this
+     * method exists to exclude — e.g. paragraph-15 ("Brukerstøtte fungerer som inngang...")
+     * shares nothing at all with a claim about a different named ITIL practice, yet its closing
+     * "...må opprettholdes uten avbrudd." was still let back in as "better than discarding it".
+     * An excerpt with zero relevant clauses contributes nothing to the combined text instead —
+     * detectDeterministicConflict() finds no conflict in an empty string, so this never fires a
+     * false conflict; it simply stops manufacturing one from unrelated text.
      */
     public function filterToRelevantSentences(string $claimText, string $excerptText): string
     {
         $claimTokens = array_unique($this->significantTokens($this->textNormalizer->normalize($claimText)));
 
         if ($claimTokens === [] || trim($excerptText) === '') {
-            return $excerptText;
+            return '';
         }
 
-        $sentences = preg_split('/(?<=[.!?])\s+/u', trim($excerptText), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $clauses = $this->splitIntoClauses($excerptText);
 
-        $relevant = array_values(array_filter($sentences, function (string $sentence) use ($claimTokens): bool {
-            $sentenceTokens = $this->significantTokens($this->textNormalizer->normalize($sentence));
+        $relevant = array_values(array_filter(
+            $clauses,
+            fn (string $clause): bool => $this->clauseIsRelevant($clause, $claimTokens),
+        ));
 
-            return array_intersect($claimTokens, $sentenceTokens) !== [];
-        }));
+        return implode(' ', $relevant);
+    }
 
-        return $relevant !== [] ? implode(' ', $relevant) : $excerptText;
+    /**
+     * @return list<string>
+     */
+    private function splitIntoClauses(string $text): array
+    {
+        // A comma directly followed by one of the split-marker conjunctions starts a new clause
+        // (the marker itself stays with the new clause, so it can still be evaluated as part of
+        // it — e.g. "..., mens som..." → boundary before "mens", not after). Uses
+        // CLAUSE_SPLIT_MARKERS, not the full CLAUSE_RISK_MARKERS — "men"/"but" is deliberately
+        // excluded here, see CLAUSE_SPLIT_MARKERS's docblock.
+        $text = preg_replace(
+            '/\s*,\s*(?=(?:'.implode('|', array_map(fn (string $m) => preg_quote($m, '/'), self::CLAUSE_SPLIT_MARKERS)).')\b)/ui',
+            "\n",
+            $text,
+        ) ?? $text;
+
+        // "og"/"and" coordinates two independent clauses far more often than it joins a short
+        // noun list in this corpus; splitting on it too catches cases like "...og beslutninger
+        // kan spores i etterkant" where no comma precedes the risky clause at all.
+        $text = preg_replace('/\s+(og|and)\s+(?=\p{Ll})/u', "\n$1 ", $text) ?? $text;
+
+        $pieces = preg_split('/(?<=[.!?])\s+|\n/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return array_values(array_filter(array_map('trim', $pieces), fn (string $p): bool => $p !== ''));
+    }
+
+    private function clauseIsRelevant(string $clause, array $claimTokens): bool
+    {
+        $clauseNorm = $this->textNormalizer->normalize($clause);
+        $clauseTokens = $this->significantTokens($clauseNorm);
+
+        $overlap = array_intersect($claimTokens, $clauseTokens);
+
+        if ($overlap === []) {
+            return false;
+        }
+
+        if (! $this->containsAny($clauseNorm, self::CLAUSE_RISK_MARKERS)) {
+            return true;
+        }
+
+        // CURRENT_STATE_SUBJECTS ("leverandøren", "kunden", ...) is reused here for the same
+        // reason as GENERIC_ACTION_VERBS: a bare party noun recurs in nearly every sentence of
+        // this document and is never, on its own, a specific enough overlap to trust a
+        // risk-marker clause (verified against real run-38 data, claims 4058/4059).
+        $meaningfulOverlap = array_diff($overlap, self::GENERIC_ACTION_VERBS, self::CURRENT_STATE_SUBJECTS);
+
+        return $meaningfulOverlap !== [];
     }
 
     /**
@@ -341,34 +478,106 @@ class EnterpriseWikiClaimCanonicalizationService
             return false;
         }
 
-        $subjectTerm = $claimTokens[0];
-        $otherTokens = array_values(array_unique(array_slice($claimTokens, 1)));
+        $subjectTerm = $this->resolveSubjectTerm($claimTokens);
+
+        if ($subjectTerm === null) {
+            return false;
+        }
+
+        $otherTokens = array_values(array_unique(array_diff($claimTokens, [$subjectTerm])));
 
         if ($otherTokens === []) {
             return false;
         }
 
+        // Coverage is judged only on the claim's MEANINGFUL other tokens — excluding the same
+        // generic verbs/nouns/party-terms filterToRelevantSentences() already treats as too
+        // ubiquitous in this document to distinguish one topic from another. Without this, a
+        // candidate can look "relevant" purely on generic overlap while actually describing a
+        // different entity's function — verified against real run-38 data, claim 4048: paragraph-
+        // 14's aggregate closing sentence ("...sikrer forutsigbar håndtering... som påvirker
+        // Kundens IT-tjenester") shares only generic words with the claim and does reach 40% that
+        // way, but the claim's actually-distinguishing function words ("registrering, prioritering
+        // og oppfølging") come only from paragraph-15 — which describes Brukerstøtte, not
+        // Hendelseshåndtering, and correctly has no subject match. Falls back to the full token
+        // set if every other token happens to be generic (nothing left to discriminate on).
+        $meaningfulOtherTokens = array_values(array_diff($otherTokens, self::GENERIC_ACTION_VERBS, self::GENERIC_SUBJECT_TERMS));
+
+        if ($meaningfulOtherTokens === []) {
+            $meaningfulOtherTokens = $otherTokens;
+        }
+
+        // Run-38 fix (second pass): a mismatch requires that NO relevant cited candidate contains
+        // the subject — not that SOME candidate happens to lack it. The prior per-excerpt check
+        // fired as soon as any ONE cited excerpt lacked the subject while covering enough of the
+        // claim's other tokens, even when a DIFFERENT cited excerpt plainly named the subject
+        // (verified against real run-38 data, claim 4062: paragraph-11 names the claim's subject
+        // "forespørselshåndtering" directly, but paragraph-14's more generic framing — which
+        // shares enough other tokens to look "relevant" — does not, and used to trip a false
+        // mismatch on its own). A claim only genuinely borrows the wrong subject when every
+        // candidate that plausibly speaks to it stays silent on the subject itself.
+        $hasRelevantCandidateWithoutSubject = false;
+
         foreach ($citedExcerptTexts as $excerpt) {
             $excerptNorm = $this->textNormalizer->normalize($excerpt);
 
-            if ($excerptNorm === '' || $this->containsWord($excerptNorm, $subjectTerm)) {
+            if ($excerptNorm === '') {
                 continue;
             }
 
             $covered = 0;
 
-            foreach ($otherTokens as $token) {
+            foreach ($meaningfulOtherTokens as $token) {
                 if ($this->containsWord($excerptNorm, $token)) {
                     $covered++;
                 }
             }
 
-            if (($covered / count($otherTokens)) >= 0.4) {
-                return true;
+            if (($covered / count($meaningfulOtherTokens)) < 0.4) {
+                continue;
+            }
+
+            if ($this->containsWord($excerptNorm, $subjectTerm)) {
+                return false;
+            }
+
+            $hasRelevantCandidateWithoutSubject = true;
+        }
+
+        return $hasRelevantCandidateWithoutSubject;
+    }
+
+    /**
+     * The specific, named practice this claim is actually about, if any — deliberately an
+     * ALLOWLIST rather than "skip the generic words and hope what's left is meaningful". An
+     * exclusion-based approach (skip party nouns, skip generic verbs, skip generic adjectives, ...)
+     * was tried first and never converged: this document's claims combine a small, fixed set of
+     * named ITIL practices with an unbounded variety of ordinary Norwegian prose (adjectives,
+     * prepositions, boilerplate connective nouns), so each new exclusion fixed one claim and broke
+     * another that legitimately depended on the excluded word (verified against real run-38 data
+     * across multiple iterations). detectSubjectMismatch() only has a real, well-defined job when
+     * the claim names one of these specific practices; scanning for a known name directly — in
+     * either language, anywhere in the claim, not just its first token — is both simpler and more
+     * robust than trying to exhaustively deny-list everything that isn't one. Returns null (no
+     * mismatch check performed) when the claim names none of them, which is always the safe
+     * (non-firing) outcome.
+     */
+    // Single-word tokens only — significantTokens() splits on non-letter/non-digit boundaries, so
+    // a multi-word English equivalent ("incident management") could never match a token here.
+    private const KNOWN_PRACTICE_ENTITIES = [
+        'hendelseshåndtering', 'forespørselshåndtering', 'problemhåndtering',
+        'endringsstyring', 'kunnskapsforvaltning', 'brukerstøtte',
+    ];
+
+    private function resolveSubjectTerm(array $claimTokens): ?string
+    {
+        foreach ($claimTokens as $token) {
+            if (in_array($token, self::KNOWN_PRACTICE_ENTITIES, true)) {
+                return $token;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -444,6 +653,13 @@ class EnterpriseWikiClaimCanonicalizationService
      * still contain an incidental "ikke ... men" elsewhere, wrongly blocking a claim that never
      * negates anything itself. Only the contrastive span itself is stripped; a genuine standalone
      * negation anywhere else in the same text still counts.
+     *
+     * Run-38 fix (second pass): "ikke kun"/"ikke bare" ("not just"/"not only") is a SCOPE
+     * qualifier, not a negation — "oppfølging rettes mot praktisk anvendelse, ikke kun forståelse
+     * av prinsipper" ("follow-up targets practical application, not just understanding of
+     * principles") affirms the practical-application half; it does not negate anything a claim
+     * would need to also state. Verified against real run-38 data across several claims (3788,
+     * 3789, 3790, 4041, 4059, 3881, 3943) citing this exact recurring clause.
      */
     private function hasNegationMarker(string $normalizedText): bool
     {
@@ -452,6 +668,8 @@ class EnterpriseWikiClaimCanonicalizationService
         $withoutContrast = preg_replace('/\bikke\b[^.!?]*?\bmen\b/ui', '', $withoutNegatedCompounds)
             ?? $withoutNegatedCompounds;
         $withoutContrast = preg_replace('/\bnot\b[^.!?]*?\bbut\b/ui', '', $withoutContrast) ?? $withoutContrast;
+        $withoutContrast = preg_replace('/\bikke\s+(?:kun|bare)\b/ui', '', $withoutContrast) ?? $withoutContrast;
+        $withoutContrast = preg_replace('/\bnot\s+(?:just|only)\b/ui', '', $withoutContrast) ?? $withoutContrast;
 
         foreach (self::NEGATION_MARKERS as $marker) {
             if ($this->containsWord($withoutContrast, $marker)) {
