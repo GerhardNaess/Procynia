@@ -15,6 +15,7 @@ use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
@@ -26,6 +27,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -38,6 +40,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
+        private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
     ) {}
 
     public function index(Request $request): Response
@@ -73,7 +76,7 @@ class WikiController extends Controller
 
         $props += match ($tab) {
             'sources' => $this->loadSourcesTab($user, $customerId, $request),
-            'runs' => $this->loadRunsTab($customerId, $request),
+            'runs' => $this->loadRunsTab($user, $customerId, $request),
             'quality' => $this->loadQualityTab($customerId, $request),
             default => $this->loadPagesTab($user, $customerId, $request),
         };
@@ -700,7 +703,7 @@ class WikiController extends Controller
         ];
     }
 
-    private function loadRunsTab(int $customerId, Request $request): array
+    private function loadRunsTab(?User $user, int $customerId, Request $request): array
     {
         $allowedRunStatuses = EnterpriseWikiIngestRun::STATUSES;
         $allowedDecisionStatuses = [
@@ -786,15 +789,16 @@ class WikiController extends Controller
         $runs = $query->get();
 
         $documentIds = $runs->pluck('source_id')->unique();
-        $docFilenames = $documentIds->isNotEmpty()
+        $docsById = $documentIds->isNotEmpty()
             ? EnterpriseWikiDocument::query()
                 ->whereIn('id', $documentIds)
                 ->where('customer_id', $customerId)
-                ->pluck('original_filename', 'id')
+                ->get()
+                ->keyBy('id')
             : collect();
 
         return [
-            'runs' => $runs->map(function (EnterpriseWikiIngestRun $run) use ($docFilenames) {
+            'runs' => $runs->map(function (EnterpriseWikiIngestRun $run) use ($docsById, $user) {
                 $lintTotal = (int) ($run->lint_total_count ?? 0);
                 $lintOpen = (int) ($run->lint_open_count ?? 0);
                 $lintOpenBlocking = (int) ($run->lint_open_blocking_count ?? 0);
@@ -803,12 +807,18 @@ class WikiController extends Controller
                 $findingsOpenBlocking = $lintOpenBlocking + $claimDefects;
                 $findingsOpenNonBlocking = max(0, $lintOpen - $lintOpenBlocking);
 
+                /** @var EnterpriseWikiDocument|null $document */
+                $document = $docsById->get($run->source_id);
+
                 return [
                     'id' => $run->id,
                     'status' => $run->status,
                     'maintainer_decision_status' => $run->maintainer_decision_status,
-                    'source_document_filename' => $docFilenames->get($run->source_id),
+                    'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,
+                    'can_cancel' => ! $run->isTerminal()
+                        && $document instanceof EnterpriseWikiDocument
+                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
                     'error_message' => $run->error_message,
                     'qa_status' => $run->qa_status,
                     'qa_last_error' => $run->qa_last_error,
@@ -887,6 +897,46 @@ class WikiController extends Controller
             ],
             'stall_explanation' => $this->runStallExplanation($run, $awaitingCount),
         ]);
+    }
+
+    /**
+     * Manually cancel a non-terminal ingest run — e.g. one that is legitimately waiting on
+     * Document Owner approval with no active job/lease behind it — so its source document
+     * becomes eligible for the existing document-scoped deletion. Authorization mirrors
+     * WikiSourceController::destroy() exactly: the run is cancelled by whoever could delete its
+     * source document (System Owner, or the document's registered owner), since cancelling a
+     * run only ever exists to unblock that same deletion.
+     */
+    public function cancelRun(EnterpriseWikiIngestRun $run): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->find($run->source_id);
+
+        abort_unless($document instanceof EnterpriseWikiDocument, 404);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        if ($run->isTerminal()) {
+            return redirect()->route('app.wiki.index', ['tab' => 'runs'])
+                ->with('error', __('procynia.wiki.run_cancel_already_terminal'));
+        }
+
+        $this->documentFlowService->cancelRun($run, $user);
+
+        Log::info('[PROCYNIA][WIKI_RUN] Cancelled ingest run.', [
+            'run_id' => $run->id,
+            'document_id' => $document->id,
+            'user_id' => $user->id,
+        ]);
+
+        return redirect()->route('app.wiki.index', ['tab' => 'runs'])
+            ->with('success', __('procynia.wiki.run_cancel_success'));
     }
 
     /**

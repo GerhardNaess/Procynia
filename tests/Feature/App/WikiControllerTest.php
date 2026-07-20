@@ -3957,6 +3957,170 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Runs tab — can_cancel flag
+    // =========================================================================
+
+    public function test_runs_tab_can_cancel_true_for_system_owner_on_non_terminal_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['can_cancel'] === true;
+        });
+    }
+
+    public function test_runs_tab_can_cancel_false_for_terminal_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['can_cancel'] === false;
+        });
+    }
+
+    public function test_runs_tab_can_cancel_false_for_contributor_without_ownership(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['can_cancel'] === false;
+        });
+    }
+
+    public function test_runs_tab_can_cancel_true_for_contributor_who_owns_document(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $user->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['can_cancel'] === true;
+        });
+    }
+
+    // =========================================================================
+    // Runs tab — PATCH /app/wiki/runs/{run}/cancel
+    // =========================================================================
+
+    public function test_cancel_run_sets_status_cancelled_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'runs']));
+        $response->assertSessionHas('success');
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+        $this->assertNotNull($run->fresh()->finished_at);
+    }
+
+    public function test_cancel_run_allows_document_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $doc->update(['owner_user_id' => $owner->id]);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($owner)->patch("/app/wiki/runs/{$run->id}/cancel");
+
+        $response->assertSessionHas('success');
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+    }
+
+    public function test_cancel_run_rejects_contributor_without_ownership(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+
+        $response->assertForbidden();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
+    }
+
+    public function test_cancel_run_rejects_run_from_another_customer(): void
+    {
+        $customer = $this->createCustomer('Eier');
+        $other = $this->createCustomer('Fremmed');
+        $user = $this->createUser($other, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+
+        $response->assertNotFound();
+    }
+
+    public function test_cancel_run_on_already_terminal_run_returns_error_and_leaves_status_unchanged(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'runs']));
+        $response->assertSessionHas('error');
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
+    }
+
+    public function test_cancelling_a_run_makes_its_document_deletable(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $blockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");
+        $blockedPreview->assertOk();
+        $this->assertTrue($blockedPreview->json('blocked'));
+
+        $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel")->assertSessionHas('success');
+
+        $unblockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");
+        $unblockedPreview->assertOk();
+        $this->assertFalse($unblockedPreview->json('blocked'));
+    }
+
+    // =========================================================================
     // Runs tab — GET /app/wiki/runs/{run}/pages (Sider detail panel)
     // =========================================================================
 

@@ -99,6 +99,7 @@ const INGEST_STATUS_STYLES = {
     failed: 'bg-rose-100 text-rose-700',
     escalated: 'bg-amber-100 text-amber-700',
     decision_only: 'bg-violet-100 text-violet-700',
+    cancelled: 'bg-slate-200 text-slate-600',
 };
 
 const SEVERITY_STYLES = {
@@ -121,6 +122,7 @@ const INGEST_STATUS_LABELS = {
     failed: 'Feilet',
     escalated: 'Eskalert',
     decision_only: 'Beslutning lagret',
+    cancelled: 'Avbrutt',
 };
 
 const IN_PROGRESS_STATUSES = [
@@ -812,6 +814,10 @@ function getWikiRunsHelpSections(tw) {
                     title: tw.runs_page_help_item_status_decision_only_title ?? 'Beslutning lagret',
                     text: tw.runs_page_help_item_status_decision_only_text ?? 'Kjøringen er brukt til å registrere en beslutning uten å starte den fulle behandlingsflyten.',
                 },
+                {
+                    title: tw.runs_page_help_item_status_cancelled_title ?? 'Avbrutt',
+                    text: tw.runs_page_help_item_status_cancelled_text ?? 'Kjøringen ble manuelt avbrutt av en bruker, vanligvis for å gjøre kildedokumentet slettbart. Wiki-innhold som allerede var generert, er beholdt.',
+                },
             ],
         },
         {
@@ -887,6 +893,10 @@ function getWikiRunsHelpSections(tw) {
                 {
                     title: tw.runs_page_help_item_actions_fail_title ?? 'Når kjøringen feiler',
                     text: tw.runs_page_help_item_actions_fail_text ?? 'Les den brukerrettede feilforklaringen, kontroller hvilket dokument og steg som er berørt, og bruk eventuell eksisterende ny behandling i UI-et dersom det finnes.',
+                },
+                {
+                    title: tw.runs_page_help_item_actions_cancel_title ?? 'Avbryt kjøring',
+                    text: tw.runs_page_help_item_actions_cancel_text ?? 'Hvis en kjøring venter lenge uten å gå videre — for eksempel på en Dokumenteier som ikke er tilgjengelig — kan Systemansvarlig eller kildedokumentets Dokumenteier bruke Avbryt kjøring for å stoppe den. Allerede generert Wiki-innhold beholdes, og kildedokumentet blir deretter slettbart.',
                 },
             ],
         },
@@ -2204,6 +2214,16 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
     const [expandedRuns, setExpandedRuns] = useState({});
     const [runPagesState, setRunPagesState] = useState({});
     const [runFindingsState, setRunFindingsState] = useState({});
+    const [cancelTarget, setCancelTarget] = useState(null);
+
+    const handleCancelClick = (run) => setCancelTarget(run);
+    const handleCancelDismiss = () => setCancelTarget(null);
+    const handleCancelConfirm = () => {
+        if (!cancelTarget) return;
+        const runId = cancelTarget.id;
+        setCancelTarget(null);
+        router.patch(`/app/wiki/runs/${runId}/cancel`, {}, { preserveScroll: true });
+    };
 
     const navigate = (overrides) => {
         router.get('/app/wiki', {
@@ -2350,6 +2370,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     <th className="px-4 py-3 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_created ?? 'Opprettet'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_finished ?? 'Fullført'}</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_actions ?? 'Handlinger'}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -2457,10 +2478,23 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                             <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
+                                            <td className="whitespace-nowrap px-4 py-3">
+                                                {run.can_cancel ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleCancelClick(run)}
+                                                        className={ACTION_BUTTON_DESTRUCTIVE}
+                                                    >
+                                                        {tw.run_cancel_button ?? 'Avbryt kjøring'}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-slate-300">—</span>
+                                                )}
+                                            </td>
                                         </tr>
                                         {activePanel !== null && (
                                             <tr>
-                                                <td colSpan={9} className="bg-slate-50/70 px-4 py-4">
+                                                <td colSpan={10} className="bg-slate-50/70 px-4 py-4">
                                                     {activePanel === 'pages' ? (
                                                         <RunAffectedPagesPanel
                                                             panelId={panelId}
@@ -2487,6 +2521,38 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         </table>
                     </div>
                 </section>
+            )}
+
+            {cancelTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
+                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+                            {tw.run_cancel_confirm_title ?? 'Bekreft avbrutt kjøring'}
+                        </h2>
+                        <p className="text-sm font-medium text-slate-800 break-all">
+                            {cancelTarget.source_document_filename}
+                        </p>
+                        <p className="mt-2 text-sm text-slate-600">
+                            {tw.run_cancel_confirm_body ?? 'Dette stopper kjøringen. Wiki-innhold som allerede er generert blir beholdt, men kjøringen kan ikke fortsette eller fullføres etterpå. Handlingen kan ikke angres.'}
+                        </p>
+                        <div className="mt-5 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={handleCancelDismiss}
+                                className="inline-flex h-9 items-center rounded-full border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                            >
+                                {tw.run_cancel_dismiss_button ?? 'Lukk'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCancelConfirm}
+                                className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                            >
+                                {tw.run_cancel_confirm_button ?? 'Avbryt kjøringen'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -41,6 +41,10 @@ class EnterpriseWikiIngestRun extends Model
     // Used when the run stores only a maintainer decision — no pages are created.
     public const STATUS_DECISION_ONLY = 'decision_only';
 
+    // Manually cancelled by a user (e.g. so the source document can be deleted) — terminal,
+    // distinct from STATUS_FAILED/STATUS_ESCALATED because nothing went wrong.
+    public const STATUS_CANCELLED = 'cancelled';
+
     public const STATUSES = [
         self::STATUS_QUEUED,
         self::STATUS_RUNNING,
@@ -56,6 +60,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_FAILED,
         self::STATUS_ESCALATED,
         self::STATUS_DECISION_ONLY,
+        self::STATUS_CANCELLED,
     ];
 
     public const MAINTAINER_DECISION_STATUS_PENDING = 'pending';
@@ -115,6 +120,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_COMPLETED,
         self::STATUS_FAILED,
         self::STATUS_ESCALATED,
+        self::STATUS_CANCELLED,
     ];
 
     public const NON_TERMINAL_STATUSES = [

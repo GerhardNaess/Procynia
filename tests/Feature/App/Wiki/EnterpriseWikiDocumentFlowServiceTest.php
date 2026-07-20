@@ -6,11 +6,14 @@ use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
@@ -306,6 +309,85 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     // =========================================================================
+    // cancelRun()
+    // =========================================================================
+
+    public function test_cancel_run_sets_cancelled_status_and_releases_leases_without_touching_content(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $actor = $this->createActor($customer);
+
+        $page = $this->createPage($customer->id, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel');
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Artikkel',
+        ]);
+        $runPage = EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generated_page_version_id' => $version->id,
+            'claims_claimed_at' => now(),
+            'claims_claim_token' => 'lease-token',
+        ]);
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Vi leverer strukturert innhold.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 0,
+            'verification_claimed_at' => now(),
+            'verification_claim_token' => 'claim-lease-token',
+        ]);
+
+        $cancelled = $this->flowService()->cancelRun($run, $actor, 'Testavbrudd');
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $cancelled->status);
+        $this->assertTrue($cancelled->isTerminal());
+        $this->assertNotNull($cancelled->finished_at);
+        $this->assertStringContainsString('Testavbrudd', (string) $cancelled->error_message);
+
+        $runPage->refresh();
+        $this->assertNull($runPage->claims_claimed_at);
+        $this->assertNull($runPage->claims_claim_token);
+
+        $claim->refresh();
+        $this->assertNull($claim->verification_claimed_at);
+        $this->assertNull($claim->verification_claim_token);
+        $this->assertSame('Vi leverer strukturert innhold.', $claim->claim_text);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $claim->approval_status);
+    }
+
+    public function test_cancel_run_is_a_no_op_when_run_is_already_terminal(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['finished_at' => now(), 'error_message' => null]);
+        $actor = $this->createActor($customer);
+
+        $result = $this->flowService()->cancelRun($run, $actor);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $result->status);
+    }
+
+    public function test_run_is_terminal_and_excluded_from_non_terminal_statuses_once_cancelled(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_CANCELLED);
+
+        $this->assertTrue($run->isTerminal());
+        $this->assertNotContains(EnterpriseWikiIngestRun::STATUS_CANCELLED, EnterpriseWikiIngestRun::NON_TERMINAL_STATUSES);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -365,6 +447,32 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    private function createIngestRunWithStatus(Customer $customer, EnterpriseWikiDocument $document, string $status): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => $status,
+            'started_at' => now(),
+        ]);
+    }
+
+    private function createActor(Customer $customer): User
+    {
+        return User::query()->create([
+            'name' => 'Test Actor',
+            'email' => Str::lower(Str::random(8)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'customer_id' => $customer->id,
+            'is_active' => true,
         ]);
     }
 

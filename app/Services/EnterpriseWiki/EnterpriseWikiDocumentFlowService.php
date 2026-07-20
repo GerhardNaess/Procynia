@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\User;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -143,6 +144,71 @@ class EnterpriseWikiDocumentFlowService
         }
 
         return $versions;
+    }
+
+    /**
+     * Manually cancel a non-terminal run so its source document becomes eligible for deletion.
+     *
+     * Any active claim-extraction (page-level) or claim-verification lease held for the run is
+     * released so a worker that still holds one cannot write back into a run that has already
+     * moved to a terminal status — see EnterpriseWikiExtractPageClaimsService::reserve()/release()
+     * and EnterpriseWikiVerifyPageClaimsService for the matching lease lifecycle. Generated
+     * pages, page versions, and claims are left untouched: cancelling a run only stops it from
+     * progressing further, it does not undo Wiki content the run already produced.
+     */
+    public function cancelRun(EnterpriseWikiIngestRun $run, User $actor, ?string $reason = null): EnterpriseWikiIngestRun
+    {
+        $cancelled = DB::transaction(function () use ($run, $actor, $reason): EnterpriseWikiIngestRun {
+            $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->findOrFail($run->id);
+
+            if ($locked->isTerminal()) {
+                return $locked;
+            }
+
+            DB::table('enterprise_wiki_ingest_run_pages')
+                ->where('enterprise_wiki_ingest_run_id', $locked->id)
+                ->update([
+                    'claims_claimed_at' => null,
+                    'claims_claim_token' => null,
+                    'updated_at' => now(),
+                ]);
+
+            $claimIds = DB::table('enterprise_wiki_claims as c')
+                ->join('enterprise_wiki_page_versions as pv', 'pv.id', '=', 'c.enterprise_wiki_page_version_id')
+                ->join('enterprise_wiki_ingest_run_pages as rp', 'rp.enterprise_wiki_page_id', '=', 'pv.enterprise_wiki_page_id')
+                ->where('rp.enterprise_wiki_ingest_run_id', $locked->id)
+                ->whereNotNull('c.verification_claimed_at')
+                ->pluck('c.id');
+
+            if ($claimIds->isNotEmpty()) {
+                DB::table('enterprise_wiki_claims')
+                    ->whereIn('id', $claimIds)
+                    ->update([
+                        'verification_claimed_at' => null,
+                        'verification_claim_token' => null,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            $locked->update([
+                'status' => EnterpriseWikiIngestRun::STATUS_CANCELLED,
+                'finished_at' => now(),
+                'error_message' => mb_substr(
+                    'Kjøring avbrutt av '.$actor->name.($reason !== null && $reason !== '' ? ': '.$reason : '.'),
+                    0,
+                    1000
+                ),
+            ]);
+
+            return $locked->fresh() ?? $locked;
+        });
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Run cancelled.', [
+            'run_id' => $run->id,
+            'actor_user_id' => $actor->id,
+        ]);
+
+        return $cancelled;
     }
 
     /**
