@@ -396,9 +396,13 @@ class EnterpriseWikiClaimCanonicalizationService
     }
 
     /**
+     * Public so callers outside this service (e.g. a claim-repair service matching a claim's own
+     * clauses against candidate source paragraphs one clause at a time, rather than the whole
+     * claim at once) can reuse the exact same clause boundaries as filterToRelevantSentences().
+     *
      * @return list<string>
      */
-    private function splitIntoClauses(string $text): array
+    public function splitIntoClauses(string $text): array
     {
         // A comma directly followed by one of the split-marker conjunctions starts a new clause
         // (the marker itself stays with the new clause, so it can still be evaluated as part of
@@ -1099,9 +1103,13 @@ class EnterpriseWikiClaimCanonicalizationService
      * ("09", "15"), which are exactly the key entities (times, counts, deadlines) that must
      * survive into the overlap comparison regardless of their (often short) length.
      *
+     * Public so callers outside this service can score text overlap using the exact same
+     * tokenization rules (stopwords, minimum length) this service's own conflict/relevance
+     * checks rely on, instead of duplicating a slightly different tokenizer.
+     *
      * @return list<string>
      */
-    private function significantTokens(string $normalizedText): array
+    public function significantTokens(string $normalizedText): array
     {
         $tokens = preg_split('/[^\p{L}\p{N}]+/u', $normalizedText, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 
