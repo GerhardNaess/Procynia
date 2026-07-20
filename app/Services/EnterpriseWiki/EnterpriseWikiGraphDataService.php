@@ -37,40 +37,53 @@ use Illuminate\Support\Collection;
 class EnterpriseWikiGraphDataService
 {
     /**
+     * @param  list<string>  $visibleStatuses  The same per-viewer status set as
+     *                                         WikiController::visibleStatuses()/
+     *                                         User::visibleEnterpriseWikiPageStatuses() — the
+     *                                         graph must never show a page the ordinary page
+     *                                         list would hide from this viewer.
+     *
      * @throws \InvalidArgumentException if run_id or page_id is invalid or unscoped
      */
-    public function build(int $customerId, ?int $runId = null, ?int $pageId = null): array
+    public function build(int $customerId, array $visibleStatuses, ?int $runId = null, ?int $pageId = null): array
     {
         if ($pageId !== null) {
-            return $this->buildNeighborhood($customerId, $pageId);
+            return $this->buildNeighborhood($customerId, $pageId, $visibleStatuses);
         }
 
         if ($runId !== null) {
-            return $this->buildRunScoped($customerId, $runId);
+            return $this->buildRunScoped($customerId, $runId, $visibleStatuses);
         }
 
-        return $this->buildCustomerWide($customerId);
+        return $this->buildCustomerWide($customerId, $visibleStatuses);
     }
 
     // =========================================================================
     // Scope builders
     // =========================================================================
 
-    private function buildCustomerWide(int $customerId): array
+    private function buildCustomerWide(int $customerId, array $visibleStatuses): array
     {
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
+            ->whereIn('status', $visibleStatuses)
             ->get();
 
-        $links = EnterpriseWikiPageLink::query()
+        $pageIds = $pages->pluck('id')->all();
+
+        // Only edges whose both endpoints survived the status filter above — a link may
+        // reference a page this viewer isn't allowed to see (see class docblock).
+        $links = empty($pageIds) ? collect() : EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
             ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+            ->whereIn('from_page_id', $pageIds)
+            ->whereIn('to_page_id', $pageIds)
             ->get();
 
         return $this->assemble($pages, $links, $customerId, 'customer', null, null);
     }
 
-    private function buildRunScoped(int $customerId, int $runId): array
+    private function buildRunScoped(int $customerId, int $runId, array $visibleStatuses): array
     {
         $run = EnterpriseWikiIngestRun::query()
             ->where('id', $runId)
@@ -95,11 +108,12 @@ class EnterpriseWikiGraphDataService
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('id', $pivotPageIds)
+            ->whereIn('status', $visibleStatuses)
             ->get();
 
         $actualPageIds = $pages->pluck('id')->all();
 
-        // Only edges whose both endpoints are within the run's page set
+        // Only edges whose both endpoints are within the run's (visible) page set
         $links = empty($actualPageIds) ? collect() : EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
             ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
@@ -110,11 +124,12 @@ class EnterpriseWikiGraphDataService
         return $this->assemble($pages, $links, $customerId, 'run', $runId, null);
     }
 
-    private function buildNeighborhood(int $customerId, int $pageId): array
+    private function buildNeighborhood(int $customerId, int $pageId, array $visibleStatuses): array
     {
         $centerPage = EnterpriseWikiPage::query()
             ->where('id', $pageId)
             ->where('customer_id', $customerId)
+            ->whereIn('status', $visibleStatuses)
             ->first();
 
         if ($centerPage === null) {
@@ -138,14 +153,17 @@ class EnterpriseWikiGraphDataService
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('id', $pageIdSet)
+            ->whereIn('status', $visibleStatuses)
             ->get();
 
-        // All edges between any two pages in the neighborhood
+        $actualPageIds = $pages->pluck('id')->all();
+
+        // All edges between any two pages in the (visible) neighborhood
         $links = EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
             ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
-            ->whereIn('from_page_id', $pageIdSet)
-            ->whereIn('to_page_id', $pageIdSet)
+            ->whereIn('from_page_id', $actualPageIds)
+            ->whereIn('to_page_id', $actualPageIds)
             ->get();
 
         return $this->assemble($pages, $links, $customerId, 'page', null, $pageId);

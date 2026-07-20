@@ -378,7 +378,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $incoming = app(EnterpriseWikiPageTraversalService::class)->incoming($concept);
         $this->assertTrue($incoming->pluck('id')->contains($article->id));
 
-        $graph = app(EnterpriseWikiGraphDataService::class)->build($customer->id, pageId: $concept->id);
+        $graph = app(EnterpriseWikiGraphDataService::class)->build($customer->id, EnterpriseWikiPage::STATUSES, pageId: $concept->id);
         $edgeExists = collect($graph['edges'])->contains(
             fn (array $edge) => $edge['from_page_id'] === $article->id && $edge['to_page_id'] === $concept->id,
         );

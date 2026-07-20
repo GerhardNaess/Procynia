@@ -613,6 +613,79 @@ class WikiGraphDataControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Status visibility — the graph must not show pages the ordinary page
+    // list (WikiController::visibleStatuses()) would hide from this viewer.
+    // =========================================================================
+
+    public function test_customer_wide_excludes_draft_page_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $approved = $this->createPage($customer, 'article', 'Godkjent side');
+        $draft = $this->createPage($customer, 'article', 'Utkast side', EnterpriseWikiPage::STATUS_DRAFT);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $nodeIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertTrue($nodeIds->contains($approved->id));
+        $this->assertFalse($nodeIds->contains($draft->id));
+    }
+
+    public function test_customer_wide_includes_draft_page_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createSystemOwner($customer);
+        $draft = $this->createPage($customer, 'article', 'Utkast side', EnterpriseWikiPage::STATUS_DRAFT);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $nodeIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertTrue($nodeIds->contains($draft->id));
+    }
+
+    public function test_customer_wide_excludes_edge_when_one_endpoint_is_a_hidden_draft(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $approved = $this->createPage($customer, 'article', 'Godkjent side');
+        $draft = $this->createPage($customer, 'summary', 'Utkast side', EnterpriseWikiPage::STATUS_DRAFT);
+        $link = $this->createPageLink($customer, $approved, $draft, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $linkIds = collect($response->json('edges'))->pluck('link_id');
+        $this->assertFalse($linkIds->contains($link->id));
+    }
+
+    public function test_run_scoped_graph_excludes_draft_page_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $draft = $this->createPage($customer, 'article', 'Utkast side', EnterpriseWikiPage::STATUS_DRAFT);
+        $run = $this->createAppliedRun($customer, $draft);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?run_id='.$run->id);
+
+        $response->assertOk();
+        $nodeIds = collect($response->json('nodes'))->pluck('page_id');
+        $this->assertFalse($nodeIds->contains($draft->id));
+    }
+
+    public function test_neighborhood_treats_hidden_center_page_as_not_found_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $draft = $this->createPage($customer, 'article', 'Utkast side', EnterpriseWikiPage::STATUS_DRAFT);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?page_id='.$draft->id);
+
+        $response->assertStatus(422);
+    }
+
+    // =========================================================================
     // No side effects
     // =========================================================================
 
@@ -701,16 +774,29 @@ class WikiGraphDataControllerTest extends TestCase
         ]);
     }
 
-    private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
+    private function createPage(Customer $customer, string $pageType, string $title, string $status = EnterpriseWikiPage::STATUS_APPROVED): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
             'title' => $title,
             'page_type' => $pageType,
-            'status' => EnterpriseWikiPage::STATUS_APPROVED,
+            'status' => $status,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('h', 64, '0'),
+        ]);
+    }
+
+    private function createSystemOwner(Customer $customer): User
+    {
+        return User::query()->create([
+            'name' => 'System Owner',
+            'email' => Str::lower(Str::random(8)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'customer_id' => $customer->id,
+            'is_active' => true,
         ]);
     }
 

@@ -67,11 +67,21 @@ class WikiController extends Controller
             'total' => (int) $lintBySeverity->sum(),
         ];
 
+        // Computed regardless of active tab (like lint_health above) so the Pages tab — whose own
+        // prop payload never includes runs — can still know to poll for newly generated pages
+        // while a run is working in the background on another tab.
+        $hasActiveWikiRun = EnterpriseWikiIngestRun::query()
+            ->where('customer_id', $customerId)
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->whereIn('status', EnterpriseWikiIngestRun::NON_TERMINAL_STATUSES)
+            ->exists();
+
         $props = [
             'active_tab' => $tab,
             'lint_health' => $lintHealth,
             'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),
+            'has_active_wiki_run' => $hasActiveWikiRun,
         ];
 
         $props += match ($tab) {
@@ -165,6 +175,16 @@ class WikiController extends Controller
             'updated_at' => $page->updated_at,
         ]);
 
+        // How many pages exist for this customer that this viewer's role can never see here
+        // (e.g. a Contributor without QA can only ever see 'approved') — independent of search/
+        // type/lint filters, so the list can explain their absence instead of silently looking
+        // empty (see EnterpriseWikiGraphDataService, which used to show these same pages with no
+        // status filter at all — the graph/list inconsistency this count exists to explain).
+        $hiddenByStatusCount = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->whereNotIn('status', $this->visibleStatuses($user))
+            ->count();
+
         return [
             'pages' => $pages,
             'pages_meta' => [
@@ -172,6 +192,7 @@ class WikiController extends Controller
                 'per_page' => $paginator->perPage(),
                 'total' => $paginator->total(),
                 'last_page' => $paginator->lastPage(),
+                'hidden_by_status_count' => $hiddenByStatusCount,
             ],
             'pages_filters' => [
                 'search' => $search,
@@ -1672,18 +1693,7 @@ class WikiController extends Controller
      */
     private function visibleStatuses(?User $user): array
     {
-        $statuses = [EnterpriseWikiPage::STATUS_APPROVED];
-
-        if ($user?->isSystemOwner() || $user?->isBidManager() || $user?->canApproveWikiClaims()) {
-            $statuses[] = EnterpriseWikiPage::STATUS_DRAFT;
-            $statuses[] = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
-        }
-
-        if ($user?->isSystemOwner()) {
-            $statuses[] = EnterpriseWikiPage::STATUS_REJECTED;
-        }
-
-        return $statuses;
+        return $user?->visibleEnterpriseWikiPageStatuses() ?? [EnterpriseWikiPage::STATUS_APPROVED];
     }
 
     /**

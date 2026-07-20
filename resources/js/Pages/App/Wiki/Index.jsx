@@ -518,6 +518,10 @@ function getWikiPagesHelpSections(tw) {
                     title: tw.page_help_item_status_rejected_title ?? 'Avvist',
                     text: tw.page_help_item_status_rejected_text ?? 'Minst én nødvendig Dokumenteier har avvist materialet. Materialet kan ikke fullføres før avviket er behandlet.',
                 },
+                {
+                    title: tw.page_help_item_status_visibility_title ?? 'Hvorfor ser jeg ikke alle utkast?',
+                    text: tw.page_help_item_status_visibility_text ?? 'Utkast og sider til gjennomgang vises bare for roller som skal behandle dem — Systemansvarlig, Bid Manager, eller andre med QA-tilgang til claim-godkjenning. Andre roller ser først siden når den er Godkjent. Wiki-grafen bruker samme synlighetsregler som denne oversikten, slik at en side aldri vises i grafen uten også å telle med her.',
+                },
             ],
         },
         {
@@ -1422,6 +1426,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
     }[type] ?? type);
 
     const hasActiveFilters = !!(filters.search || filters.page_type || filters.status || filters.lint);
+    const hiddenByStatusCount = meta.hidden_by_status_count ?? 0;
 
     return (
         <div className="space-y-4">
@@ -1510,10 +1515,24 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                 )}
             </div>
 
+            {hiddenByStatusCount > 0 && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    {(tw.pages_hidden_by_status_note
+                        ?? '{count} wiki-side(r) er ikke synlige for din rolle ennå fordi de venter på gjennomgang og godkjenning.'
+                    ).replace('{count}', hiddenByStatusCount)}
+                </div>
+            )}
+
             {pages.length === 0 ? (
                 <EmptyStateBox
                     title={tw.empty_title ?? 'Ingen wiki-sider ennå'}
-                    description={tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.'}
+                    description={
+                        !hasActiveFilters && hiddenByStatusCount > 0
+                            ? (tw.empty_description_hidden_by_status
+                                ?? 'Det finnes {count} wiki-side(r) for denne kunden, men de er ikke synlige for din rolle ennå. De venter på gjennomgang og godkjenning fra systemansvarlig eller bid manager.'
+                            ).replace('{count}', hiddenByStatusCount)
+                            : (tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.')
+                    }
                 />
             ) : (
                 <>
@@ -3104,6 +3123,7 @@ export default function WikiIndex({
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
     wiki_generation_available: wikiGenerationAvailable = false,
     lint_health: lintHealth = { error: 0, warning: 0, info: 0, total: 0 },
+    has_active_wiki_run: hasActiveWikiRunAnyTab = false,
 }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -3137,17 +3157,24 @@ export default function WikiIndex({
                 : null;
 
     useEffect(() => {
-        if (!hasActiveWikiRun || !['sources', 'runs'].includes(activeTab)) {
+        // The Pages tab never loads a `runs` prop of its own (see WikiController::index()'s
+        // match on active_tab), so it can't tell locally whether a run is still working — it
+        // relies on the always-computed has_active_wiki_run prop instead. Sources/Runs keep
+        // using their own already-loaded run list, which is more precise (exact run statuses,
+        // not just "some run is non-terminal somewhere for this customer").
+        const only = activeTab === 'sources' ? ['sources'] : activeTab === 'runs' ? ['runs'] : activeTab === 'pages' ? ['pages'] : null;
+        const shouldPoll = only !== null && (activeTab === 'pages' ? hasActiveWikiRunAnyTab : hasActiveWikiRun);
+
+        if (!shouldPoll) {
             return undefined;
         }
 
-        const only = activeTab === 'sources' ? ['sources'] : ['runs'];
         const interval = window.setInterval(() => {
             router.reload({ only, preserveScroll: true });
         }, 5000);
 
         return () => window.clearInterval(interval);
-    }, [activeTab, hasActiveWikiRun]);
+    }, [activeTab, hasActiveWikiRun, hasActiveWikiRunAnyTab]);
 
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>

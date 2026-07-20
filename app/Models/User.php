@@ -344,6 +344,33 @@ class User extends Authenticatable implements FilamentUser
         return $document->owner_user_id !== null && (int) $document->owner_user_id === (int) $this->id;
     }
 
+    /**
+     * Which EnterpriseWikiPage statuses this user is allowed to see, anywhere in the Enterprise
+     * Wiki UI — the ordinary page list (WikiController::visibleStatuses()) and the graph
+     * (EnterpriseWikiGraphDataService) must both call this so they never disagree about which
+     * pages belong to a customer's Wiki view. Approved pages are visible to everyone; draft and
+     * pending_review are only for roles actually expected to review them (System Owner, Bid
+     * Manager, or anyone with QA and access to the approve_wiki_claims permission); rejected is
+     * System-Owner-only since it is that role's own moderation decision.
+     *
+     * @return list<string>
+     */
+    public function visibleEnterpriseWikiPageStatuses(): array
+    {
+        $statuses = [EnterpriseWikiPage::STATUS_APPROVED];
+
+        if ($this->isSystemOwner() || $this->isBidManager() || $this->canApproveWikiClaims()) {
+            $statuses[] = EnterpriseWikiPage::STATUS_DRAFT;
+            $statuses[] = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+        }
+
+        if ($this->isSystemOwner()) {
+            $statuses[] = EnterpriseWikiPage::STATUS_REJECTED;
+        }
+
+        return $statuses;
+    }
+
     public static function customerRoleForBidRole(string $bidRole): string
     {
         return in_array($bidRole, [self::BID_ROLE_SYSTEM_OWNER, self::BID_ROLE_BID_MANAGER], true)

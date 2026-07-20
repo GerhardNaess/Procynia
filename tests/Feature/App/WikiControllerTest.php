@@ -3663,6 +3663,128 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Pages tab — hidden_by_status_count (graph/list visibility consistency)
+    // =========================================================================
+
+    public function test_pages_tab_hidden_by_status_count_is_zero_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.pages_meta.hidden_by_status_count') === 0;
+        });
+    }
+
+    public function test_pages_tab_hidden_by_status_count_reflects_invisible_drafts_for_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast en');
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast to');
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pageIds = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return data_get($inertia, 'props.pages_meta.hidden_by_status_count') === 2
+                && $pageIds->count() === 1;
+        });
+    }
+
+    public function test_pages_tab_draft_page_visible_to_system_owner_with_draft_status_not_auto_approved(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            $found = collect(data_get($inertia, 'props.pages', []))->firstWhere('id', $draft->id);
+
+            return $found !== null && $found['status'] === EnterpriseWikiPage::STATUS_DRAFT;
+        });
+    }
+
+    public function test_pages_tab_hidden_drafts_reappear_for_system_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
+
+        $contributor = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $hiddenResponse = $this->actingAs($contributor)->get('/app/wiki?tab=pages');
+        $hiddenResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return ! $ids->contains($draft->id);
+        });
+
+        $systemOwner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $visibleResponse = $this->actingAs($systemOwner)->get('/app/wiki?tab=pages');
+        $visibleResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return $ids->contains($draft->id);
+        });
+    }
+
+    public function test_page_visible_in_graph_is_also_visible_in_ordinary_page_list(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Wiki-utkast fra graf');
+
+        $graphResponse = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+        $graphResponse->assertOk();
+        $this->assertTrue(collect($graphResponse->json('nodes'))->pluck('page_id')->contains($draft->id));
+
+        $listResponse = $this->actingAs($user)->get('/app/wiki?tab=pages');
+        $listResponse->assertOk();
+        $listResponse->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            return collect(data_get($inertia, 'props.pages', []))->pluck('id')->contains($draft->id);
+        });
+    }
+
+    public function test_has_active_wiki_run_prop_is_true_on_pages_tab_when_a_run_is_in_progress(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.has_active_wiki_run') === true;
+        });
+    }
+
+    public function test_has_active_wiki_run_prop_is_false_when_no_runs_are_in_progress(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.has_active_wiki_run') === false;
+        });
+    }
+
+    // =========================================================================
     // Phase 8F-2: search and filtering — sources tab
     // =========================================================================
 

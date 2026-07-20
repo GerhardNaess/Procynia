@@ -295,7 +295,7 @@ class EnterpriseWikiIncrementalRelinkServiceTest extends TestCase
         $incoming = app(EnterpriseWikiPageTraversalService::class)->incoming($trigger);
         $this->assertTrue($incoming->pluck('id')->contains($article->id));
 
-        $graph = app(EnterpriseWikiGraphDataService::class)->build($customer->id, pageId: $trigger->id);
+        $graph = app(EnterpriseWikiGraphDataService::class)->build($customer->id, EnterpriseWikiPage::STATUSES, pageId: $trigger->id);
         $edgeExists = collect($graph['edges'])->contains(
             fn (array $edge) => $edge['from_page_id'] === $article->id && $edge['to_page_id'] === $trigger->id,
         );
