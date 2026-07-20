@@ -3603,6 +3603,10 @@ return [
                 'title' => 'Ingen sikker kildekandidat',
                 'explanation' => 'Systemet fant ingen kildekandidat det var trygt å bruke for å bekrefte eller avkrefte denne påstanden.',
             ],
+            'reused_unsupported_fact' => [
+                'title' => 'Gjenbrukt fra tidligere bekreftet avvik',
+                'explanation_no_detail' => 'Denne påstanden gjenbruker en allerede bekreftet vurdering fra en identisk eller likelydende påstand et annet sted i kunnskapsgrunnlaget, men ingen egen detaljert forklaring er lagret for akkurat denne forekomsten.',
+            ],
         ],
 
         // Blokkering — separat fra alvorlighet. Se produktreglene i CLAUDE.md.

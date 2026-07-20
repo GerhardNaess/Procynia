@@ -3603,6 +3603,10 @@ return [
                 'title' => 'No confident source candidate',
                 'explanation' => 'The system found no source candidate it was safe to use to confirm or refute this claim.',
             ],
+            'reused_unsupported_fact' => [
+                'title' => 'Reused from a previously confirmed deviation',
+                'explanation_no_detail' => 'This claim reuses an already-confirmed assessment from an identical or equivalent claim elsewhere in the knowledge base, but no detailed explanation is stored specifically for this occurrence.',
+            ],
         ],
 
         // Blocking — separate from severity. See the product rules in CLAUDE.md.

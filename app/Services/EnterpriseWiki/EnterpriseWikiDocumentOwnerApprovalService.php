@@ -74,8 +74,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
             ? $version->claims
             : EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $version->id)
-                ->with(['sourceReferences' => fn ($query) => $query
-                    ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
+                ->with([
+                    'sourceReferences' => fn ($query) => $query
+                        ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT),
+                    'canonicalFact',
+                ])
                 ->get();
 
         return $this->buildRequirementGroupsFromClaims($claims, $page);
@@ -406,8 +409,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
             ? $version->claims
             : EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $version->id)
-                ->with(['sourceReferences' => fn ($query) => $query
-                    ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
+                ->with([
+                    'sourceReferences' => fn ($query) => $query
+                        ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT),
+                    'canonicalFact',
+                ])
                 ->get();
 
         return $this->hasActiveClaimIntegrityDefects($claims);

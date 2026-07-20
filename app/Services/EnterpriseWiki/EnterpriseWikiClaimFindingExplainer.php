@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 
 /**
@@ -30,6 +31,15 @@ use App\Models\EnterpriseWikiClaim;
  *       but no linked EnterpriseWikiSourceReference, or some review_metadata without a 'verdict'
  *       — the system never confirmed the CONTENT is wrong, only that it could not confidently
  *       link/check it. That is "technical uncertainty" too, and does not suggest blocking.
+ *       EXCEPT: a claim persisted via EnterpriseWikiVerifyPageClaimsService::persistReusedFact()
+ *       (an identical/equivalent claim elsewhere already has a verified canonical fact, so this
+ *       occurrence reuses that outcome instead of calling AI again) never gets its own
+ *       review_metadata by design, but it is NOT unverified — it inherited a real, already-
+ *       confirmed verdict. Such a claim's canonical_fact_id is resolved and, when the fact is
+ *       verified_unsupported, treated as a confirmed content error using the fact's own
+ *       verification_reason (or an honest "reused, no further detail" message when the fact
+ *       itself carries none) — never misclassified as a technical link failure just because this
+ *       particular occurrence has no review_metadata of its own.
  *     - Otherwise a semantic verdict was actually reached, so it is at least "undocumented or
  *       incorrect factual claim" and suggests blocking by default. When a genuine deterministic
  *       conflict was found (an actor/modality/negation/scope/number/currency/subject mismatch —
@@ -155,7 +165,9 @@ class EnterpriseWikiClaimFindingExplainer
         // incorrect claim, regardless of the unsupported_generated_content label (see class
         // docblock and CLAUDE.md's "Klassifisering skal følge den faktiske årsaken" rule).
         if (! $this->hasVerifiedVerdict($meta)) {
-            return $this->explainUnverifiedLink($claim);
+            $reused = $this->explainReusedCanonicalFact($claim);
+
+            return $reused ?? $this->explainUnverifiedLink($claim);
         }
 
         if ($claim->generation_issue === 'claim_contradicted_by_source') {
@@ -218,6 +230,33 @@ class EnterpriseWikiClaimFindingExplainer
             $category,
             __('procynia.wiki.claim_finding.'.$titleKey.'.title'),
             __('procynia.wiki.claim_finding.'.$titleKey.'.explanation_no_detail'),
+        );
+    }
+
+    /**
+     * A claim with no own review_metadata may still have a real, already-confirmed basis: it
+     * reused a canonical fact (EnterpriseWikiClaim::canonicalFact, set by
+     * EnterpriseWikiVerifyPageClaimsService::persistReusedFact()/recordOutcome()) instead of
+     * being individually re-verified. Returns null when there is no such fact, or the fact is not
+     * (yet) a confirmed unsupported verdict — the caller then falls back to
+     * explainUnverifiedLink() for the genuinely never-checked case.
+     */
+    private function explainReusedCanonicalFact(EnterpriseWikiClaim $claim): ?array
+    {
+        $fact = $claim->canonicalFact;
+
+        if (! $fact instanceof EnterpriseWikiCanonicalFact
+            || $fact->verification_status !== EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED
+        ) {
+            return null;
+        }
+
+        $reason = trim((string) $fact->verification_reason);
+
+        return $this->buildContentFinding(
+            self::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM,
+            __('procynia.wiki.claim_finding.reused_unsupported_fact.title'),
+            $reason !== '' ? $reason : __('procynia.wiki.claim_finding.reused_unsupported_fact.explanation_no_detail'),
         );
     }
 

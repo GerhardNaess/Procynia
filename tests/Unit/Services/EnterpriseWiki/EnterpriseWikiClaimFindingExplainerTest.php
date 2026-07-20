@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\EnterpriseWiki;
 
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
@@ -275,6 +276,63 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
 
         $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY, $finding['category']);
         $this->assertSame('Ingen sikker kildekandidat', $finding['title']);
+        $this->assertFalse($finding['suggested_blocking']);
+    }
+
+    public function test_claim_reused_from_a_verified_unsupported_canonical_fact_is_a_confirmed_content_error(): void
+    {
+        // EnterpriseWikiVerifyPageClaimsService::persistReusedFact() never writes its own
+        // review_metadata for a claim that reuses an identical/equivalent claim's already-
+        // established outcome elsewhere — but that is not a technical link failure, it inherited a
+        // real, already-confirmed verdict from its canonical fact.
+        $claim = $this->unsupportedClaim(['content_block_key' => 'block-0002', 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect([
+            new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-9']),
+            new EnterpriseWikiSourceReference(['source_element_key' => 'paragraph-11']),
+        ]));
+        $claim->setRelation('canonicalFact', new EnterpriseWikiCanonicalFact([
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+            'verification_reason' => 'The source describes user support handling, not the claimed incident response time.',
+        ]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM, $finding['category']);
+        $this->assertSame('Gjenbrukt fra tidligere bekreftet avvik', $finding['title']);
+        $this->assertSame('The source describes user support handling, not the claimed incident response time.', $finding['explanation']);
+        $this->assertTrue($finding['suggested_blocking']);
+        $this->assertTrue($this->explainer()->suggestedBlocking($claim));
+    }
+
+    public function test_claim_reused_from_a_canonical_fact_with_no_stored_reason_still_gives_an_honest_message(): void
+    {
+        $claim = $this->unsupportedClaim(['content_block_key' => 'block-0002', 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect());
+        $claim->setRelation('canonicalFact', new EnterpriseWikiCanonicalFact([
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_UNSUPPORTED,
+            'verification_reason' => null,
+        ]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM, $finding['category']);
+        $this->assertNotSame('', trim($finding['explanation']));
+        $this->assertTrue($finding['suggested_blocking']);
+    }
+
+    public function test_claim_with_canonical_fact_still_pending_falls_back_to_unverified_link(): void
+    {
+        // A canonical fact that has not itself reached a verdict yet must not be treated as a
+        // confirmed basis — this claim is genuinely unverified, same as if it had no fact at all.
+        $claim = $this->unsupportedClaim(['content_block_key' => null, 'review_metadata' => null]);
+        $claim->setRelation('sourceReferences', collect());
+        $claim->setRelation('canonicalFact', new EnterpriseWikiCanonicalFact([
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_PENDING,
+        ]));
+
+        $finding = $this->explainer()->explain($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::CATEGORY_TECHNICAL_UNCERTAINTY, $finding['category']);
         $this->assertFalse($finding['suggested_blocking']);
     }
 

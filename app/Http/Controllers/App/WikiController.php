@@ -1174,7 +1174,7 @@ class WikiController extends Controller
         if ($currentVersion !== null) {
             $claimCollection = EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $currentVersion->id)
-                ->with(['sourceReferences', 'approvedBy', 'blockingOverrideBy'])
+                ->with(['sourceReferences', 'approvedBy', 'blockingOverrideBy', 'canonicalFact'])
                 ->orderBy('position_order')
                 ->get();
         }
