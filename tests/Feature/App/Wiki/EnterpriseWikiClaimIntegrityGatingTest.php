@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
@@ -397,6 +398,34 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $this->assertContains('active_unsupported_generated_content_claims', $verifiedQaResult['claim_integrity_defects']);
         $this->assertTrue($docOwnerService->hasActiveClaimIntegrityDefectsForVersion($verifiedVersion));
+    }
+
+    public function test_qa_document_owner_and_ui_findings_panel_agree_on_effective_blocking(): void
+    {
+        // Extends the QA/Document-Owner consistency check above to the Funn panel
+        // (EnterpriseWikiRunFindingsService) — the UI-facing 'blocks_run' must use the exact same
+        // gate value as the QA/document-owner services, even though the UI must present it as
+        // "requires decision", never as an already-decided block (CLAUDE.md).
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'UI Consistency Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'UI Consistency Summary');
+        $version = $this->currentVersion($article);
+        $this->createVerifiedUnsupportedClaim($article, $version, $document);
+        $this->markStepsComplete($run);
+
+        $qaResult = $this->qaService()->runForRun($run);
+        $docOwnerBlocks = app(EnterpriseWikiDocumentOwnerApprovalService::class)->hasActiveClaimIntegrityDefectsForVersion($version);
+        $findings = app(EnterpriseWikiRunFindingsService::class)->buildForRun($run, null, false);
+        $claimFinding = collect($findings['findings'])->firstWhere('claim_id', '!=', null);
+
+        $this->assertContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
+        $this->assertTrue($docOwnerBlocks);
+        $this->assertNotNull($claimFinding);
+        $this->assertTrue($claimFinding['blocks_run']);
+        $this->assertSame('requires_decision', $claimFinding['status']);
+        $this->assertSame('pending', $claimFinding['user_decision']);
     }
 
     public function test_has_active_claim_integrity_defects_for_version_false_for_clean_source_based_claim(): void

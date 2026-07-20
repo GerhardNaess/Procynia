@@ -1314,7 +1314,7 @@ class WikiController extends Controller
                         EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                     ], true);
                     $finding = $isClaimDefect ? $this->claimFindingExplainer->explain($claim) : null;
-                    $isBlocking = $isClaimDefect ? ($claim->blocking_override ?? $finding['suggested_blocking']) : null;
+                    $blockingState = $isClaimDefect ? $this->claimFindingExplainer->blockingState($claim) : null;
 
                     return [
                         'id' => $claim->id,
@@ -1341,8 +1341,13 @@ class WikiController extends Controller
                         'finding_title' => $finding['title'] ?? null,
                         'finding_explanation' => $finding['explanation'] ?? null,
                         'finding_recommended_action' => $finding['recommended_action'] ?? null,
-                        'is_blocking' => $isBlocking,
-                        'blocking_is_override' => $claim->blocking_override !== null,
+                        // Kept as two separate facts, never one collapsed boolean — a claim the
+                        // system recommends blocking with no recorded decision must never render
+                        // as "Blokkerer kjøringen" (CLAUDE.md: "Systemforslag er ikke
+                        // brukerbeslutning"). null for every non-claim-defect claim.
+                        'system_recommends_blocking' => $blockingState['system_recommends_blocking'] ?? null,
+                        'user_decision' => $blockingState['user_decision'] ?? null,
+                        'requires_decision' => $blockingState['requires_decision'] ?? null,
                         'blocking_override_by_name' => $claim->blockingOverrideBy?->name,
                         'blocking_override_at' => $claim->blocking_override_at,
                         'source_references' => $claim->sourceReferences

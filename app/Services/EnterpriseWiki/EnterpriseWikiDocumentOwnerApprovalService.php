@@ -436,11 +436,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             ], true)) {
-                // Same effective-blocking rule as EnterpriseWikiPostIngestQaService::
-                // findClaimIntegrityDefects() — an authorized user's recorded override wins,
-                // otherwise the system's own suggestion (false for internal_error/"technical
-                // uncertainty", true for unsupported_generated_content).
-                return $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim);
+                // Same gate rule as EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()
+                // (EnterpriseWikiClaimFindingExplainer::blockingState()['blocks_gate']) — an
+                // authorized user's recorded override wins, otherwise an unhandled decision need
+                // for a claim the system recommends blocking still suppresses this requirement.
+                return $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
             }
 
             return $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED

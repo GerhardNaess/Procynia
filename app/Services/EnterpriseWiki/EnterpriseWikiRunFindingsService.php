@@ -84,7 +84,7 @@ class EnterpriseWikiRunFindingsService
                     EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                 ])
-                ->with(['version', 'sourceReferences', 'canonicalFact'])
+                ->with(['version', 'sourceReferences', 'canonicalFact', 'blockingOverrideBy'])
                 ->get();
 
         $bestPracticeSuggestions = $currentVersionIdByPageId->isEmpty()
@@ -202,12 +202,23 @@ class EnterpriseWikiRunFindingsService
      * Every finding gets a concrete, per-case title/explanation/recommended action from
      * EnterpriseWikiClaimFindingExplainer — never the one-size-fits-all "unsupported_generated_content"/
      * "internal_generation_error" label the old version of this method used regardless of why the
-     * claim actually failed. Severity and blocking are now genuinely separate: severity reflects
-     * the explainer's category, while blocking is the system's SUGGESTION unless an authorized
-     * user has recorded an explicit override (EnterpriseWikiClaim::blocking_override) — the exact
-     * same effective-blocking rule EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()
-     * uses, so the QA gate and this panel can never disagree about whether a given claim is
-     * actually holding the run back.
+     * claim actually failed. The category text is never a substitute for the concrete claim and
+     * source: this item always carries the claim's own text and its own linked source excerpts
+     * (or an honest "no confident source" flag when none exist) alongside the categorical
+     * explanation, so the reader can see exactly what the Wiki text says versus what the source
+     * says (CLAUDE.md: "Ikke bruk den generelle kategoriteksten som erstatning for claim og
+     * kilde").
+     *
+     * Severity and blocking are genuinely separate, and blocking itself is genuinely split into
+     * the system's suggestion versus the user's actual decision
+     * (EnterpriseWikiClaimFindingExplainer::blockingState()) — this item never shows a bare
+     * "blocking" boolean as if it were a settled fact before an authorized user has actually
+     * decided (CLAUDE.md: "Systemforslag er ikke brukerbeslutning"). `blocks_run`/`blocks_page`
+     * remain the exact same gate-level value EnterpriseWikiPostIngestQaService::
+     * findClaimIntegrityDefects() uses, so the QA gate and this panel can never disagree about
+     * whether a given claim is actually holding the run back — but the UI must read
+     * `system_recommends_blocking` and `user_decision` instead of `blocks_run` to decide what
+     * text to show.
      *
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
      */
@@ -219,10 +230,16 @@ class EnterpriseWikiRunFindingsService
     ): array {
         $page = $pagesById->get($claim->enterprise_wiki_page_id);
         $explanation = $this->claimFindingExplainer->explain($claim);
-        $isBlocking = $claim->blocking_override ?? $explanation['suggested_blocking'];
+        $blockingState = $this->claimFindingExplainer->blockingState($claim);
         $severity = match ($explanation['category']) {
             EnterpriseWikiClaimFindingExplainer::CATEGORY_UNDOCUMENTED_OR_INCORRECT_CLAIM => 'critical',
             default => 'warning',
+        };
+
+        $status = match (true) {
+            $blockingState['user_decision'] === EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING => 'user_blocking',
+            $blockingState['requires_decision'] => 'requires_decision',
+            default => 'open',
         };
 
         $canHandleClaim = $user instanceof User
@@ -235,6 +252,16 @@ class EnterpriseWikiRunFindingsService
             default => 'view_source',
         };
 
+        $sourceExcerpts = $claim->sourceReferences
+            ->map(fn ($ref) => [
+                'label' => $ref->source_label,
+                'excerpt' => $ref->excerpt,
+                'page_reference' => $ref->page_reference,
+            ])
+            ->filter(fn (array $ref): bool => trim((string) $ref['excerpt']) !== '')
+            ->values()
+            ->all();
+
         $item = [
             'id' => 'claim-defect-'.$claim->id,
             'title' => $explanation['title'],
@@ -244,12 +271,20 @@ class EnterpriseWikiRunFindingsService
             'category_label' => $explanation['category_label'],
             'severity' => $severity,
             'severity_label' => $this->severityLabel($severity),
-            'status' => $isBlocking ? 'requires_action' : 'open',
-            'status_label' => __('procynia.wiki.runs_findings_status_'.($isBlocking ? 'requires_action' : 'open')),
-            'blocks_run' => $isBlocking,
-            'blocks_page' => $isBlocking && $page !== null,
-            'blocking_is_override' => $claim->blocking_override !== null,
+            'status' => $status,
+            'status_label' => __('procynia.wiki.runs_findings_status_'.$status),
+            'blocks_run' => $blockingState['blocks_gate'],
+            'blocks_page' => $blockingState['blocks_gate'] && $page !== null,
+            'system_recommends_blocking' => $blockingState['system_recommends_blocking'],
+            'user_decision' => $blockingState['user_decision'],
+            'requires_decision' => $blockingState['requires_decision'],
             'blocking_reason' => $this->blockingReasonText($claim),
+            'blocking_override_by_name' => $claim->blockingOverrideBy?->name,
+            'blocking_override_at' => $claim->blocking_override_at?->toIso8601String(),
+            'claim_text' => $claim->claim_text,
+            'page_excerpt' => $claim->page_excerpt,
+            'source_excerpts' => $sourceExcerpts,
+            'has_source_excerpt' => $sourceExcerpts !== [],
             'scope' => $page !== null ? 'page' : 'run',
             'page_id' => $page?->id,
             'page_title' => $page?->title,
@@ -444,6 +479,8 @@ class EnterpriseWikiRunFindingsService
     {
         $rank = [
             'requires_action' => 0,
+            'user_blocking' => 0,
+            'requires_decision' => 0,
             'open' => 1,
             'pending_review' => 1,
             'resolved' => 2,
@@ -491,16 +528,19 @@ class EnterpriseWikiRunFindingsService
         $superseded = 0;
         $bestPracticePending = 0;
 
-        // 'requires_action' is only ever assigned to a blocking item (see normalizeLintFinding()/
-        // normalizeClaimDefect()), so these six buckets are mutually exclusive and always sum to
-        // $total — that is the invariant the "Funn" count in the main table must also honor. A
-        // decided best-practice suggestion (approved/approved_edited/rejected) counts as
-        // $resolved — it is closed, historical, and no longer needs a decision — while a pending
-        // one gets its own bucket so the UI can visibly separate "waiting for a human suggestion
-        // decision" from "an actual quality defect" (Del 1).
+        // 'requires_action' (lint) / 'user_blocking' / 'requires_decision' (claim defects) are
+        // the three statuses that gate the run (see normalizeLintFinding()/normalizeClaimDefect()),
+        // so these six buckets are mutually exclusive and always sum to $total — that is the
+        // invariant the "Funn" count in the main table must also honor. A decided best-practice
+        // suggestion (approved/approved_edited/rejected) counts as $resolved — it is closed,
+        // historical, and no longer needs a decision — while a pending one gets its own bucket so
+        // the UI can visibly separate "waiting for a human suggestion decision" from "an actual
+        // quality defect" (Del 1). 'requires_decision' is still counted as $openBlocking here —
+        // an unhandled decision need still holds up final approval — but the UI must show it as
+        // "awaiting decision", never as an already-decided block (CLAUDE.md).
         foreach ($items as $item) {
             match ($item['status']) {
-                'requires_action' => $openBlocking++,
+                'requires_action', 'user_blocking', 'requires_decision' => $openBlocking++,
                 'open' => $openNonBlocking++,
                 'resolved', 'approved', 'approved_edited', 'rejected' => $resolved++,
                 'informative' => $informative++,

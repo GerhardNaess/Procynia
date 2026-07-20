@@ -64,6 +64,24 @@ class EnterpriseWikiClaimFindingExplainer
     public const CATEGORY_TECHNICAL_UNCERTAINTY = 'technical_uncertainty';
 
     /**
+     * No decision has been recorded — EnterpriseWikiClaim::blocking_override is null. This is
+     * NOT the same as "the system's suggestion applies as the user's decision" (see
+     * blockingState()'s docblock) — it means a decision is still outstanding.
+     */
+    public const USER_DECISION_PENDING = 'pending';
+
+    /**
+     * An authorized user explicitly recorded blocking_override = true.
+     */
+    public const USER_DECISION_BLOCKING = 'blocking';
+
+    /**
+     * An authorized user explicitly recorded blocking_override = false — approved the deviation
+     * / chose not to block.
+     */
+    public const USER_DECISION_NOT_BLOCKING = 'not_blocking';
+
+    /**
      * Deterministic conflict types EnterpriseWikiClaimCanonicalizationService::detectDeterministicConflict()
      * / detectSubjectMismatch() can return, threaded into review_metadata.deterministic_reason by
      * EnterpriseWikiVerifyPageClaimsService — the most concrete, highest-confidence explanation
@@ -119,6 +137,51 @@ class EnterpriseWikiClaimFindingExplainer
     public function suggestedBlocking(EnterpriseWikiClaim $claim): bool
     {
         return $this->explain($claim)['suggested_blocking'];
+    }
+
+    /**
+     * The full blocking picture for a claim, keeping the system's recommendation and the user's
+     * decision as two genuinely separate facts — never collapsed into one ambiguous boolean the
+     * UI could show as an already-decided "Blokkerer kjøringen" before anyone actually decided
+     * anything (see CLAUDE.md's product rules: "Systemforslag er ikke brukerbeslutning").
+     *
+     * blocking_override = null means NO decision has been recorded — it must never be silently
+     * treated as if the system's suggestion IS the user's decision. `requires_decision` is the
+     * honest "unhandled decision need" state: a content-deviation category the system recommends
+     * blocking, with nobody having decided yet.
+     *
+     * `blocks_gate` is the one internal, gate-only computation (QA repair_required / Document
+     * Owner approval suppression) — never expose this raw boolean to the UI as "is blocking"; it
+     * deliberately conflates "awaiting decision" with "user decided to block" because both must
+     * still hold up final approval (CLAUDE.md: "Før endelig godkjenning kan systemet fortsatt
+     * kreve at brukeren tar stilling til åpne innholdsavvik"). UI-facing code must read
+     * `system_recommends_blocking` and `user_decision` instead.
+     *
+     * @return array{
+     *     system_recommends_blocking: bool,
+     *     user_decision: string,
+     *     requires_decision: bool,
+     *     blocks_gate: bool,
+     * }
+     */
+    public function blockingState(EnterpriseWikiClaim $claim): array
+    {
+        $systemRecommendsBlocking = $this->suggestedBlocking($claim);
+
+        $userDecision = match ($claim->blocking_override) {
+            true => self::USER_DECISION_BLOCKING,
+            false => self::USER_DECISION_NOT_BLOCKING,
+            default => self::USER_DECISION_PENDING,
+        };
+
+        $requiresDecision = $userDecision === self::USER_DECISION_PENDING && $systemRecommendsBlocking;
+
+        return [
+            'system_recommends_blocking' => $systemRecommendsBlocking,
+            'user_decision' => $userDecision,
+            'requires_decision' => $requiresDecision,
+            'blocks_gate' => $userDecision === self::USER_DECISION_BLOCKING || $requiresDecision,
+        ];
     }
 
     /**

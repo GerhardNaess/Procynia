@@ -5019,6 +5019,279 @@ class WikiControllerTest extends TestCase
         $this->assertSame('open_and_handle', $finding['action']);
     }
 
+    // =========================================================================
+    // Run-39 UX fix: claim-based findings show the concrete claim/source, and separate the
+    // system's blocking recommendation from the user's actual decision.
+    // =========================================================================
+
+    public function test_run_findings_claim_defect_shows_concrete_claim_text(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konkret claim');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Hendelseshåndtering registrerer og prioriterer alle henvendelser.');
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('Hendelseshåndtering registrerer og prioriterer alle henvendelser.', $finding['claim_text']);
+    }
+
+    public function test_run_findings_claim_defect_shows_concrete_source_excerpt_when_it_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konkret kilde');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim(
+            $page,
+            $version,
+            $doc,
+            'Hendelseshåndtering registrerer og prioriterer alle henvendelser.',
+            'Brukerstøtte håndterer registrering og prioritering av hendelser og forespørsler.',
+        );
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertTrue($finding['has_source_excerpt']);
+        $this->assertSame(
+            'Brukerstøtte håndterer registrering og prioritering av hendelser og forespørsler.',
+            $finding['source_excerpts'][0]['excerpt'],
+        );
+    }
+
+    public function test_run_findings_actor_mismatch_shows_the_differing_claim_and_source_actors(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Feil aktør');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim(
+            $page,
+            $version,
+            $doc,
+            'Hendelseshåndtering registrerer og prioriterer alle henvendelser.',
+            'Brukerstøtte håndterer registrering og prioritering av hendelser og forespørsler.',
+            'actor_mismatch',
+        );
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        // The concrete actor names ("Hendelseshåndtering" vs "Brukerstøtte") are visible via the
+        // claim text and source excerpt shown side by side — the explanation is not a substitute
+        // for either (CLAUDE.md).
+        $this->assertStringContainsString('Hendelseshåndtering', $finding['claim_text']);
+        $this->assertStringContainsString('Brukerstøtte', $finding['source_excerpts'][0]['excerpt']);
+        $this->assertNotEmpty($finding['explanation']);
+    }
+
+    public function test_run_findings_modality_mismatch_shows_the_differing_claim_and_source_text(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sterkere enn kilden');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim(
+            $page,
+            $version,
+            $doc,
+            'Leverandøren skal svare innen 30 minutter.',
+            'Leverandøren kan svare innen 30 minutter.',
+            'modality_mismatch',
+        );
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertStringContainsString('skal', $finding['claim_text']);
+        $this->assertStringContainsString('kan', $finding['source_excerpts'][0]['excerpt']);
+    }
+
+    public function test_run_findings_negation_mismatch_shows_the_differing_claim_and_source_text(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Negasjonsavvik');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim(
+            $page,
+            $version,
+            $doc,
+            'Leverandøren varsler ikke kunden ved planlagt vedlikehold.',
+            'Leverandøren varsler kunden ved planlagt vedlikehold.',
+            'negation_mismatch',
+        );
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertStringContainsString('varsler ikke', $finding['claim_text']);
+        $this->assertStringContainsString('varsler kunden', $finding['source_excerpts'][0]['excerpt']);
+    }
+
+    public function test_run_findings_missing_source_excerpt_gives_an_honest_fallback_flag(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Ingen kilde');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        // Verified content deviation but no source reference at all — the UI must say so honestly
+        // rather than showing an empty area or a fabricated excerpt.
+        $this->createClaim($page, $version, 'Påstand uten kildeutdrag.', 0, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+                'deterministic_reason' => 'actor_mismatch',
+            ],
+        ]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertFalse($finding['has_source_excerpt']);
+        $this->assertSame([], $finding['source_excerpts']);
+    }
+
+    public function test_run_findings_confirmed_deviation_with_no_decision_requires_decision_not_already_blocked(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Avventer vurdering');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand uten beslutning.');
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('requires_decision', $finding['status']);
+        $this->assertSame('pending', $finding['user_decision']);
+        $this->assertTrue($finding['system_recommends_blocking']);
+        // The gate value stays true (an unhandled decision still holds up approval), but the
+        // status/user_decision fields are what the UI must use to avoid showing this as an
+        // already-decided block.
+        $this->assertTrue($finding['blocks_run']);
+    }
+
+    public function test_run_findings_user_blocking_decision_is_shown_separately_from_system_recommendation(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Bruker blokkerer');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand med beslutning.');
+        $claim->update(['blocking_override' => true]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('user_blocking', $finding['status']);
+        $this->assertSame('blocking', $finding['user_decision']);
+        $this->assertTrue($finding['blocks_run']);
+    }
+
+    public function test_run_findings_user_not_blocking_decision_does_not_gate(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Bruker godkjenner avvik');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand godkjent som avvik.');
+        $claim->update(['blocking_override' => false]);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('open', $finding['status']);
+        $this->assertSame('not_blocking', $finding['user_decision']);
+        $this->assertFalse($finding['blocks_run']);
+    }
+
+    public function test_run_findings_technical_uncertainty_never_requires_decision_or_blocks(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Teknisk usikkerhet');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createClaimDefect($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
+
+        $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
+
+        $response->assertOk();
+        $finding = $response->json('findings')[0];
+        $this->assertSame('technical_uncertainty', $finding['category']);
+        $this->assertSame('open', $finding['status']);
+        $this->assertFalse($finding['system_recommends_blocking']);
+        $this->assertFalse($finding['blocks_run']);
+    }
+
+    private function createVerifiedContentDeviationClaim(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        EnterpriseWikiDocument $document,
+        string $claimText,
+        string $sourceExcerpt = 'Kilden beskriver noe annet enn påstanden.',
+        string $deterministicReason = 'actor_mismatch',
+    ): EnterpriseWikiClaim {
+        $claim = $this->createClaim($page, $version, $claimText, 0, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+                'deterministic_reason' => $deterministicReason,
+            ],
+        ]);
+        $this->createDocumentSourceReference($claim, $document, $sourceExcerpt);
+
+        return $claim->fresh();
+    }
+
     private function createRunLintFinding(
         Customer $customer,
         EnterpriseWikiIngestRun $run,

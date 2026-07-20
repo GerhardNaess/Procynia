@@ -409,4 +409,59 @@ class EnterpriseWikiClaimFindingExplainerTest extends TestCase
         $explanations = [$actor['explanation'], $modality['explanation'], $scope['explanation'], $noSource['explanation'], $ambiguousBlock['explanation']];
         $this->assertSame($explanations, array_unique($explanations), 'Every distinct cause must render a distinct explanation.');
     }
+
+    // =========================================================================
+    // blockingState(): system recommendation vs. user decision are separate facts (CLAUDE.md:
+    // "Systemforslag er ikke brukerbeslutning") — never one collapsed "is_blocking" boolean.
+    // =========================================================================
+
+    public function test_no_decision_recorded_is_pending_not_an_implicit_decision(): void
+    {
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'actor_mismatch']);
+        $claim->blocking_override = null;
+
+        $state = $this->explainer()->blockingState($claim);
+
+        $this->assertTrue($state['system_recommends_blocking']);
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::USER_DECISION_PENDING, $state['user_decision']);
+        $this->assertTrue($state['requires_decision'], 'A confirmed content deviation with no decision must require one.');
+        $this->assertTrue($state['blocks_gate'], 'An unhandled decision need still holds up final approval.');
+    }
+
+    public function test_blocking_override_true_is_a_recorded_blocking_decision(): void
+    {
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'actor_mismatch']);
+        $claim->blocking_override = true;
+
+        $state = $this->explainer()->blockingState($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING, $state['user_decision']);
+        $this->assertFalse($state['requires_decision'], 'A decision has already been made — nothing is pending.');
+        $this->assertTrue($state['blocks_gate']);
+    }
+
+    public function test_blocking_override_false_is_a_recorded_non_blocking_decision(): void
+    {
+        $claim = $this->verifiedUnsupportedClaim(['deterministic_reason' => 'actor_mismatch']);
+        $claim->blocking_override = false;
+
+        $state = $this->explainer()->blockingState($claim);
+
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::USER_DECISION_NOT_BLOCKING, $state['user_decision']);
+        $this->assertFalse($state['requires_decision']);
+        $this->assertFalse($state['blocks_gate'], 'An explicit user decision not to block must never gate approval.');
+    }
+
+    public function test_technical_uncertainty_never_requires_a_blocking_decision(): void
+    {
+        $claim = $this->internalErrorClaim('genuine_content_mismatch');
+        $claim->blocking_override = null;
+
+        $state = $this->explainer()->blockingState($claim);
+
+        $this->assertFalse($state['system_recommends_blocking']);
+        $this->assertSame(EnterpriseWikiClaimFindingExplainer::USER_DECISION_PENDING, $state['user_decision']);
+        $this->assertFalse($state['requires_decision'], 'Technical uncertainty must never require a document owner decision.');
+        $this->assertFalse($state['blocks_gate']);
+    }
 }

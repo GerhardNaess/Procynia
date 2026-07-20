@@ -2713,6 +2713,31 @@ const FINDING_STATUS_STYLES = {
     rejected: 'bg-slate-100 text-slate-500',
 };
 
+// Claim-based findings (EnterpriseWikiClaimFindingExplainer categories) carry a concrete claim
+// text, source excerpts, and a system-recommendation/user-decision split lint/best-practice
+// findings don't have — only these get the expandable detail row and the 3-way blocking display.
+const CLAIM_FINDING_CATEGORIES = new Set([
+    'undocumented_or_incorrect_claim',
+    'possible_content_deviation',
+    'technical_uncertainty',
+]);
+
+function findingBlockingStatusLabel(finding, tw) {
+    if (finding.user_decision === 'blocking') {
+        return tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning';
+    }
+    if (finding.user_decision === 'not_blocking') {
+        return tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker';
+    }
+    if (finding.requires_decision) {
+        return tw.claim_finding_user_decision_pending ?? 'Avventer vurdering';
+    }
+
+    return finding.blocks_run
+        ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
+        : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke');
+}
+
 const FINDINGS_LOCAL_FILTERS = ['all', 'open', 'blocking', 'resolved', 'informative'];
 
 function findingsLocalFilterLabel(filterKey, tw) {
@@ -2748,6 +2773,20 @@ function matchesFindingsLocalFilter(finding, filterKey) {
  */
 function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
     const [localFilter, setLocalFilter] = useState('all');
+    const [expandedFindingIds, setExpandedFindingIds] = useState(() => new Set());
+
+    const toggleFindingExpanded = (findingId) => {
+        setExpandedFindingIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(findingId)) {
+                next.delete(findingId);
+            } else {
+                next.add(findingId);
+            }
+
+            return next;
+        });
+    };
 
     if (!state || state.status === 'loading') {
         return (
@@ -2827,62 +2866,132 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {visibleFindings.map((finding) => (
-                            <tr key={finding.id} className="align-top text-slate-700">
-                                <td className="max-w-[280px] px-3 py-2">
-                                    {finding.category_label && (
-                                        <span className="mb-0.5 inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-                                            {finding.category_label}
-                                        </span>
+                        {visibleFindings.map((finding) => {
+                            const isClaimFinding = CLAIM_FINDING_CATEGORIES.has(finding.category);
+                            const isExpanded = isClaimFinding && expandedFindingIds.has(finding.id);
+
+                            return (
+                                <Fragment key={finding.id}>
+                                    <tr className="align-top text-slate-700">
+                                        <td className="max-w-[280px] px-3 py-2">
+                                            <div className="flex items-start gap-1.5">
+                                                {isClaimFinding && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleFindingExpanded(finding.id)}
+                                                        aria-expanded={isExpanded}
+                                                        aria-label={isExpanded
+                                                            ? (tw.claim_finding_collapse_details ?? 'Skjul detaljer')
+                                                            : (tw.claim_finding_expand_details ?? 'Vis detaljer')}
+                                                        className="mt-0.5 shrink-0 select-none rounded px-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                                                    >
+                                                        {isExpanded ? '▾' : '▸'}
+                                                    </button>
+                                                )}
+                                                <div className="min-w-0 flex-1">
+                                                    {finding.category_label && (
+                                                        <span className="mb-0.5 inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                                                            {finding.category_label}
+                                                        </span>
+                                                    )}
+                                                    <span className="block font-medium text-slate-900">{finding.title}</span>
+                                                    <span className="mt-0.5 block text-xs text-slate-500">
+                                                        {finding.category === 'best_practice_suggestion' && (
+                                                            <span className="font-medium text-slate-400">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
+                                                        )}
+                                                        {finding.explanation}
+                                                    </span>
+                                                    {finding.recommended_action && (
+                                                        <span className="mt-1 block text-xs text-slate-400">
+                                                            {finding.recommended_action}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="max-w-[200px] px-3 py-2">
+                                            {finding.scope === 'run' ? (
+                                                <span className="text-slate-500">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
+                                            ) : (
+                                                <span className="block truncate" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <span className={`${BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-500'}`}>
+                                                {finding.severity_label}
+                                            </span>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <span className={`${BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                                                {finding.status_label}
+                                            </span>
+                                            {isClaimFinding ? (
+                                                <>
+                                                    {finding.system_recommends_blocking && (
+                                                        <span className="mt-1 block text-[11px] text-amber-600">
+                                                            {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
+                                                        </span>
+                                                    )}
+                                                    <span className="mt-1 block text-[11px] text-slate-400">
+                                                        {findingBlockingStatusLabel(finding, tw)}
+                                                    </span>
+                                                </>
+                                            ) : typeof finding.blocks_run === 'boolean' && (
+                                                <span className="mt-1 block text-[11px] text-slate-400" title={finding.blocking_reason ?? ''}>
+                                                    {finding.blocks_run
+                                                        ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
+                                                        : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                                            {finding.url && finding.action ? (
+                                                <Link href={finding.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                                    {finding.action_label}
+                                                </Link>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                    {isExpanded && (
+                                        <tr key={`${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
+                                            <td colSpan={5} className="px-3 py-3">
+                                                <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5">
+                                                    <div>
+                                                        <span className="font-semibold text-slate-500">
+                                                            {tw.claim_finding_claim_text_label ?? 'Påstand'}:
+                                                        </span>{' '}
+                                                        <span className="text-slate-800">{finding.claim_text || '—'}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="font-semibold text-slate-500">
+                                                            {tw.claim_finding_source_excerpt_label ?? 'Kildeutdrag'}:
+                                                        </span>
+                                                        {finding.has_source_excerpt ? (
+                                                            <ul className="mt-1 space-y-1.5">
+                                                                {finding.source_excerpts.map((ref, index) => (
+                                                                    <li key={index} className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5">
+                                                                        {ref.page_reference && (
+                                                                            <span className="mr-1 font-medium text-slate-500">{ref.page_reference}:</span>
+                                                                        )}
+                                                                        <span className="text-slate-700">{ref.excerpt}</span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        ) : (
+                                                            <p className="mt-1 italic text-slate-400">
+                                                                {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     )}
-                                    <span className="block font-medium text-slate-900">{finding.title}</span>
-                                    <span className="mt-0.5 block text-xs text-slate-500">
-                                        {finding.category === 'best_practice_suggestion' && (
-                                            <span className="font-medium text-slate-400">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
-                                        )}
-                                        {finding.explanation}
-                                    </span>
-                                    {finding.recommended_action && (
-                                        <span className="mt-1 block text-xs text-slate-400">
-                                            {finding.recommended_action}
-                                        </span>
-                                    )}
-                                </td>
-                                <td className="max-w-[200px] px-3 py-2">
-                                    {finding.scope === 'run' ? (
-                                        <span className="text-slate-500">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
-                                    ) : (
-                                        <span className="block truncate" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
-                                    )}
-                                </td>
-                                <td className="px-3 py-2">
-                                    <span className={`${BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-500'}`}>
-                                        {finding.severity_label}
-                                    </span>
-                                </td>
-                                <td className="px-3 py-2">
-                                    <span className={`${BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                                        {finding.status_label}
-                                    </span>
-                                    {typeof finding.blocks_run === 'boolean' && (
-                                        <span className="mt-1 block text-[11px] text-slate-400" title={finding.blocking_reason ?? ''}>
-                                            {finding.blocks_run
-                                                ? (tw.runs_findings_blocks_run ?? 'Blokkerer')
-                                                : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
-                                        </span>
-                                    )}
-                                </td>
-                                <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    {finding.url && finding.action ? (
-                                        <Link href={finding.url} className="text-sm font-medium text-violet-700 hover:underline">
-                                            {finding.action_label}
-                                        </Link>
-                                    ) : (
-                                        <span className="text-slate-400">—</span>
-                                    )}
-                                </td>
-                            </tr>
-                        ))}
+                                </Fragment>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>

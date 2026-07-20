@@ -541,12 +541,13 @@ class EnterpriseWikiPostIngestQaService
 
         $defects = [];
 
-        // Effective blocking = an authorized user's recorded override if present, otherwise the
-        // system's own suggestion (EnterpriseWikiClaimFindingExplainer::suggestedBlocking() —
-        // false for internal_error/"technical uncertainty", true for unsupported_generated_content/
-        // "undocumented or incorrect claim"). The SAME rule EnterpriseWikiRunFindingsService uses
-        // for the Funn panel, so the panel and this gate can never disagree about whether a given
-        // claim is actually holding the run back.
+        // Gate-only "blocks_gate" (EnterpriseWikiClaimFindingExplainer::blockingState()) — true
+        // when an authorized user explicitly recorded blocking_override = true, OR nobody has
+        // decided yet and the system recommends blocking (an unhandled decision need still holds
+        // up final approval, CLAUDE.md: "Før endelig godkjenning kan systemet fortsatt kreve at
+        // brukeren tar stilling til åpne innholdsavvik"). The SAME rule
+        // EnterpriseWikiRunFindingsService uses for the Funn panel, so the panel and this gate can
+        // never disagree about whether a given claim is actually holding the run back.
         $claimIntegrityClaims = EnterpriseWikiClaim::query()
             ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
             ->whereIn('content_origin', [
@@ -559,7 +560,7 @@ class EnterpriseWikiPostIngestQaService
 
         $hasBlockingInternalError = $claimIntegrityClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)
-            ->contains(fn (EnterpriseWikiClaim $claim): bool => $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim));
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blockingState($claim)['blocks_gate']);
 
         if ($hasBlockingInternalError) {
             $defects[] = 'active_internal_error_claims';
@@ -567,7 +568,7 @@ class EnterpriseWikiPostIngestQaService
 
         $hasBlockingUnsupported = $claimIntegrityClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->contains(fn (EnterpriseWikiClaim $claim): bool => $claim->blocking_override ?? $this->claimFindingExplainer->suggestedBlocking($claim));
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blockingState($claim)['blocks_gate']);
 
         if ($hasBlockingUnsupported) {
             $defects[] = 'active_unsupported_generated_content_claims';

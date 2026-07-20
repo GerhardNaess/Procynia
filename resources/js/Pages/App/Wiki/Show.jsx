@@ -40,8 +40,8 @@ function getWikiShowHelpSections(tw) {
                     text: tw.show_page_help_item_blocking_technical_text ?? 'Når systemet ikke fant en sikker kobling mellom en påstand og et kildeavsnitt, vises dette som en teknisk usikkerhet — ikke som en bekreftet feil i innholdet. Slike funn er som regel ikke blokkerende i utgangspunktet.',
                 },
                 {
-                    title: tw.show_page_help_item_blocking_override_title ?? 'Du kan beholde eller fjerne blokkering',
-                    text: tw.show_page_help_item_blocking_override_text ?? 'Systemet foreslår om et funn bør blokkere, men en autorisert bruker kan overstyre dette. Beslutningen lagres med bruker, tidspunkt og eventuell kommentar.',
+                    title: tw.show_page_help_item_blocking_override_title ?? 'Systemets anbefaling er ikke det samme som brukerens beslutning',
+                    text: tw.show_page_help_item_blocking_override_text ?? 'Et funn kan vise «Systemet anbefaler blokkering» og samtidig «Avventer vurdering» — det betyr at ingen har tatt stilling ennå, ikke at funnet allerede blokkerer. En autorisert bruker velger «Blokker godkjenning» eller «Godkjenn avvik / Ikke blokker». Beslutningen lagres med bruker, tidspunkt og eventuell kommentar.',
                 },
             ],
         },
@@ -656,6 +656,7 @@ export default function WikiShow({
         const hasSourceReferences = sourceReferences.length > 0;
         const canHandleClaim = claim.can_handle ?? false;
         const isBestPracticeClaim = claim.content_origin === 'best_practice';
+        const isClaimDefect = claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content';
         const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
         const selectedSourceCatalog = selectedSourceDocument ? (claimSourceCatalog[selectedSourceDocument.id] ?? null) : null;
         const selectedSourceElements = selectedSourceCatalog?.elements ?? [];
@@ -720,12 +721,24 @@ export default function WikiShow({
                                     cls={FINDING_CATEGORY_STYLES[claim.finding_category] ?? 'bg-slate-200 text-slate-600'}
                                 />
                             )}
-                            {claim.is_blocking !== null && claim.is_blocking !== undefined && (
+                            {claim.system_recommends_blocking && (
                                 <Badge
-                                    label={claim.is_blocking
-                                        ? (tw.claim_blocking_yes ?? 'Ja, blokkerer')
-                                        : (tw.claim_blocking_no ?? 'Nei, blokkerer ikke')}
-                                    cls={claim.is_blocking ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}
+                                    label={tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
+                                    cls="bg-amber-100 text-amber-700"
+                                />
+                            )}
+                            {claim.user_decision && (
+                                <Badge
+                                    label={claim.user_decision === 'blocking'
+                                        ? (tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning')
+                                        : claim.user_decision === 'not_blocking'
+                                            ? (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')
+                                            : (tw.claim_finding_user_decision_pending ?? 'Avventer vurdering')}
+                                    cls={claim.user_decision === 'blocking'
+                                        ? 'bg-rose-100 text-rose-700'
+                                        : claim.user_decision === 'not_blocking'
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-amber-100 text-amber-700'}
                                 />
                             )}
                             {claim.conflict_flag && (
@@ -758,36 +771,50 @@ export default function WikiShow({
                     </p>
                 )}
 
-                {claim.is_blocking !== null && claim.is_blocking !== undefined && (
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <span className="text-xs text-slate-500">
-                            {(tw.claim_blocking_reason_label ?? 'Hvorfor')}: {claim.blocking_is_override
-                                ? (tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
+                {claim.user_decision && (
+                    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        {claim.user_decision !== 'pending' && claim.blocking_override_by_name && (
+                            <p className="text-xs text-slate-500">
+                                {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
                                     .replace(':name', claim.blocking_override_by_name ?? '—')
-                                    .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')
-                                : (tw.claim_blocking_reason_default ?? 'Systemets forslag, ikke overstyrt av en bruker ennå.')}
-                        </span>
+                                    .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')}
+                            </p>
+                        )}
                         {canHandleClaim && (
-                            <div className="flex flex-wrap items-center gap-2">
-                                {claim.is_blocking ? (
+                            <div className="mt-1.5 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
-                                        disabled={claimProcessing === claim.id}
-                                        onClick={() => updateClaimBlocking(claim, false)}
-                                        className="rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                                    >
-                                        {tw.remove_blocking_button ?? 'Fjern blokkering / godkjenn avviket'}
-                                    </button>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        disabled={claimProcessing === claim.id}
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
                                         onClick={() => updateClaimBlocking(claim, true)}
-                                        className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                        className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'blocking'
+                                                ? 'bg-rose-600 text-white'
+                                                : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+                                        }`}
                                     >
-                                        {tw.keep_blocking_button ?? 'Behold blokkering'}
+                                        {tw.keep_blocking_button ?? 'Blokker godkjenning'}
                                     </button>
-                                )}
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
+                                        onClick={() => updateClaimBlocking(claim, false)}
+                                        className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'not_blocking'
+                                                ? 'bg-emerald-600 text-white'
+                                                : 'border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                        }`}
+                                    >
+                                        {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
+                                    </button>
+                                </div>
+                                <p className="text-[11px] leading-4 text-slate-400">
+                                    <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
+                                    <br />
+                                    <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
+                                </p>
                             </div>
                         )}
                     </div>
@@ -802,6 +829,11 @@ export default function WikiShow({
                         )}
                         {sourceReferences.length === 0 ? (
                             <div className="space-y-2">
+                                {isClaimDefect && (
+                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs italic text-slate-500">
+                                        {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
+                                    </p>
+                                )}
                                 {isBestPracticeClaim && (
                                     <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
                                         <p className="text-sm leading-6 text-amber-800">
@@ -1078,7 +1110,6 @@ export default function WikiShow({
                                         {ref.source_element_type && (
                                             <p className="text-xs text-slate-400">
                                                 {tw.source_element_type ?? 'Kildeelement'}: {sourceElementTypeLabel(ref.source_element_type)}
-                                                {ref.source_element_key ? ` · ${ref.source_element_key}` : ''}
                                             </p>
                                         )}
                                         {ref.source_row_key && ref.source_row_key !== ref.source_element_key && (
