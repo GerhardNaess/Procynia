@@ -297,6 +297,7 @@ export default function WikiShow({
     // one of 'ready' | 'superseded' | 'block_missing' | 'not_found'.
     const targetClaimId = reviewReference?.status === 'ready' ? String(reviewReference.claim_id) : null;
     const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
+    const backHref = reviewReference?.back_url ?? '/app/wiki?tab=runs';
     const hasVerificationContent = claims.length > 0 || lintFindings.length > 0;
 
     const [processing, setProcessing] = useState(null);
@@ -1383,7 +1384,7 @@ export default function WikiShow({
                 {reviewReference && (
                     <div>
                         <Link
-                            href="/app/wiki?tab=runs"
+                            href={backHref}
                             className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900 hover:underline"
                         >
                             <BackArrowIcon className="h-4 w-4" aria-hidden="true" />

@@ -56,6 +56,11 @@ class EnterpriseWikiRunFindingsService
      */
     public function buildForRun(EnterpriseWikiIngestRun $run, ?User $user, bool $includeTechnical): array
     {
+        $returnUrl = route('app.wiki.index', [
+            'tab' => 'runs',
+            'run_src' => $run->source_id,
+        ]);
+
         $pageIds = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->pluck('enterprise_wiki_page_id');
@@ -98,7 +103,7 @@ class EnterpriseWikiRunFindingsService
         $items = [];
 
         foreach ($lintFindings as $finding) {
-            $items[] = $this->normalizeLintFinding($finding, $pagesById, $currentVersionIdByPageId, $user, $includeTechnical);
+            $items[] = $this->normalizeLintFinding($finding, $pagesById, $currentVersionIdByPageId, $user, $includeTechnical, $returnUrl);
         }
 
         // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
@@ -113,7 +118,7 @@ class EnterpriseWikiRunFindingsService
                 continue;
             }
 
-            $items[] = $this->normalizeClaimDefect($claim, $pagesById, $user, $includeTechnical);
+            $items[] = $this->normalizeClaimDefect($claim, $pagesById, $user, $includeTechnical, $returnUrl);
         }
 
         // Grouped by (page, content_block_key) — several best-practice claims anchored to the
@@ -125,7 +130,7 @@ class EnterpriseWikiRunFindingsService
         );
 
         foreach ($bestPracticeGroups as $groupClaims) {
-            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $user, $includeTechnical);
+            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
         }
 
         usort($items, $this->sortComparator());
@@ -146,6 +151,7 @@ class EnterpriseWikiRunFindingsService
         Collection $currentVersionIdByPageId,
         ?User $user,
         bool $includeTechnical,
+        ?string $returnUrl,
     ): array {
         $page = $finding->enterprise_wiki_page_id !== null ? $pagesById->get($finding->enterprise_wiki_page_id) : null;
         $currentVersionId = $page !== null ? $currentVersionIdByPageId->get($page->id) : null;
@@ -168,7 +174,7 @@ class EnterpriseWikiRunFindingsService
         $canHandleClaim = $claim !== null && $user instanceof User && ! $isSuperseded && $finding->isOpen()
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
 
-        $url = $this->pageUrl($page, $claim?->id);
+        $url = $this->pageUrl($page, $claim?->id, $returnUrl);
         $actionLabel = match (true) {
             $url === null => null,
             $claim !== null && $finding->isOpen() && ! $isSuperseded => $canHandleClaim ? 'open_and_handle' : 'view_source',
@@ -246,6 +252,7 @@ class EnterpriseWikiRunFindingsService
         Collection $pagesById,
         ?User $user,
         bool $includeTechnical,
+        ?string $returnUrl,
     ): array {
         $page = $pagesById->get($claim->enterprise_wiki_page_id);
         $explanation = $this->claimFindingExplainer->explain($claim);
@@ -264,7 +271,7 @@ class EnterpriseWikiRunFindingsService
         $canHandleClaim = $user instanceof User
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
 
-        $url = $this->pageUrl($page, $claim->id);
+        $url = $this->pageUrl($page, $claim->id, $returnUrl);
         $actionKey = match (true) {
             $url === null => null,
             $canHandleClaim => 'open_and_handle',
@@ -371,6 +378,7 @@ class EnterpriseWikiRunFindingsService
         Collection $pagesById,
         ?User $user,
         bool $includeTechnical,
+        ?string $returnUrl,
     ): array {
         $primary = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
         )->first();
@@ -390,7 +398,7 @@ class EnterpriseWikiRunFindingsService
         $canHandle = $isPending && $user instanceof User
             && $this->documentOwnerApprovalService->canHandleClaim($primary, $user, $primary->version);
 
-        $url = $this->pageUrl($page, $primary->id);
+        $url = $this->pageUrl($page, $primary->id, $returnUrl);
         $action = match (true) {
             $url === null => null,
             $isPending => $canHandle ? 'open_and_review' : 'view_page',
@@ -453,15 +461,23 @@ class EnterpriseWikiRunFindingsService
             : 'claim-'.$claim->id;
     }
 
-    private function pageUrl(?EnterpriseWikiPage $page, ?int $claimId): ?string
+    private function pageUrl(?EnterpriseWikiPage $page, ?int $claimId, ?string $returnUrl = null): ?string
     {
         if ($page === null) {
             return null;
         }
 
-        $url = route('app.wiki.show', ['slug' => $page->slug]);
+        $parameters = ['slug' => $page->slug];
 
-        return $claimId !== null ? $url.'?claim_id='.$claimId : $url;
+        if ($claimId !== null) {
+            $parameters['claim_id'] = $claimId;
+        }
+
+        if ($returnUrl !== null) {
+            $parameters['back_url'] = $returnUrl;
+        }
+
+        return route('app.wiki.show', $parameters);
     }
 
     private function severityFor(string $rawSeverity): string

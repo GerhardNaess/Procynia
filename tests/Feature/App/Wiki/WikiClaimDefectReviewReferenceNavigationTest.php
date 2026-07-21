@@ -205,7 +205,8 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
     public function test_kjoringer_funn_action_url_resolves_to_the_correct_highlighted_block(): void
     {
         // End-to-end: the exact URL EnterpriseWikiRunFindingsService puts on the "Åpne og
-        // behandle" action must itself resolve to the claim's own block when followed.
+        // behandle" action must itself resolve to the claim's own block when followed, and
+        // preserve the originating runs tab so the back-link can return to the same run row.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
         $document = $this->createDocument($customer);
@@ -238,12 +239,20 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         $this->assertNotNull($finding['url']);
         $this->assertStringContainsString('claim_id='.$claim->id, $finding['url']);
 
+        $parsedUrlQuery = [];
+        parse_str((string) parse_url($finding['url'], PHP_URL_QUERY), $parsedUrlQuery);
+        $this->assertSame(
+            route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]),
+            $parsedUrlQuery['back_url'] ?? null,
+        );
+
         $path = parse_url($finding['url'], PHP_URL_PATH).'?'.parse_url($finding['url'], PHP_URL_QUERY);
         $response = $this->actingAs($user)->get($path);
 
         $response->assertOk();
         $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'ready'
-            && data_get($inertia, 'props.review_reference.block_key') === 'block-0002');
+            && data_get($inertia, 'props.review_reference.block_key') === 'block-0002'
+            && data_get($inertia, 'props.review_reference.back_url') === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]));
     }
 
     private function createCustomer(string $name = 'Navigasjon AS'): Customer

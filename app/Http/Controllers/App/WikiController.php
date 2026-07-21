@@ -1421,8 +1421,10 @@ class WikiController extends Controller
         }
 
         $rawReviewClaimId = $request->query('claim_id');
+        $rawBackUrl = $request->query('back_url');
+        $backUrl = is_string($rawBackUrl) ? $this->normalizeReviewBackUrl($rawBackUrl) : null;
         $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
-            ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims)
+            ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
 
         return Inertia::render('App/Wiki/Show', [
@@ -1471,13 +1473,14 @@ class WikiController extends Controller
      * manipulated claim id belonging to another page or another customer simply resolves to
      * 'not_found' — never leaks whether a differently-scoped claim id exists.
      *
-     * @return array{status: string, claim_id?: int, block_key?: ?string, version_number?: ?int}
+     * @return array{status: string, claim_id?: int, block_key?: ?string, version_number?: ?int, back_url?: string}
      */
     private function buildReviewReference(
         int $claimId,
         EnterpriseWikiPage $page,
         ?EnterpriseWikiPageVersion $currentVersion,
         bool $includeTechnical,
+        ?string $backUrl = null,
     ): array {
         $claim = EnterpriseWikiClaim::query()
             ->where('id', $claimId)
@@ -1485,24 +1488,24 @@ class WikiController extends Controller
             ->first();
 
         if ($claim === null) {
-            return ['status' => 'not_found'];
+            return $this->reviewReferenceWithBackUrl(['status' => 'not_found'], $backUrl);
         }
 
         if ($currentVersion === null || (int) $claim->enterprise_wiki_page_version_id !== (int) $currentVersion->id) {
             $claimVersion = $claim->version()->first();
 
-            return [
+            return $this->reviewReferenceWithBackUrl([
                 'status' => 'superseded',
                 'claim_id' => $claim->id,
                 'version_number' => $claimVersion?->version_number,
-            ];
+            ], $backUrl);
         }
 
         $blockKey = trim((string) ($claim->content_block_key ?? ''));
         $blockKey = $blockKey !== '' ? $blockKey : null;
 
         if ($blockKey === null) {
-            return ['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => null];
+            return $this->reviewReferenceWithBackUrl(['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => null], $backUrl);
         }
 
         // Must match renderedContentBlocks()'s own filter exactly (non-empty markdown) — a block
@@ -1523,10 +1526,38 @@ class WikiController extends Controller
                 $reference['technical_block_key'] = $blockKey;
             }
 
-            return $reference;
+            return $this->reviewReferenceWithBackUrl($reference, $backUrl);
         }
 
-        return ['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => $blockKey];
+        return $this->reviewReferenceWithBackUrl(['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => $blockKey], $backUrl);
+    }
+
+    private function reviewReferenceWithBackUrl(array $reference, ?string $backUrl): array
+    {
+        if ($backUrl !== null) {
+            $reference['back_url'] = $backUrl;
+        }
+
+        return $reference;
+    }
+
+    private function normalizeReviewBackUrl(string $backUrl): ?string
+    {
+        $backUrl = trim($backUrl);
+
+        if ($backUrl === '') {
+            return null;
+        }
+
+        $parsed = parse_url($backUrl);
+
+        if (! is_array($parsed) || ($parsed['path'] ?? null) !== '/app/wiki') {
+            return null;
+        }
+
+        parse_str($parsed['query'] ?? '', $query);
+
+        return (($query['tab'] ?? null) === 'runs') ? $backUrl : null;
     }
 
     /**
