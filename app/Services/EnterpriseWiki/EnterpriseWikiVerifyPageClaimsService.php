@@ -923,11 +923,22 @@ class EnterpriseWikiVerifyPageClaimsService
 
                 return ['verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED, 'deterministic_reason' => 'subject_mismatch'];
             }
+        } elseif ($block !== null) {
+            // Legacy claim with a real content block but no structured source elements on it —
+            // the block's own markdown (this page's actual current content) is the closest thing
+            // to a cited excerpt available, and is at least scoped to the page, not the document.
+            $supportingText = (string) ($block['markdown'] ?? '');
         } else {
-            // Legacy claim with no structured block source elements — the AI verified against
-            // the whole-document fallback text, so that is what the deterministic check compares
-            // against too.
-            $supportingText = $block['markdown'] ?? $fallbackSourceText;
+            // No structured source elements AND no block at all (e.g. a page version whose
+            // content_blocks_json is empty) — there is no cited excerpt of any kind to compare
+            // against. detectDeterministicConflict() is documented to run "only against the
+            // excerpt(s) actually cited... not the whole candidate pool"; silently falling back to
+            // $fallbackSourceText (up to 8000 chars of the whole source document) violates that
+            // and produces a near-universal false negation/modality/scope mismatch, since a
+            // document of any real length almost always contains a negation marker SOMEWHERE
+            // unrelated to this specific claim (run-39: 64 claims wrongly flagged
+            // negation_mismatch this way). Trust the AI verdict as-is instead of guessing.
+            return ['verdict' => $verdict, 'deterministic_reason' => null];
         }
 
         $conflict = $this->canonicalizationService->detectDeterministicConflict($claimText, $supportingText);

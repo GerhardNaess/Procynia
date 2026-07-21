@@ -379,17 +379,19 @@ class EnterpriseWikiClaimCanonicalizationService
      */
     public function filterToRelevantSentences(string $claimText, string $excerptText): string
     {
-        $claimTokens = array_unique($this->significantTokens($this->textNormalizer->normalize($claimText)));
+        $claimNorm = $this->textNormalizer->normalize($claimText);
+        $claimTokens = array_unique($this->significantTokens($claimNorm));
 
         if ($claimTokens === [] || trim($excerptText) === '') {
             return '';
         }
 
+        $claimHasNegation = $this->hasNegationMarker($claimNorm);
         $clauses = $this->splitIntoClauses($excerptText);
 
         $relevant = array_values(array_filter(
             $clauses,
-            fn (string $clause): bool => $this->clauseIsRelevant($clause, $claimTokens),
+            fn (string $clause): bool => $this->clauseIsRelevant($clause, $claimTokens, $claimHasNegation),
         ));
 
         return implode(' ', $relevant);
@@ -425,7 +427,7 @@ class EnterpriseWikiClaimCanonicalizationService
         return array_values(array_filter(array_map('trim', $pieces), fn (string $p): bool => $p !== ''));
     }
 
-    private function clauseIsRelevant(string $clause, array $claimTokens): bool
+    private function clauseIsRelevant(string $clause, array $claimTokens, bool $claimHasNegation): bool
     {
         $clauseNorm = $this->textNormalizer->normalize($clause);
         $clauseTokens = $this->significantTokens($clauseNorm);
@@ -446,7 +448,24 @@ class EnterpriseWikiClaimCanonicalizationService
         // risk-marker clause (verified against real run-38 data, claims 4058/4059).
         $meaningfulOverlap = array_diff($overlap, self::GENERIC_ACTION_VERBS, self::CURRENT_STATE_SUBJECTS);
 
-        return $meaningfulOverlap !== [];
+        if ($meaningfulOverlap === []) {
+            return false;
+        }
+
+        // Run-39 fix: this document repeatedly pairs a negated "current gap" clause with an
+        // un-negated "improvement" clause describing the same ITIL domain noun (e.g. "dagens
+        // arbeidsmåter ikke gir tilstrekkelig styring" vs. a claim that governance IS
+        // strengthened) — sharing one specific noun like "styring"/"kontroll" is not evidence the
+        // negated clause is actually about the claim's assertion rather than the problem
+        // statement it exists to contrast with. When the clause's negation polarity disagrees
+        // with the claim's, only trust it with a materially stronger overlap than the single-term
+        // bar used above (verified against real run-39 claims 4111/4112, both wrongly flagged
+        // negation_mismatch from exactly this pattern).
+        if ($this->hasNegationMarker($clauseNorm) !== $claimHasNegation) {
+            return count($meaningfulOverlap) > 1;
+        }
+
+        return true;
     }
 
     /**

@@ -713,4 +713,107 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
             ],
         ));
     }
+
+    /**
+     * Run-39 fix: this document repeatedly pairs a negated "current gap" clause with an
+     * un-negated "improvement" clause naming the same ITIL domain noun ("styring") — sharing
+     * that one noun with the claim used to be enough for clauseIsRelevant() to keep the negated
+     * clause, so hasNegationMarker() then found a bare "ikke" the claim itself never had.
+     * Real production case: claim 4112, citing paragraph-20 and paragraph-22, was wrongly
+     * downgraded to not_supported via deterministic_reason=negation_mismatch.
+     */
+    public function test_run_39_claim_4112_negated_gap_clause_no_longer_manufactures_a_conflict(): void
+    {
+        $claim = 'Slik styrkes styring, prioritering og evne til å identifisere og følge opp underliggende '
+            .'årsaker til feil, også under belastning og ved endringer.';
+
+        $paragraph20 = 'Leverandøren legger ITIL til grunn for hvordan prosessene utformes og videreutvikles, '
+            .'og tar et tydelig ansvar for å styrke kvaliteten i hvordan IT-tjenestene styres og følges opp. '
+            .'For Kunden innebærer dette arbeidsformer som gir bedre kontroll på drift, tydeligere prioriteringer '
+            .'og mer forutsigbar gjennomføring av endringer.';
+
+        $paragraph22 = 'Leverandøren videreutvikler prosessene der dagens arbeidsmåter ikke gir tilstrekkelig '
+            .'styring eller oversikt. Dette omfatter blant annet tydeligere prioritering av hendelser, mer '
+            .'konsekvent håndtering av endringer og bedre grunnlag for å identifisere og følge opp underliggende '
+            .'årsaker til feil. Målet er å redusere operasjonell risiko og sikre en drift som er stabil også '
+            .'under belastning og ved endringer.';
+
+        $combined = trim(
+            $this->service()->filterToRelevantSentences($claim, $paragraph20)
+            .' '
+            .$this->service()->filterToRelevantSentences($claim, $paragraph22)
+        );
+
+        $this->assertStringNotContainsString('ikke gir tilstrekkelig', $combined);
+        $this->assertNull($this->service()->detectDeterministicConflict($claim, $combined));
+    }
+
+    /**
+     * Run-39 fix: same pattern as claim 4112, but the shared/weak-overlap tokens are "dagens"
+     * across several negated clauses within a 7-paragraph citation (paragraphs 26-32). Real
+     * production case: claim 4111 was wrongly downgraded via deterministic_reason=negation_mismatch.
+     */
+    public function test_run_39_claim_4111_negated_gap_clauses_across_multiple_excerpts_no_longer_manufacture_a_conflict(): void
+    {
+        $claim = 'Et målrettet løp omfatter vurdering av dagens praksis, opplæring i prinsipper og roller, '
+            .'etablering av tydelige beslutningspunkter og ansvar, samt kontrollert innføring med fokus på '
+            .'praktisk anvendelse og forankring ved endringsledelse.';
+
+        $paragraphs = [
+            'Etablering og innføring av ITIL-prosesser gjennomføres som et målrettet forbedringsløp med '
+                .'tydelig kobling til risiko, driftsevne og krav til etterlevelse. Arbeidet tar utgangspunkt i '
+                .'hvordan IT-tjenestene faktisk brukes i dag, og hvor manglende styring eller utydelige '
+                .'arbeidsmåter skaper risiko for driftsavbrudd, feil eller svak sporbarhet.',
+            'Før etablering av prosessene gjennomfører Leverandøren målrettet opplæring i ITIL-prinsipper, '
+                .'roller og arbeidsmåter for relevante miljøer, slik at innføringen bygger på et felles '
+                .'utgangspunkt og gir ønsket effekt i praksis.',
+            'Innledningsvis vurderer Leverandøren hvordan hendelser, endringer og øvrige driftsaktiviteter '
+                .'håndteres i praksis, med særlig vekt på prioritering, beslutningspunkter og samspill mellom '
+                .'involverte miljøer. Dette gir et konkret bilde av hvor dagens arbeidsmåter ikke gir '
+                .'tilstrekkelig kontroll eller forutsigbarhet.',
+            'På denne bakgrunn etableres forbedrede arbeidsprosesser for de prioriterte områdene, med '
+                .'tydelige krav til hvordan saker registreres, vurderes, besluttes og følges opp. Prosessene '
+                .'utformes slik at de gir reell styring i situasjoner som påvirker tilgjengelighet, sikkerhet '
+                .'og etterlevelse, og ikke bare beskriver ønsket praksis.',
+            'Roller og ansvar avklares samtidig, med klare forventninger til hvem som beslutter, hvem som '
+                .'utfører og hvordan samhandling mellom brukerstøtte, tekniske miljøer og fagressurser skal '
+                .'fungere. Dette er avgjørende for å sikre fremdrift i saker og unngå uklarheter i situasjoner '
+                .'hvor responstid og kvalitet er kritisk.',
+            'Innføring av prosessene gjennomføres kontrollert og med tydelig oppfølging av etterlevelse. '
+                .'Leverandøren sikrer at medarbeidere forstår hvordan prosessene skal brukes i konkrete '
+                .'arbeidssituasjoner, og at arbeidsmåtene faktisk tas i bruk i det daglige. Opplæring og '
+                .'oppfølging rettes mot praktisk anvendelse, ikke kun forståelse av prinsipper.',
+            'For områder som innebærer større endringer i arbeidsmåter eller organisering, benyttes '
+                .'kompetanse innen endringsledelse for å sikre nødvendig forankring og gjennomføringsevne. '
+                .'Målet er å oppnå varig endring i hvordan arbeidet utføres, ikke kun etablere nye '
+                .'beskrivelser av prosessene.',
+        ];
+
+        $filtered = array_filter(array_map(
+            fn (string $paragraph): string => $this->service()->filterToRelevantSentences($claim, $paragraph),
+            $paragraphs,
+        ));
+
+        $combined = implode(' ', $filtered);
+
+        $this->assertStringNotContainsString('ikke gir tilstrekkelig', $combined);
+        $this->assertNull($this->service()->detectDeterministicConflict($claim, $combined));
+    }
+
+    /**
+     * Guard against over-correction: a negated clause with STRONG (multi-token), specific overlap
+     * against a non-negated claim must still be treated as relevant and still flagged as a
+     * conflict — the run-39 fix only relaxes the single-generic-noun case.
+     */
+    public function test_negated_clause_with_strong_specific_overlap_is_still_a_conflict(): void
+    {
+        $claim = 'Tjenesten er tilgjengelig utenfor ordinær arbeidstid.';
+        $excerpt = 'Dette avsnittet handler om noe helt annet tema. '
+            .'Tjenesten er ikke tilgjengelig utenfor ordinær arbeidstid.';
+
+        $filtered = $this->service()->filterToRelevantSentences($claim, $excerpt);
+
+        $this->assertStringContainsString('ikke tilgjengelig', $filtered);
+        $this->assertSame('negation_mismatch', $this->service()->detectDeterministicConflict($claim, $filtered));
+    }
 }
