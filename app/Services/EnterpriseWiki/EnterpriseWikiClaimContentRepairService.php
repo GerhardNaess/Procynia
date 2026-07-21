@@ -57,6 +57,7 @@ class EnterpriseWikiClaimContentRepairService
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
         private readonly EnterpriseWikiPostIngestQaService $qaService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
     ) {}
 
     /**
@@ -283,6 +284,13 @@ class EnterpriseWikiClaimContentRepairService
             'claims_claimed_at' => null,
             'claims_claim_token' => null,
         ]);
+
+        // The revised blocks can change or drop an inline [[wikilink]] — re-sync the graph from
+        // the new current version so link_type=wikilink rows never drift from actual content
+        // (the CODE_STALE_WIKILINK_GRAPH_EDGE lint check this omission previously caused).
+        if ($pivotRow->page !== null) {
+            $this->buildPageLinksService->materializeWikilinksForPage($pivotRow->page->fresh(), $run->id);
+        }
 
         return true;
     }

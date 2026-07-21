@@ -45,12 +45,24 @@ class EnterpriseWikiIncrementalRelinkService
         EnterpriseWikiPage::PAGE_TYPE_ENTITY,
     ];
 
+    /**
+     * Ingest run ids collected during the current relinkForRun() call whose claims need
+     * re-syncing (EnterpriseWikiPageVersionClaimSyncService::syncRuns()) because a candidate page
+     * got a new current version. A candidate is, by definition, a page outside $run's own pivot,
+     * so it is not assumed to belong to $run — every run id its own pivot row(s) reference is
+     * collected instead. Reset at the start of every relinkForRun() call.
+     *
+     * @var list<int>
+     */
+    private array $pendingClaimResyncRunIds = [];
+
     public function __construct(
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly WikiLinkRevisionAiClient $aiClient,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
     ) {}
 
     /**
@@ -95,6 +107,8 @@ class EnterpriseWikiIncrementalRelinkService
 
         $languageCode = $this->resolveLanguageCode($run->customer_id);
 
+        $this->pendingClaimResyncRunIds = [];
+
         foreach ($triggers as $trigger) {
             $counts['triggers_processed']++;
 
@@ -107,6 +121,13 @@ class EnterpriseWikiIncrementalRelinkService
 
                 $counts[$status] = ($counts[$status] ?? 0) + 1;
             }
+        }
+
+        if ($counts['applied'] > 0) {
+            // A relinked candidate is a brand-new EnterpriseWikiPageVersion — its claims must be
+            // re-extracted/verified against this version (see
+            // EnterpriseWikiPageVersionClaimSyncService), not left pointing at the superseded one.
+            $this->claimSyncService->syncRuns($this->pendingClaimResyncRunIds);
         }
 
         Log::info('[WIKI_INCREMENTAL_RELINK] Incremental relinking completed.', [
@@ -250,6 +271,10 @@ class EnterpriseWikiIncrementalRelinkService
             $newVersion = $this->writeNewCurrentVersion($candidate->id, $revisedMarkdown);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($candidate->id);
             $this->buildPageLinksService->materializeWikilinksForPage($candidate, $run->id);
+            $this->pendingClaimResyncRunIds = array_merge(
+                $this->pendingClaimResyncRunIds,
+                $this->claimSyncService->markPageForResync($candidate),
+            );
 
             return $this->finalize(
                 $run,

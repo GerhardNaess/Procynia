@@ -33,8 +33,10 @@ use Illuminate\Support\Facades\DB;
  * "new immutable version" pattern as every other Enterprise Wiki repair service (bump
  * version_number, demote the previous is_current row, keep every other block byte-for-byte).
  *
- * Never re-runs claim extraction, verification, or full document generation — the appended block
- * is a navigational link, not a factual claim.
+ * Never regenerates full document content — but a new current version still invalidates the
+ * page's existing claims (they stay attached to the superseded version), so every append also
+ * re-syncs claims for the new version via EnterpriseWikiPageVersionClaimSyncService, exactly like
+ * every other repair path that creates a new current EnterpriseWikiPageVersion.
  */
 class EnterpriseWikiArticleSummaryLinkRepairService
 {
@@ -43,6 +45,7 @@ class EnterpriseWikiArticleSummaryLinkRepairService
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
     ) {}
 
     /**
@@ -128,8 +131,10 @@ class EnterpriseWikiArticleSummaryLinkRepairService
 
         $languageCode = $this->resolveLanguageCode($run->customer_id);
 
-        $this->ensureLink($article, $summary, $languageCode, $apply, $result);
-        $this->ensureLink($summary, $article, $languageCode, $apply, $result);
+        $affectedRunIds = [];
+
+        $this->ensureLink($article, $summary, $languageCode, $apply, $result, $affectedRunIds);
+        $this->ensureLink($summary, $article, $languageCode, $apply, $result, $affectedRunIds);
 
         if (! $apply) {
             return;
@@ -138,6 +143,13 @@ class EnterpriseWikiArticleSummaryLinkRepairService
         // Idempotent structural article_to_summary/summary_to_article rows — the exact ones
         // EnterpriseWikiAppliedRunLintService::checkArticleLinks()/checkSummaryLinks() require.
         $this->buildPageLinksService->build($run);
+
+        // Appending the link block created a new current version for article and/or summary —
+        // re-sync claims for it before re-linting, otherwise CODE_PAGE_WITHOUT_CLAIMS would open
+        // for a page this very repair just replaced (see EnterpriseWikiPageVersionClaimSyncService).
+        if ($affectedRunIds !== []) {
+            $this->claimSyncService->syncRuns($affectedRunIds);
+        }
 
         // Re-run the run's own quality check so a resolved "article/summary missing link"
         // finding closes immediately instead of waiting for an unrelated future QA pass.
@@ -165,8 +177,9 @@ class EnterpriseWikiArticleSummaryLinkRepairService
 
     /**
      * @param  array<string, int>  $result
+     * @param  list<int>  $affectedRunIds
      */
-    private function ensureLink(EnterpriseWikiPage $page, EnterpriseWikiPage $target, string $languageCode, bool $apply, array &$result): void
+    private function ensureLink(EnterpriseWikiPage $page, EnterpriseWikiPage $target, string $languageCode, bool $apply, array &$result, array &$affectedRunIds): void
     {
         $version = EnterpriseWikiPageVersion::query()
             ->where('enterprise_wiki_page_id', $page->id)
@@ -192,6 +205,7 @@ class EnterpriseWikiArticleSummaryLinkRepairService
         }
 
         $this->appendLinkVersion($page, $version, $target, $languageCode);
+        $affectedRunIds = array_merge($affectedRunIds, $this->claimSyncService->markPageForResync($page));
     }
 
     private function appendLinkVersion(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, EnterpriseWikiPage $target, string $languageCode): void

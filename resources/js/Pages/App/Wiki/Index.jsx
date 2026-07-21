@@ -2772,7 +2772,10 @@ function matchesFindingsLocalFilter(finding, filterKey) {
  * within this open panel and never touch the Kjøringer tab's own filter bar.
  */
 function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
-    const [localFilter, setLocalFilter] = useState('all');
+    // Defaults to 'open' so a run with many historically-resolved findings doesn't bury the
+    // ones that still need attention — 'resolved' (Løst) remains one click away via the filter
+    // chips below, unchanged.
+    const [localFilter, setLocalFilter] = useState('open');
     const [expandedFindingIds, setExpandedFindingIds] = useState(() => new Set());
 
     const toggleFindingExpanded = (findingId) => {

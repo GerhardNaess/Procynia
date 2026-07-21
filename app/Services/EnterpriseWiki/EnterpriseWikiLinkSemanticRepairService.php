@@ -32,6 +32,15 @@ use Throwable;
  */
 class EnterpriseWikiLinkSemanticRepairService
 {
+    /**
+     * Ingest run ids collected during the current repairForRun() call whose claims need
+     * re-syncing (EnterpriseWikiPageVersionClaimSyncService::syncRuns()) because one of their
+     * pages got a new current version. Reset at the start of every repairForRun() call.
+     *
+     * @var list<int>
+     */
+    private array $pendingClaimResyncRunIds = [];
+
     public function __construct(
         private readonly WikiLinkSemanticQaAiClient $qaClient,
         private readonly WikiLinkRevisionAiClient $revisionClient,
@@ -41,6 +50,7 @@ class EnterpriseWikiLinkSemanticRepairService
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
     ) {}
 
     /**
@@ -70,6 +80,8 @@ class EnterpriseWikiLinkSemanticRepairService
             'failed' => 0,
         ];
 
+        $this->pendingClaimResyncRunIds = [];
+
         foreach ($pivotRows as $row) {
             $page = $row->page;
 
@@ -87,7 +99,20 @@ class EnterpriseWikiLinkSemanticRepairService
         // findings for links that were fixed, opens findings for anything still wrong. Only
         // needed when a repair actually changed a page; skip the extra pass otherwise.
         if ($counts['applied'] > 0) {
-            $this->lintService->lint($run->fresh() ?? $run);
+            // A revised page is a brand-new EnterpriseWikiPageVersion — its claims must be
+            // re-extracted/verified against this version, not left pointing at the superseded
+            // one (see EnterpriseWikiPageVersionClaimSyncService). pendingClaimResyncRunIds
+            // always includes $run itself, plus any other run a repaired page also belongs to.
+            $affectedRunIds = array_unique(array_merge($this->pendingClaimResyncRunIds, [$run->id]));
+            $this->claimSyncService->syncRuns($affectedRunIds);
+
+            foreach ($affectedRunIds as $runId) {
+                $affectedRun = $runId === $run->id ? $run : EnterpriseWikiIngestRun::query()->find($runId);
+
+                if ($affectedRun !== null) {
+                    $this->lintService->lint($affectedRun->fresh() ?? $affectedRun);
+                }
+            }
         }
 
         Log::info('[WIKI_LINK_SEMANTIC_REPAIR] Link semantic QA/repair completed.', [
@@ -178,6 +203,10 @@ class EnterpriseWikiLinkSemanticRepairService
             $newVersion = $this->writeNewCurrentVersion($page->id, $revision['markdown']);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
             $this->buildPageLinksService->materializeWikilinksForPage($page, $run->id);
+            $this->pendingClaimResyncRunIds = array_merge(
+                $this->pendingClaimResyncRunIds,
+                $this->claimSyncService->markPageForResync($page),
+            );
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_APPLIED, null, $newVersion->id);
         } catch (EnterpriseWikiInvalidWikilinksException $e) {
