@@ -53,16 +53,18 @@ class RequirementWikiAnswerAiClient
      * Purpose: Write the requirement answer as structured sections, using pages read during
      *          research as first priority and recognized best practice to fill genuine gaps.
      * Inputs: The requirement identifier/text and the pages that were read (each carrying its own
-     *         content_markdown/content_mode/selected_headings, and the approved, non-conflicting
-     *         claim texts that ground any concrete commitments on that page — see
-     *         RequirementWikiResearchService's supporting_claim_ids). May be an empty list when the
-     *         Wiki had no relevant pages at all — the model still writes a best-practice draft.
+     *         content_markdown/content_mode/selected_headings, and its claim texts split by
+     *         content_origin — source_based_claim_texts, documented in the customer's own sources,
+     *         and best_practice_claim_texts, a professional addition never presented as customer
+     *         fact — see RequirementWikiResearchService::supportingClaimsByOrigin()). May be an
+     *         empty list when the Wiki had no relevant pages at all — the model still writes a
+     *         best-practice draft.
      * Returns: {answer_sections} — every section's used_page_ids is guaranteed to be a subset of
      *          the page_ids actually passed in; a section may legitimately have an empty
      *          used_page_ids when it is mainly best practice.
      * Side effects: None (one OpenAI call).
      *
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      * @return array{answer_sections: list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>}
      *
      * @throws RuntimeException on API error, empty response, invalid JSON, or a malformed/inconsistent schema result
@@ -140,7 +142,7 @@ class RequirementWikiAnswerAiClient
     }
 
     /**
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      */
     private function buildPayload(string $requirementIdentifier, string $requirementText, array $pages, string $languageName): array
     {
@@ -156,9 +158,14 @@ class RequirementWikiAnswerAiClient
                         $page['content_markdown'],
                     ];
 
-                    if ($page['claim_texts'] !== []) {
-                        $lines[] = 'VERIFIED FACTS for this page (use these — and only these — for any concrete SLA, response time, metric, frequency, role, tool, certification, guarantee, or commitment you state):';
-                        $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['claim_texts']));
+                    if ($page['source_based_claim_texts'] !== []) {
+                        $lines[] = 'SOURCE-DOCUMENTED FACTS for this page (documented in the customer\'s own source documents — use these, and only these, for any concrete SLA, response time, metric, frequency, role, tool, certification, guarantee, or commitment you present as an existing customer fact):';
+                        $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['source_based_claim_texts']));
+                    }
+
+                    if ($page['best_practice_claim_texts'] !== []) {
+                        $lines[] = 'BEST-PRACTICE SUGGESTIONS for this page (NOT documented in the customer\'s own sources — you may use these as professional recommendations, but must phrase them as a suggested/recommended approach, never as an existing customer fact or commitment):';
+                        $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['best_practice_claim_texts']));
                     }
 
                     return implode("\n", $lines);
@@ -242,10 +249,11 @@ class RequirementWikiAnswerAiClient
             '- Prioritize precision and subject-matter substance over length.',
             '',
             'Protecting against invented company facts — this is the one hard boundary on best practice:',
-            '- Never state as an existing fact about the vendor: a specific certification, a specific tool, an SLA or response time, an existing role or organizational structure, a named internal process, or a guaranteed outcome — UNLESS a page\'s VERIFIED FACTS (or its own documented content) actually supports it.',
+            '- Never state as an existing fact about the vendor: a specific certification, a specific tool, an SLA or response time, an existing role or organizational structure, a named internal process, or a guaranteed outcome — UNLESS a page\'s SOURCE-DOCUMENTED FACTS (or its own documented content) actually supports it.',
+            '- A page\'s BEST-PRACTICE SUGGESTIONS are never documented customer fact, even though they come from the customer\'s own Wiki page — present them the same way as any other best-practice content: as a recommended method, a suggested approach, or professional practice to be adapted for the specific delivery, never as something the vendor already has, does, or guarantees.',
             '- When best practice would normally include such a specific claim but no page supports it, phrase it generically instead: as a recommended method, a suggested approach, relevant professional practice, or a solution to be clarified/adapted for the specific delivery — never as something the vendor already has or does.',
             '- This restraint applies ONLY to concrete vendor-specific claims like the ones above — do not make the rest of the answer generic or overly cautious because of it. Explain and recommend best practice confidently; simply don\'t dress it up as an existing company fact.',
-            '- Never use words like "guarantees", "always", or "ensures" for anything not explicitly supported by a page.',
+            '- Never use words like "guarantees", "always", or "ensures" for anything not explicitly supported by a page\'s SOURCE-DOCUMENTED FACTS.',
             '',
             'Voice:',
             '- Write as the supplier answering the tender requirement directly — a real bid response in flowing, professional paragraphs, not a description of the pages or of best practice as a concept.',

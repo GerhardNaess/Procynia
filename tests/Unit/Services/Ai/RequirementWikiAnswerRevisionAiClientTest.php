@@ -45,7 +45,8 @@ class RequirementWikiAnswerRevisionAiClientTest extends TestCase
             'content_mode' => 'full',
             'content_markdown' => 'Etter etablering eier Kunden prosessen videre.',
             'selected_headings' => [],
-            'claim_texts' => [],
+            'source_based_claim_texts' => [],
+            'best_practice_claim_texts' => [],
         ]];
     }
 

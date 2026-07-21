@@ -211,6 +211,7 @@ class RequirementWikiResearchService
                 $contextSize += $contentLength;
                 $readPageIds[] = $pageId;
                 $roundReadPageIds[] = $pageId;
+                $claimsByOrigin = $this->supportingClaimsByOrigin($pageId, $activeQueryTokens);
 
                 $readPages[] = [
                     'page_id' => $pageId,
@@ -224,7 +225,13 @@ class RequirementWikiResearchService
                     'content_mode' => $read['content_mode'],
                     'content_markdown' => $read['content_markdown'],
                     'selected_headings' => $read['selected_headings'],
-                    'supporting_claim_ids' => $this->supportingClaimIds($pageId, $activeQueryTokens),
+                    // 'all' is kept for backward compatibility with older persisted research_trace
+                    // readers; source_based/best_practice are the new origin-scoped buckets that
+                    // let downstream steps (RequirementWikiAnswerService) know WHICH claims may be
+                    // presented as documented customer fact vs. an undocumented suggestion.
+                    'supporting_claim_ids' => $claimsByOrigin['all'],
+                    'source_based_claim_ids' => $claimsByOrigin['source_based'],
+                    'best_practice_claim_ids' => $claimsByOrigin['best_practice'],
                     'round_read' => $roundNumber,
                 ];
             }
@@ -327,31 +334,52 @@ class RequirementWikiResearchService
     }
 
     /**
+     * Purpose: Find claims that support a read page, split by content_origin — the provenance
+     *          signal downstream Wiki-answer generation needs to keep source-documented knowledge
+     *          and best-practice suggestions visibly distinct (see docs/enterprise-llm-wiki-plan.md,
+     *          "Arkitekturnotat — v0.9").
+     * Inputs: The page id and the currently active query tokens.
+     * Returns: 'all' (both origins together, kept for backward-compatible persisted-data readers),
+     *          'source_based', and 'best_practice' claim id lists. Claims whose content_origin is
+     *          unclassified/unsupported_generated_content/internal_error are deliberately excluded
+     *          from every bucket — those are QA-flagged states, never a valid grounding for a
+     *          customer-facing answer, whether as fact or as suggestion.
+     * Side effects: None (one query per page).
+     *
      * @param  list<string>  $queryTokens
-     * @return list<int>
+     * @return array{all: list<int>, source_based: list<int>, best_practice: list<int>}
      */
-    private function supportingClaimIds(int $pageId, array $queryTokens): array
+    private function supportingClaimsByOrigin(int $pageId, array $queryTokens): array
     {
+        $empty = ['all' => [], 'source_based' => [], 'best_practice' => []];
+
         if ($queryTokens === []) {
-            return [];
+            return $empty;
         }
 
-        return EnterpriseWikiClaim::query()
+        $matches = EnterpriseWikiClaim::query()
             ->where('enterprise_wiki_page_id', $pageId)
             ->where('conflict_flag', false)
+            ->whereIn('content_origin', [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ])
             ->whereHas('version', function ($query): void {
                 $query->where('is_current', true);
             })
-            ->get(['id', 'claim_text'])
+            ->get(['id', 'claim_text', 'content_origin'])
             ->filter(function (EnterpriseWikiClaim $claim) use ($queryTokens): bool {
                 $claimTokens = RequirementWikiTermNormalizer::tokenize((string) $claim->claim_text);
                 [$overlap] = RequirementWikiTermNormalizer::overlap($queryTokens, $claimTokens);
 
                 return $overlap >= self::MIN_CLAIM_TOKEN_OVERLAP;
-            })
-            ->pluck('id')
-            ->values()
-            ->all();
+            });
+
+        return [
+            'all' => $matches->pluck('id')->values()->all(),
+            'source_based' => $matches->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED)->pluck('id')->values()->all(),
+            'best_practice' => $matches->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)->pluck('id')->values()->all(),
+        ];
     }
 
     /**

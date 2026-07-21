@@ -49,7 +49,8 @@ class RequirementWikiAlignmentAiClientTest extends TestCase
             'content_mode' => 'full',
             'content_markdown' => 'Problem Management gjennomfører rotårsaksanalyse.',
             'selected_headings' => [],
-            'claim_texts' => [],
+            'source_based_claim_texts' => [],
+            'best_practice_claim_texts' => [],
         ]];
     }
 

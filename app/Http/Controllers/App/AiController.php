@@ -2058,6 +2058,7 @@ class AiController extends Controller
                 'discovered_pages' => [],
                 'alignment_summary' => null,
                 'has_possible_conflict' => null,
+                'has_source_based_support' => null,
                 'engine_version' => null,
                 'generated_at' => null,
                 'is_stale' => null,
@@ -2106,6 +2107,7 @@ class AiController extends Controller
             $alignment = $sectionKey !== null ? ($alignmentBySectionKey[$sectionKey] ?? null) : null;
             $alignmentStatus = is_string($alignment['alignment_status'] ?? null) ? $alignment['alignment_status'] : null;
             $supportingPageIds = is_array($alignment['supporting_page_ids'] ?? null) ? $alignment['supporting_page_ids'] : [];
+            $provenanceType = is_string($alignment['provenance_type'] ?? null) ? $alignment['provenance_type'] : null;
 
             $sections[] = [
                 'key' => $sectionKey,
@@ -2130,6 +2132,12 @@ class AiController extends Controller
                 'conflict_summary' => is_string($alignment['conflict_summary'] ?? null) ? $alignment['conflict_summary'] : null,
                 'review_note' => is_string($alignment['review_note'] ?? null) ? $alignment['review_note'] : null,
                 'revised' => (bool) ($alignment['revised'] ?? false),
+                // provenance_type is computed deterministically from claim content_origin (see
+                // RequirementWikiAnswerService::computeSectionsProvenance()) — a different axis from
+                // alignment_status: whether this section's concrete facts are actually documented in
+                // the customer's own sources (source_based), a professional addition (best_practice),
+                // or both (mixed). Null only for answers persisted before this field existed.
+                'provenance_type' => $provenanceType,
             ];
         }
 
@@ -2172,6 +2180,9 @@ class AiController extends Controller
             )),
             'alignment_summary' => $alignmentSummary,
             'has_possible_conflict' => $wikiAnswer->has_possible_conflict,
+            'has_source_based_support' => is_bool($alignmentTrace['has_source_based_support'] ?? null)
+                ? $alignmentTrace['has_source_based_support']
+                : null,
             'engine_version' => $wikiAnswer->engine_version,
             'generated_at' => optional($wikiAnswer->generated_at)?->toIso8601String(),
             'is_stale' => $wikiAnswer->isStale(),

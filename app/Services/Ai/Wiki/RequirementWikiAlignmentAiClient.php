@@ -65,7 +65,7 @@ class RequirementWikiAlignmentAiClient
      * Side effects: None (one OpenAI call).
      *
      * @param  list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>  $answerSections
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      * @return list<array{section_key: string, alignment_status: string, supporting_page_ids: list<int>, supported_points: list<string>, uncovered_points: list<string>, conflict_summary: ?string, review_note: ?string}>
      *
      * @throws RuntimeException on API error, empty response, invalid JSON, or a malformed/incomplete schema result
@@ -181,7 +181,7 @@ class RequirementWikiAlignmentAiClient
 
     /**
      * @param  list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>  $answerSections
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      */
     private function buildPayload(
         string $requirementIdentifier,
@@ -199,9 +199,14 @@ class RequirementWikiAlignmentAiClient
                     $page['content_markdown'],
                 ];
 
-                if ($page['claim_texts'] !== []) {
-                    $lines[] = 'VERIFIED FACTS for this page:';
-                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['claim_texts']));
+                if ($page['source_based_claim_texts'] !== []) {
+                    $lines[] = 'SOURCE-DOCUMENTED FACTS for this page (documented in the customer\'s own sources):';
+                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['source_based_claim_texts']));
+                }
+
+                if ($page['best_practice_claim_texts'] !== []) {
+                    $lines[] = 'BEST-PRACTICE SUGGESTIONS for this page (NOT documented in the customer\'s own sources):';
+                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['best_practice_claim_texts']));
                 }
 
                 return implode("\n", $lines);
@@ -290,6 +295,8 @@ class RequirementWikiAlignmentAiClient
             '- review_note: a brief, human-readable note for a quality reviewer, or null if there is nothing notable to add beyond the above.',
             '',
             'This is a section-level, meaning-level judgment — never a rigid word-for-word or sentence-for-sentence comparison.',
+            '',
+            'Note: a page\'s BEST-PRACTICE SUGGESTIONS are Wiki content too, so a section built on them is still "aligned" or "partially_aligned" with the Wiki\'s own text — that classification is about textual/semantic grounding, not about whether the underlying fact is customer-documented. Whether a fact is source-documented vs. a best-practice addition is tracked separately and is not your concern here.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);

@@ -48,6 +48,17 @@ class RequirementWikiAnswerService
 {
     public const ENGINE_VERSION = 'wiki_reader_alignment_v3';
 
+    // Deterministic per-section provenance (v0.9 provenance-gap closure) — computed here from each
+    // used page's actual claim content_origin, never self-reported by an AI client. A DIFFERENT axis
+    // from alignment_status: alignment_status judges whether the section's substance is supported by
+    // the Wiki's own text; provenance_type judges whether the concrete facts it states were actually
+    // customer-documented (source_based) or a professional addition (best_practice/mixed).
+    public const PROVENANCE_SOURCE_BASED = 'source_based';
+
+    public const PROVENANCE_BEST_PRACTICE = 'best_practice';
+
+    public const PROVENANCE_MIXED = 'mixed';
+
     public function __construct(
         private readonly RequirementWikiResearchService $researchService,
         private readonly RequirementWikiAnswerAiClient $answerAiClient,
@@ -75,7 +86,7 @@ class RequirementWikiAnswerService
     ): SavedNoticeAiRequirementWikiAnswer {
         $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
-        $claimTextsByPageId = $this->claimTextsByPageId($context['pages']);
+        $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
         $pagesForAi = $this->pagesForAi($context['pages'], $claimTextsByPageId);
 
         $answer = $this->answerAiClient->generateAnswer(
@@ -110,6 +121,7 @@ class RequirementWikiAnswerService
         $missingSummary = $this->computeMissingSummary($alignmentFinal, $coverageStatus, $context);
         $usedPageIds = $this->unionUsedPageIds($answerSections);
         $answerText = implode("\n\n", array_column($answerSections, 'text'));
+        $provenanceBySectionKey = $this->computeSectionsProvenance($answerSections, $pagesForAi);
 
         return $this->persist($requirement, [
             'coverage_status' => $coverageStatus,
@@ -118,7 +130,7 @@ class RequirementWikiAnswerService
             'sources' => $this->sourcesPayload($context['pages'], $usedPageIds),
             'model' => 'gpt-4.1-mini',
             'research_trace' => ['research' => $context, 'answer' => ['answer_sections' => $answerSections]],
-            'alignment_trace' => $this->buildAlignmentTrace($answerSections, $alignmentBefore, $alignmentFinal, $revisionInfo, $coverageStatus, $hasPossibleConflict),
+            'alignment_trace' => $this->buildAlignmentTrace($answerSections, $alignmentBefore, $alignmentFinal, $revisionInfo, $coverageStatus, $hasPossibleConflict, $provenanceBySectionKey),
             'has_possible_conflict' => $hasPossibleConflict,
             'engine_version' => self::ENGINE_VERSION,
             'stale_at' => null,
@@ -373,10 +385,16 @@ class RequirementWikiAnswerService
     /**
      * Purpose: Build the persisted alignment_trace payload, auditable per section.
      * Inputs: The final answer sections (for heading lookup), the pre- and post-revision alignment
-     *         assessments, the revision metadata, and the computed coverage/conflict results.
+     *         assessments, the revision metadata, the computed coverage/conflict results, and the
+     *         deterministically computed per-section provenance (see computeSectionsProvenance()).
      * Returns: A structure suitable for jsonb storage and frontend consumption — see class docblock
-     *          and CLAUDE.md's Fase 9 Wiki-answer section for the full field list.
+     *          and CLAUDE.md's Fase 9 Wiki-answer section for the full field list. has_source_based_
+     *          support and no_source_based_support_message are computed from provenance_type alone
+     *          (claim content_origin), never from alignment_status — a section can be "aligned" with
+     *          the Wiki's own descriptive text while still having no source_based claim behind it.
      * Side effects: None.
+     *
+     * @param  array<string, array{provenance_type: string, source_based_page_ids: list<int>, best_practice_page_ids: list<int>}>  $provenanceBySectionKey
      */
     private function buildAlignmentTrace(
         array $answerSections,
@@ -385,6 +403,7 @@ class RequirementWikiAnswerService
         array $revisionInfo,
         string $coverageStatus,
         bool $hasPossibleConflict,
+        array $provenanceBySectionKey,
     ): array {
         $headingByKey = [];
 
@@ -401,9 +420,14 @@ class RequirementWikiAnswerService
         $revisedKeys = array_flip($revisionInfo['section_keys']);
 
         $sections = array_map(
-            static function (array $assessment) use ($headingByKey, $beforeByKey, $revisedKeys): array {
+            static function (array $assessment) use ($headingByKey, $beforeByKey, $revisedKeys, $provenanceBySectionKey): array {
                 $key = $assessment['section_key'];
                 $wasRevised = isset($revisedKeys[$key]);
+                $provenance = $provenanceBySectionKey[$key] ?? [
+                    'provenance_type' => self::PROVENANCE_BEST_PRACTICE,
+                    'source_based_page_ids' => [],
+                    'best_practice_page_ids' => [],
+                ];
 
                 return [
                     'section_key' => $key,
@@ -416,50 +440,69 @@ class RequirementWikiAnswerService
                     'conflict_summary' => $assessment['conflict_summary'],
                     'review_note' => $assessment['review_note'],
                     'revised' => $wasRevised,
+                    'provenance_type' => $provenance['provenance_type'],
+                    'source_based_page_ids' => $provenance['source_based_page_ids'],
+                    'best_practice_page_ids' => $provenance['best_practice_page_ids'],
                 ];
             },
             $alignmentFinal,
         );
+
+        $hasSourceBasedSupport = array_filter(
+            $sections,
+            static fn (array $section): bool => in_array($section['provenance_type'], [self::PROVENANCE_SOURCE_BASED, self::PROVENANCE_MIXED], true),
+        ) !== [];
 
         return [
             'sections' => $sections,
             'coverage_status' => $coverageStatus,
             'has_possible_conflict' => $hasPossibleConflict,
             'revision' => $revisionInfo,
+            // Deterministic flag only — no message text is persisted here. When a customer-fact
+            // question has no source_based/mixed section at all, the frontend renders the
+            // corresponding translated notice from has_source_based_support alone (see
+            // wiki_answer_no_source_based_support_message in lang/{no,en}/procynia.php), so the
+            // wording stays translatable rather than frozen into stored jsonb.
+            'has_source_based_support' => $hasSourceBasedSupport,
         ];
     }
 
     /**
-     * Purpose: Fetch the claim text for every claim id referenced by any read page, in one query.
-     * Inputs: The research context's read pages (each carrying supporting_claim_ids).
-     * Returns: page_id => list of claim texts for that page.
+     * Purpose: Fetch the claim text for every claim id referenced by any read page, in one query,
+     *          split by content_origin so the answer/alignment/revision clients can keep documented
+     *          fact and best-practice suggestion visibly distinct instead of one undifferentiated
+     *          "VERIFIED FACTS" block.
+     * Inputs: The research context's read pages (each carrying source_based_claim_ids and
+     *         best_practice_claim_ids — see RequirementWikiResearchService::supportingClaimsByOrigin()).
+     * Returns: page_id => ['source_based' => list<string>, 'best_practice' => list<string>].
      * Side effects: None.
      *
      * @param  list<array<string, mixed>>  $pages
-     * @return array<int, list<string>>
+     * @return array<int, array{source_based: list<string>, best_practice: list<string>}>
      */
-    private function claimTextsByPageId(array $pages): array
+    private function claimTextsByPageIdAndOrigin(array $pages): array
     {
         $allClaimIds = array_values(array_unique(array_merge(
             [],
-            ...array_map(static fn (array $page): array => $page['supporting_claim_ids'], $pages),
+            ...array_map(static fn (array $page): array => array_merge(
+                $page['source_based_claim_ids'] ?? [],
+                $page['best_practice_claim_ids'] ?? [],
+            ), $pages),
         )));
 
-        if ($allClaimIds === []) {
-            return [];
-        }
-
-        $claimTextById = EnterpriseWikiClaim::query()
-            ->whereIn('id', $allClaimIds)
-            ->pluck('claim_text', 'id');
+        $claimTextById = $allClaimIds === []
+            ? collect()
+            : EnterpriseWikiClaim::query()->whereIn('id', $allClaimIds)->pluck('claim_text', 'id');
 
         $byPageId = [];
 
         foreach ($pages as $page) {
-            $byPageId[$page['page_id']] = array_values(array_filter(array_map(
-                static fn (int $claimId): ?string => $claimTextById[$claimId] ?? null,
-                $page['supporting_claim_ids'],
-            )));
+            $lookup = static fn (int $claimId): ?string => $claimTextById[$claimId] ?? null;
+
+            $byPageId[$page['page_id']] = [
+                'source_based' => array_values(array_filter(array_map($lookup, $page['source_based_claim_ids'] ?? []))),
+                'best_practice' => array_values(array_filter(array_map($lookup, $page['best_practice_claim_ids'] ?? []))),
+            ];
         }
 
         return $byPageId;
@@ -468,28 +511,111 @@ class RequirementWikiAnswerService
     /**
      * Purpose: Build the shared page payload shape consumed by the answer, alignment, and revision
      *          AI clients alike.
-     * Inputs: The research context's read pages and their claim texts.
-     * Returns: One entry per page: identity, content, and its verified-fact claim texts.
+     * Inputs: The research context's read pages and their origin-split claim texts.
+     * Returns: One entry per page: identity, content, and its claim texts split into
+     *          source_based_claim_texts (documented in the customer's own sources — may be presented
+     *          as customer fact) and best_practice_claim_texts (a professional addition — must never
+     *          be presented as documented customer fact, only as a suggestion/recommendation).
      * Side effects: None.
      *
      * @param  list<array<string, mixed>>  $pages
-     * @param  array<int, list<string>>  $claimTextsByPageId
-     * @return list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>
+     * @param  array<int, array{source_based: list<string>, best_practice: list<string>}>  $claimTextsByPageId
+     * @return list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>
      */
     private function pagesForAi(array $pages, array $claimTextsByPageId): array
     {
         return array_map(
-            static fn (array $page): array => [
-                'page_id' => $page['page_id'],
-                'title' => $page['title'],
-                'page_type' => $page['page_type'],
-                'content_mode' => $page['content_mode'],
-                'content_markdown' => $page['content_markdown'],
-                'selected_headings' => $page['selected_headings'],
-                'claim_texts' => $claimTextsByPageId[$page['page_id']] ?? [],
-            ],
+            static function (array $page) use ($claimTextsByPageId): array {
+                $texts = $claimTextsByPageId[$page['page_id']] ?? ['source_based' => [], 'best_practice' => []];
+
+                return [
+                    'page_id' => $page['page_id'],
+                    'title' => $page['title'],
+                    'page_type' => $page['page_type'],
+                    'content_mode' => $page['content_mode'],
+                    'content_markdown' => $page['content_markdown'],
+                    'selected_headings' => $page['selected_headings'],
+                    'source_based_claim_texts' => $texts['source_based'],
+                    'best_practice_claim_texts' => $texts['best_practice'],
+                ];
+            },
             $pages,
         );
+    }
+
+    /**
+     * Purpose: Deterministically classify each answer section's provenance from the actual claim
+     *          content_origin of the pages it cites — never from an AI's self-report. This is the
+     *          concrete enforcement of the binding rule that best-practice content must never be
+     *          presented as documented customer fact (docs/enterprise-llm-wiki-plan.md, "Arkitektur-
+     *          notat — v0.9").
+     * Inputs: The final answer sections (used_page_ids) and the pagesForAi DTO (each page's
+     *         source_based_claim_texts/best_practice_claim_texts).
+     * Returns: section_key => provenance_type ('source_based' when every grounding signal is
+     *          source_based, 'best_practice' when the section cites no page at all or only
+     *          best-practice-marked claims, 'mixed' when both are present), plus the page_ids that
+     *          contributed each kind of grounding. A page cited with no matching claim at all still
+     *          counts as source_based grounding — an approved Wiki page's own content_markdown
+     *          originates from the customer's own documents; content_origin only exists at the
+     *          finer-grained claim level to flag specific additions within it.
+     * Side effects: None.
+     *
+     * @param  list<array{key: string, used_page_ids: list<int>}>  $answerSections
+     * @param  list<array{page_id: int, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pagesForAi
+     * @return array<string, array{provenance_type: string, source_based_page_ids: list<int>, best_practice_page_ids: list<int>}>
+     */
+    private function computeSectionsProvenance(array $answerSections, array $pagesForAi): array
+    {
+        $pageHasBestPracticeOnly = [];
+
+        foreach ($pagesForAi as $page) {
+            // A page whose ONLY matching claims are best_practice-marked never itself counts as
+            // source_based grounding; a page with any source_based claim, or no matching claims at
+            // all (grounded purely in the page's own approved content), does.
+            $pageHasBestPracticeOnly[$page['page_id']] = $page['best_practice_claim_texts'] !== []
+                && $page['source_based_claim_texts'] === [];
+        }
+
+        $result = [];
+
+        foreach ($answerSections as $section) {
+            $usedPageIds = $section['used_page_ids'];
+
+            if ($usedPageIds === []) {
+                $result[$section['key']] = [
+                    'provenance_type' => self::PROVENANCE_BEST_PRACTICE,
+                    'source_based_page_ids' => [],
+                    'best_practice_page_ids' => [],
+                ];
+
+                continue;
+            }
+
+            $sourceBasedPageIds = [];
+            $bestPracticePageIds = [];
+
+            foreach ($usedPageIds as $pageId) {
+                if ($pageHasBestPracticeOnly[$pageId] ?? false) {
+                    $bestPracticePageIds[] = $pageId;
+                } else {
+                    $sourceBasedPageIds[] = $pageId;
+                }
+            }
+
+            $provenanceType = match (true) {
+                $sourceBasedPageIds !== [] && $bestPracticePageIds !== [] => self::PROVENANCE_MIXED,
+                $bestPracticePageIds !== [] => self::PROVENANCE_BEST_PRACTICE,
+                default => self::PROVENANCE_SOURCE_BASED,
+            };
+
+            $result[$section['key']] = [
+                'provenance_type' => $provenanceType,
+                'source_based_page_ids' => $sourceBasedPageIds,
+                'best_practice_page_ids' => $bestPracticePageIds,
+            ];
+        }
+
+        return $result;
     }
 
     /**
@@ -500,11 +626,14 @@ class RequirementWikiAnswerService
      * Returns: One entry per cited page (already unique — a page is read at most once per run),
      *          carrying its discovery provenance so the UI can distinguish direct-search hits from
      *          pages found by following Wiki links/backlinks.
+     * has_source_based_claims/has_best_practice_claims let the UI scope citation links to only the
+     * source_based basis, per the binding provenance rule — a best-practice-only page must never be
+     * presented as documentary evidence of what the customer's own sources say.
      * Side effects: None.
      *
      * @param  list<array<string, mixed>>  $pages
      * @param  list<int>  $usedPageIds
-     * @return list<array{enterprise_wiki_page_id: int, page_title: string, page_slug: string, page_type: string, selection_type: string, discovered_from_page_id: ?int, discovered_from_title: ?string, link_direction: ?string, supporting_claim_ids: list<int>}>
+     * @return list<array{enterprise_wiki_page_id: int, page_title: string, page_slug: string, page_type: string, selection_type: string, discovered_from_page_id: ?int, discovered_from_title: ?string, link_direction: ?string, supporting_claim_ids: list<int>, has_source_based_claims: bool, has_best_practice_claims: bool}>
      */
     private function sourcesPayload(array $pages, array $usedPageIds): array
     {
@@ -525,6 +654,8 @@ class RequirementWikiAnswerService
                 'discovered_from_title' => $page['discovered_from_title'],
                 'link_direction' => $page['link_direction'],
                 'supporting_claim_ids' => $page['supporting_claim_ids'],
+                'has_source_based_claims' => ($page['source_based_claim_ids'] ?? []) !== [],
+                'has_best_practice_claims' => ($page['best_practice_claim_ids'] ?? []) !== [],
             ],
             array_values(array_filter($pages, static fn (array $page): bool => isset($usedPageIds[$page['page_id']]))),
         ));

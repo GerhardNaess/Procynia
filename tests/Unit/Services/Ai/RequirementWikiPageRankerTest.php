@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Ai;
 
+use App\Models\EnterpriseWikiClaim;
 use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
 use App\Services\Ai\Wiki\RequirementWikiPageRanker;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
@@ -154,6 +155,57 @@ class RequirementWikiPageRankerTest extends TestCase
         $ranked = app(RequirementWikiPageRanker::class)->rank($catalog, $tokens, $customer->id);
 
         $this->assertCount(RequirementWikiPageRanker::MAX_CANDIDATES, $ranked);
+    }
+
+    /**
+     * v0.9 provenance-gap closure — acceptance (7): a source_based claim hit is weighted more
+     * heavily than a best_practice claim hit, so a page documented in the customer's own sources
+     * can outrank a page whose only matching claim is an undocumented best-practice suggestion —
+     * useful for customer-fact questions, per the binding provenance rule.
+     */
+    public function test_a_source_based_claim_hit_outranks_a_best_practice_claim_hit_at_equal_recall(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $sourceBackedPage = $this->createWikiPageWithVersion($customer, 'Urelatert tittel en', 'Denne siden handler om noe helt annet.');
+        $bestPracticeOnlyPage = $this->createWikiPageWithVersion($customer, 'Urelatert tittel to', 'Denne siden handler også om noe helt annet.');
+        $this->createWikiClaim($sourceBackedPage, 'Kapasitetsstyring rapporteres månedlig til kunden.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+        $this->createWikiClaim($bestPracticeOnlyPage, 'Kapasitetsstyring bør rapporteres månedlig til kunden.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+
+        $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
+        $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv kapasitetsstyring.');
+        $ranked = app(RequirementWikiPageRanker::class)->rank($catalog, $tokens, $customer->id);
+        $byId = collect($ranked)->keyBy('page_id');
+
+        $this->assertGreaterThan(
+            $byId[$bestPracticeOnlyPage->id]['score'],
+            $byId[$sourceBackedPage->id]['score'],
+        );
+    }
+
+    /**
+     * v0.9 provenance-gap closure — acceptance (8): the lower best_practice claim-hit weight is a
+     * tie-breaker only — the primary title/content overlap signals are unchanged, so a page whose
+     * actual content is the stronger match for a recommendation-style query still ranks first even
+     * though its only claim is best_practice-marked.
+     */
+    public function test_best_practice_content_can_still_rank_first_when_it_is_the_stronger_match(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $bestPracticePage = $this->createWikiPageWithVersion($customer, 'Kapasitetsstyring', 'Anbefalt fremgangsmåte for kapasitetsstyring og kapasitetsplanlegging.');
+        $this->createWikiClaim($bestPracticePage, 'Kapasitetsstyring bør gjennomgås kvartalsvis som beste praksis.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+        $weaklyRelatedPage = $this->createWikiPageWithVersion($customer, 'Urelatert tema', 'Denne siden nevner kapasitetsstyring bare i forbifarten.');
+
+        $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
+        $tokens = RequirementWikiTermNormalizer::tokenize('Anbefal beste praksis for kapasitetsstyring.');
+        $ranked = app(RequirementWikiPageRanker::class)->rank($catalog, $tokens, $customer->id);
+
+        $this->assertSame($bestPracticePage->id, $ranked[0]['page_id']);
     }
 
     public function test_excluded_page_ids_never_appear_in_the_result(): void

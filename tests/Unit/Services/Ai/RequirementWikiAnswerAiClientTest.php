@@ -35,7 +35,8 @@ class RequirementWikiAnswerAiClientTest extends TestCase
             'content_mode' => 'full',
             'content_markdown' => "# Problem Management\n\nProsessen identifiserer rotårsaker til hendelser.",
             'selected_headings' => [],
-            'claim_texts' => ['Problem Management gjennomfører rotårsaksanalyse.'],
+            'source_based_claim_texts' => ['Problem Management gjennomfører rotårsaksanalyse.'],
+            'best_practice_claim_texts' => [],
         ]];
     }
 
@@ -49,7 +50,8 @@ class RequirementWikiAnswerAiClientTest extends TestCase
                 'content_mode' => 'full',
                 'content_markdown' => 'Innhold om Problem Management.',
                 'selected_headings' => [],
-                'claim_texts' => [],
+                'source_based_claim_texts' => [],
+                'best_practice_claim_texts' => [],
             ],
             [
                 'page_id' => 102,
@@ -58,7 +60,8 @@ class RequirementWikiAnswerAiClientTest extends TestCase
                 'content_mode' => 'full',
                 'content_markdown' => 'Innhold om Incident Management.',
                 'selected_headings' => [],
-                'claim_texts' => [],
+                'source_based_claim_texts' => [],
+                'best_practice_claim_texts' => [],
             ],
         ];
     }
@@ -82,7 +85,7 @@ class RequirementWikiAnswerAiClientTest extends TestCase
         $userText = data_get($captured, 'input.1.content.0.text');
         $this->assertStringContainsString('PAGE_ID: 101', $userText);
         $this->assertStringContainsString('rotårsaker til hendelser', $userText);
-        $this->assertStringContainsString('VERIFIED FACTS', $userText);
+        $this->assertStringContainsString('SOURCE-DOCUMENTED FACTS', $userText);
     }
 
     public function test_prompt_instructs_the_model_to_read_the_pages(): void
@@ -129,6 +132,46 @@ class RequirementWikiAnswerAiClientTest extends TestCase
         $this->assertStringContainsString('Avoid repeating CMDB, monitoring, traceability, Change Enablement, and continuous improvement', $developerPrompt);
         $this->assertStringNotContainsString('Incident Management section', $developerPrompt);
         $this->assertStringNotContainsString('Problem Management section', $developerPrompt);
+    }
+
+    /**
+     * v0.9 provenance-gap closure: a page's source_based and best_practice claims must appear in
+     * two separately labeled blocks, and the prompt must explicitly forbid presenting a
+     * BEST-PRACTICE SUGGESTIONS claim as an existing customer fact.
+     */
+    public function test_source_based_and_best_practice_claims_appear_in_two_distinct_labeled_blocks(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        $pages = [[
+            'page_id' => 101,
+            'title' => 'Problem Management',
+            'page_type' => 'concept',
+            'content_mode' => 'full',
+            'content_markdown' => 'Innhold.',
+            'selected_headings' => [],
+            'source_based_claim_texts' => ['Problem Management rapporteres månedlig.'],
+            'best_practice_claim_texts' => ['Det anbefales å automatisere rotårsaksanalyse.'],
+        ]];
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $pages, 'no');
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringContainsString('SOURCE-DOCUMENTED FACTS', $userText);
+        $this->assertStringContainsString('Problem Management rapporteres månedlig.', $userText);
+        $this->assertStringContainsString('BEST-PRACTICE SUGGESTIONS', $userText);
+        $this->assertStringContainsString('Det anbefales å automatisere rotårsaksanalyse.', $userText);
+
+        $developerPrompt = data_get($captured, 'input.0.content.0.text');
+        $this->assertStringContainsString('BEST-PRACTICE SUGGESTIONS', $developerPrompt);
+        $this->assertStringContainsString('never as something the vendor already has, does, or guarantees', $developerPrompt);
     }
 
     public function test_prompt_requires_formal_contract_language_and_explicit_parties(): void

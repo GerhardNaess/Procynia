@@ -2381,6 +2381,20 @@ export default function AiShow({
         best_practice: 'bg-sky-50 text-sky-700 ring-sky-200',
         possible_conflict: 'bg-rose-50 text-rose-700 ring-rose-200',
     };
+    // Provenance (v0.9 provenance-gap closure): computed deterministically server-side from each
+    // section's actual claim content_origin — a DIFFERENT axis from alignment_status above. Whether
+    // the section's concrete facts are documented in the customer's own sources (source_based), a
+    // professional addition (best_practice), or both (mixed) — never an AI self-report.
+    const wikiAnswerProvenanceLabels = {
+        source_based: tai.wiki_answer_provenance_source_based,
+        best_practice: tai.wiki_answer_provenance_best_practice,
+        mixed: tai.wiki_answer_provenance_mixed,
+    };
+    const wikiAnswerProvenanceClassName = {
+        source_based: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+        best_practice: 'bg-sky-50 text-sky-700 ring-sky-200',
+        mixed: 'bg-violet-50 text-violet-700 ring-violet-200',
+    };
     const activeRequirementWikiAnswerHasText = activeRequirementWikiAnswerText.trim() !== '';
     const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
     const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
@@ -5397,6 +5411,12 @@ export default function AiShow({
                                                         </div>
                                                     ) : null}
 
+                                                    {activeRequirementWikiAnswer.has_source_based_support === false ? (
+                                                        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-800">
+                                                            {tai.wiki_answer_no_source_based_support_message}
+                                                        </div>
+                                                    ) : null}
+
                                                     {Array.isArray(activeRequirementWikiAnswer.sections) && activeRequirementWikiAnswer.sections.length > 0 ? (
                                                         <div className="mt-4 space-y-3">
                                                             {activeRequirementWikiAnswer.sections.map((section, sectionIndex) => {
@@ -5419,6 +5439,14 @@ export default function AiShow({
                                                                             {section.alignment_status ? (
                                                                                 <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName[section.alignment_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}>
                                                                                     {wikiAnswerAlignmentStatusLabels[section.alignment_status] ?? section.alignment_status}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {section.provenance_type ? (
+                                                                                <span
+                                                                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${wikiAnswerProvenanceClassName[section.provenance_type] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}
+                                                                                    title={tai.wiki_answer_provenance_hint}
+                                                                                >
+                                                                                    {wikiAnswerProvenanceLabels[section.provenance_type] ?? section.provenance_type}
                                                                                 </span>
                                                                             ) : null}
                                                                             {Array.isArray(section.page_titles) && section.page_titles.length > 0 ? (
@@ -5480,7 +5508,19 @@ export default function AiShow({
                                                                     key={`wiki-source-${source.enterprise_wiki_page_id ?? source.page_id ?? source.id}`}
                                                                     className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
                                                                 >
-                                                                    <div>{source.page_title ?? source.page_slug ?? '—'}</div>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <span>{source.page_title ?? source.page_slug ?? '—'}</span>
+                                                                        {source.has_source_based_claims ? (
+                                                                            <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                                                                                {tai.wiki_answer_source_based_claims_badge}
+                                                                            </span>
+                                                                        ) : null}
+                                                                        {source.has_best_practice_claims ? (
+                                                                            <span className="inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200">
+                                                                                {tai.wiki_answer_best_practice_claims_badge}
+                                                                            </span>
+                                                                        ) : null}
+                                                                    </div>
                                                                     {source.discovered_from_title ? (
                                                                         <div className="text-xs text-slate-400">
                                                                             {tai.wiki_answer_discovered_from_prefix} {source.discovered_from_title}

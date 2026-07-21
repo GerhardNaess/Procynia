@@ -3,6 +3,7 @@
 namespace Tests\Unit\Services\Ai;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
@@ -10,6 +11,7 @@ use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
+use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
 use App\Services\Ai\Wiki\RequirementWikiResearchService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -551,6 +553,150 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->assertSame('Problem Management', $byId[$linkedPage->id]['discovered_from_title']);
     }
 
+    /**
+     * v0.9 provenance-gap closure — acceptance (1): a pure source_based answer shows documented
+     * information and gets a source_based provenance_type, and its citing page carries a valid
+     * source_based claim marker (has_source_based_claims=true).
+     */
+    public function test_a_pure_source_based_section_is_marked_source_based_with_valid_citations(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+        $claim = $this->createWikiClaim($page, 'Problem Management rapporteres månedlig.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [
+            $this->fakePage($page->id, 'Problem Management', [$claim->id], []),
+        ]));
+        $this->mockAnswerClient([$this->section('S1', 'Dokumentert svar.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('source_based', $answer->alignment_trace['sections'][0]['provenance_type']);
+        $this->assertTrue($answer->alignment_trace['has_source_based_support']);
+        $this->assertTrue($answer->sources[0]['has_source_based_claims']);
+        $this->assertFalse($answer->sources[0]['has_best_practice_claims']);
+    }
+
+    /**
+     * v0.9 provenance-gap closure — acceptance (2)+(5): an answer grounded only in best_practice
+     * claims is allowed but is clearly marked as a best-practice suggestion, never as documented
+     * customer fact — has_source_based_support is false so the frontend shows the "not documented"
+     * notice for a customer-fact question with only this kind of grounding.
+     */
+    public function test_a_pure_best_practice_section_is_marked_best_practice_and_reports_no_source_based_support(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+        $claim = $this->createWikiClaim($page, 'Det anbefales å automatisere rotårsaksanalyse.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [
+            $this->fakePage($page->id, 'Problem Management', [], [$claim->id]),
+        ]));
+        $this->mockAnswerClient([$this->section('S1', 'Forslag basert på beste praksis.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->assertSame('best_practice', $answer->alignment_trace['sections'][0]['provenance_type']);
+        $this->assertFalse($answer->alignment_trace['has_source_based_support']);
+        $this->assertFalse($answer->sources[0]['has_source_based_claims']);
+        $this->assertTrue($answer->sources[0]['has_best_practice_claims']);
+    }
+
+    /**
+     * v0.9 provenance-gap closure — acceptance (3)+(4): a mixed answer keeps each part's provenance
+     * distinct — the source_based section and the best_practice section are tracked independently,
+     * and the best_practice-only page never lands in the source_based bucket for either section
+     * (i.e. it is never usable as source evidence for a customer claim).
+     */
+    public function test_a_mixed_answer_keeps_source_based_and_best_practice_sections_distinct(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $documentedPage = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+        $suggestionPage = $this->createWikiPageWithVersion($customer, 'Kontinuerlig forbedring', 'Innhold.');
+        $sourceBasedClaim = $this->createWikiClaim($documentedPage, 'Problem Management rapporteres månedlig.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+        $bestPracticeClaim = $this->createWikiClaim($suggestionPage, 'Det anbefales kvartalsvise forbedringsmøter.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [
+            $this->fakePage($documentedPage->id, 'Problem Management', [$sourceBasedClaim->id], []),
+            $this->fakePage($suggestionPage->id, 'Kontinuerlig forbedring', [], [$bestPracticeClaim->id]),
+        ]));
+        $this->mockAnswerClient([
+            $this->section('S1', 'Basert på kildedokumentene.', [$documentedPage->id]),
+            $this->section('S2', 'Forslag basert på beste praksis.', [$suggestionPage->id]),
+        ]);
+        $this->mockAlignmentClient([
+            $this->assessment('S1', 'aligned', [$documentedPage->id]),
+            $this->assessment('S2', 'aligned', [$suggestionPage->id]),
+        ]);
+
+        $answer = app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $sectionsByKey = collect($answer->alignment_trace['sections'])->keyBy('section_key');
+        $this->assertSame('source_based', $sectionsByKey['S1']['provenance_type']);
+        $this->assertSame([$documentedPage->id], $sectionsByKey['S1']['source_based_page_ids']);
+        $this->assertSame([], $sectionsByKey['S1']['best_practice_page_ids']);
+        $this->assertSame('best_practice', $sectionsByKey['S2']['provenance_type']);
+        $this->assertSame([], $sectionsByKey['S2']['source_based_page_ids']);
+        $this->assertSame([$suggestionPage->id], $sectionsByKey['S2']['best_practice_page_ids']);
+        $this->assertTrue($answer->alignment_trace['has_source_based_support']);
+
+        $sourcesByPageId = collect($answer->sources)->keyBy('enterprise_wiki_page_id');
+        $this->assertTrue($sourcesByPageId[$documentedPage->id]['has_source_based_claims']);
+        $this->assertFalse($sourcesByPageId[$suggestionPage->id]['has_source_based_claims']);
+        $this->assertTrue($sourcesByPageId[$suggestionPage->id]['has_best_practice_claims']);
+    }
+
+    /**
+     * v0.9 provenance-gap closure — acceptance (6): the research/ranking layer never loses
+     * content_origin — a real (non-mocked) research pass over real EnterpriseWikiClaim rows must
+     * bucket claim ids by content_origin, and multiple customers' claims stay isolated.
+     */
+    public function test_research_context_buckets_claims_by_content_origin_and_isolates_customers(): void
+    {
+        $customerA = $this->createWikiCustomer('Provenance Customer A');
+        $customerB = $this->createWikiCustomer('Provenance Customer B');
+        $requirement = $this->createRequirement($customerA, 'Beskriv rutinen for Problem Management.');
+        $pageA = $this->createWikiPageWithVersion($customerA, 'Problem Management', 'Innhold om Problem Management.');
+        $pageB = $this->createWikiPageWithVersion($customerB, 'Problem Management hos B', 'Innhold hos kunde B om Problem Management.');
+
+        $sourceClaim = $this->createWikiClaim($pageA, 'Problem Management rapporteres månedlig til kunden.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+        $bestPracticeClaim = $this->createWikiClaim($pageA, 'Problem Management bør automatiseres der mulig.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        ]);
+        $this->createWikiClaim($pageB, 'Problem Management rapporteres månedlig til kunden.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+
+        $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('selectNextAction')
+            ->once()
+            ->andReturn(['action' => 'read_pages', 'page_ids' => [$pageA->id], 'search_terms' => [], 'reason' => 'Direkte relevant.']));
+
+        $context = app(RequirementWikiResearchService::class)->research($requirement, $customerA->id, 'no');
+
+        $this->assertCount(1, $context['pages']);
+        $this->assertSame([$sourceClaim->id], $context['pages'][0]['source_based_claim_ids']);
+        $this->assertSame([$bestPracticeClaim->id], $context['pages'][0]['best_practice_claim_ids']);
+        // Customer B's page/claims were never even offered as a candidate — proving isolation at
+        // the catalog level, before any claim bucketing happens.
+        $this->assertNotContains($pageB->id, array_column($context['initial_candidates'], 'page_id'));
+    }
+
     public function test_it_throws_when_wiki_ai_generation_is_disabled_and_candidates_exist(): void
     {
         $customer = $this->createWikiCustomer();
@@ -609,7 +755,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
             ->shouldReceive('assessAlignment')->once()->andReturn($sections));
     }
 
-    private function fakePage(int $pageId, string $title): array
+    private function fakePage(int $pageId, string $title, array $sourceBasedClaimIds = [], array $bestPracticeClaimIds = []): array
     {
         return [
             'page_id' => $pageId,
@@ -623,7 +769,9 @@ class RequirementWikiAnswerServiceTest extends TestCase
             'content_mode' => 'full',
             'content_markdown' => "# {$title}\n\nInnhold om {$title}.",
             'selected_headings' => [],
-            'supporting_claim_ids' => [],
+            'supporting_claim_ids' => [...$sourceBasedClaimIds, ...$bestPracticeClaimIds],
+            'source_based_claim_ids' => $sourceBasedClaimIds,
+            'best_practice_claim_ids' => $bestPracticeClaimIds,
             'round_read' => 1,
         ];
     }

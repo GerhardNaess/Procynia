@@ -42,6 +42,15 @@ class RequirementWikiPageRanker
     private const SCORE_PER_CLAIM_HIT = 3;
 
     /**
+     * Deliberately lower than SCORE_PER_CLAIM_HIT (v0.9 provenance-gap closure): a page whose only
+     * matching claims are best_practice-marked (never documented in the customer's own sources) may
+     * still rank — recommendation-style requirements genuinely benefit from surfacing it — but a
+     * page backed by a real source_based claim hit is a stronger recall signal for a customer-fact
+     * question and should be preferred when both compete for the same score band.
+     */
+    private const SCORE_PER_BEST_PRACTICE_CLAIM_HIT = 1;
+
+    /**
      * Purpose: Rank catalog entries against a set of already-normalized query tokens.
      * Inputs: The full catalog (see RequirementWikiCatalogBuilder::build()), the query tokens
      *         (RequirementWikiTermNormalizer::tokenize() output — caller's responsibility), the
@@ -79,13 +88,14 @@ class RequirementWikiPageRanker
                 $titleHit = array_intersect($queryTokens, $titleTokens) !== [];
                 [$headingOverlapCount] = RequirementWikiTermNormalizer::overlap($queryTokens, $headingTokens);
                 [$contentOverlapCount, $contentOverlapRatio] = RequirementWikiTermNormalizer::overlap($queryTokens, $contentTokens);
-                $claimHitCount = $claimHitCounts[$entry['page_id']] ?? 0;
+                $hits = $claimHitCounts[$entry['page_id']] ?? ['source_based' => 0, 'best_practice' => 0];
 
                 $score = ($titleHit ? self::SCORE_TITLE_HIT : 0)
                     + ($headingOverlapCount * self::SCORE_PER_HEADING_HIT)
                     + ($contentOverlapCount * self::SCORE_PER_TERM_OVERLAP)
                     + (int) round($contentOverlapRatio * self::SCORE_OVERLAP_RATIO_WEIGHT)
-                    + ($claimHitCount * self::SCORE_PER_CLAIM_HIT);
+                    + ($hits['source_based'] * self::SCORE_PER_CLAIM_HIT)
+                    + ($hits['best_practice'] * self::SCORE_PER_BEST_PRACTICE_CLAIM_HIT);
 
                 return [
                     'page_id' => $entry['page_id'],
@@ -102,7 +112,9 @@ class RequirementWikiPageRanker
                         'heading_overlap_count' => $headingOverlapCount,
                         'content_overlap_count' => $contentOverlapCount,
                         'content_overlap_ratio' => round($contentOverlapRatio, 3),
-                        'claim_hit_count' => $claimHitCount,
+                        'claim_hit_count' => $hits['source_based'] + $hits['best_practice'],
+                        'source_based_claim_hit_count' => $hits['source_based'],
+                        'best_practice_claim_hit_count' => $hits['best_practice'],
                     ],
                 ];
             },
@@ -127,15 +139,23 @@ class RequirementWikiPageRanker
 
     /**
      * Purpose: Count, per page, how many approved/non-conflicting current-version claims match
-     * the query tokens — a supporting recall signal, never the primary one.
+     * the query tokens — a supporting recall signal, never the primary one. Split into a
+     * best_practice bucket and an "everything else" bucket so a best_practice-marked claim
+     * (recognized professional practice, not documented in the customer's own sources) can be
+     * weighted lower than any other claim — see SCORE_PER_CLAIM_HIT vs
+     * SCORE_PER_BEST_PRACTICE_CLAIM_HIT. This is a ranking recall signal only, not a citation
+     * decision, so unclassified/legacy claims are deliberately NOT excluded here the way the
+     * answer-grounding path (RequirementWikiResearchService::supportingClaimsByOrigin()) excludes
+     * them — surfacing a candidate page for a human researcher to read carries none of the risk
+     * that citing an unclassified claim as customer fact in a generated answer would.
      * Inputs: Customer id and query tokens.
-     * Returns: page_id => matching claim count.
+     * Returns: page_id => ['source_based' => count, 'best_practice' => count].
      * Side effects: None (single grouped-in-PHP query; claim text volume per customer is small
      *               enough that scoring in PHP, not SQL, keeps the matching logic identical to
      *               every other relevance computation in this subsystem).
      *
      * @param  list<string>  $queryTokens
-     * @return array<int, int>
+     * @return array<int, array{source_based: int, best_practice: int}>
      */
     private function claimHitCountsByPageId(int $customerId, array $queryTokens): array
     {
@@ -148,7 +168,7 @@ class RequirementWikiPageRanker
                 $query->where('is_current', true);
             })
             ->where('conflict_flag', false)
-            ->get(['id', 'enterprise_wiki_page_id', 'claim_text']);
+            ->get(['id', 'enterprise_wiki_page_id', 'claim_text', 'content_origin']);
 
         $counts = [];
 
@@ -159,10 +179,14 @@ class RequirementWikiPageRanker
             // Deliberately >=1, not the stricter >=2 bar used elsewhere: claims exist here purely
             // to widen recall for a page that title/heading/content search would otherwise miss —
             // a single distinctive shared term (e.g. one specific named process) is enough to
-            // surface it as a low-weight (SCORE_PER_CLAIM_HIT) candidate, never as the primary signal.
-            if ($overlapCount >= 1) {
-                $counts[$claim->enterprise_wiki_page_id] = ($counts[$claim->enterprise_wiki_page_id] ?? 0) + 1;
+            // surface it as a low-weight candidate, never as the primary signal.
+            if ($overlapCount < 1) {
+                continue;
             }
+
+            $counts[$claim->enterprise_wiki_page_id] ??= ['source_based' => 0, 'best_practice' => 0];
+            $bucket = $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE ? 'best_practice' : 'source_based';
+            $counts[$claim->enterprise_wiki_page_id][$bucket]++;
         }
 
         return $counts;

@@ -50,7 +50,7 @@ class RequirementWikiAnswerRevisionAiClient
      * Side effects: None (one OpenAI call).
      *
      * @param  list<array{key: string, heading: string, text: string, used_page_ids: list<int>, conflict_summary: string}>  $sectionsToRevise
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      * @return array<string, array{heading: string, text: string, used_page_ids: list<int>}>
      *
      * @throws RuntimeException on API error, empty response, invalid JSON, or a malformed schema result
@@ -126,7 +126,7 @@ class RequirementWikiAnswerRevisionAiClient
 
     /**
      * @param  list<array{key: string, heading: string, text: string, used_page_ids: list<int>, conflict_summary: string}>  $sectionsToRevise
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      */
     private function buildPayload(
         string $requirementIdentifier,
@@ -144,9 +144,14 @@ class RequirementWikiAnswerRevisionAiClient
                     $page['content_markdown'],
                 ];
 
-                if ($page['claim_texts'] !== []) {
-                    $lines[] = 'VERIFIED FACTS for this page:';
-                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['claim_texts']));
+                if ($page['source_based_claim_texts'] !== []) {
+                    $lines[] = 'SOURCE-DOCUMENTED FACTS for this page (documented in the customer\'s own sources):';
+                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['source_based_claim_texts']));
+                }
+
+                if ($page['best_practice_claim_texts'] !== []) {
+                    $lines[] = 'BEST-PRACTICE SUGGESTIONS for this page (NOT documented in the customer\'s own sources — never present as customer fact):';
+                    $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['best_practice_claim_texts']));
                 }
 
                 return implode("\n", $lines);
@@ -218,6 +223,7 @@ class RequirementWikiAnswerRevisionAiClient
             '- Use the Wiki pages as the sole source of truth for what is actually true about this vendor.',
             '- Fix ONLY the specific contradiction described in "WHAT IS WRONG" — do not rewrite unrelated parts of the section.',
             '- Preserve the section\'s professional quality, level of detail, and any best-practice content that is NOT part of the contradiction. Do not make the section generic, vague, or overly cautious.',
+            '- Keep SOURCE-DOCUMENTED FACTS and BEST-PRACTICE SUGGESTIONS visibly distinct in the corrected text: only SOURCE-DOCUMENTED FACTS may be phrased as an existing customer fact; BEST-PRACTICE SUGGESTIONS must stay phrased as a suggestion or recommendation.',
             '- Update used_page_ids to the page_ids that actually ground the corrected text (may be empty if the corrected content is best practice with no Wiki support).',
             '- Return every section you were given — using its exact key — even if, after review, only a small wording change was needed.',
             '',
