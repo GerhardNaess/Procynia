@@ -2255,8 +2255,8 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
             .catch(() => setRunPagesState((current) => ({ ...current, [runId]: { status: 'error', data: null } })));
     };
 
-    const fetchRunFindings = (runId) => {
-        setRunFindingsState((current) => ({ ...current, [runId]: { status: 'loading', data: null } }));
+    const fetchRunFindings = (runId, lintCount) => {
+        setRunFindingsState((current) => ({ ...current, [runId]: { status: 'loading', data: null, fetchedForLintCount: lintCount } }));
 
         fetch(`/app/wiki/runs/${runId}/findings`, {
             headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -2265,8 +2265,8 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             })
-            .then((data) => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'ready', data } })))
-            .catch(() => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'error', data: null } })));
+            .then((data) => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'ready', data, fetchedForLintCount: lintCount } })))
+            .catch(() => setRunFindingsState((current) => ({ ...current, [runId]: { status: 'error', data: null, fetchedForLintCount: lintCount } })));
     };
 
     const togglePanel = (run, panel, hasData) => {
@@ -2280,10 +2280,28 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
             fetchRunPages(run.id);
         }
 
-        if (nextPanel === 'findings' && !runFindingsState[run.id]) {
-            fetchRunFindings(run.id);
+        // Re-fetch whenever the row's own live lint_count (refreshed every 5s by the runs poll
+        // below while a run is active) has moved past what this panel was last fetched for — a
+        // findings panel opened early in a still-running run must never keep showing a stale
+        // snapshot from before verification/QA produced its real findings.
+        if (nextPanel === 'findings' && runFindingsState[run.id]?.fetchedForLintCount !== run.lint_count) {
+            fetchRunFindings(run.id, run.lint_count);
         }
     };
+
+    // Keeps an OPEN findings panel live: the runs poll refreshes run.lint_count every 5s while a
+    // run is active, but that alone never triggers fetchRunFindings (a separate fetch(), not an
+    // Inertia prop) — without this effect, a panel left open across a poll tick would keep
+    // rendering whatever snapshot it fetched on the last toggle, even as the row's own badge count
+    // moves on.
+    useEffect(() => {
+        runs.forEach((run) => {
+            if (expandedRuns[run.id] === 'findings' && runFindingsState[run.id]?.fetchedForLintCount !== run.lint_count) {
+                fetchRunFindings(run.id, run.lint_count);
+            }
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [runs]);
 
     return (
         <div className="space-y-4">
