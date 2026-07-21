@@ -163,6 +163,10 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             ['block_key' => 'block-0002', 'markdown' => 'Påstand navigert fra Kjøringer -> Funn.'],
         ]);
         $this->createRunPage($run, $page, $version);
+        // No deterministic_reason: a plain "not supported, no specific dimension flagged" verdict
+        // is still a genuine user-facing case under the v0.7 rule (unlike a claim flagged only by
+        // an internal comparison-mechanism signal such as modality_mismatch, which is excluded —
+        // see EnterpriseWikiBestPracticeSuggestionTest's dimension-mismatch tests).
         $claim = $this->createClaim($page, $version, 'Påstand navigert fra Kjøringer -> Funn.', [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             'generation_issue' => 'unsupported_generated_content',
@@ -170,7 +174,6 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'review_metadata' => [
                 'classification_basis' => 'semantic_verification',
                 'verdict' => 'not_supported',
-                'deterministic_reason' => 'modality_mismatch',
             ],
         ]);
         $this->createSourceReference($claim, $customer);

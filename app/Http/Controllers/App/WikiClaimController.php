@@ -82,6 +82,7 @@ class WikiClaimController extends Controller
         }
 
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
+        $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er godkjent.');
     }
@@ -104,7 +105,17 @@ class WikiClaimController extends Controller
             $validated['comment'] ?? null,
         );
 
+        // v0.7 binding quality-strategy rule: "avvis" on a best-practice addition means "fjern
+        // teksten" — the only two outcomes for text the system added beyond the source are keep
+        // (approve) or remove (reject). Strips the block's markdown from the live page; the
+        // decision itself (approval_status=rejected) is recorded regardless, above.
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            $this->removeBestPracticeText($claim);
+            $this->pageLinksService->materializeWikilinksForPage($page->fresh());
+        }
+
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
+        $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er avvist.');
     }
@@ -165,6 +176,69 @@ class WikiClaimController extends Controller
                 ]),
             ]);
         }
+    }
+
+    /**
+     * v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+     * v0.7", rule #4): several best-practice claims anchored to the same contiguous text block
+     * (content_block_key, same page version) are ONE user-facing case
+     * (EnterpriseWikiRunFindingsService::additionGroupKey()) — deciding the primary claim must
+     * decide the whole case, not leave siblings pending forever. Distinct from
+     * cascadeBestPracticeDecision() above, which cascades across PAGES via a shared
+     * canonical_fact_id; this cascades within the SAME block on the SAME page. Only the decision
+     * itself is cascaded, never the primary claim's edited/removed text — a sibling's own
+     * claim_text is left as-is (the block's markdown, which they all describe, already reflects
+     * whatever the primary claim's action did to it).
+     */
+    private function cascadeBlockDecision(EnterpriseWikiClaim $claim, int $userId, string $status, ?string $comment): void
+    {
+        if ($claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return;
+        }
+
+        $blockKey = trim((string) $claim->content_block_key);
+
+        if ($blockKey === '') {
+            return;
+        }
+
+        $siblings = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $claim->enterprise_wiki_page_version_id)
+            ->where('content_block_key', $blockKey)
+            ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)
+            ->where('id', '!=', $claim->id)
+            ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
+            ->get();
+
+        foreach ($siblings as $sibling) {
+            $this->storeDecision($sibling, $userId, $status, $comment);
+        }
+    }
+
+    /**
+     * v0.7 rule: "fjerne teksten" for a best-practice addition — blanks the shared block's
+     * markdown (EnterpriseWikiPageContentBlockService::replaceBlockMarkdown()), the same
+     * mechanism applyBestPracticeTextEdit() uses to rewrite it, just with an empty replacement.
+     * Show.jsx already filters blocks with empty markdown out of the rendered page, so this is
+     * enough to make the addition disappear — no separate "delete block" operation is needed.
+     * A silent no-op when the claim has no stable block anchor (nothing concrete to remove).
+     */
+    private function removeBestPracticeText(EnterpriseWikiClaim $claim): void
+    {
+        $blockKey = trim((string) $claim->content_block_key);
+
+        if ($blockKey === '') {
+            return;
+        }
+
+        $claim->loadMissing('version');
+        $version = $claim->version;
+
+        if ($version === null || (int) $version->id !== (int) $claim->enterprise_wiki_page_version_id) {
+            return;
+        }
+
+        $this->contentBlockService->replaceBlockMarkdown($version, $blockKey, '');
     }
 
     public function storeSourceReference(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse

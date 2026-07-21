@@ -124,6 +124,61 @@ class EnterpriseWikiClaimFindingExplainer
     }
 
     /**
+     * v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+     * v0.7"): the only user-facing question about a piece of AI-added text is "is this concrete
+     * text region supported by the source document" — never which internal comparison mechanism
+     * flagged it. This is the one, single-source-of-truth predicate every caller that decides
+     * whether a claim should become a user-facing case (EnterpriseWikiRunFindingsService) must
+     * use, so that decision can never drift from explain()'s own classification below.
+     *
+     * true for:
+     *   - any best_practice claim (by definition a deliberate addition beyond the source).
+     *   - an unsupported_generated_content claim whose verdict is a genuine "not confirmed by the
+     *     source" outcome — including a reused canonical fact already confirmed unsupported,
+     *     an AI-reported contradiction/partial support, or a plain not_supported verdict with no
+     *     specific dimension flagged.
+     *
+     * false for:
+     *   - internal_error (a technical linking/anchoring limitation, not content the system added).
+     *   - an unsupported_generated_content claim that was never actually checked against a
+     *     confidently identified source excerpt (technical uncertainty, mirrors
+     *     explainUnverifiedLink()).
+     *   - an unsupported_generated_content claim flagged by a deterministic dimension mismatch
+     *     (actor/modality/negation/scope/number/currency/subject — DETERMINISTIC_REASON_KEYS) or a
+     *     self-reported AI check dimension (SELF_REPORTED_CHECK_DIMENSIONS) — these are internal
+     *     verification-mechanism signals, proven unreliable in isolation (see the run-39
+     *     negation_mismatch false-positive fix), and stay diagnostic-only per the v0.7 rule.
+     */
+    public function isUserFacingAddition(EnterpriseWikiClaim $claim): bool
+    {
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return true;
+        }
+
+        if ($claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT) {
+            return false;
+        }
+
+        $meta = (array) ($claim->review_metadata ?? []);
+
+        if (! $this->hasVerifiedVerdict($meta)) {
+            return $this->explainReusedCanonicalFact($claim) !== null;
+        }
+
+        if (in_array($claim->generation_issue, ['claim_contradicted_by_source', 'claim_partially_supported'], true)) {
+            return true;
+        }
+
+        $deterministicReason = (string) ($meta['deterministic_reason'] ?? '');
+
+        if (in_array($deterministicReason, self::DETERMINISTIC_REASON_KEYS, true)) {
+            return false;
+        }
+
+        return $this->firstSelfReportedMismatch($meta) === null;
+    }
+
+    /**
      * The system's suggested blocking state for this claim, independent of any human override —
      * exactly the value a fresh claim would be shown with. Callers that need the EFFECTIVE
      * blocking state must combine this with EnterpriseWikiClaim::blocking_override themselves

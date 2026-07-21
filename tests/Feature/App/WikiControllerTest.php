@@ -4672,6 +4672,9 @@ class WikiControllerTest extends TestCase
         $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
         $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_OPEN);
         $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_INFO, EnterpriseWikiLintFinding::STATUS_RESOLVED);
+        // v0.7 binding quality-strategy rule: internal_error ("technical uncertainty") is never a
+        // user-facing case anymore (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.7") —
+        // this claim contributes 0 to the total, unlike before v0.7.
         $this->createClaimDefect($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
 
         $lintCountFromTab = null;
@@ -4684,9 +4687,9 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $this->assertSame(4, $response->json('summary.total'));
+        $this->assertSame(3, $response->json('summary.total'));
         $this->assertSame($lintCountFromTab, $response->json('summary.total'));
-        $this->assertCount(4, $response->json('findings'));
+        $this->assertCount(3, $response->json('findings'));
     }
 
     public function test_run_findings_returns_empty_list_for_run_without_findings(): void
@@ -5033,7 +5036,9 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konkret claim');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Hendelseshåndtering registrerer og prioriterer alle henvendelser.');
+        // No deterministic_reason: a plain "not supported, no specific dimension flagged" verdict
+        // is still a genuine user-facing case under the v0.7 rule.
+        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Hendelseshåndtering registrerer og prioriterer alle henvendelser.', deterministicReason: '');
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
@@ -5057,6 +5062,7 @@ class WikiControllerTest extends TestCase
             $doc,
             'Hendelseshåndtering registrerer og prioriterer alle henvendelser.',
             'Brukerstøtte håndterer registrering og prioritering av hendelser og forespørsler.',
+            deterministicReason: '',
         );
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
@@ -5070,8 +5076,13 @@ class WikiControllerTest extends TestCase
         );
     }
 
-    public function test_run_findings_actor_mismatch_shows_the_differing_claim_and_source_actors(): void
+    public function test_run_findings_actor_mismatch_is_never_a_user_facing_finding(): void
     {
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.7"): a claim flagged only by an internal comparison-mechanism signal (actor_mismatch)
+        // is never a user-facing case, however concrete its claim/source text. Supersedes the
+        // previous "shows the differing claim and source actors" expectation this test asserted
+        // before v0.7.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -5079,7 +5090,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Feil aktør');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createVerifiedContentDeviationClaim(
+        $claim = $this->createVerifiedContentDeviationClaim(
             $page,
             $version,
             $doc,
@@ -5091,17 +5102,13 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = $response->json('findings')[0];
-        // The concrete actor names ("Hendelseshåndtering" vs "Brukerstøtte") are visible via the
-        // claim text and source excerpt shown side by side — the explanation is not a substitute
-        // for either (CLAUDE.md).
-        $this->assertStringContainsString('Hendelseshåndtering', $finding['claim_text']);
-        $this->assertStringContainsString('Brukerstøtte', $finding['source_excerpts'][0]['excerpt']);
-        $this->assertNotEmpty($finding['explanation']);
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
     }
 
-    public function test_run_findings_modality_mismatch_shows_the_differing_claim_and_source_text(): void
+    public function test_run_findings_modality_mismatch_is_never_a_user_facing_finding(): void
     {
+        // v0.7 rule: same as actor_mismatch above — supersedes the previous "shows the differing
+        // claim and source text" expectation.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -5109,7 +5116,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sterkere enn kilden');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createVerifiedContentDeviationClaim(
+        $claim = $this->createVerifiedContentDeviationClaim(
             $page,
             $version,
             $doc,
@@ -5121,13 +5128,14 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = $response->json('findings')[0];
-        $this->assertStringContainsString('skal', $finding['claim_text']);
-        $this->assertStringContainsString('kan', $finding['source_excerpts'][0]['excerpt']);
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
     }
 
-    public function test_run_findings_negation_mismatch_shows_the_differing_claim_and_source_text(): void
+    public function test_run_findings_negation_mismatch_is_never_a_user_facing_finding(): void
     {
+        // v0.7 rule: same as actor_mismatch above — supersedes the previous "shows the differing
+        // claim and source text" expectation. This is the exact category the run-39 investigation
+        // proved unreliable (64 false positives), which directly motivated the v0.7 rule.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -5135,7 +5143,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Negasjonsavvik');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createVerifiedContentDeviationClaim(
+        $claim = $this->createVerifiedContentDeviationClaim(
             $page,
             $version,
             $doc,
@@ -5147,9 +5155,7 @@ class WikiControllerTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = $response->json('findings')[0];
-        $this->assertStringContainsString('varsler ikke', $finding['claim_text']);
-        $this->assertStringContainsString('varsler kunden', $finding['source_excerpts'][0]['excerpt']);
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
     }
 
     public function test_run_findings_missing_source_excerpt_gives_an_honest_fallback_flag(): void
@@ -5162,7 +5168,8 @@ class WikiControllerTest extends TestCase
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
         // Verified content deviation but no source reference at all — the UI must say so honestly
-        // rather than showing an empty area or a fabricated excerpt.
+        // rather than showing an empty area or a fabricated excerpt. No deterministic_reason: a
+        // plain "not supported" verdict remains a genuine user-facing case under the v0.7 rule.
         $this->createClaim($page, $version, 'Påstand uten kildeutdrag.', 0, [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             'generation_issue' => 'unsupported_generated_content',
@@ -5170,7 +5177,6 @@ class WikiControllerTest extends TestCase
             'review_metadata' => [
                 'classification_basis' => 'semantic_verification',
                 'verdict' => 'not_supported',
-                'deterministic_reason' => 'actor_mismatch',
             ],
         ]);
 
@@ -5191,7 +5197,9 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Avventer vurdering');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand uten beslutning.');
+        // No deterministic_reason: a plain "not supported" verdict remains a genuine user-facing
+        // case under the v0.7 rule.
+        $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand uten beslutning.', deterministicReason: '');
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
@@ -5215,7 +5223,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Bruker blokkerer');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand med beslutning.');
+        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand med beslutning.', deterministicReason: '');
         $claim->update(['blocking_override' => true]);
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
@@ -5236,7 +5244,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Bruker godkjenner avvik');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand godkjent som avvik.');
+        $claim = $this->createVerifiedContentDeviationClaim($page, $version, $doc, 'Påstand godkjent som avvik.', deterministicReason: '');
         $claim->update(['blocking_override' => false]);
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
@@ -5248,8 +5256,13 @@ class WikiControllerTest extends TestCase
         $this->assertFalse($finding['blocks_run']);
     }
 
-    public function test_run_findings_technical_uncertainty_never_requires_decision_or_blocks(): void
+    public function test_run_findings_technical_uncertainty_is_never_a_user_facing_finding(): void
     {
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.7"): internal_error ("technical uncertainty") never creates a user-facing case at
+        // all anymore — it's a system linking limitation, not content the system added.
+        // Supersedes the previous "shown as a non-blocking technical_uncertainty finding"
+        // expectation this test asserted before v0.7.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -5257,16 +5270,12 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Teknisk usikkerhet');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
-        $this->createClaimDefect($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
+        $claim = $this->createClaimDefect($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = $response->json('findings')[0];
-        $this->assertSame('technical_uncertainty', $finding['category']);
-        $this->assertSame('open', $finding['status']);
-        $this->assertFalse($finding['system_recommends_blocking']);
-        $this->assertFalse($finding['blocks_run']);
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
     }
 
     private function createVerifiedContentDeviationClaim(

@@ -759,15 +759,21 @@ class WikiController extends Controller
                     ->orWhere('code', EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK);
             });
 
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.7"): this is a fast preview count for the Kjøringer list row, deliberately
+        // approximating (not re-implementing) EnterpriseWikiClaimFindingExplainer::
+        // isUserFacingAddition() — the authoritative filter lives there and in
+        // EnterpriseWikiRunFindingsService, which the Funn detail panel actually uses. internal_error
+        // is excluded entirely (never user-facing); an unsupported_generated_content claim flagged
+        // only by an internal comparison-mechanism signal (deterministic_reason) is excluded too,
+        // so this badge count and the detail panel's count stay consistent for the common case.
         $claimDefectCountSub = DB::table('enterprise_wiki_claims as fdc')
             ->join('enterprise_wiki_page_versions as fdpv', 'fdpv.id', '=', 'fdc.enterprise_wiki_page_version_id')
             ->join('enterprise_wiki_ingest_run_pages as fdrp', 'fdrp.enterprise_wiki_page_id', '=', 'fdpv.enterprise_wiki_page_id')
             ->whereColumn('fdrp.enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
             ->where('fdpv.is_current', true)
-            ->whereIn('fdc.content_origin', [
-                EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
-                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
-            ])
+            ->where('fdc.content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
+            ->whereRaw("COALESCE(fdc.review_metadata->>'deterministic_reason', '') NOT IN ('actor_mismatch', 'modality_mismatch', 'negation_mismatch', 'scope_mismatch', 'number_mismatch', 'currency_mismatch', 'subject_mismatch')")
             ->selectRaw('count(*)');
 
         $query = EnterpriseWikiIngestRun::query()

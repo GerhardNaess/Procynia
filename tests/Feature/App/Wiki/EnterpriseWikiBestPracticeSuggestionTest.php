@@ -93,14 +93,16 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $this->assertSame(1, $response->json('summary.best_practice_pending'));
     }
 
-    public function test_verified_unsupported_generated_content_still_blocks(): void
+    public function test_deterministic_dimension_mismatch_is_never_a_user_facing_finding(): void
     {
-        // Stale-test fix: 'unsupported_generated_content' was never a valid finding category
-        // (EnterpriseWikiClaimFindingExplainer's categories are undocumented_or_incorrect_claim /
-        // possible_content_deviation / technical_uncertainty since 25a0055), and an unverified
-        // claim with no content_block_key/review_metadata no longer blocks by default since the
-        // run-39 fix (5c9d48c) — it is technical_uncertainty, not a confirmed defect. A claim that
-        // actually reached a semantic verdict is still a confirmed, blocking defect.
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat
+        // — v0.7"): a claim flagged only by an internal comparison-mechanism signal (here,
+        // actor_mismatch — proven unreliable in isolation by the run-39 negation_mismatch
+        // false-positive incident) is never a user-facing case anymore, regardless of how
+        // confidently it was "verified". It stays available as raw claim data for technical
+        // diagnostics, but must not appear in the Funn panel at all
+        // (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()). Supersedes the previous
+        // "still a confirmed, blocking defect" expectation this test asserted before v0.7.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -108,7 +110,7 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Udokumentert påstand');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version);
-        $this->createClaim($page, $version, 'Udokumentert faktapåstand.', 0, [
+        $claim = $this->createClaim($page, $version, 'Udokumentert faktapåstand.', 0, [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             'generation_issue' => 'unsupported_generated_content',
             'content_block_key' => 'block-0001',
@@ -122,17 +124,18 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = collect($response->json('findings'))->firstWhere('category', 'undocumented_or_incorrect_claim');
-        $this->assertNotNull($finding);
-        $this->assertSame('critical', $finding['severity']);
-        $this->assertTrue($finding['blocks_run']);
-        $this->assertSame(1, $response->json('summary.open_blocking'));
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
+        $this->assertSame(0, $response->json('summary.open_blocking'));
+        $this->assertSame(0, $response->json('summary.total'));
     }
 
-    public function test_internal_error_is_technical_uncertainty_and_does_not_block_by_default(): void
+    public function test_internal_error_is_never_a_user_facing_finding(): void
     {
-        // Stale-test fix: internal_error has been ALWAYS technical_uncertainty and non-blocking
-        // by default since ed42684 — 'internal_generation_error' was never a finding category.
+        // v0.7 binding quality-strategy rule: internal_error ("technical uncertainty" — a missing
+        // or ambiguous link between the claim, its text block, and a source paragraph) is a
+        // system limitation, not content the system added — it must never create a user-facing
+        // case (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.7"). Supersedes the
+        // previous "shown as a non-blocking technical_uncertainty finding" expectation.
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $doc = $this->createDocument($customer);
@@ -140,18 +143,16 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Intern feil');
         $version = $this->createVersion($page, true);
         $this->createRunPage($run, $page, $version);
-        $this->createClaim($page, $version, 'Intern genereringsfeil.', 0, [
+        $claim = $this->createClaim($page, $version, 'Intern genereringsfeil.', 0, [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
         ]);
 
         $response = $this->actingAs($user)->getJson("/app/wiki/runs/{$run->id}/findings");
 
         $response->assertOk();
-        $finding = collect($response->json('findings'))->firstWhere('category', 'technical_uncertainty');
-        $this->assertNotNull($finding);
-        $this->assertSame('warning', $finding['severity']);
-        $this->assertFalse($finding['blocks_run']);
+        $this->assertNull(collect($response->json('findings'))->firstWhere('claim_id', $claim->id));
         $this->assertSame(0, $response->json('summary.open_blocking'));
+        $this->assertSame(0, $response->json('summary.total'));
     }
 
     // =========================================================================

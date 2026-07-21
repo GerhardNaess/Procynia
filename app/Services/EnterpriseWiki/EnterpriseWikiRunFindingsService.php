@@ -101,12 +101,31 @@ class EnterpriseWikiRunFindingsService
             $items[] = $this->normalizeLintFinding($finding, $pagesById, $currentVersionIdByPageId, $user, $includeTechnical);
         }
 
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.7"): an internal_error claim, or an unsupported_generated_content claim flagged only
+        // by an internal comparison-mechanism signal (deterministic dimension mismatch, a
+        // self-reported AI check mismatch, or "never actually checked" technical uncertainty), is
+        // never a user-facing case — see EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()
+        // for the single-source-of-truth predicate. It stays available as raw claim data for
+        // technical diagnostics, just never surfaces here.
         foreach ($claimDefects as $claim) {
+            if (! $this->claimFindingExplainer->isUserFacingAddition($claim)) {
+                continue;
+            }
+
             $items[] = $this->normalizeClaimDefect($claim, $pagesById, $user, $includeTechnical);
         }
 
-        foreach ($bestPracticeSuggestions as $claim) {
-            $items[] = $this->normalizeBestPracticeSuggestion($claim, $pagesById, $user, $includeTechnical);
+        // Grouped by (page, content_block_key) — several best-practice claims anchored to the
+        // same contiguous text block are ONE user-facing case, never one per claim (v0.7 rule
+        // #4). A claim with no stable block anchor falls back to its own claim id as the group
+        // key, so it is never incorrectly merged with an unrelated claim.
+        $bestPracticeGroups = $bestPracticeSuggestions->groupBy(
+            fn (EnterpriseWikiClaim $claim): string => $this->additionGroupKey($claim),
+        );
+
+        foreach ($bestPracticeGroups as $groupClaims) {
+            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $user, $includeTechnical);
         }
 
         usort($items, $this->sortComparator());
@@ -332,33 +351,46 @@ class EnterpriseWikiRunFindingsService
      * A best-practice suggestion is never a defect — it is a deliberate recommendation beyond
      * the source document, always neutral severity, never blocking, with its own approve/edit-
      * and-approve/reject workflow (WikiClaimController), never the QA/repair path (2). The
-     * "Åpne og vurder" link uses the exact same ?claim_id= deep link as everything else on this
+     * "Gå til tekst" link uses the exact same ?claim_id= deep link as everything else on this
      * panel, but WikiController::show() resolves it into a validated review_reference that scrolls
      * to and highlights the actual suggested text block, not just the top of the page.
      *
+     * v0.7 rule #4: several claims anchored to the same content_block_key are ONE case, not one
+     * per claim — $claims is every claim in the group (usually exactly one). The PRIMARY claim
+     * (lowest position_order, then lowest id — the same tie-break WikiClaimController's cascade
+     * uses) drives title/url/claim_id; the group's status is "still pending" as long as ANY claim
+     * in it is undecided (WikiClaimController::cascadeBlockDecision() keeps siblings in sync when
+     * a decision is recorded, so this is normally never observed mid-way, but the aggregate check
+     * is the honest source of truth regardless of whether the cascade ran).
+     *
+     * @param  Collection<int, EnterpriseWikiClaim>  $claims
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
      */
     private function normalizeBestPracticeSuggestion(
-        EnterpriseWikiClaim $claim,
+        Collection $claims,
         Collection $pagesById,
         ?User $user,
         bool $includeTechnical,
     ): array {
-        $page = $pagesById->get($claim->enterprise_wiki_page_id);
-        $editedBeforeApproval = (bool) data_get($claim->review_metadata, 'edited_before_approval', false);
+        $primary = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
+        )->first();
+
+        $page = $pagesById->get($primary->enterprise_wiki_page_id);
+        $editedBeforeApproval = (bool) data_get($primary->review_metadata, 'edited_before_approval', false);
+        $anyPending = $claims->contains(fn (EnterpriseWikiClaim $c): bool => $c->isPending());
 
         $status = match (true) {
-            $claim->isPending() => 'pending_review',
-            $claim->isApproved() && $editedBeforeApproval => 'approved_edited',
-            $claim->isApproved() => 'approved',
+            $anyPending => 'pending_review',
+            $primary->isApproved() && $editedBeforeApproval => 'approved_edited',
+            $primary->isApproved() => 'approved',
             default => 'rejected',
         };
 
         $isPending = $status === 'pending_review';
         $canHandle = $isPending && $user instanceof User
-            && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
+            && $this->documentOwnerApprovalService->canHandleClaim($primary, $user, $primary->version);
 
-        $url = $this->pageUrl($page, $claim->id);
+        $url = $this->pageUrl($page, $primary->id);
         $action = match (true) {
             $url === null => null,
             $isPending => $canHandle ? 'open_and_review' : 'view_page',
@@ -366,9 +398,9 @@ class EnterpriseWikiRunFindingsService
         };
 
         $item = [
-            'id' => 'best-practice-'.$claim->id,
-            'title' => $claim->claim_text,
-            'explanation' => (string) ($claim->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
+            'id' => 'best-practice-'.$primary->id,
+            'title' => $primary->claim_text,
+            'explanation' => (string) ($primary->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
             'category' => 'best_practice_suggestion',
             'category_label' => __('procynia.wiki.runs_findings_best_practice_category'),
             'severity' => 'suggestion',
@@ -380,12 +412,13 @@ class EnterpriseWikiRunFindingsService
             'scope' => $page !== null ? 'page' : 'run',
             'page_id' => $page?->id,
             'page_title' => $page?->title,
-            'page_version_id' => $claim->enterprise_wiki_page_version_id,
-            'page_version_number' => $claim->version?->version_number,
-            'claim_id' => $claim->id,
-            'created_at' => $claim->created_at?->toIso8601String(),
-            'resolved_at' => $claim->approved_at?->toIso8601String(),
-            'decided_by_name' => $claim->approvedBy?->name,
+            'page_version_id' => $primary->enterprise_wiki_page_version_id,
+            'page_version_number' => $primary->version?->version_number,
+            'claim_id' => $primary->id,
+            'claim_count' => $claims->count(),
+            'created_at' => $primary->created_at?->toIso8601String(),
+            'resolved_at' => $primary->approved_at?->toIso8601String(),
+            'decided_by_name' => $primary->approvedBy?->name,
             'url' => $url,
             'can_handle' => $canHandle,
             'action' => $action,
@@ -397,11 +430,27 @@ class EnterpriseWikiRunFindingsService
                 'source' => 'best_practice_suggestion',
                 'code' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
                 'raw_severity' => null,
-                'raw_status' => $claim->approval_status,
+                'raw_status' => $primary->approval_status,
+                'claim_ids' => $claims->pluck('id')->all(),
             ];
         }
 
         return $item;
+    }
+
+    /**
+     * Grouping key for v0.7 rule #4 — several claims anchored to the same contiguous text block
+     * (content_block_key) on the same page version are one case. A claim with no stable block
+     * anchor (content_block_key empty/null) falls back to its own claim id, so it is never
+     * incorrectly merged with an unrelated claim that also happens to lack one.
+     */
+    private function additionGroupKey(EnterpriseWikiClaim $claim): string
+    {
+        $blockKey = trim((string) $claim->content_block_key);
+
+        return $blockKey !== ''
+            ? $claim->enterprise_wiki_page_version_id.'|'.$blockKey
+            : 'claim-'.$claim->id;
     }
 
     private function pageUrl(?EnterpriseWikiPage $page, ?int $claimId): ?string
