@@ -298,12 +298,19 @@ export default function WikiShow({
     const targetClaimId = reviewReference?.status === 'ready' ? String(reviewReference.claim_id) : null;
     const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
     const backHref = reviewReference?.back_url ?? '/app/wiki?tab=runs';
-    const hasVerificationContent = claims.length > 0 || lintFindings.length > 0;
+    const hasFocusedReview = targetBlockKey !== null;
+    const focusedReviewClaims = hasFocusedReview
+        ? claims.filter((claim) => String(claim.content_block_key ?? '') === String(targetBlockKey))
+        : [];
+    const verificationClaims = hasFocusedReview
+        ? claims.filter((claim) => String(claim.content_block_key ?? '') !== String(targetBlockKey))
+        : claims;
+    const hasVerificationContent = verificationClaims.length > 0 || lintFindings.length > 0;
 
     const [processing, setProcessing] = useState(null);
-    const [verificationOpen, setVerificationOpen] = useState(Boolean(targetClaimId) || hasVerificationContent);
-    const [verifiedClaimsOpen, setVerifiedClaimsOpen] = useState(Boolean(targetClaimId));
-    const [structuralFindingsOpen, setStructuralFindingsOpen] = useState(Boolean(targetClaimId));
+    const [verificationOpen, setVerificationOpen] = useState(hasVerificationContent && !hasFocusedReview);
+    const [verifiedClaimsOpen, setVerifiedClaimsOpen] = useState(!hasFocusedReview && Boolean(targetClaimId));
+    const [structuralFindingsOpen, setStructuralFindingsOpen] = useState(!hasFocusedReview && Boolean(targetClaimId));
     const [claimProcessing, setClaimProcessing] = useState(null);
     const [claimSourceDrafts, setClaimSourceDrafts] = useState({});
     const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
@@ -317,7 +324,7 @@ export default function WikiShow({
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
 
     useEffect(() => {
-        if (!targetClaimId) {
+        if (!targetClaimId || hasFocusedReview) {
             return undefined;
         }
 
@@ -337,7 +344,7 @@ export default function WikiShow({
         });
 
         return () => window.cancelAnimationFrame(frame);
-    }, [targetClaimId, page.slug, claims.length, verificationOpen, verifiedClaimsOpen, structuralFindingsOpen]);
+    }, [targetClaimId, hasFocusedReview, page.slug, claims.length, verificationOpen, verifiedClaimsOpen, structuralFindingsOpen]);
 
     useEffect(() => {
         if (!targetBlockKey) {
@@ -352,6 +359,7 @@ export default function WikiShow({
 
         const frame = window.requestAnimationFrame(() => {
             targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            targetElement.focus({ preventScroll: true });
         });
 
         return () => window.cancelAnimationFrame(frame);
@@ -359,7 +367,7 @@ export default function WikiShow({
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
-    const openClaims = claims.filter((claim) => (
+    const openClaims = verificationClaims.filter((claim) => (
         claim.approval_status === 'pending'
         && (
             claim.content_origin === 'best_practice'
@@ -370,7 +378,7 @@ export default function WikiShow({
             || claim.source_status === 'missing_excerpt'
         )
     ));
-    const verifiedClaims = claims.filter((claim) => !openClaims.includes(claim));
+    const verifiedClaims = verificationClaims.filter((claim) => !openClaims.includes(claim));
 
     const sendAction = (action) => {
         if (processing) return;
@@ -654,7 +662,8 @@ export default function WikiShow({
         }[claim.source_status] ?? '');
     };
 
-    const renderClaimCard = (claim, group) => {
+    const renderClaimCard = (claim, group, options = {}) => {
+        const { showClaimText = true } = options;
         const isOpenGroup = group === 'open';
         const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
         const isPendingDecision = claim.approval_status === 'pending';
@@ -694,12 +703,14 @@ export default function WikiShow({
                 key={claim.id}
                 id={`claim-${claim.id}`}
                 tabIndex={-1}
-                className={`scroll-mt-24 rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)] ${String(claim.id) === targetClaimId ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white' : ''}`}
+                className={`scroll-mt-24 rounded-[18px] border ${showClaimText ? 'border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]' : 'border-violet-100 bg-white/95 p-4 shadow-sm'}`}
             >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                        <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
-                        {claim.page_excerpt && claim.page_excerpt !== claim.claim_text && (
+                        {showClaimText && (
+                            <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                        )}
+                        {showClaimText && claim.page_excerpt && claim.page_excerpt !== claim.claim_text && (
                             <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
                                 {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {claim.page_excerpt}
                             </p>
@@ -1453,11 +1464,31 @@ export default function WikiShow({
                                                 key={block.block_key}
                                                 id={`wiki-block-${block.block_key}`}
                                                 data-block-key={block.block_key}
+                                                tabIndex={-1}
                                                 className={isTargetBlock
                                                     ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
                                                     : undefined}
                                             >
                                                 <ReactMarkdown components={{ a: WikiArticleLink }}>{block.markdown}</ReactMarkdown>
+                                                {isTargetBlock && focusedReviewClaims.length > 0 && (
+                                                    <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                                        <div className="space-y-1">
+                                                            <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                                                                {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
+                                                            </p>
+                                                            <p className="text-sm text-slate-600">
+                                                                {tw.review_reference_inline_subtitle ?? 'Handlingene under gjelder teksten over.'}
+                                                            </p>
+                                                        </div>
+                                                        <div className="mt-4 space-y-3">
+                                                            {focusedReviewClaims.map((claim) => renderClaimCard(
+                                                                claim,
+                                                                claim.approval_status === 'pending' ? 'open' : 'verified',
+                                                                { showClaimText: false },
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })
