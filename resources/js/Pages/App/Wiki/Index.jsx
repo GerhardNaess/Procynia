@@ -6,6 +6,11 @@ import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     getWikiQualityCheckCopy,
 } from './wikiQualityChecks';
+import {
+    RUN_TIMELINE_STEPS,
+    matchesFindingsLocalFilter,
+    getRunTimelineState,
+} from './runFindingsLogic';
 
 function formatDate(value, locale) {
     if (!value) return '—';
@@ -150,16 +155,6 @@ const ACTIVE_WIKI_RUN_STATUSES = [
     'awaiting_document_owner_approval',
 ];
 
-const RUN_TIMELINE_STEPS = [
-    { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
-    { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
-    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Anvendelse' },
-    { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
-    { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
-    { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },
-    { key: 'awaiting_document_owner_approval', labelKey: 'ingest_timeline_owner_approval', fallback: 'Dokumenteier' },
-];
-
 function isActiveWikiRun(run) {
     return !!run && ACTIVE_WIKI_RUN_STATUSES.includes(run.status);
 }
@@ -271,41 +266,6 @@ function getIngestActivityCopy(run, tw) {
         detail: run.status,
         tone: 'waiting',
     };
-}
-
-function getRunTimelineState(run, stepIndex) {
-    if (!run) return 'empty';
-    if (run.status === 'decision_only') {
-        return stepIndex === 0 ? 'done' : 'empty';
-    }
-
-    const currentIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === run.status
-        || (step.key === 'queued' && ['queued', 'running', 'sections_planned'].includes(run.status))
-        || (step.key === 'generating_pages' && run.status === 'generating_concept_entity_pages'));
-
-    if (run.status === 'completed') {
-        return 'done';
-    }
-
-    if (run.status === 'failed' || run.status === 'escalated') {
-        if (currentIndex === -1) {
-            return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'error';
-        }
-        if (stepIndex < currentIndex) return 'done';
-        if (stepIndex === currentIndex) return 'error';
-        return 'empty';
-    }
-
-    if (run.status === 'awaiting_document_owner_approval') {
-        return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'waiting';
-    }
-
-    if (currentIndex === -1) return 'empty';
-    if (stepIndex < currentIndex) return 'done';
-    if (stepIndex === currentIndex) {
-        return run.status === 'queued' ? 'waiting' : 'active';
-    }
-    return 'empty';
 }
 
 function RunTimeline({ run, tw }) {
@@ -2766,21 +2726,6 @@ function findingsLocalFilterLabel(filterKey, tw) {
         resolved: tw.runs_findings_filter_resolved ?? 'Løst',
         informative: tw.runs_findings_filter_informative ?? 'Informasjon',
     }[filterKey] ?? filterKey;
-}
-
-function matchesFindingsLocalFilter(finding, filterKey) {
-    switch (filterKey) {
-        case 'open':
-            return finding.status === 'requires_action' || finding.status === 'open' || finding.status === 'pending_review';
-        case 'blocking':
-            return finding.blocks_run;
-        case 'resolved':
-            return finding.status === 'resolved' || finding.status === 'approved' || finding.status === 'approved_edited' || finding.status === 'rejected';
-        case 'informative':
-            return finding.status === 'informative' || finding.status === 'superseded';
-        default:
-            return true;
-    }
 }
 
 /**

@@ -728,60 +728,8 @@ class WikiController extends Controller
         $runSrc = is_numeric($request->query('run_src'))
             ? (int) $request->query('run_src') : null;
 
-        // Kjøringer "Funn" — definition change (documented, see loadRunsTab()'s row map below):
-        // the column used to count only OPEN enterprise_wiki_lint_findings rows. It now counts
-        // every finding a user could ever see in the new detail panel — every lint finding
-        // status (open+resolved), PLUS live claim-integrity defects (internal_error/
-        // unsupported_generated_content claims on the run's pages' CURRENT versions), which
-        // previously had no visible "Funn" representation at all even though they are exactly
-        // what keeps qa_status from reaching "passed" — see
-        // EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(). This keeps the
-        // invariant "Funn-tallet = totalt antall elementer i detaljlisten" true against
-        // EnterpriseWikiRunFindingsService, which the new GET .../findings endpoint uses. A
-        // source_based claim missing its source reference is NOT folded in a second time here —
-        // EnterpriseWikiAppliedRunLintService already writes a real CODE_CLAIM_MISSING_SOURCE
-        // lint finding for that, so it is already counted once via $lintTotalSub.
-        $lintTotalSub = DB::table('enterprise_wiki_lint_findings')
-            ->selectRaw('count(*)')
-            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id');
-
-        $lintOpenSub = DB::table('enterprise_wiki_lint_findings')
-            ->selectRaw('count(*)')
-            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
-            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
-
-        $lintOpenBlockingSub = DB::table('enterprise_wiki_lint_findings')
-            ->selectRaw('count(*)')
-            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
-            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->where(function ($q): void {
-                $q->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)
-                    ->orWhere('code', EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK);
-            });
-
-        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
-        // v0.7"): this is a fast preview count for the Kjøringer list row, deliberately
-        // approximating (not re-implementing) EnterpriseWikiClaimFindingExplainer::
-        // isUserFacingAddition() — the authoritative filter lives there and in
-        // EnterpriseWikiRunFindingsService, which the Funn detail panel actually uses. internal_error
-        // is excluded entirely (never user-facing); an unsupported_generated_content claim flagged
-        // only by an internal comparison-mechanism signal (deterministic_reason) is excluded too,
-        // so this badge count and the detail panel's count stay consistent for the common case.
-        $claimDefectCountSub = DB::table('enterprise_wiki_claims as fdc')
-            ->join('enterprise_wiki_page_versions as fdpv', 'fdpv.id', '=', 'fdc.enterprise_wiki_page_version_id')
-            ->join('enterprise_wiki_ingest_run_pages as fdrp', 'fdrp.enterprise_wiki_page_id', '=', 'fdpv.enterprise_wiki_page_id')
-            ->whereColumn('fdrp.enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
-            ->where('fdpv.is_current', true)
-            ->where('fdc.content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->whereRaw("COALESCE(fdc.review_metadata->>'deterministic_reason', '') NOT IN ('actor_mismatch', 'modality_mismatch', 'negation_mismatch', 'scope_mismatch', 'number_mismatch', 'currency_mismatch', 'subject_mismatch')")
-            ->selectRaw('count(*)');
-
         $query = EnterpriseWikiIngestRun::query()
             ->select('enterprise_wiki_ingest_runs.*')
-            ->selectSub($lintTotalSub, 'lint_total_count')
-            ->selectSub($lintOpenSub, 'lint_open_count')
-            ->selectSub($lintOpenBlockingSub, 'lint_open_blocking_count')
-            ->selectSub($claimDefectCountSub, 'claim_defect_count')
             ->withCount(['sections', 'pages'])
             ->where('enterprise_wiki_ingest_runs.customer_id', $customerId)
             ->where('enterprise_wiki_ingest_runs.source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
@@ -813,14 +761,18 @@ class WikiController extends Controller
             : collect();
 
         return [
+            // Kjøringer "Funn" — sourced from the exact same canonical collection the detail
+            // panel uses (EnterpriseWikiRunFindingsService::buildForRun()), never a second,
+            // hand-rolled approximation. A prior version of this method re-implemented
+            // EnterpriseWikiClaimFindingExplainer::isUserFacingAddition() as raw SQL, which only
+            // replicated its deterministic_reason check — it silently missed the "never reached a
+            // verdict" and "self-reported check mismatch" exclusions, so the badge could show far
+            // more than the panel (e.g. 17 vs 1). Calling buildForRun() per row costs a handful of
+            // extra indexed queries per run instead of one batched subquery, but guarantees the
+            // badge and the panel can never drift apart again — see
+            // EnterpriseWikiRunFindingsConsistencyTest.
             'runs' => $runs->map(function (EnterpriseWikiIngestRun $run) use ($docsById, $user) {
-                $lintTotal = (int) ($run->lint_total_count ?? 0);
-                $lintOpen = (int) ($run->lint_open_count ?? 0);
-                $lintOpenBlocking = (int) ($run->lint_open_blocking_count ?? 0);
-                $claimDefects = (int) ($run->claim_defect_count ?? 0);
-
-                $findingsOpenBlocking = $lintOpenBlocking + $claimDefects;
-                $findingsOpenNonBlocking = max(0, $lintOpen - $lintOpenBlocking);
+                $summary = $this->runFindingsService->buildForRun($run, $user, false)['summary'];
 
                 /** @var EnterpriseWikiDocument|null $document */
                 $document = $docsById->get($run->source_id);
@@ -844,9 +796,9 @@ class WikiController extends Controller
                     'output_tokens' => $run->output_tokens,
                     'pages_count' => (int) ($run->pages_count ?? 0),
                     'sections_count' => (int) ($run->sections_count ?? 0),
-                    'lint_count' => $lintTotal + $claimDefects,
-                    'findings_open_blocking_count' => $findingsOpenBlocking,
-                    'findings_open_non_blocking_count' => $findingsOpenNonBlocking,
+                    'lint_count' => $summary['total'],
+                    'findings_open_blocking_count' => $summary['open_blocking'],
+                    'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'created_at' => $run->created_at,
                     'started_at' => $run->started_at,
                     'finished_at' => $run->finished_at,
