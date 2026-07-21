@@ -566,9 +566,23 @@ class EnterpriseWikiPostIngestQaService
             $defects[] = 'active_internal_error_claims';
         }
 
+        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.7"): an internal comparison-mechanism signal alone (negation/modality/actor/scope/
+        // subject mismatch, or a self-reported AI check mismatch) must never set a run to
+        // repair_required by itself — only a genuine, user-facing "not confirmed by source" case
+        // (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()) does. An authorized user's
+        // explicit blocking_override = true is a real human decision, not a hidden classification,
+        // and still counts regardless of category.
         $hasBlockingUnsupported = $claimIntegrityClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blockingState($claim)['blocks_gate']);
+            ->contains(function (EnterpriseWikiClaim $claim): bool {
+                if ($claim->blocking_override === true) {
+                    return true;
+                }
+
+                return $this->claimFindingExplainer->isUserFacingAddition($claim)
+                    && $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
+            });
 
         if ($hasBlockingUnsupported) {
             $defects[] = 'active_unsupported_generated_content_claims';

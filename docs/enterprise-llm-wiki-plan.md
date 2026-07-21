@@ -1,6 +1,6 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.20
+Versjon: 0.21
 Dato: 2026-07-21
 Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Neste planlagt: Fase 9 — Wiki-svar på eksisterende ekstraherte krav — produktbeslutning tatt 2026-07-13, ikke implementert**
 
@@ -13,6 +13,8 @@ Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 
 > **Lenkekorrigering (v0.6, 2026-07-11):** Runtimeflyten kan nå faktisk gjennomføres og generere article, summary, concept og entity (Responses API-herding `fa01995` + staged page-generation queues `b6ccd87`). Men genererte sider er i dag isolerte artikler uten inline `[[wikilinks]]` i brødteksten. `EnterpriseWikiPageLink` (Fase 8E-16) bygges i dag som en mekanisk kombinasjon av alle page-type-par i en run — ikke avledet fra faktiske lenker i innholdet — og grafen (8E-19/8E-20) viser derfor nodes uten reelle kanter. Dette er et brudd på Karpathy Wiki-premisset: Wikien vedlikeholdes ikke som et sammenhengende kunnskapsnettverk. **Sidegenerering alene er ikke det samme som en Wiki.** Se det dedikerte arkitekturnotatet rett under, §4.10–4.11 og Fase 8I for korrigert modell og videre arbeid.
 >
 > **Kvalitetsstrategikorrigering (v0.7, 2026-07-21):** Procynia har lov til å bruke beste praksis og tilføre nyttig tekst utover kildedokumentet. Det eneste brukeren skal varsles om er konkrete tekstområder systemet har lagt til som ikke kan støttes av kilden — aldri interne verifiseringskategorier (negasjon, modalitet, aktør, scope, teknisk usikkerhet). Denne regelen er bindende og overstyrer tidligere claim-/verifiseringsspråk der de er i konflikt. Se det dedikerte arkitekturnotatet ved slutten av dokumentet (rett før «Produksjonsaktivering») for full presisering. Gjelder nye dokumentimporter — eksisterende kjøringer migreres ikke.
+>
+> **Presisering (v0.8, 2026-07-21):** v0.7 gjør interne verifiseringssignaler usynlige som *brukersaker* — det betyr ikke at claims som datastruktur er mindre viktige. Claims er og forblir Procynias atomære, maskinlesbare kunnskapslag: semantiske relasjoner, wikilenker, kunnskapsgraf, begreper/enheter, Wiki-søk og Wiki-baserte svar, med sporbarhet til claim/tekstblokk/sideversjon/kilde og grunnlagstype (`source_based`/`best_practice`/`mixed`). Claims skal aldri fjernes, deaktiveres eller reduseres til kun en verifiseringsmekanisme. Samtidig er QA-portvakten rettet: et internt signal (negasjon/modalitet/aktør/scope/subjekt-avvik, teknisk usikkerhet) skal aldri alene sette en kjøring til `repair_required` — kun en reell brukersak eller en eksplisitt menneskelig blokkeringsbeslutning gjør det. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
 
 ## Arkitekturnotat — v0.6 kurskorrigering: Karpathy-lenking og inkrementelt vedlikehold
 
@@ -829,6 +831,8 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 19. **Automatisk re-ingest** — Skal wiki-sider automatisk trigge ny generering når kildeversjon oppdateres, eller kun manuelt i pilot?
 
 20. **Konflikthåndtering** — Når `conflict_flag = true`: skal brukeren løse konflikten manuelt, eller skal AI foreslå sammenslåing?
+
+21. **RequirementWiki*-tjenestenes claim-opphavsfiltrering (identifisert v0.8, 2026-07-21)** — `RequirementWikiResearchService`, `RequirementWikiAnswerService` og `RequirementWikiPageRanker` leser i dag `EnterpriseWikiClaim` uten å filtrere på `content_origin`, slik at `best_practice`/`unsupported_generated_content`-claims brukes identisk med `source_based`-claims som grunnlag for genererte Wiki-svar. Fantes før v0.7/v0.8 og er ikke rettet — se v0.8-notatet over. Bør avklares: skal disse tjenestene skille grunnlagstype eksplisitt i svaret (f.eks. markere hvilke deler som er beste praksis vs. dokumentert), og hvordan uten en større ombygging av de 3 AI-vendte tjenestene?
 
 ---
 
@@ -2778,6 +2782,30 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 7. Denne regelen gjelder implementasjonsmessig kun **nye** dokumentimporter etter at den er implementert — eksisterende kjøringer og sider migreres ikke, og regenereres ikke, som en konsekvens av denne presiseringen alene.
 
 **Teknisk implementasjon:** gjenbruker eksisterende `content_blocks_json`/`content_block_key`/`source_elements`, eksisterende `EnterpriseWikiClaim.content_origin` (`best_practice`/`unsupported_generated_content`), eksisterende godkjenn/rediger/avvis-flyt (`WikiClaimController`), og eksisterende Kjøringer→Funn-panel (`EnterpriseWikiRunFindingsService`) — se `EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()` for det ene, sentrale filteret som avgjør hva som er en brukersak versus en intern diagnostikk-detalj. Ingen ny claim- eller markeringsmodell er innført.
+
+## Arkitekturnotat — v0.8: claims som obligatorisk aktiv kunnskapsstruktur (2026-07-21)
+
+**Bindende presisering, som en direkte konsekvens av v0.7 (og for å hindre en feillesning av den):** v0.7 gjorde negasjon/modalitet/aktør/scope/subjekt-avvik og teknisk usikkerhet usynlige som *brukersaker*. Dette må aldri leses som at claims som datastruktur er mindre viktige, kan fjernes, eller reduseres til bare en verifiseringsmekanisme.
+
+**Bindende regel:**
+
+> Claims skal beholdes og brukes aktivt som Procynias atomære, maskinlesbare kunnskapslag. De brukes til semantiske relasjoner mellom Wiki-sider, wikilenker og kunnskapsgraf, begreper/enheter/roller/prosesser/systemer, avhengigheter/eierskap/rekkefølge/årsak–virkning, Wiki-søk og Wiki-baserte svar, og forklarbarhet/proveniens for relasjoner. En relasjon skal så langt mulig kunne spores til: claim(s), `content_block_key`, sideversjon, kildedokument og `source_elements`, og grunnlagstype (`source_based`, `best_practice` eller `mixed`). Beste-praksis-claims og -relasjoner er tillatt, men skal aldri fremstilles som dokumentert kundefakta. Claims skal ikke fjernes, deaktiveres eller reduseres til kun en verifiseringsmekanisme.
+
+**Kartlegging (read-only, 2026-07-21) — hva som faktisk bruker claims i dag:**
+
+| Prosess | Bruker claims? | Detaljer |
+|---|---|---|
+| Wikilink-materialisering (`EnterpriseWikiBuildPageLinksService`, `EnterpriseWikiLinkParser`/`Resolver`) | **Nei** | Jobber utelukkende mot `content_markdown`/`[[wikilinks]]`. Ingen claim-referanse i noen av disse filene. |
+| Kunnskapsgraf (`EnterpriseWikiGraphDataService`, `EnterpriseWikiPageTraversalService`) | Delvis | Claims brukes kun som et visnings-metrikk (`claim_count` per node) — kanter kommer utelukkende fra `EnterpriseWikiPageLink` (`link_type=wikilink`). |
+| Begrep/entitet-relasjonsbygging | **Nei** | Ingen dedikert tjeneste bygger begrep-/entitet-/rolle-relasjoner fra claims i dag. |
+| Wiki-side-liste/søk (`WikiController::loadPagesTab()`) | Delvis | Kun `withCount('claims')` for visningsbadges — ingen filtrering, ingen rangeringsrolle. |
+| Wiki-baserte svar (Fase 9, `RequirementWikiResearchService`, `RequirementWikiAnswerService`, `RequirementWikiPageRanker`) | **Ja** | Disse 3 av 11 `RequirementWiki*`-tjenestene leser faktisk `EnterpriseWikiClaim` (støtteclaims, claim-tekst til AI-svar, claim-hit-count for rangering). |
+
+**Påvirket av commit 39d62c3?** Nei. 39d62c3 endret kun `EnterpriseWikiRunFindingsService` (Kjøringer→Funn-visning) og la til `EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()`. Ingen av prosessene i tabellen over kaller noen av disse to — bekreftet ved kildekodesøk. Claims-tabellen (`enterprise_wiki_claims`) og alle rader i den er urørt av 39d62c3. Det finnes derfor intet konkret gap forårsaket av 39d62c3 å rette i relasjonsbyggingen.
+
+**Kjent, forhåndseksisterende gap (ikke forårsaket av 39d62c3, ikke rettet i denne oppgaven):** De 3 `RequirementWiki*`-tjenestene som faktisk bruker claims i Wiki-svar, filtrerer i dag **ikke** på `content_origin` — en `best_practice`- eller `unsupported_generated_content`-claim brukes identisk med en `source_based`-claim som grunnlag for et generert svar. Dette er i spenning med regelen over («skal aldri fremstilles som dokumentert kundefakta»), men er utenfor scope for denne oppgavens avgrensede rettelse (fantes før 39d62c3, og å rette det er en egen, ikke-triviell endring i 3 AI-vendte tjenester — se §11 «Åpne beslutninger» for videre arbeid).
+
+**QA-portvakt-retting (v0.8):** `EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()` og `EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefects()` satte tidligere en kjøring til `repair_required` (og undertrykte Dokumenteier-godkjenning) alene på bakgrunn av et internt sammenligningssignal (negasjon/modalitet/aktør/scope/subjekt-avvik) — nøyaktig den skjulte klassifiseringen v0.7 sa aldri skal være en brukersak, men som frem til nå fortsatt kunne stoppe en kjøring teknisk. Begge steder krever nå `EnterpriseWikiClaimFindingExplainer::isUserFacingAddition($claim)` i tillegg til `blockingState()['blocks_gate']` — men kun når ingen eksplisitt `blocking_override` er satt; en autorisert brukers eksplisitte beslutning om å blokkere teller fortsatt, uansett kategori (det er ikke lenger «alene» en skjult klassifisering, men en bekreftet menneskelig beslutning). Reelle tekniske flytfeil (manglende artikkel/sammendrag, manglende gjeldende sideversjon, ufullført jobbkjede, aktivt lease, lint-feil) er urørt av denne endringen — de går gjennom helt andre sjekker (`runChecks()`, lint) som ikke er endret.
 
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 

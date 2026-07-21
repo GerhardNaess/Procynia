@@ -21,6 +21,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -142,6 +143,145 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    // =========================================================================
+    // v0.8 fix: an internal comparison-mechanism signal alone must never set
+    // repair_required (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.8").
+    // =========================================================================
+
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function dimensionMismatchReasonProvider(): iterable
+    {
+        yield 'negation_mismatch' => ['negation_mismatch'];
+        yield 'modality_mismatch' => ['modality_mismatch'];
+        yield 'actor_mismatch' => ['actor_mismatch'];
+        yield 'scope_mismatch' => ['scope_mismatch'];
+        yield 'subject_mismatch' => ['subject_mismatch'];
+    }
+
+    #[DataProvider('dimensionMismatchReasonProvider')]
+    public function test_dimension_mismatch_claim_does_not_set_repair_required_by_default(string $deterministicReason): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'deterministic_reason' => $deterministicReason,
+        ]);
+        $this->createSourceReference($claim, $document);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_self_reported_action_mismatch_does_not_set_repair_required_by_default(): void
+    {
+        // Distinct code path from the deterministic dimension mismatches above — a self-reported
+        // AI check mismatch (no deterministic_reason, but checks.action = 'mismatch') is equally
+        // an internal comparison-mechanism signal, not a confirmed content error.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'checks' => ['action' => 'mismatch'],
+        ]);
+        $this->createSourceReference($claim, $document);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_dimension_mismatch_claim_still_blocks_when_a_human_explicitly_overrides_it(): void
+    {
+        // An authorized user's explicit blocking_override = true is a real human decision, not a
+        // hidden classification — it must still count regardless of the underlying category.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, blockingOverride: true, contentBlockKey: 'block-0001', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'deterministic_reason' => 'negation_mismatch',
+        ]);
+        $this->createSourceReference($claim, $document);
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    public function test_document_owner_approval_gate_agrees_with_qa_gate_for_dimension_mismatch_claim(): void
+    {
+        // EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefectsForVersion()
+        // must never disagree with the QA gate above about whether a dimension-mismatch claim is
+        // effectively blocking.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $document = EnterpriseWikiDocument::query()->find($run->source_id);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'deterministic_reason' => 'scope_mismatch',
+        ]);
+        $this->createSourceReference($claim, $document);
+        $this->markStepsComplete($run);
+
+        $qaResult = $this->qaService()->runForRun($run);
+        $docOwnerBlocks = app(EnterpriseWikiDocumentOwnerApprovalService::class)->hasActiveClaimIntegrityDefectsForVersion($version->fresh());
+
+        $this->assertNotContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
+        $this->assertFalse($docOwnerBlocks);
+    }
+
+    public function test_genuine_technical_flow_failure_still_stops_the_run(): void
+    {
+        // v0.8 explicitly preserves this: a real technical flow failure (here, a missing current
+        // page version for one of the run's pages) must still fail QA — unrelated to and unaffected
+        // by the claim-classification gate fixed above.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $conceptPage = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept Without Version');
+        $this->addPageToRun($run, $conceptPage);
+        // Deliberately no current version created for $conceptPage.
+        $this->markStepsComplete($run);
+
+        $result = $this->qaService()->runForRun($run);
+
+        $this->assertContains('missing_or_empty_page_version', $result['critical_defects']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
     public function test_source_based_claim_without_source_reference_blocks_qa_passed(): void

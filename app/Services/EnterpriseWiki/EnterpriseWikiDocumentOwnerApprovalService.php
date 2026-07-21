@@ -436,11 +436,21 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             ], true)) {
-                // Same gate rule as EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()
-                // (EnterpriseWikiClaimFindingExplainer::blockingState()['blocks_gate']) — an
-                // authorized user's recorded override wins, otherwise an unhandled decision need
-                // for a claim the system recommends blocking still suppresses this requirement.
-                return $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
+                // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md,
+                // "Arkitekturnotat — v0.7"): an internal comparison-mechanism signal alone
+                // (negation/modality/actor/scope/subject mismatch, or internal_error/technical
+                // uncertainty) must never suppress the Document Owner approval requirement by
+                // itself — only a genuine user-facing "not confirmed by source" case
+                // (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()), or an authorized
+                // user's explicit override, does. Same gate rule as
+                // EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(), so the two can
+                // never disagree.
+                if ($claim->blocking_override === true) {
+                    return true;
+                }
+
+                return $this->claimFindingExplainer->isUserFacingAddition($claim)
+                    && $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
             }
 
             return $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
