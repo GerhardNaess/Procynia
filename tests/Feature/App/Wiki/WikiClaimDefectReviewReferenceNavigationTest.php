@@ -149,6 +149,59 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             && data_get($inertia, 'props.review_reference.block_key') === null);
     }
 
+    /**
+     * A block whose content_block_key still exists in content_blocks_json but whose markdown was
+     * blanked (e.g. the "Fjern"/remove-text action on a best-practice suggestion — see
+     * WikiClaimController and EnterpriseWikiUnsupportedAdditionAcceptanceTest) is never actually
+     * rendered as a #wiki-block-{key} element (renderedContentBlocks() filters empty-markdown
+     * blocks out). buildReviewReference() must apply the exact same filter, or it falsely reports
+     * 'ready' for a block the frontend cannot actually scroll to or highlight — silently doing
+     * nothing with no error shown to the user.
+     */
+    public function test_a_blanked_removed_block_reports_block_missing_not_a_false_ready(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Fjernet tekst');
+        $version = $this->createVersionWithBlocks($page, [
+            ['block_key' => 'block-0001', 'markdown' => '# Fjernet tekst'],
+            ['block_key' => 'block-0002', 'markdown' => ''],
+        ]);
+        $claim = $this->createClaim($page, $version, 'Forslag som ble fjernet.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'content_block_key' => 'block-0002',
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED,
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}?claim_id={$claim->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'block_missing');
+    }
+
+    public function test_a_claim_id_not_belonging_to_this_page_reports_not_found(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Riktig side');
+        $version = $this->createVersionWithBlocks($page, [
+            ['block_key' => 'block-0001', 'markdown' => '# Riktig side'],
+        ]);
+        $otherPage = $this->createPage($customer, 'Annen side');
+        $otherVersion = $this->createVersionWithBlocks($otherPage, [
+            ['block_key' => 'block-0001', 'markdown' => '# Annen side'],
+        ]);
+        $foreignClaim = $this->createClaim($otherPage, $otherVersion, 'Påstand på en annen side.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'content_block_key' => 'block-0001',
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}?claim_id={$foreignClaim->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'not_found');
+    }
+
     public function test_kjoringer_funn_action_url_resolves_to_the_correct_highlighted_block(): void
     {
         // End-to-end: the exact URL EnterpriseWikiRunFindingsService puts on the "Åpne og

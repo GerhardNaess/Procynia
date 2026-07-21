@@ -132,6 +132,14 @@ function WarnIcon({ className = 'h-4 w-4' }) {
     );
 }
 
+function BackArrowIcon({ className = 'h-4 w-4' }) {
+    return (
+        <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M17 10a.75.75 0 0 1-.75.75H5.612l4.158 3.96a.75.75 0 1 1-1.04 1.08l-5.5-5.25a.75.75 0 0 1 0-1.08l5.5-5.25a.75.75 0 1 1 1.04 1.08L5.612 9.25H16.25A.75.75 0 0 1 17 10Z" clipRule="evenodd" />
+        </svg>
+    );
+}
+
 function ChevronIcon({ open }) {
     return (
         <svg
@@ -1372,6 +1380,18 @@ export default function WikiShow({
                     );
                 })()}
 
+                {reviewReference && (
+                    <div>
+                        <Link
+                            href="/app/wiki?tab=runs"
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900 hover:underline"
+                        >
+                            <BackArrowIcon className="h-4 w-4" aria-hidden="true" />
+                            {tw.review_reference_back_to_findings ?? 'Tilbake til funn'}
+                        </Link>
+                    </div>
+                )}
+
                 {reviewReference?.status === 'superseded' && (
                     <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
@@ -1382,11 +1402,15 @@ export default function WikiShow({
                     </div>
                 )}
 
-                {reviewReference?.status === 'block_missing' && (
+                {(reviewReference?.status === 'block_missing' || reviewReference?.status === 'not_found') && (
                     <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
                         <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                         <div className="text-sm text-amber-800">
-                            <p>{tw.review_reference_block_missing ?? 'Teksten finnes ikke lenger i gjeldende versjon av siden.'}</p>
+                            <p>
+                                {reviewReference.status === 'block_missing'
+                                    ? (tw.review_reference_block_missing ?? 'Teksten kunne ikke lokaliseres på Wiki-siden.')
+                                    : (tw.review_reference_not_found ?? 'Teksten kunne ikke lokaliseres på Wiki-siden.')}
+                            </p>
                             {isSystemOwner && reviewReference.technical_block_key && (
                                 <p className="mt-1 text-xs text-amber-600">block_key: {reviewReference.technical_block_key}</p>
                             )}

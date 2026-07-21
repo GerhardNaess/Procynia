@@ -1505,8 +1505,16 @@ class WikiController extends Controller
             return ['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => null];
         }
 
+        // Must match renderedContentBlocks()'s own filter exactly (non-empty markdown) — a block
+        // that still exists in content_blocks_json but was blanked (e.g. the "Fjern"/remove-text
+        // action on a best-practice suggestion, see WikiClaimController) is never actually
+        // rendered with a #wiki-block-{key} element for the frontend to scroll to and highlight.
+        // Checking block_key existence alone here previously reported 'ready' for such a claim,
+        // silently failing to scroll or highlight anything with no error shown to the user.
         $blocks = (array) ($currentVersion->content_blocks_json ?? []);
-        $blockExists = collect($blocks)->contains(fn ($block): bool => is_array($block) && ($block['block_key'] ?? null) === $blockKey);
+        $blockExists = collect($blocks)->contains(fn ($block): bool => is_array($block)
+            && ($block['block_key'] ?? null) === $blockKey
+            && trim((string) ($block['markdown'] ?? '')) !== '');
 
         if (! $blockExists) {
             $reference = ['status' => 'block_missing', 'claim_id' => $claim->id];
