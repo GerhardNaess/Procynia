@@ -316,7 +316,9 @@ export default function WikiShow({
     const [claimSourceProcessing, setClaimSourceProcessing] = useState(null);
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
-    const [claimTextEdits, setClaimTextEdits] = useState({});
+    const [editingBlockKey, setEditingBlockKey] = useState(null);
+    const [blockEditDrafts, setBlockEditDrafts] = useState({});
+    const [blockEditProcessing, setBlockEditProcessing] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
@@ -363,7 +365,7 @@ export default function WikiShow({
         });
 
         return () => window.cancelAnimationFrame(frame);
-    }, [targetBlockKey, page.slug]);
+    }, [targetBlockKey, targetClaimId, current_version?.id, page.slug]);
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
@@ -391,14 +393,10 @@ export default function WikiShow({
     const approveClaim = (claim) => {
         if (claimProcessing) return;
         setClaimProcessing(claim.id);
-        const approvedText = claim.content_origin === 'best_practice'
-            ? String(claimTextEdits[claim.id] ?? claim.claim_text ?? '').trim()
-            : '';
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/approve`,
             {
                 comment: approvalComments[claim.id] || undefined,
-                approved_text: approvedText || undefined,
             },
             { onFinish: () => setClaimProcessing(null) },
         );
@@ -563,6 +561,57 @@ export default function WikiShow({
         );
     };
 
+    const startBlockEdit = (claim) => {
+        const blockKey = String(claim.content_block_key || '').trim();
+
+        if (!blockKey) {
+            return;
+        }
+
+        const block = contentBlocks.find((item) => item.block_key === blockKey);
+
+        if (!block) {
+            return;
+        }
+
+        setEditingBlockKey(blockKey);
+        setBlockEditDrafts((prev) => ({
+            ...prev,
+            [blockKey]: block.raw_markdown ?? block.markdown ?? '',
+        }));
+    };
+
+    const cancelBlockEdit = (blockKey) => {
+        setEditingBlockKey((current) => (current === blockKey ? null : current));
+    };
+
+    const saveBlockEdit = (claim) => {
+        const blockKey = String(claim.content_block_key || '').trim();
+        const markdown = String(blockEditDrafts[blockKey] ?? '').trim();
+
+        if (!blockKey || markdown === '' || blockEditProcessing) {
+            return;
+        }
+
+        setBlockEditProcessing(blockKey);
+        router.patch(
+            `/app/wiki/${page.slug}/claims/${claim.id}/edit-text`,
+            {
+                markdown,
+                back_url: backHref,
+            },
+            {
+                onSuccess: () => {
+                    setEditingBlockKey(null);
+                    setBlockEditDrafts({});
+                },
+                onFinish: () => {
+                    setBlockEditProcessing(null);
+                },
+            },
+        );
+    };
+
     const approveDocumentOwnerApproval = (approval) => {
         if (documentOwnerApprovalProcessing) return;
         setDocumentOwnerApprovalProcessing(approval.id);
@@ -674,13 +723,20 @@ export default function WikiShow({
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};
-        const claimTextEdit = claimTextEdits[claim.id] ?? claim.claim_text ?? '';
         const sourceReferences = claim.source_references ?? [];
         const hasSourceReferences = sourceReferences.length > 0;
         const canHandleClaim = claim.can_handle ?? false;
         const isBestPracticeClaim = claim.content_origin === 'best_practice';
         const isClaimDefect = claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content';
         const hasUserDecision = claim.user_decision && claim.user_decision !== 'pending';
+        const claimBlockKey = String(claim.content_block_key || '').trim();
+        const blockForClaim = claimBlockKey
+            ? contentBlocks.find((block) => block.block_key === claimBlockKey) ?? null
+            : null;
+        const isEditingThisBlock = editingBlockKey !== null && editingBlockKey === claimBlockKey;
+        const blockDraft = claimBlockKey
+            ? (blockEditDrafts[claimBlockKey] ?? blockForClaim?.raw_markdown ?? blockForClaim?.markdown ?? '')
+            : '';
         const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
         const selectedSourceCatalog = selectedSourceDocument ? (claimSourceCatalog[selectedSourceDocument.id] ?? null) : null;
         const selectedSourceElements = selectedSourceCatalog?.elements ?? [];
@@ -736,7 +792,7 @@ export default function WikiShow({
                                             ? 'text-amber-700'
                                             : 'text-slate-600'
                                 }`}>
-                                    {claim.user_decision === 'blocking'
+                                {claim.user_decision === 'blocking'
                                         ? (tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning')
                                         : claim.user_decision === 'not_blocking'
                                             ? (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')
@@ -745,26 +801,8 @@ export default function WikiShow({
                             )}
                         </div>
 
-                        {canHandleClaim && isPendingDecision && (
+                        {canHandleClaim && !isEditingThisBlock && (
                             <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                {claim.content_origin === 'best_practice' && (
-                                    <label className="block space-y-1">
-                                        <span className="text-base font-semibold text-amber-700">
-                                            {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
-                                        </span>
-                                        <textarea
-                                            rows={3}
-                                            maxLength={4000}
-                                            value={claimTextEdit}
-                                            onChange={(e) => setClaimTextEdits((prev) => ({
-                                                ...prev,
-                                                [claim.id]: e.target.value,
-                                            }))}
-                                            className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
-                                        />
-                                    </label>
-                                )}
-
                                 <div className="flex flex-wrap gap-2">
                                     <input
                                         type="text"
@@ -787,11 +825,59 @@ export default function WikiShow({
                                     </button>
                                     <button
                                         type="button"
+                                        disabled={blockEditProcessing === claimBlockKey}
+                                        onClick={() => startBlockEdit(claim)}
+                                        className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                        Rediger teksten
+                                    </button>
+                                    <button
+                                        type="button"
                                         disabled={claimProcessing === claim.id}
                                         onClick={() => rejectClaim(claim)}
                                         className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                                     >
                                         Fjern teksten
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {canHandleClaim && isEditingThisBlock && (
+                            <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
+                                <div className="space-y-2">
+                                    <p className="text-base font-semibold text-slate-700">
+                                        {tw.review_reference_edit_heading ?? 'Rediger blokken'}
+                                    </p>
+                                    <p className="text-base leading-7 text-slate-600">
+                                        {tw.review_reference_edit_help ?? 'Rediger hele den sammenhengende tekstblokken. Avsnittene rundt forblir synlige i artikkelen.'}
+                                    </p>
+                                    <textarea
+                                        rows={8}
+                                        value={blockDraft}
+                                        onChange={(e) => setBlockEditDrafts((prev) => ({
+                                            ...prev,
+                                            [claimBlockKey]: e.target.value,
+                                        }))}
+                                        className="w-full rounded-xl border border-violet-200 bg-white px-4 py-3 text-base leading-7 text-slate-800 focus:border-violet-400 focus:outline-none"
+                                    />
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={blockEditProcessing === claimBlockKey || String(blockDraft).trim() === ''}
+                                        onClick={() => saveBlockEdit(claim)}
+                                        className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                        Lagre endring
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={blockEditProcessing === claimBlockKey}
+                                        onClick={() => cancelBlockEdit(claimBlockKey)}
+                                        className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                        Avbryt
                                     </button>
                                 </div>
                             </div>
@@ -837,7 +923,7 @@ export default function WikiShow({
 
                         {canHandleClaim && !claim.user_decision && !isPendingDecision && (
                             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
-                                <span className="text-sm text-slate-600">
+                                <span className="text-base text-slate-600">
                                     {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                         .replace(':name', claim.approved_by_name ?? '—')
                                         .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
@@ -847,7 +933,7 @@ export default function WikiShow({
                                     type="button"
                                     disabled={claimProcessing === claim.id}
                                     onClick={() => unapproveClaim(claim)}
-                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                                 >
                                     {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                                 </button>
@@ -874,10 +960,10 @@ export default function WikiShow({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                         {showClaimText && (
-                            <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                            <p className="text-base leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
                         {showClaimText && claim.page_excerpt && claim.page_excerpt !== claim.claim_text && (
-                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                            <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-base leading-6 text-slate-500">
                                 {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {claim.page_excerpt}
                             </p>
                         )}
@@ -942,13 +1028,13 @@ export default function WikiShow({
                 </div>
 
                 {problemLabel && (
-                    <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-base text-slate-700">
                         {problemLabel}
                     </p>
                 )}
 
                 {claim.finding_recommended_action && (
-                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                    <p className="mt-2 text-base leading-6 text-slate-500">
                         {claim.finding_recommended_action}
                     </p>
                 )}
@@ -1012,41 +1098,24 @@ export default function WikiShow({
                         {sourceReferences.length === 0 ? (
                             <div className="space-y-2">
                                 {isClaimDefect && (
-                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs italic text-slate-500">
+                                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base italic text-slate-500">
                                         {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                     </p>
                                 )}
                                 {isBestPracticeClaim && (
                                     <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-                                        <p className="text-sm leading-6 text-amber-800">
-                                            {tw.verification_basis_best_practice_no_source_search ?? 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.'}
-                                        </p>
-                                        {canHandleClaim && isPendingDecision && (
-                                            <label className="block space-y-1">
-                                                <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-                                                    {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
-                                                </span>
-                                                <textarea
-                                                    rows={3}
-                                                    maxLength={4000}
-                                                    value={claimTextEdit}
-                                                    onChange={(e) => setClaimTextEdits((prev) => ({
-                                                        ...prev,
-                                                        [claim.id]: e.target.value,
-                                                    }))}
-                                                    className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-amber-400 focus:outline-none"
-                                                />
-                                            </label>
-                                        )}
-                                    </div>
-                                )}
+                                <p className="text-base leading-7 text-amber-800">
+                                    {tw.verification_basis_best_practice_no_source_search ?? 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.'}
+                                </p>
+                            </div>
+                        )}
 
                                 {canLinkSource && (
                                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3">
                                         <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
                                             {tw.claim_source_link_heading ?? 'Koble kilde'}
                                         </p>
-                                        <p className="mt-1 text-xs leading-5 text-sky-800">
+                                        <p className="mt-1 text-base leading-7 text-sky-800">
                                             {tw.claim_source_link_intro ?? 'Velg et kildedokument og lim inn utdraget som dokumenterer påstanden.'}
                                         </p>
 
@@ -1272,7 +1341,7 @@ export default function WikiShow({
                                 )}
 
                                 {!canHandleClaim && !isBestPracticeClaim && (
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base text-slate-600">
                                         {claimAccessNotice}
                                     </div>
                                 )}
@@ -1363,7 +1432,7 @@ export default function WikiShow({
                     )}
 
                     {!isPendingDecision && canHandleClaim && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-sm text-sky-700">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-base text-sky-700">
                             <span>
                                 {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                     .replace(':name', claim.approved_by_name ?? '—')
@@ -1374,7 +1443,7 @@ export default function WikiShow({
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => unapproveClaim(claim)}
-                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-base font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
                             >
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
@@ -1382,7 +1451,7 @@ export default function WikiShow({
                     )}
 
                     {!canHandleClaim && hasSourceReferences && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-base text-slate-600">
                             {claimAccessNotice}
                         </div>
                     )}
@@ -1471,9 +1540,24 @@ export default function WikiShow({
                         </div>
                     </div>
                     {current_version && (
-                        <p className="text-sm text-slate-400">
-                            {tw.version ?? 'Versjon'} {current_version.version_number}
-                        </p>
+                        <div className="space-y-1 text-sm text-slate-400">
+                            <p>
+                                {tw.version ?? 'Versjon'} {current_version.version_number}
+                            </p>
+                            {(current_version.edited_by_name || current_version.edited_at) && (
+                                <p>
+                                    {current_version.edited_by_name
+                                        ? `${tw.edited_by ?? 'Redigert av'} ${current_version.edited_by_name}`
+                                        : (tw.edited ?? 'Redigert')}
+                                    {current_version.edited_at
+                                        ? ` · ${new Date(current_version.edited_at).toLocaleString(locale, {
+                                            dateStyle: 'medium',
+                                            timeStyle: 'short',
+                                        })}`
+                                        : ''}
+                                </p>
+                            )}
+                        </div>
                     )}
                 </section>
 

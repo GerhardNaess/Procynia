@@ -14,6 +14,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageBlockEditService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
@@ -44,6 +45,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiBuildPageLinksService $pageLinksService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
+        private readonly EnterpriseWikiPageBlockEditService $pageBlockEditService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
@@ -118,6 +120,40 @@ class WikiClaimController extends Controller
         $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er avvist.');
+    }
+
+    public function editText(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+
+        $page = $this->resolvePageForClaim($slug, $claim);
+        abort_unless($this->canHandleClaimForPage($page, $claim, $user), 403);
+
+        $validated = $request->validate([
+            'markdown' => ['required', 'string', 'max:20000'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
+        ]);
+
+        $result = $this->pageBlockEditService->edit(
+            $page,
+            $claim,
+            $user,
+            (string) $validated['markdown'],
+        );
+
+        $query = [
+            'claim_id' => (int) ($result['focus_claim_id'] ?? $claim->id),
+        ];
+
+        $backUrl = $this->normalizeReviewBackUrl($validated['back_url'] ?? null);
+
+        if ($backUrl !== null) {
+            $query['back_url'] = $backUrl;
+        }
+
+        return redirect()
+            ->route('app.wiki.show', array_merge(['slug' => $page->slug], $query))
+            ->with('success', 'Teksten er lagret som en ny sideversjon.');
     }
 
     /**
@@ -547,6 +583,29 @@ class WikiClaimController extends Controller
         $value = trim($value);
 
         return $value !== '' ? $value : null;
+    }
+
+    private function normalizeReviewBackUrl(mixed $backUrl): ?string
+    {
+        if (! is_string($backUrl)) {
+            return null;
+        }
+
+        $backUrl = trim($backUrl);
+
+        if ($backUrl === '') {
+            return null;
+        }
+
+        $parsed = parse_url($backUrl);
+
+        if (! is_array($parsed) || ($parsed['path'] ?? null) !== '/app/wiki') {
+            return null;
+        }
+
+        parse_str($parsed['query'] ?? '', $query);
+
+        return (($query['tab'] ?? null) === 'runs') ? $backUrl : null;
     }
 
     public function sourceDocumentElements(string $slug, EnterpriseWikiClaim $claim, EnterpriseWikiDocument $document): JsonResponse

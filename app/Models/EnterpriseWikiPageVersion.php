@@ -16,6 +16,8 @@ class EnterpriseWikiPageVersion extends Model
         'content_blocks_json',
         'generated_by_model',
         'generation_prompt_hash',
+        'edited_by_user_id',
+        'edited_at',
     ];
 
     protected function casts(): array
@@ -24,12 +26,18 @@ class EnterpriseWikiPageVersion extends Model
             'version_number' => 'integer',
             'is_current' => 'boolean',
             'content_blocks_json' => 'array',
+            'edited_at' => 'datetime',
         ];
     }
 
     public function page(): BelongsTo
     {
         return $this->belongsTo(EnterpriseWikiPage::class, 'enterprise_wiki_page_id');
+    }
+
+    public function editedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'edited_by_user_id');
     }
 
     public function claims(): HasMany

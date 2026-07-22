@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiLintFinding;
@@ -12,7 +13,10 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -117,6 +121,155 @@ class WikiClaimControllerTest extends TestCase
         $this->assertSame($editedText, $claim->page_excerpt);
         $this->assertSame('Presisert formulering.', $claim->approval_comment);
         $this->assertSame('no_visible_link_needed', $claim->review_metadata['visible_wiki_link_result'] ?? null);
+    }
+
+    public function test_system_owner_can_edit_a_marked_wiki_block_and_create_a_new_version(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        [$page, $version, $claim] = $this->createPageWithClaim($customer);
+
+        $page->update([
+            'title' => 'Kundens medvirkning',
+        ]);
+
+        $originalText = 'Kunden sikrer at tiltak blir fulgt opp.';
+        $editedText = 'Kunden bidrar til at tiltak blir fulgt opp.';
+
+        $version->update([
+            'content_markdown' => "# Kundens medvirkning\n\nAvsnitt før.\n\n{$originalText}\n\nAvsnitt etter.",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => '# Kundens medvirkning',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => 'Avsnitt før.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                ],
+                [
+                    'block_key' => 'block-0003',
+                    'position' => 2,
+                    'markdown' => $originalText,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                ],
+                [
+                    'block_key' => 'block-0004',
+                    'position' => 3,
+                    'markdown' => 'Avsnitt etter.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                ],
+            ],
+        ]);
+
+        $claim->update([
+            'claim_text' => $originalText,
+            'page_excerpt' => $originalText,
+            'content_block_key' => 'block-0003',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            'approved_by_user_id' => $owner->id,
+            'approved_at' => now(),
+        ]);
+
+        $otherClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Avsnitt før.',
+            'page_excerpt' => 'Avsnitt før.',
+            'content_block_key' => 'block-0002',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->with($page->title, $page->page_type, $editedText, 'no')
+            ->andReturn([
+                'claims' => [
+                    [
+                        'text' => $editedText,
+                        'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                        'excerpt' => $editedText,
+                        'conflict_note' => null,
+                    ],
+                ],
+            ]);
+
+        $this->mock(EnterpriseWikiDocumentWikiAnswerStalenessService::class)
+            ->shouldReceive('markAnswersStaleForWikiPageChange')
+            ->once()
+            ->andReturn(['stale_wiki_answer_count' => 0]);
+
+        $this->mock(EnterpriseWikiBuildPageLinksService::class)
+            ->shouldReceive('materializeWikilinksForPage')
+            ->once()
+            ->andReturn(['links_created' => 0, 'links_skipped' => 0]);
+
+        $response = $this->actingAs($owner)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/edit-text",
+            [
+                'markdown' => $editedText,
+                'back_url' => '/app/wiki?tab=runs',
+            ],
+        );
+
+        $response->assertStatus(302);
+
+        $newVersion = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
+        $this->assertSame(2, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->count());
+        $this->assertNotSame($version->id, $newVersion->id);
+        $this->assertSame($owner->id, $newVersion->edited_by_user_id);
+        $this->assertNotNull($newVersion->edited_at);
+        $this->assertSame('Kundens medvirkning', $page->fresh()->title);
+        $this->assertStringContainsString($editedText, $newVersion->content_markdown);
+        $this->assertStringContainsString('Avsnitt før.', $newVersion->content_markdown);
+        $this->assertStringContainsString('Avsnitt etter.', $newVersion->content_markdown);
+        $this->assertSame('mixed', $newVersion->content_blocks_json[2]['content_origin']);
+        $this->assertSame($editedText, $newVersion->content_blocks_json[2]['markdown']);
+        $this->assertSame('source_based', $newVersion->content_blocks_json[1]['content_origin']);
+        $this->assertSame('source_based', $newVersion->content_blocks_json[3]['content_origin']);
+
+        $newClaims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $newVersion->id)
+            ->orderBy('position_order')
+            ->get();
+
+        $this->assertCount(2, $newClaims);
+
+        $editedClaim = $newClaims->firstWhere('content_block_key', 'block-0003');
+        $untouchedClaim = $newClaims->firstWhere('content_block_key', 'block-0002');
+        $location = (string) $response->headers->get('Location');
+
+        $this->assertNotNull($editedClaim);
+        $this->assertStringContainsString('/app/wiki/'.$page->slug, $location);
+        $this->assertStringContainsString('claim_id='.$editedClaim->id, $location);
+        $this->assertStringContainsString('back_url=%2Fapp%2Fwiki%3Ftab%3Druns', $location);
+        $this->assertSame($editedText, $editedClaim->claim_text);
+        $this->assertSame($editedText, $editedClaim->page_excerpt);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $editedClaim->approval_status);
+        $this->assertSame($owner->id, $editedClaim->approved_by_user_id);
+        $this->assertNotNull($editedClaim->verified_at);
+        $this->assertSame('block-0003', $editedClaim->review_metadata['edited_block_key'] ?? null);
+        $this->assertTrue((bool) ($editedClaim->review_metadata['re_extracted_after_block_edit'] ?? false));
+
+        $this->assertNotNull($untouchedClaim);
+        $this->assertSame('Avsnitt før.', $untouchedClaim->claim_text);
+        $this->assertSame('block-0002', $untouchedClaim->content_block_key);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $untouchedClaim->approval_status);
     }
 
     public function test_bid_manager_cannot_approve_claim(): void
@@ -1025,9 +1178,9 @@ class WikiClaimControllerTest extends TestCase
     // Helpers
     // =========================================================================
 
-    private function createCanonicalFact(Customer $customer, string $canonicalText): \App\Models\EnterpriseWikiCanonicalFact
+    private function createCanonicalFact(Customer $customer, string $canonicalText): EnterpriseWikiCanonicalFact
     {
-        return \App\Models\EnterpriseWikiCanonicalFact::query()->create([
+        return EnterpriseWikiCanonicalFact::query()->create([
             'customer_id' => $customer->id,
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
             'source_element_keys' => [],
@@ -1042,7 +1195,7 @@ class WikiClaimControllerTest extends TestCase
     /**
      * @return array{0: EnterpriseWikiPage, 1: EnterpriseWikiPageVersion, 2: EnterpriseWikiClaim}
      */
-    private function createBestPracticeClaim(Customer $customer, \App\Models\EnterpriseWikiCanonicalFact $fact, string $claimText): array
+    private function createBestPracticeClaim(Customer $customer, EnterpriseWikiCanonicalFact $fact, string $claimText): array
     {
         [$page, $version, $claim] = $this->createPageWithClaim($customer);
 
