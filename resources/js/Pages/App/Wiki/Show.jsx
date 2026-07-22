@@ -300,12 +300,10 @@ export default function WikiShow({
     const backHref = reviewReference?.back_url ?? '/app/wiki?tab=runs';
     const hasFocusedReview = targetBlockKey !== null;
     const focusedReviewClaims = hasFocusedReview
-        ? claims.filter((claim) => String(claim.content_block_key ?? '') === String(targetBlockKey))
+        ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
         : [];
-    const focusedReviewClaimIds = new Set(focusedReviewClaims.map((claim) => String(claim.id)));
     const verificationClaims = hasFocusedReview
-        ? claims.filter((claim) => String(claim.content_block_key ?? '') !== String(targetBlockKey)
-            && !focusedReviewClaimIds.has(String(claim.id)))
+        ? claims.filter((claim) => String(claim.id) !== String(targetClaimId))
         : claims;
     const hasVerificationContent = verificationClaims.length > 0 || lintFindings.length > 0;
 
@@ -682,6 +680,7 @@ export default function WikiShow({
         const canHandleClaim = claim.can_handle ?? false;
         const isBestPracticeClaim = claim.content_origin === 'best_practice';
         const isClaimDefect = claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content';
+        const hasUserDecision = claim.user_decision && claim.user_decision !== 'pending';
         const selectedSourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(sourceDraft.source_document_id)) ?? null;
         const selectedSourceCatalog = selectedSourceDocument ? (claimSourceCatalog[selectedSourceDocument.id] ?? null) : null;
         const selectedSourceElements = selectedSourceCatalog?.elements ?? [];
@@ -711,10 +710,10 @@ export default function WikiShow({
                     key={claim.id}
                     id={`claim-${claim.id}`}
                     tabIndex={-1}
-                    className="scroll-mt-24 rounded-2xl border border-violet-200 bg-white p-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+                    className="scroll-mt-24 border-l-4 border-violet-300 bg-violet-50/30 px-4 py-3"
                 >
-                    <div className="space-y-4">
-                        <div className="space-y-2">
+                    <div className="space-y-3">
+                        <div className="space-y-1.5">
                             <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
@@ -729,7 +728,7 @@ export default function WikiShow({
                                     {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
                                 </p>
                             )}
-                            {claim.user_decision && (
+                            {hasUserDecision && (
                                 <p className={`text-base font-medium ${
                                     claim.user_decision === 'blocking'
                                         ? 'text-rose-700'
@@ -747,7 +746,7 @@ export default function WikiShow({
                         </div>
 
                         {canHandleClaim && isPendingDecision && (
-                            <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                            <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
                                 {claim.content_origin === 'best_practice' && (
                                     <label className="block space-y-1">
                                         <span className="text-base font-semibold text-amber-700">
@@ -798,9 +797,9 @@ export default function WikiShow({
                             </div>
                         )}
 
-                        {claim.user_decision && canHandleClaim && (
-                            <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                                {claim.user_decision !== 'pending' && claim.blocking_override_by_name && (
+                        {hasUserDecision && canHandleClaim && (
+                            <div className="space-y-2 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
+                                {claim.blocking_override_by_name && (
                                     <p className="text-base text-slate-600">
                                         {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
                                             .replace(':name', claim.blocking_override_by_name ?? '—')
@@ -833,19 +832,12 @@ export default function WikiShow({
                                         {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
                                     </button>
                                 </div>
-                                <p className="text-base leading-6 text-slate-600">
-                                    <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
-                                    {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
-                                    <br />
-                                    <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
-                                    {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
-                                </p>
                             </div>
                         )}
 
                         {canHandleClaim && !claim.user_decision && !isPendingDecision && (
-                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
-                                <span className="text-base text-slate-600">
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
+                                <span className="text-sm text-slate-600">
                                     {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                         .replace(':name', claim.approved_by_name ?? '—')
                                         .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
@@ -855,7 +847,7 @@ export default function WikiShow({
                                     type="button"
                                     disabled={claimProcessing === claim.id}
                                     onClick={() => unapproveClaim(claim)}
-                                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                                 >
                                     {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                                 </button>
@@ -921,18 +913,14 @@ export default function WikiShow({
                                     cls="bg-amber-100 text-amber-700"
                                 />
                             )}
-                            {claim.user_decision && (
+                            {hasUserDecision && (
                                 <Badge
                                     label={claim.user_decision === 'blocking'
                                         ? (tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning')
-                                        : claim.user_decision === 'not_blocking'
-                                            ? (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')
-                                            : (tw.claim_finding_user_decision_pending ?? 'Avventer vurdering')}
+                                        : (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')}
                                     cls={claim.user_decision === 'blocking'
                                         ? 'bg-rose-100 text-rose-700'
-                                        : claim.user_decision === 'not_blocking'
-                                            ? 'bg-emerald-100 text-emerald-700'
-                                            : 'bg-amber-100 text-amber-700'}
+                                        : 'bg-amber-100 text-amber-700'}
                                 />
                             )}
                             {claim.conflict_flag && (
@@ -965,49 +953,49 @@ export default function WikiShow({
                     </p>
                 )}
 
-                {claim.user_decision && (
+                {hasUserDecision && (
                     <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        {claim.user_decision !== 'pending' && claim.blocking_override_by_name && (
-                            <p className="text-xs text-slate-500">
+                        {claim.blocking_override_by_name && (
+                            <p className="text-base text-slate-500">
                                 {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
                                     .replace(':name', claim.blocking_override_by_name ?? '—')
                                     .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')}
                             </p>
                         )}
                         {canHandleClaim && (
-                                <div className="mt-1.5 space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
-                                            onClick={() => updateClaimBlocking(claim, true)}
-                                            className={`rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50 ${
-                                                claim.user_decision === 'blocking'
-                                                    ? 'bg-rose-600 text-white'
-                                                    : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
-                                            }`}
-                                        >
-                                            {tw.keep_blocking_button ?? 'Blokker godkjenning'}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
-                                            onClick={() => updateClaimBlocking(claim, false)}
-                                            className={`rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50 ${
-                                                claim.user_decision === 'not_blocking'
-                                                    ? 'border border-amber-400 bg-amber-100 text-amber-900'
-                                                    : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
-                                            }`}
-                                        >
-                                            {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
-                                        </button>
-                                    </div>
-                                    <p className="text-sm leading-5 text-slate-500">
-                                        <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
-                                        {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
-                                        <br />
-                                        <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
-                                        {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
+                            <div className="mt-1.5 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
+                                        onClick={() => updateClaimBlocking(claim, true)}
+                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'blocking'
+                                                ? 'bg-rose-600 text-white'
+                                                : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+                                        }`}
+                                    >
+                                        {tw.keep_blocking_button ?? 'Blokker godkjenning'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
+                                        onClick={() => updateClaimBlocking(claim, false)}
+                                        className={`rounded-full px-3 py-1.5 text-base font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'not_blocking'
+                                                ? 'border border-amber-400 bg-amber-100 text-amber-900'
+                                                : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
+                                        }`}
+                                    >
+                                        {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
+                                    </button>
+                                </div>
+                                <p className="text-base leading-5 text-slate-500">
+                                    <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
+                                    <br />
+                                    <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
                                 </p>
                             </div>
                         )}
