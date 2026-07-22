@@ -302,8 +302,10 @@ export default function WikiShow({
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.content_block_key ?? '') === String(targetBlockKey))
         : [];
+    const focusedReviewClaimIds = new Set(focusedReviewClaims.map((claim) => String(claim.id)));
     const verificationClaims = hasFocusedReview
-        ? claims.filter((claim) => String(claim.content_block_key ?? '') !== String(targetBlockKey))
+        ? claims.filter((claim) => String(claim.content_block_key ?? '') !== String(targetBlockKey)
+            && !focusedReviewClaimIds.has(String(claim.id)))
         : claims;
     const hasVerificationContent = verificationClaims.length > 0 || lintFindings.length > 0;
 
@@ -640,10 +642,12 @@ export default function WikiShow({
     }[s] ?? s);
 
     const claimProblemLabel = (claim) => {
-        // internal_error / unsupported_generated_content — per-case finding from
-        // EnterpriseWikiClaimFindingExplainer, never one generic default message.
-        if (claim.finding_explanation) {
-            return claim.finding_explanation;
+        if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') {
+            return tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.';
+        }
+
+        if (claim.finding_recommended_action) {
+            return claim.finding_recommended_action;
         }
 
         if (claim.content_origin === 'best_practice') {
@@ -659,11 +663,14 @@ export default function WikiShow({
         return ({
             missing_source: tw.verification_basis_claim_problem_missing_source ?? 'Systemet fant ikke et kildeavsnitt som dokumenterer påstanden. Koble en kilde dersom påstanden kan dokumenteres, eller avvis den.',
             missing_excerpt: tw.verification_basis_claim_problem_missing_excerpt ?? 'Kilden er funnet, men mangler tekstutdrag.',
-        }[claim.source_status] ?? '');
+        }[claim.source_status]
+            ?? tw.claim_finding_action_possible_content_deviation
+            ?? 'Sammenlign påstanden med kildeteksten. Avviket er ikke bekreftet — vurder om det er reelt før du bestemmer deg.');
     };
 
     const renderClaimCard = (claim, group, options = {}) => {
         const { showClaimText = true } = options;
+        const isInlineReview = options.inlineReview === true;
         const isOpenGroup = group === 'open';
         const problemLabel = isOpenGroup ? claimProblemLabel(claim) : '';
         const isPendingDecision = claim.approval_status === 'pending';
@@ -697,6 +704,173 @@ export default function WikiShow({
             })
             : selectedSourceElements;
         const canLinkSource = canHandleClaim && !isBestPracticeClaim && claim.source_status === 'missing_source';
+
+        if (isInlineReview) {
+            return (
+                <article
+                    key={claim.id}
+                    id={`claim-${claim.id}`}
+                    tabIndex={-1}
+                    className="scroll-mt-24 rounded-2xl border border-violet-200 bg-white p-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+                >
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
+                                {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
+                            </p>
+                            <p className="text-lg font-semibold text-slate-900">
+                                {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
+                            </p>
+                            <p className="text-base leading-7 text-slate-700">
+                                {problemLabel}
+                            </p>
+                            {claim.system_recommends_blocking && (
+                                <p className="text-base font-medium text-amber-700">
+                                    {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
+                                </p>
+                            )}
+                            {claim.user_decision && (
+                                <p className={`text-base font-medium ${
+                                    claim.user_decision === 'blocking'
+                                        ? 'text-rose-700'
+                                        : claim.user_decision === 'not_blocking'
+                                            ? 'text-amber-700'
+                                            : 'text-slate-600'
+                                }`}>
+                                    {claim.user_decision === 'blocking'
+                                        ? (tw.claim_finding_user_decision_blocking ?? 'Bruker har valgt: Blokkerer godkjenning')
+                                        : claim.user_decision === 'not_blocking'
+                                            ? (tw.claim_finding_user_decision_not_blocking ?? 'Bruker har valgt: Godkjenn avvik / ikke blokker')
+                                            : (tw.claim_finding_user_decision_pending ?? 'Avventer vurdering')}
+                                </p>
+                            )}
+                        </div>
+
+                        {canHandleClaim && isPendingDecision && (
+                            <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                                {claim.content_origin === 'best_practice' && (
+                                    <label className="block space-y-1">
+                                        <span className="text-base font-semibold text-amber-700">
+                                            {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
+                                        </span>
+                                        <textarea
+                                            rows={3}
+                                            maxLength={4000}
+                                            value={claimTextEdit}
+                                            onChange={(e) => setClaimTextEdits((prev) => ({
+                                                ...prev,
+                                                [claim.id]: e.target.value,
+                                            }))}
+                                            className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-amber-400 focus:outline-none"
+                                        />
+                                    </label>
+                                )}
+
+                                <div className="flex flex-wrap gap-2">
+                                    <input
+                                        type="text"
+                                        maxLength={1000}
+                                        placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
+                                        value={approvalComments[claim.id] ?? ''}
+                                        onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
+                                        className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none"
+                                    />
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id}
+                                        onClick={() => approveClaim(claim)}
+                                        className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                        Behold teksten
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id}
+                                        onClick={() => rejectClaim(claim)}
+                                        className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                    >
+                                        Fjern teksten
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {claim.user_decision && canHandleClaim && (
+                            <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                                {claim.user_decision !== 'pending' && claim.blocking_override_by_name && (
+                                    <p className="text-base text-slate-600">
+                                        {(tw.claim_blocking_reason_overridden ?? 'Overstyrt av :name den :date.')
+                                            .replace(':name', claim.blocking_override_by_name ?? '—')
+                                            .replace(':date', claim.blocking_override_at ? new Date(claim.blocking_override_at).toLocaleString(locale) : '')}
+                                    </p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
+                                        onClick={() => updateClaimBlocking(claim, true)}
+                                        className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'blocking'
+                                                ? 'bg-rose-600 text-white'
+                                                : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+                                        }`}
+                                    >
+                                        {tw.keep_blocking_button ?? 'Blokker godkjenning'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
+                                        onClick={() => updateClaimBlocking(claim, false)}
+                                        className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:opacity-50 ${
+                                            claim.user_decision === 'not_blocking'
+                                                ? 'border border-amber-400 bg-amber-100 text-amber-900'
+                                                : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
+                                        }`}
+                                    >
+                                        {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
+                                    </button>
+                                </div>
+                                <p className="text-base leading-6 text-slate-600">
+                                    <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
+                                    <br />
+                                    <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
+                                    {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
+                                </p>
+                            </div>
+                        )}
+
+                        {canHandleClaim && !claim.user_decision && !isPendingDecision && (
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+                                <span className="text-base text-slate-600">
+                                    {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
+                                        .replace(':name', claim.approved_by_name ?? '—')
+                                        .replace(':date', claim.approved_at ? new Date(claim.approved_at).toLocaleString(locale) : '')}
+                                    {claim.approval_comment ? ` — “${claim.approval_comment}”` : ''}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={claimProcessing === claim.id}
+                                    onClick={() => unapproveClaim(claim)}
+                                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                                >
+                                    {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
+                                </button>
+                            </div>
+                        )}
+
+                        {!canHandleClaim && (
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-base leading-7 text-slate-600">
+                                {claimAccessNotice}
+                            </div>
+                        )}
+                    </div>
+                </article>
+            );
+        }
 
         return (
             <article
@@ -801,39 +975,39 @@ export default function WikiShow({
                             </p>
                         )}
                         {canHandleClaim && (
-                            <div className="mt-1.5 space-y-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
-                                        onClick={() => updateClaimBlocking(claim, true)}
-                                        className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-                                            claim.user_decision === 'blocking'
-                                                ? 'bg-rose-600 text-white'
-                                                : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
-                                        }`}
-                                    >
-                                        {tw.keep_blocking_button ?? 'Blokker godkjenning'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
-                                        onClick={() => updateClaimBlocking(claim, false)}
-                                        className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-                                            claim.user_decision === 'not_blocking'
-                                                ? 'bg-emerald-600 text-white'
-                                                : 'border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                                        }`}
-                                    >
-                                        {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
-                                    </button>
-                                </div>
-                                <p className="text-[11px] leading-4 text-slate-400">
-                                    <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
-                                    {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
-                                    <br />
-                                    <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
-                                    {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
+                                <div className="mt-1.5 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={claimProcessing === claim.id || claim.user_decision === 'blocking'}
+                                            onClick={() => updateClaimBlocking(claim, true)}
+                                            className={`rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50 ${
+                                                claim.user_decision === 'blocking'
+                                                    ? 'bg-rose-600 text-white'
+                                                    : 'border border-rose-300 bg-white text-rose-700 hover:bg-rose-50'
+                                            }`}
+                                        >
+                                            {tw.keep_blocking_button ?? 'Blokker godkjenning'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={claimProcessing === claim.id || claim.user_decision === 'not_blocking'}
+                                            onClick={() => updateClaimBlocking(claim, false)}
+                                            className={`rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:opacity-50 ${
+                                                claim.user_decision === 'not_blocking'
+                                                    ? 'border border-amber-400 bg-amber-100 text-amber-900'
+                                                    : 'border border-amber-300 bg-white text-amber-800 hover:bg-amber-50'
+                                            }`}
+                                        >
+                                            {tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}
+                                        </button>
+                                    </div>
+                                    <p className="text-sm leading-5 text-slate-500">
+                                        <strong>{tw.keep_blocking_button ?? 'Blokker godkjenning'}:</strong>{' '}
+                                        {tw.claim_blocking_consequence_block ?? 'Funnet hindrer endelig godkjenning til det er løst eller beslutningen endres.'}
+                                        <br />
+                                        <strong>{tw.remove_blocking_button ?? 'Godkjenn avvik / Ikke blokker'}:</strong>{' '}
+                                        {tw.claim_blocking_consequence_not_block ?? 'Funnet beholdes i historikken, men hindrer ikke endelig godkjenning.'}
                                 </p>
                             </div>
                         )}
@@ -1179,29 +1353,29 @@ export default function WikiShow({
                                 placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
                                 value={approvalComments[claim.id] ?? ''}
                                 onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700 focus:border-violet-300 focus:outline-none"
+                                className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-violet-300 focus:outline-none"
                             />
                             <button
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => approveClaim(claim)}
-                                className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                             >
-                                {tw.approve_claim_button ?? 'Godkjenn påstanden'}
+                                Behold teksten
                             </button>
                             <button
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => rejectClaim(claim)}
-                                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                                className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                             >
-                                {tw.reject_claim_button ?? 'Avvis påstanden'}
+                                Fjern teksten
                             </button>
                         </div>
                     )}
 
                     {!isPendingDecision && canHandleClaim && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-sky-50 px-3 py-3 text-sm text-sky-700">
                             <span>
                                 {(tw.claim_decided_by_at ?? 'Besluttet av :name den :date')
                                     .replace(':name', claim.approved_by_name ?? '—')
@@ -1212,7 +1386,7 @@ export default function WikiShow({
                                 type="button"
                                 disabled={claimProcessing === claim.id}
                                 onClick={() => unapproveClaim(claim)}
-                                className="rounded-full border border-sky-300 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                                className="rounded-full border border-sky-300 bg-white px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
                             >
                                 {tw.undo_claim_decision_button ?? tw.unapprove_claim_button ?? 'Angre beslutning'}
                             </button>
@@ -1473,10 +1647,10 @@ export default function WikiShow({
                                                 {isTargetBlock && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                                         <div className="space-y-1">
-                                                            <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                                                            <p className="text-base font-semibold text-violet-700">
                                                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                                                             </p>
-                                                            <p className="text-sm text-slate-600">
+                                                            <p className="text-base text-slate-600">
                                                                 {tw.review_reference_inline_subtitle ?? 'Handlingene under gjelder teksten over.'}
                                                             </p>
                                                         </div>
@@ -1484,7 +1658,7 @@ export default function WikiShow({
                                                             {focusedReviewClaims.map((claim) => renderClaimCard(
                                                                 claim,
                                                                 claim.approval_status === 'pending' ? 'open' : 'verified',
-                                                                { showClaimText: false },
+                                                                { showClaimText: false, inlineReview: true },
                                                             ))}
                                                         </div>
                                                     </div>
