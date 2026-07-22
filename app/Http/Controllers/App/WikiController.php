@@ -1117,9 +1117,7 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        $currentVersion = $page->currentVersion()
-            ->with('editedBy')
-            ->first();
+        $currentVersion = $page->currentVersion()->first();
         $canApproveWikiClaims = $user?->isSystemOwner() || $user?->canApproveWikiClaims();
 
         // Read access is not gated by page status: any authorized user of this customer's
@@ -1445,9 +1443,6 @@ class WikiController extends Controller
                 'version_number' => $currentVersion->version_number,
                 'content_markdown' => $currentVersion->content_markdown,
                 'rendered_markdown' => $renderedMarkdown,
-                'edited_by_user_id' => $currentVersion->edited_by_user_id,
-                'edited_by_name' => $currentVersion->editedBy?->name,
-                'edited_at' => $currentVersion->edited_at,
                 'content_blocks_json' => $this->renderedContentBlocks($currentVersion, $page, $customerId),
             ] : null,
             'review_reference' => $reviewReference,
@@ -1583,8 +1578,6 @@ class WikiController extends Controller
             ->map(fn (array $block): array => [
                 'block_key' => $block['block_key'] ?? null,
                 'position' => $block['position'] ?? 0,
-                'content_origin' => $block['content_origin'] ?? null,
-                'raw_markdown' => (string) ($block['markdown'] ?? ''),
                 'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
             ])
             ->values()
