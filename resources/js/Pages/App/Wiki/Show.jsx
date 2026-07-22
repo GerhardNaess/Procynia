@@ -317,11 +317,50 @@ export default function WikiShow({
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
     const [claimTextEdits, setClaimTextEdits] = useState({});
+    const [wikiBlockEditingKey, setWikiBlockEditingKey] = useState(null);
+    const [wikiBlockEditDrafts, setWikiBlockEditDrafts] = useState({});
+    const [wikiBlockSavedMarkdowns, setWikiBlockSavedMarkdowns] = useState({});
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
+
+    const getWikiBlockMarkdown = (block) => wikiBlockSavedMarkdowns[block.block_key] ?? block.markdown;
+
+    const startWikiBlockEdit = (blockKey, fallbackMarkdown) => {
+        const currentMarkdown = wikiBlockSavedMarkdowns[blockKey] ?? fallbackMarkdown;
+
+        setWikiBlockEditDrafts((prev) => ({
+            ...prev,
+            [blockKey]: currentMarkdown,
+        }));
+        setWikiBlockEditingKey(blockKey);
+    };
+
+    const cancelWikiBlockEdit = (blockKey) => {
+        setWikiBlockEditDrafts((prev) => {
+            const next = { ...prev };
+            delete next[blockKey];
+            return next;
+        });
+        setWikiBlockEditingKey((current) => (current === blockKey ? null : current));
+    };
+
+    const saveWikiBlockEdit = (blockKey) => {
+        const nextMarkdown = String(wikiBlockEditDrafts[blockKey] ?? '');
+
+        setWikiBlockSavedMarkdowns((prev) => ({
+            ...prev,
+            [blockKey]: nextMarkdown,
+        }));
+        setWikiBlockEditDrafts((prev) => {
+            const next = { ...prev };
+            delete next[blockKey];
+            return next;
+        });
+        setWikiBlockEditingKey((current) => (current === blockKey ? null : current));
+    };
 
     useEffect(() => {
         if (!targetClaimId || hasFocusedReview) {
@@ -744,6 +783,21 @@ export default function WikiShow({
                                 </p>
                             )}
                         </div>
+
+                        {isInlineReview && canHandleClaim && targetBlockKey && wikiBlockEditingKey !== targetBlockKey && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => startWikiBlockEdit(
+                                        targetBlockKey,
+                                        contentBlocks.find((block) => block.block_key === targetBlockKey)?.markdown ?? '',
+                                    )}
+                                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                                >
+                                    Rediger teksten
+                                </button>
+                            </div>
+                        )}
 
                         {canHandleClaim && isPendingDecision && (
                             <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
@@ -1620,6 +1674,9 @@ export default function WikiShow({
                                 {contentBlocks.length > 0 ? (
                                     contentBlocks.map((block) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
+                                        const currentBlockMarkdown = getWikiBlockMarkdown(block);
+                                        const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
+                                        const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockMarkdown;
 
                                         return (
                                             <div
@@ -1631,7 +1688,47 @@ export default function WikiShow({
                                                     ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
                                                     : undefined}
                                             >
-                                                <ReactMarkdown components={{ a: WikiArticleLink }}>{block.markdown}</ReactMarkdown>
+                                                {isEditingTargetBlock ? (
+                                                    <div className="space-y-3">
+                                                        <label className="block space-y-2">
+                                                            <span className="text-base font-semibold text-violet-700">
+                                                                {tw.wiki_block_edit_label ?? 'Rediger teksten'}
+                                                            </span>
+                                                            <textarea
+                                                                autoFocus
+                                                                rows={10}
+                                                                value={currentDraft}
+                                                                onChange={(e) => setWikiBlockEditDrafts((prev) => ({
+                                                                    ...prev,
+                                                                    [block.block_key]: e.target.value,
+                                                                }))}
+                                                                className="w-full rounded-lg border border-violet-200 bg-white px-4 py-3 text-lg leading-8 text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                            />
+                                                        </label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                type="button"
+                                                                disabled
+                                                                onClick={() => saveWikiBlockEdit(block.block_key)}
+                                                                className="rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                Lagre endring
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => cancelWikiBlockEdit(block.block_key)}
+                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                                                            >
+                                                                Avbryt
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-sm text-slate-500">
+                                                            Lagring kobles til i neste steg.
+                                                        </p>
+                                                    </div>
+                                                ) : (
+                                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                )}
                                                 {isTargetBlock && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                                         <div className="space-y-1">
