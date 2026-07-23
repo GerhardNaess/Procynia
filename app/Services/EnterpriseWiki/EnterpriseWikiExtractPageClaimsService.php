@@ -180,6 +180,53 @@ class EnterpriseWikiExtractPageClaimsService
     }
 
     /**
+     * Extract and persist claims for one explicitly selected mixed-provenance block. This is the
+     * future manual-edit entrypoint: no page-level extraction, no ingest-run checkpoints, and no
+     * claims from other blocks are touched.
+     *
+     * @return array{claims: int, claim_ids: list<int>}
+     */
+    public function extractClaimsForManualMixedBlock(EnterpriseWikiIngestRun $run, EnterpriseWikiPageVersion $version, array $block): array
+    {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have manually edited block claims extracted."
+            );
+        }
+
+        $page = $version->page()->first();
+
+        if ($page === null) {
+            throw new \RuntimeException("Page version [{$version->id}] is not attached to a Wiki page.");
+        }
+
+        $blockKey = trim((string) ($block['block_key'] ?? ''));
+
+        if ($blockKey === '') {
+            throw new \InvalidArgumentException('Manual mixed block claim extraction requires a content_block_key.');
+        }
+
+        $storedBlock = $this->findBlockByKey($version, $blockKey);
+
+        if ($storedBlock === null) {
+            throw new \RuntimeException("Content block [{$blockKey}] was not found in page version [{$version->id}].");
+        }
+
+        $sourceElementsByKey = $this->sourceElementsByKeyForBlock($storedBlock);
+
+        $result = $this->aiClient->extractClaimsForManualMixedBlock(
+            pageTitle: $page->title,
+            pageType: $page->page_type,
+            blockMarkdown: (string) ($storedBlock['markdown'] ?? ''),
+            contentBlockKey: $blockKey,
+            sourceElements: $this->sourceElementsForManualMixedBlockAi($sourceElementsByKey),
+            languageCode: $this->resolveLanguageCode($run->customer_id),
+        );
+
+        return $this->persistManualMixedBlockClaims($page, $version, $blockKey, $sourceElementsByKey, $result);
+    }
+
+    /**
      * Atomically reserve a (run, page) for extraction: a plain conditional UPDATE, matched
      * only when extraction isn't already complete and no active (non-stale) lease exists.
      * Under concurrent UPDATEs on the same row, Postgres serializes them via the row lock and
@@ -329,6 +376,93 @@ class EnterpriseWikiExtractPageClaimsService
     }
 
     /**
+     * @param  array<string, array<string, mixed>>  $sourceElementsByKey
+     * @return array{claims: int, claim_ids: list<int>}
+     */
+    private function persistManualMixedBlockClaims(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $blockKey, array $sourceElementsByKey, array $result): array
+    {
+        return DB::transaction(function () use ($page, $version, $blockKey, $sourceElementsByKey, $result): array {
+            $lockedVersion = EnterpriseWikiPageVersion::query()
+                ->whereKey($version->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedVersion === null) {
+                throw new \RuntimeException("Page version [{$version->id}] no longer exists.");
+            }
+
+            $block = $this->findBlockByKey($lockedVersion, $blockKey);
+
+            if ($block === null) {
+                throw new \RuntimeException("Content block [{$blockKey}] was not found in page version [{$version->id}].");
+            }
+
+            $claims = [];
+
+            foreach ($this->dedupeClaims($result['claims'] ?? []) as $claim) {
+                $claims[] = $this->validatedManualMixedBlockClaim($claim, $block, $sourceElementsByKey);
+            }
+
+            $maxPosition = EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $lockedVersion->id)
+                ->max('position_order');
+            $nextPosition = $maxPosition === null ? 0 : ((int) $maxPosition) + 1;
+            $createdClaimIds = [];
+
+            foreach ($claims as $claim) {
+                $contentOrigin = $claim['content_origin'];
+                $bestPracticeDrifted = $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                    && ! $this->canonicalizationService->isGenuineBestPracticeText($claim['text']);
+
+                if ($bestPracticeDrifted) {
+                    $contentOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;
+                }
+
+                $createdClaim = EnterpriseWikiClaim::query()->create([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'enterprise_wiki_page_version_id' => $lockedVersion->id,
+                    'claim_text' => $claim['text'],
+                    'content_origin' => $contentOrigin,
+                    'page_excerpt' => $claim['excerpt'],
+                    'content_block_key' => $blockKey,
+                    'review_reason' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                        ? $claim['best_practice_reason']
+                        : null,
+                    'review_metadata' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                        ? [
+                            'statement_kind' => 'recommendation',
+                            'classification_basis' => 'ai_manual_mixed_block_claim_origin',
+                            'suggested_placement' => $blockKey,
+                            'visible_wiki_link_recommendation' => 'auto_evaluate',
+                        ]
+                        : null,
+                    'generation_issue' => match (true) {
+                        $bestPracticeDrifted => 'best_practice_claim_asserts_current_state',
+                        $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT => 'unsupported_generated_content',
+                        default => null,
+                    },
+                    'position_order' => $nextPosition++,
+                    'confidence' => $claim['confidence'],
+                    'conflict_flag' => $claim['conflict_note'] !== null,
+                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                ]);
+
+                if ($contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                    foreach ($this->sourceReferencePayloadsForKeys($sourceElementsByKey, $claim['source_element_keys'], $claim['excerpt']) as $sourceReferencePayload) {
+                        EnterpriseWikiSourceReference::query()->create(array_merge([
+                            'enterprise_wiki_claim_id' => $createdClaim->id,
+                        ], $sourceReferencePayload));
+                    }
+                }
+
+                $createdClaimIds[] = $createdClaim->id;
+            }
+
+            return ['claims' => count($createdClaimIds), 'claim_ids' => $createdClaimIds];
+        });
+    }
+
+    /**
      * Drops an exact (post-normalization) duplicate claim within a single extraction response —
      * the same AI call occasionally restates one fact twice (e.g. once from a heading/summary
      * line and once from the body sentence it summarizes). A single page version must not carry
@@ -402,6 +536,206 @@ class EnterpriseWikiExtractPageClaimsService
         }
 
         return $payloads;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $sourceElementsByKey
+     * @return list<array{key: string, type: string|null, text: string}>
+     */
+    private function sourceElementsForManualMixedBlockAi(array $sourceElementsByKey): array
+    {
+        return array_values(array_map(static fn (array $sourceElement): array => [
+            'key' => (string) $sourceElement['source_element_key'],
+            'type' => is_string($sourceElement['source_element_type'] ?? null) ? $sourceElement['source_element_type'] : null,
+            'text' => (string) $sourceElement['source_excerpt'],
+        ], $sourceElementsByKey));
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function sourceElementsByKeyForBlock(array $block): array
+    {
+        $sourceElements = (array) ($block['source_elements'] ?? []);
+
+        if ($sourceElements === [] && ($block['source_id'] ?? null) !== null) {
+            $sourceElements = [$block];
+        }
+
+        $byKey = [];
+
+        foreach ($sourceElements as $sourceElement) {
+            if (! is_array($sourceElement)) {
+                continue;
+            }
+
+            $key = trim((string) ($sourceElement['source_element_key'] ?? ''));
+            $sourceId = (int) ($sourceElement['source_id'] ?? 0);
+            $sourceExcerpt = trim((string) ($sourceElement['source_excerpt'] ?? ''));
+
+            if ($key === '' || $sourceId <= 0 || $sourceExcerpt === '') {
+                continue;
+            }
+
+            if (! array_key_exists($key, $byKey)) {
+                $byKey[$key] = $sourceElement;
+            }
+        }
+
+        return $byKey;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $sourceElementsByKey
+     * @param  list<string>  $sourceElementKeys
+     * @return list<array<string, mixed>>
+     */
+    private function sourceReferencePayloadsForKeys(array $sourceElementsByKey, array $sourceElementKeys, string $pageExcerpt): array
+    {
+        $payloads = [];
+
+        foreach ($sourceElementKeys as $key) {
+            $sourceElement = $sourceElementsByKey[$key] ?? null;
+
+            if ($sourceElement === null) {
+                throw new \RuntimeException("Source element key [{$key}] is not available for this content block.");
+            }
+
+            $payloads[] = [
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => (int) $sourceElement['source_id'],
+                'source_element_key' => $sourceElement['source_element_key'] ?? null,
+                'source_element_type' => $sourceElement['source_element_type'] ?? null,
+                'source_row_key' => $sourceElement['source_row_key'] ?? null,
+                'source_label' => (string) ($sourceElement['source_label'] ?? 'Kildedokument'),
+                'excerpt' => (string) ($sourceElement['source_excerpt'] ?? $pageExcerpt),
+                'source_hash' => (string) ($sourceElement['source_hash'] ?? ''),
+                'page_reference' => $sourceElement['page_reference'] ?? null,
+            ];
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $sourceElementsByKey
+     * @return array{text: string, confidence: string, excerpt: string, content_origin: string, source_element_keys: list<string>, best_practice_reason: string|null, conflict_note: string|null}
+     */
+    private function validatedManualMixedBlockClaim(mixed $claim, array $block, array $sourceElementsByKey): array
+    {
+        if (! is_array($claim)) {
+            throw new \RuntimeException('Manual mixed block claim extraction returned an invalid claim.');
+        }
+
+        $text = trim((string) ($claim['text'] ?? ''));
+        $confidence = $claim['confidence'] ?? null;
+        $excerpt = trim((string) ($claim['excerpt'] ?? ''));
+        $contentOrigin = $claim['content_origin'] ?? null;
+        $sourceElementKeys = $claim['source_element_keys'] ?? null;
+        $bestPracticeReason = is_string($claim['best_practice_reason'] ?? null) ? trim($claim['best_practice_reason']) : ($claim['best_practice_reason'] ?? null);
+        $conflictNote = is_string($claim['conflict_note'] ?? null) ? trim($claim['conflict_note']) : ($claim['conflict_note'] ?? null);
+
+        if ($text === ''
+            || ! is_string($confidence)
+            || ! in_array($confidence, [
+                EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                EnterpriseWikiClaim::CONFIDENCE_LOW,
+                EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            ], true)
+            || $excerpt === ''
+            || ! is_string($contentOrigin)
+            || ! in_array($contentOrigin, [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            ], true)
+            || ! is_array($sourceElementKeys)
+            || ! (is_string($bestPracticeReason) || $bestPracticeReason === null)
+            || ! (is_string($conflictNote) || $conflictNote === null)
+        ) {
+            throw new \RuntimeException('Manual mixed block claim extraction returned an invalid claim.');
+        }
+
+        if (! $this->textNormalizer->contains((string) ($block['markdown'] ?? ''), $excerpt)) {
+            throw new \RuntimeException('Manual mixed block claim extraction returned an excerpt that is not anchored in the block.');
+        }
+
+        $sourceElementKeys = $this->validatedManualMixedBlockSourceKeys($sourceElementKeys, $sourceElementsByKey);
+
+        if ($contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+            if ($sourceElementKeys === []) {
+                throw new \RuntimeException('Manual mixed block source_based claim requires source_element_keys.');
+            }
+
+            if ($bestPracticeReason !== null && $bestPracticeReason !== '') {
+                throw new \RuntimeException('Manual mixed block source_based claim cannot include best_practice_reason.');
+            }
+        } elseif ($contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            if ($sourceElementKeys !== []) {
+                throw new \RuntimeException('Manual mixed block best_practice claim cannot include source_element_keys.');
+            }
+
+            if ($bestPracticeReason === null || $bestPracticeReason === '') {
+                throw new \RuntimeException('Manual mixed block best_practice claim requires best_practice_reason.');
+            }
+        } elseif ($sourceElementKeys !== []) {
+            throw new \RuntimeException('Manual mixed block unsupported_generated_content claim cannot include source_element_keys.');
+        } elseif ($bestPracticeReason !== null && $bestPracticeReason !== '') {
+            throw new \RuntimeException('Manual mixed block unsupported_generated_content claim cannot include best_practice_reason.');
+        }
+
+        return [
+            'text' => $text,
+            'confidence' => $confidence,
+            'excerpt' => $excerpt,
+            'content_origin' => $contentOrigin,
+            'source_element_keys' => $sourceElementKeys,
+            'best_practice_reason' => $bestPracticeReason === '' ? null : $bestPracticeReason,
+            'conflict_note' => $conflictNote === '' ? null : $conflictNote,
+        ];
+    }
+
+    /**
+     * @param  list<mixed>  $sourceElementKeys
+     * @param  array<string, array<string, mixed>>  $sourceElementsByKey
+     * @return list<string>
+     */
+    private function validatedManualMixedBlockSourceKeys(array $sourceElementKeys, array $sourceElementsByKey): array
+    {
+        $validated = [];
+
+        foreach ($sourceElementKeys as $key) {
+            if (! is_string($key) || trim($key) === '') {
+                throw new \RuntimeException('Manual mixed block claim returned an invalid source_element_key.');
+            }
+
+            $key = trim($key);
+
+            if (! array_key_exists($key, $sourceElementsByKey)) {
+                throw new \RuntimeException("Manual mixed block claim referenced unknown source_element_key [{$key}].");
+            }
+
+            if (! in_array($key, $validated, true)) {
+                $validated[] = $key;
+            }
+        }
+
+        return $validated;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findBlockByKey(EnterpriseWikiPageVersion $version, string $blockKey): ?array
+    {
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (is_array($block) && (string) ($block['block_key'] ?? '') === $blockKey) {
+                return $block;
+            }
+        }
+
+        return null;
     }
 
     private function resolveLanguageCode(int $customerId): string

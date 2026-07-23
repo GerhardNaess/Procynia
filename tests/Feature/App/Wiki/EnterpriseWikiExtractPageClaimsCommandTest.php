@@ -13,9 +13,11 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
@@ -587,6 +589,234 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
         $this->assertSame($originalMarkdown, $version->fresh()->content_markdown);
+    }
+
+    // =========================================================================
+    // Manual mixed-block claim-origin extraction variant
+    // =========================================================================
+
+    public function test_manual_mixed_block_extraction_persists_explicit_claim_origins_and_claim_scoped_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = 'mixed';
+        $blocks[1]['markdown'] = implode("\n\n", [
+            'Kunden har en dokumentert rutine.',
+            'Det anbefales å etablere månedlig kontroll.',
+            'Kunden har innført døgnbemanning.',
+        ]);
+        $blocks[1]['source_elements'] = [
+            [
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => 123,
+                'source_label' => 'source.docx',
+                'source_hash' => str_pad('a', 64, '0'),
+                'document_version_hash' => str_pad('a', 64, '0'),
+                'source_element_key' => 'source-alpha',
+                'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                'source_row_key' => null,
+                'source_excerpt' => 'Kunden har en dokumentert rutine.',
+                'page_reference' => 'Avsnitt 1',
+            ],
+            [
+                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                'source_id' => 456,
+                'source_label' => 'source-2.docx',
+                'source_hash' => str_pad('b', 64, '0'),
+                'document_version_hash' => str_pad('b', 64, '0'),
+                'source_element_key' => 'source-beta',
+                'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                'source_row_key' => null,
+                'source_excerpt' => 'Urelatert kildeutdrag.',
+                'page_reference' => 'Avsnitt 2',
+            ],
+        ];
+        $version->update([
+            'content_markdown' => "# Test Page\n\n{$blocks[1]['markdown']}\n\nSupporting excerpt beta.",
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $otherBlockClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Existing claim from another block',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'page_excerpt' => 'Supporting excerpt beta.',
+            'content_block_key' => 'block-0003',
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->withArgs(function (string $pageTitle, string $pageType, string $blockMarkdown, string $contentBlockKey, array $sourceElements): bool {
+                $this->assertSame('block-0002', $contentBlockKey);
+                $this->assertSame('article', $pageType);
+                $this->assertStringContainsString('Kunden har en dokumentert rutine.', $blockMarkdown);
+                $this->assertSame(['source-alpha', 'source-beta'], array_column($sourceElements, 'key'));
+
+                return $pageTitle !== '';
+            })
+            ->andReturn(['claims' => [
+                [
+                    'text' => 'Kunden har en dokumentert rutine.',
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                    'excerpt' => 'Kunden har en dokumentert rutine.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => ['source-alpha'],
+                    'best_practice_reason' => null,
+                    'conflict_note' => null,
+                ],
+                [
+                    'text' => 'Det anbefales å etablere månedlig kontroll.',
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                    'excerpt' => 'Det anbefales å etablere månedlig kontroll.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'source_element_keys' => [],
+                    'best_practice_reason' => 'Normativ anbefaling for bedre kontroll.',
+                    'conflict_note' => null,
+                ],
+                [
+                    'text' => 'Kunden har innført døgnbemanning.',
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_LOW,
+                    'excerpt' => 'Kunden har innført døgnbemanning.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                    'source_element_keys' => [],
+                    'best_practice_reason' => null,
+                    'conflict_note' => null,
+                ],
+            ]]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)
+            ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
+
+        $this->assertSame(3, $result['claims']);
+
+        $createdClaims = EnterpriseWikiClaim::query()
+            ->whereIn('id', $result['claim_ids'])
+            ->orderBy('position_order')
+            ->get();
+
+        $this->assertSame([
+            EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        ], $createdClaims->pluck('content_origin')->all());
+
+        $sourceBasedClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $bestPracticeClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE);
+        $unsupportedClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
+
+        $this->assertSame(
+            ['source-alpha'],
+            EnterpriseWikiSourceReference::query()
+                ->where('enterprise_wiki_claim_id', $sourceBasedClaim->id)
+                ->pluck('source_element_key')
+                ->all(),
+        );
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $bestPracticeClaim->id)->exists());
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $unsupportedClaim->id)->exists());
+        $this->assertSame('ai_manual_mixed_block_claim_origin', $bestPracticeClaim->review_metadata['classification_basis'] ?? null);
+        $this->assertSame('unsupported_generated_content', $unsupportedClaim->generation_issue);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->firstOrFail();
+
+        $this->assertNull($pivot->claims_extracted_at);
+        $this->assertNull($pivot->claims_claimed_at);
+        $this->assertSame($blocks, $version->fresh()->content_blocks_json);
+        $this->assertTrue(EnterpriseWikiClaim::query()->whereKey($otherBlockClaim->id)->exists());
+    }
+
+    public function test_manual_mixed_block_best_practice_fact_is_degraded_to_unsupported(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = 'mixed';
+        $blocks[1]['markdown'] = 'Kunden har allerede etablert en fast eskaleringsrutine.';
+        $blocks[1]['source_elements'] = [];
+        $version->update([
+            'content_markdown' => "# Test Page\n\n{$blocks[1]['markdown']}",
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => 'Kunden har allerede etablert en fast eskaleringsrutine.',
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                'excerpt' => 'Kunden har allerede etablert en fast eskaleringsrutine.',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'source_element_keys' => [],
+                'best_practice_reason' => 'AI mente dette var normativt.',
+                'conflict_note' => null,
+            ]]]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)
+            ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
+
+        $claim = EnterpriseWikiClaim::query()->findOrFail($result['claim_ids'][0]);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
+        $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
+    public function test_manual_mixed_block_invalid_claim_rolls_back_whole_block_response(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = 'mixed';
+        $blocks[1]['markdown'] = 'Kunden har en dokumentert rutine. Ugyldig påstand.';
+        $version->update([
+            'content_markdown' => "# Test Page\n\n{$blocks[1]['markdown']}",
+            'content_blocks_json' => $blocks,
+        ]);
+        $claimsBefore = EnterpriseWikiClaim::query()->count();
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [
+                [
+                    'text' => 'Kunden har en dokumentert rutine.',
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                    'excerpt' => 'Kunden har en dokumentert rutine.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => ['source-alpha'],
+                    'best_practice_reason' => null,
+                    'conflict_note' => null,
+                ],
+                [
+                    'text' => 'Ugyldig påstand.',
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                    'excerpt' => 'Ugyldig påstand.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => ['source-missing'],
+                    'best_practice_reason' => null,
+                    'conflict_note' => null,
+                ],
+            ]]);
+
+        try {
+            app(EnterpriseWikiExtractPageClaimsService::class)
+                ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
+            $this->fail('Expected manual mixed block extraction to reject the invalid response.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('unknown source_element_key', $e->getMessage());
+        }
+
+        $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
+        $this->assertSame(0, EnterpriseWikiSourceReference::query()->count());
     }
 
     // =========================================================================
