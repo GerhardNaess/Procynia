@@ -3862,8 +3862,8 @@ return [
                 'description' => 'Siden har gyldige wikilenker i innholdet, men de er ikke materialisert i lenkestrukturen.',
             ],
             'orphan_concept_page' => [
-                'label' => 'Begrepsside er ikke koblet til andre sider',
-                'description' => 'Begrepssiden har ingen lenker til artikkel- eller sammendragssider.',
+                'label' => 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside',
+                'description' => 'Begrepssiden har ingen utgående lenke til en artikkel- eller sammendragsside.',
             ],
             'orphan_entity_page' => [
                 'label' => 'Enhetsside er ikke koblet til andre sider',

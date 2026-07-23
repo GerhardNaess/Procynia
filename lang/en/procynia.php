@@ -3862,8 +3862,8 @@ return [
                 'description' => 'The page has valid wiki links in the content, but they are not materialized in the link structure.',
             ],
             'orphan_concept_page' => [
-                'label' => 'Concept page is not linked to other pages',
-                'description' => 'The concept page has no links to article or summary pages.',
+                'label' => 'Concept page is missing an outgoing link to an article or summary page',
+                'description' => 'The concept page has no outgoing link to an article or summary page.',
             ],
             'orphan_entity_page' => [
                 'label' => 'Entity page is not linked to other pages',

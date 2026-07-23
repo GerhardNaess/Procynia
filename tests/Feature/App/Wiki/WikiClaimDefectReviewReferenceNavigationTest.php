@@ -383,7 +383,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'enterprise_wiki_claim_id' => null,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
             'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
-            'message' => 'Begrepsside er ikke koblet til andre sider.',
+            'message' => 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside.',
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
             'detected_at' => now(),
         ]);
@@ -406,9 +406,9 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             return data_get($inertia, 'props.review_reference') === null
                 && ($structureFinding['id'] ?? null) === $lintFinding->id
                 && ($structureFinding['code'] ?? null) === EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE
-                && ($structureFinding['category_label'] ?? null) === 'Begrepsside er ikke koblet til andre sider'
-                && ($structureFinding['description'] ?? null) === 'Begrepssiden har ingen lenker til artikkel- eller sammendragssider.'
-                && ($structureFinding['message'] ?? null) === 'Begrepsside er ikke koblet til andre sider.'
+                && ($structureFinding['category_label'] ?? null) === 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside'
+                && ($structureFinding['description'] ?? null) === 'Begrepssiden har ingen utgående lenke til en artikkel- eller sammendragsside.'
+                && ($structureFinding['message'] ?? null) === 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside.'
                 && ($structureFinding['page_id'] ?? null) === $page->id
                 && ($structureFinding['page_type'] ?? null) === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
                 && ($structureFinding['back_url'] ?? null) === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id])
@@ -577,7 +577,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'enterprise_wiki_claim_id' => null,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
             'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
-            'message' => 'Begrepsside er ikke koblet til andre sider.',
+            'message' => 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside.',
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
             'detected_at' => now(),
         ]);
