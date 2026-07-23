@@ -1637,7 +1637,7 @@ class WikiController extends Controller
             'update_url_template' => route('app.wiki.claims.manual-block-edit.update', [
                 'slug' => $page->slug,
                 'claim' => '__CLAIM_ID__',
-            ]),
+            ], false),
         ];
     }
 
@@ -1773,8 +1773,15 @@ class WikiController extends Controller
 
         $blockKey = trim((string) ($claim->content_block_key ?? ''));
         $blockKey = $blockKey !== '' ? $blockKey : null;
+        $blocks = $this->displayContentBlocks($currentVersion);
 
         if ($blockKey === null) {
+            $fallbackBlockKey = $this->uniqueReviewReferenceBlockKeyFromExcerpt($claim, $blocks);
+
+            if ($fallbackBlockKey !== null) {
+                return $this->reviewReferenceWithBackUrl(['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => $fallbackBlockKey], $backUrl);
+            }
+
             return $this->reviewReferenceWithBackUrl(['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => null], $backUrl);
         }
 
@@ -1784,12 +1791,15 @@ class WikiController extends Controller
         // rendered with a #wiki-block-{key} element for the frontend to scroll to and highlight.
         // Checking block_key existence alone here previously reported 'ready' for such a claim,
         // silently failing to scroll or highlight anything with no error shown to the user.
-        $blocks = (array) ($currentVersion->content_blocks_json ?? []);
-        $blockExists = collect($blocks)->contains(fn ($block): bool => is_array($block)
-            && ($block['block_key'] ?? null) === $blockKey
-            && trim((string) ($block['markdown'] ?? '')) !== '');
+        $blockExists = $blocks->contains(fn (array $block): bool => ($block['block_key'] ?? null) === $blockKey);
 
         if (! $blockExists) {
+            $fallbackBlockKey = $this->uniqueReviewReferenceBlockKeyFromExcerpt($claim, $blocks);
+
+            if ($fallbackBlockKey !== null && $this->hasNoRenderableStoredBlocks($currentVersion)) {
+                return $this->reviewReferenceWithBackUrl(['status' => 'ready', 'claim_id' => $claim->id, 'block_key' => $fallbackBlockKey], $backUrl);
+            }
+
             $reference = ['status' => 'block_missing', 'claim_id' => $claim->id];
 
             if ($includeTechnical) {
@@ -1843,17 +1853,111 @@ class WikiController extends Controller
      */
     private function renderedContentBlocks(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page, int $customerId): array
     {
-        return collect((array) ($version->content_blocks_json ?? []))
-            ->filter(fn ($block): bool => is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '')
+        return $this->displayContentBlocks($version)
             ->map(fn (array $block): array => [
                 'block_key' => $block['block_key'] ?? null,
                 'position' => $block['position'] ?? 0,
                 'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
                 'raw_markdown' => (string) $block['markdown'],
                 'content_origin' => $block['content_origin'] ?? null,
+                'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function displayContentBlocks(EnterpriseWikiPageVersion $version): Collection
+    {
+        $storedBlocks = collect((array) ($version->content_blocks_json ?? []))
+            ->filter(fn ($block): bool => is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '')
+            ->values()
+            ->map(fn (array $block, int $index): array => array_merge($block, [
+                'block_key' => trim((string) ($block['block_key'] ?? '')) !== ''
+                    ? (string) $block['block_key']
+                    : 'stored-block-'.sprintf('%04d', $index + 1),
+                'position' => $block['position'] ?? $index,
+                'is_derived_from_markdown' => false,
+            ]));
+
+        if ($storedBlocks->isNotEmpty()) {
+            return $storedBlocks;
+        }
+
+        return $this->derivedMarkdownDisplayBlocks((string) ($version->content_markdown ?? ''));
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function derivedMarkdownDisplayBlocks(string $markdown): Collection
+    {
+        $parts = preg_split("/\n{2,}/", $markdown) ?: [];
+
+        return collect($parts)
+            ->map(static fn (string $part): string => trim($part))
+            ->filter(static fn (string $part): bool => $part !== '')
+            ->values()
+            ->map(static fn (string $part, int $index): array => [
+                'block_key' => 'markdown-block-'.sprintf('%04d', $index + 1),
+                'position' => $index,
+                'markdown' => $part,
+                'raw_markdown' => $part,
+                'content_origin' => null,
+                'is_derived_from_markdown' => true,
+            ]);
+    }
+
+    private function hasNoRenderableStoredBlocks(EnterpriseWikiPageVersion $version): bool
+    {
+        return collect((array) ($version->content_blocks_json ?? []))
+            ->doesntContain(fn ($block): bool => is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '');
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $blocks
+     */
+    private function uniqueReviewReferenceBlockKeyFromExcerpt(EnterpriseWikiClaim $claim, Collection $blocks): ?string
+    {
+        $needles = collect([
+            $claim->page_excerpt,
+            $claim->claim_text,
+        ])
+            ->map(fn ($value): string => $this->normalizeReviewReferenceText((string) $value))
+            ->filter(static fn (string $value): bool => mb_strlen($value) >= 20)
+            ->unique()
+            ->values();
+
+        if ($needles->isEmpty()) {
+            return null;
+        }
+
+        $matches = $blocks
+            ->filter(function (array $block) use ($needles): bool {
+                $haystack = $this->normalizeReviewReferenceText((string) ($block['raw_markdown'] ?? $block['markdown'] ?? ''));
+
+                return $needles->contains(static fn (string $needle): bool => str_contains($haystack, $needle));
+            })
+            ->values();
+
+        if ($matches->count() !== 1) {
+            return null;
+        }
+
+        $blockKey = trim((string) ($matches->first()['block_key'] ?? ''));
+
+        return $blockKey !== '' ? $blockKey : null;
+    }
+
+    private function normalizeReviewReferenceText(string $text): string
+    {
+        $text = preg_replace('/\[\[([^|\]]+)\|([^\]]+)]]/u', '$2', $text) ?? $text;
+        $text = preg_replace('/\[\[([^\]]+)]]/u', '$1', $text) ?? $text;
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+
+        return trim($text);
     }
 
     /**

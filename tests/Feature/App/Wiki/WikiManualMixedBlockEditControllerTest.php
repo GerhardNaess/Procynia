@@ -321,6 +321,7 @@ class WikiManualMixedBlockEditControllerTest extends TestCase
 
             return data_get($inertia, 'props.can_edit_wiki_claims') === true
                 && data_get($inertia, 'props.manual_block_edit.run_id') === $fixture['run']->id
+                && data_get($inertia, 'props.manual_block_edit.update_url_template') === "/app/wiki/{$fixture['page']->slug}/claims/__CLAIM_ID__/manual-block-edit"
                 && data_get($block, 'raw_markdown') === $linkedMarkdown
                 && data_get($block, 'content_origin') === 'mixed';
         });

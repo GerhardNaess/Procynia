@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
@@ -100,6 +101,112 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'ready'
             && data_get($inertia, 'props.review_reference.block_key') === 'block-0002');
+    }
+
+    public function test_possible_content_deviation_without_block_key_uses_unique_page_excerpt_in_legacy_markdown(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Masterdata Samhandling');
+        $targetParagraph = 'Strategiske roller ivaretar partnerskap, kontraktsoppfølging og langsiktig utvikling, taktiske roller følger opp tjenestekvalitet og endringer, mens operative roller håndterer daglig drift.';
+        $version = $this->createLegacyVersionWithMarkdown($page, implode("\n\n", [
+            '# Masterdata Samhandling',
+            'Denne siden beskriver samhandling og styring.',
+            '## Roller og ansvar',
+            '[[roller-i-styringsmodellen|Rollestrukturen]] er utformet for å sikre tydelig ansvar. '.$targetParagraph,
+            '## Nøkkelroller',
+            'Leveransen ledes gjennom faste roller.',
+        ]));
+        $claim = $this->createClaim($page, $version, 'Strategiske roller ivaretar partnerskap, kontraktsoppfølging og langsiktig utvikling.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'claim_partially_supported',
+            'content_block_key' => null,
+            'page_excerpt' => $targetParagraph,
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'partially_supported',
+                'unsupported_parts' => 'kontraktsoppfølging',
+            ],
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}?claim_id={$claim->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($claim, $targetParagraph): bool {
+            $ref = data_get($inertia, 'props.review_reference');
+            $targetBlock = collect(data_get($inertia, 'props.current_version.content_blocks_json', []))
+                ->firstWhere('block_key', 'markdown-block-0004');
+
+            return $ref['status'] === 'ready'
+                && $ref['claim_id'] === $claim->id
+                && $ref['block_key'] === 'markdown-block-0004'
+                && ($targetBlock['is_derived_from_markdown'] ?? false) === true
+                && ($targetBlock['content_origin'] ?? null) === null
+                && str_contains((string) ($targetBlock['raw_markdown'] ?? ''), $targetParagraph);
+        });
+    }
+
+    public function test_non_editor_still_gets_highlighted_legacy_excerpt_block_without_edit_context(): void
+    {
+        $customer = $this->createCustomer();
+        $user = User::query()->create([
+            'name' => 'Read Only',
+            'email' => Str::lower(Str::random(8)).'@navigasjon-test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+        $page = $this->createPage($customer, 'Lesetilgang med funn');
+        $targetParagraph = 'Den operative leveransen organiseres i tre tverrfaglige team med tydelig ansvarsdeling.';
+        $version = $this->createLegacyVersionWithMarkdown($page, implode("\n\n", [
+            '# Lesetilgang med funn',
+            'Innledning.',
+            '## Team',
+            $targetParagraph,
+        ]));
+        $claim = $this->createClaim($page, $version, $targetParagraph, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'content_block_key' => null,
+            'page_excerpt' => $targetParagraph,
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}?claim_id={$claim->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'ready'
+            && data_get($inertia, 'props.review_reference.block_key') === 'markdown-block-0004'
+            && data_get($inertia, 'props.can_edit_wiki_claims') === false
+            && data_get($inertia, 'props.manual_block_edit') === null);
+    }
+
+    public function test_missing_block_key_without_unique_excerpt_keeps_no_confident_block_fallback(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Duplisert tekst');
+        $repeatedParagraph = 'Samme avsnitt kan finnes mer enn ett sted og må ikke markeres vilkårlig.';
+        $version = $this->createLegacyVersionWithMarkdown($page, implode("\n\n", [
+            '# Duplisert tekst',
+            $repeatedParagraph,
+            '## Gjentakelse',
+            $repeatedParagraph,
+        ]));
+        $claim = $this->createClaim($page, $version, $repeatedParagraph, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'generation_issue' => 'unsupported_generated_content',
+            'content_block_key' => null,
+            'page_excerpt' => $repeatedParagraph,
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}?claim_id={$claim->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'ready'
+            && data_get($inertia, 'props.review_reference.claim_id') === $claim->id
+            && data_get($inertia, 'props.review_reference.block_key') === null);
     }
 
     public function test_technical_uncertainty_with_known_block_navigates_and_highlights_its_block(): void
@@ -255,6 +362,44 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             && data_get($inertia, 'props.review_reference.back_url') === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]));
     }
 
+    public function test_structural_open_page_finding_keeps_page_url_without_claim_specific_block_handling(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $document);
+        $page = $this->createPage($customer, 'Begrepsside uten lenker');
+        $version = $this->createVersionWithBlocks($page, [
+            ['block_key' => 'block-0001', 'markdown' => '# Begrepsside uten lenker'],
+        ]);
+        $this->createRunPage($run, $page, $version);
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => null,
+            'enterprise_wiki_claim_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Begrepsside er ikke koblet til andre sider.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $findings = app(EnterpriseWikiRunFindingsService::class)->buildForRun($run, $user, false);
+        $finding = collect($findings['findings'])->firstWhere('category', EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE);
+
+        $this->assertNotNull($finding);
+        $this->assertSame('view_page', $finding['action']);
+        $this->assertStringNotContainsString('claim_id=', (string) $finding['url']);
+
+        $path = parse_url($finding['url'], PHP_URL_PATH).'?'.parse_url($finding['url'], PHP_URL_QUERY);
+        $response = $this->actingAs($user)->get($path);
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference') === null);
+    }
+
     private function createCustomer(string $name = 'Navigasjon AS'): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -317,6 +462,18 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
                 $blocks,
                 array_keys($blocks),
             ),
+            'generated_by_model' => 'gpt-5',
+        ]);
+    }
+
+    private function createLegacyVersionWithMarkdown(EnterpriseWikiPage $page, string $markdown): EnterpriseWikiPageVersion
+    {
+        return EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => $markdown,
+            'content_blocks_json' => [],
             'generated_by_model' => 'gpt-5',
         ]);
     }
