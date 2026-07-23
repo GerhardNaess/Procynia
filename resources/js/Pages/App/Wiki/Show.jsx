@@ -269,10 +269,292 @@ function LinkedPageList({ pages, label }) {
     );
 }
 
+const ORPHAN_CONCEPT_CANDIDATE_REASON_KEYS = {
+    incoming_wikilink: 'structure_finding_candidate_reason_incoming_wikilink',
+    structural_pairing: 'structure_finding_candidate_reason_structural_pairing',
+    mentions_title: 'structure_finding_candidate_reason_mentions_title',
+    shared_canonical_fact: 'structure_finding_candidate_reason_shared_canonical_fact',
+};
+
+const ORPHAN_CONCEPT_CANDIDATE_REASON_FALLBACKS = {
+    incoming_wikilink: 'Denne siden lenker allerede inn til begrepssiden.',
+    structural_pairing: 'Siden er allerede koblet til begrepssiden gjennom eksisterende sidestruktur.',
+    mentions_title: 'Sidens tekst nevner allerede begrepssidens tittel.',
+    shared_canonical_fact: 'Sidene deler et eksisterende faktagrunnlag.',
+};
+
+function OrphanConceptCandidateList({
+    finding,
+    tw,
+    pageTypeLabel,
+    onLinkCandidate,
+    linkingCandidateId,
+    confirmingCandidateId,
+    onRequestConfirm,
+    onCancelConfirm,
+}) {
+    if (finding.code !== 'orphan_concept_page' || finding.status !== 'open') {
+        return null;
+    }
+
+    const candidates = finding.candidate_targets ?? [];
+
+    return (
+        <div className="mt-5 rounded-2xl border border-sky-100 bg-white/80 p-4">
+            <h3 className="text-base font-semibold text-slate-800">
+                {tw.structure_finding_candidates_heading ?? 'Kandidater for tilkobling'}
+            </h3>
+            <p className="mt-1 text-base leading-7 text-slate-600">
+                {tw.structure_finding_candidates_intro ?? 'Denne begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside. Kandidatene under er valgt fordi eksisterende Wiki-data allerede knytter dem til denne siden.'}
+            </p>
+
+            {candidates.length === 0 && (
+                <p className="mt-3 text-base leading-7 text-slate-500">
+                    {tw.structure_finding_candidates_empty ?? 'Det finnes ingen dokumenterbar kandidat i eksisterende Wiki-data ennå. Legg til en relevant Wiki-lenke manuelt i teksten i stedet for å bruke et svakt forslag.'}
+                </p>
+            )}
+
+            <ul className="mt-3 space-y-3">
+                {candidates.map((candidate) => {
+                    const isConfirming = confirmingCandidateId === candidate.page_id;
+                    const isLinking = linkingCandidateId === candidate.page_id;
+
+                    return (
+                        <li key={candidate.page_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-base font-semibold text-slate-800">{candidate.title}</p>
+                                    <p className="text-sm text-slate-500">{pageTypeLabel(candidate.page_type)}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <a
+                                        href={`/app/wiki/${candidate.slug}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        {tw.structure_finding_candidate_open_button ?? 'Åpne siden'}
+                                    </a>
+                                    {finding.can_link_related_page && !isConfirming && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onRequestConfirm(candidate.page_id)}
+                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800"
+                                        >
+                                            {tw.structure_finding_candidate_link_button ?? 'Koble til denne siden'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                                {(candidate.reasons ?? []).map((reason) => (
+                                    <li key={reason}>
+                                        {tw[ORPHAN_CONCEPT_CANDIDATE_REASON_KEYS[reason]]
+                                            ?? ORPHAN_CONCEPT_CANDIDATE_REASON_FALLBACKS[reason]
+                                            ?? reason}
+                                    </li>
+                                ))}
+                            </ul>
+
+                            {isConfirming && (
+                                <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-3">
+                                    <p className="text-sm text-violet-900">
+                                        {(tw.structure_finding_candidate_confirm_text
+                                            ?? 'Dette oppretter en utgående Wiki-lenke fra «:from» til «:to». Fortsette?')
+                                            .replace(':from', finding.page_title)
+                                            .replace(':to', candidate.title)}
+                                    </p>
+                                    <div className="mt-2 flex gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={isLinking}
+                                            onClick={() => onLinkCandidate(candidate.page_id)}
+                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+                                        >
+                                            {isLinking
+                                                ? (tw.structure_finding_candidate_linking ?? 'Kobler til …')
+                                                : (tw.structure_finding_candidate_confirm_button ?? 'Bekreft kobling')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={isLinking}
+                                            onClick={() => onCancelConfirm()}
+                                            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                        >
+                                            {tw.structure_finding_candidate_cancel_button ?? 'Avbryt'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </li>
+                    );
+                })}
+            </ul>
+
+            {!finding.can_link_related_page && (
+                <p className="mt-3 text-sm text-slate-500">
+                    {tw.structure_finding_candidates_read_only_note ?? 'Du har lesetilgang til dette funnet. En bruker med redigeringstilgang til Wiki-innhold kan opprette koblingen.'}
+                </p>
+            )}
+        </div>
+    );
+}
+
+function StructureFindingContextPanel({
+    finding,
+    tw,
+    pageTypeLabel,
+    outgoingLinks,
+    incomingLinks,
+    backlinks,
+    relatedArticles,
+    relatedConcepts,
+    relatedEntities,
+    onLinkCandidate,
+    linkingCandidateId,
+    confirmingCandidateId,
+    onRequestConfirm,
+    onCancelConfirm,
+}) {
+    if (!finding) {
+        return null;
+    }
+
+    const hasDirectLinks = outgoingLinks.length > 0
+        || incomingLinks.length > 0
+        || backlinks.length > 0;
+    const hasRelevantPages = relatedArticles.length > 0
+        || relatedConcepts.length > 0
+        || relatedEntities.length > 0;
+    const severityClass = LINT_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-600';
+
+    return (
+        <section
+            id={`structure-finding-${finding.id}`}
+            data-testid="structure-finding-panel"
+            tabIndex={-1}
+            className="rounded-3xl border border-sky-200 bg-sky-50/80 p-6 shadow-[0_12px_30px_rgba(2,132,199,0.10)]"
+        >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-3xl space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                        <Badge label={finding.severity_label ?? finding.severity} cls={severityClass} />
+                        <Badge label={finding.status_label ?? finding.status} cls="bg-white text-slate-600 ring-1 ring-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                        <p className="text-base font-semibold uppercase tracking-[0.18em] text-sky-700">
+                            {tw.structure_finding_panel_kicker ?? 'Sidefunn'}
+                        </p>
+                        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
+                            {tw.structure_finding_panel_heading ?? 'Problem med sidestrukturen'}
+                        </h2>
+                        <p className="text-base leading-7 text-slate-700">
+                            {finding.description || finding.message || (tw.structure_finding_panel_unknown ?? 'Dette funnet gjelder strukturen på Wiki-siden.')}
+                        </p>
+                        <p className="text-base leading-7 text-slate-600">
+                            {tw.structure_finding_panel_scope_note ?? 'Dette gjelder hele siden, ikke et bestemt avsnitt. Bruk lenkestatusen under til å vurdere hvilke Wiki-sider denne siden bør kobles til.'}
+                        </p>
+                    </div>
+                </div>
+                <dl className="grid min-w-64 gap-2 rounded-2xl border border-sky-100 bg-white/80 p-4 text-base text-slate-700">
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_page_label ?? 'Side'}
+                        </dt>
+                        <dd>{finding.page_title}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_page_type_label ?? 'Sidetype'}
+                        </dt>
+                        <dd>{pageTypeLabel(finding.page_type)}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_type_label ?? 'Funntype'}
+                        </dt>
+                        <dd>{finding.category_label ?? finding.code}</dd>
+                    </div>
+                </dl>
+            </div>
+
+            {finding.message && finding.message !== finding.description && (
+                <p className="mt-4 rounded-2xl border border-sky-100 bg-white/70 px-4 py-3 text-base leading-7 text-slate-600">
+                    <span className="font-semibold text-slate-700">
+                        {tw.structure_finding_detected_reason_label ?? 'Hvorfor funnet ble opprettet'}:
+                    </span>{' '}
+                    {finding.message}
+                </p>
+            )}
+
+            {finding.is_current_version === false && (
+                <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-7 text-amber-800">
+                    {tw.structure_finding_superseded_note ?? 'Funnet peker til en eldre sideversjon. Kontroller gjeldende side før du gjør endringer.'}
+                </p>
+            )}
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-sky-100 bg-white/80 p-4">
+                    <h3 className="text-base font-semibold text-slate-800">
+                        {tw.structure_finding_existing_links_heading ?? 'Eksisterende Wiki-lenker'}
+                    </h3>
+                    <div className="mt-3 space-y-3">
+                        <LinkedPageList pages={outgoingLinks} label={tw.structure_finding_outgoing_links ?? 'Utgående lenker'} />
+                        <LinkedPageList pages={backlinks.length > 0 ? backlinks : incomingLinks} label={tw.structure_finding_incoming_links ?? 'Sider som lenker hit'} />
+                        {!hasDirectLinks && (
+                            <p className="text-base leading-7 text-slate-500">
+                                {tw.structure_finding_no_direct_links ?? 'Ingen direkte Wiki-lenker er registrert for denne siden ennå.'}
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-sky-100 bg-white/80 p-4">
+                    <h3 className="text-base font-semibold text-slate-800">
+                        {tw.structure_finding_relevant_pages_heading ?? 'Relevante sider i eksisterende data'}
+                    </h3>
+                    <div className="mt-3 space-y-3">
+                        <LinkedPageList pages={relatedArticles} label={tw.traversal_related_articles ?? 'Relaterte artikler'} />
+                        <LinkedPageList pages={relatedConcepts} label={tw.traversal_related_concepts ?? 'Konsepter'} />
+                        <LinkedPageList pages={relatedEntities} label={tw.traversal_related_entities ?? 'Entiteter'} />
+                        {!hasRelevantPages && (
+                            <p className="text-base leading-7 text-slate-500">
+                                {tw.structure_finding_no_suggestions ?? 'Det finnes ingen sikre koblingsforslag i eksisterende Wiki-data. Legg heller til en relevant Wiki-lenke manuelt enn å bruke et svakt forslag.'}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <OrphanConceptCandidateList
+                finding={finding}
+                tw={tw}
+                pageTypeLabel={pageTypeLabel}
+                onLinkCandidate={onLinkCandidate}
+                linkingCandidateId={linkingCandidateId}
+                confirmingCandidateId={confirmingCandidateId}
+                onRequestConfirm={onRequestConfirm}
+                onCancelConfirm={onCancelConfirm}
+            />
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-600">
+                <p className="font-semibold text-slate-800">
+                    {tw.structure_finding_handling_heading ?? 'Behandling'}
+                </p>
+                <p>
+                    {tw.structure_finding_handling_note ?? 'Det finnes ingen separat manuell lukking for sidestrukturfunn i dagens Wiki-flyt. Funnet lukkes av eksisterende lint-kjøring når lenkestrukturen er rettet.'}
+                </p>
+            </div>
+        </section>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
     review_reference: reviewReference = null,
+    structure_finding: structureFinding = null,
     claims,
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
@@ -282,13 +564,16 @@ export default function WikiShow({
     document_owner_summary: documentOwnerSummary = null,
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
+    can_edit_wiki_claims: canEditWikiClaims = false,
+    manual_block_edit: manualBlockEdit = null,
     outgoing_links: outgoingLinks = [],
+    incoming_links: incomingLinks = [],
     related_articles: relatedArticles = [],
     related_concepts: relatedConcepts = [],
     related_entities: relatedEntities = [],
     backlinks = [],
 }) {
-    const { translations = {}, auth = {} } = usePage().props;
+    const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
@@ -297,7 +582,8 @@ export default function WikiShow({
     // one of 'ready' | 'superseded' | 'block_missing' | 'not_found'.
     const targetClaimId = reviewReference?.status === 'ready' ? String(reviewReference.claim_id) : null;
     const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
-    const backHref = reviewReference?.back_url ?? '/app/wiki?tab=runs';
+    const hasStructureFinding = Boolean(structureFinding?.id);
+    const backHref = reviewReference?.back_url ?? structureFinding?.back_url ?? '/app/wiki?tab=runs';
     const hasFocusedReview = targetBlockKey !== null;
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
@@ -317,11 +603,134 @@ export default function WikiShow({
     const [claimSourceCatalog, setClaimSourceCatalog] = useState({});
     const [approvalComments, setApprovalComments] = useState({});
     const [claimTextEdits, setClaimTextEdits] = useState({});
+    const [wikiBlockEditingKey, setWikiBlockEditingKey] = useState(null);
+    const [wikiBlockEditDrafts, setWikiBlockEditDrafts] = useState({});
+    const [wikiBlockSaveProcessingKey, setWikiBlockSaveProcessingKey] = useState(null);
+    const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
+    const [confirmingCandidateId, setConfirmingCandidateId] = useState(null);
+    const [linkingCandidateId, setLinkingCandidateId] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
+
+    const getWikiBlockMarkdown = (block) => block.markdown;
+    const getWikiBlockRawMarkdown = (block) => typeof block.raw_markdown === 'string'
+        ? block.raw_markdown
+        : block.markdown;
+    const manualBlockEditUrl = (claimId) => {
+        const template = String(manualBlockEdit?.update_url_template ?? '');
+
+        if (!template || !claimId) {
+            return null;
+        }
+
+        return template.replace('__CLAIM_ID__', encodeURIComponent(String(claimId)));
+    };
+    const wikiBlockValidationError = wikiBlockEditError
+        ?? errors.blocks
+        ?? Object.entries(errors).find(([key]) => key.startsWith('blocks.'))?.[1]
+        ?? errors.expected_page_version_id
+        ?? errors.run_id
+        ?? null;
+
+    const startWikiBlockEdit = (blockKey, fallbackMarkdown) => {
+        setWikiBlockEditError(null);
+        setWikiBlockEditDrafts((prev) => ({
+            ...prev,
+            [blockKey]: fallbackMarkdown,
+        }));
+        setWikiBlockEditingKey(blockKey);
+    };
+
+    const cancelWikiBlockEdit = (blockKey) => {
+        setWikiBlockEditDrafts((prev) => {
+            const next = { ...prev };
+            delete next[blockKey];
+            return next;
+        });
+        setWikiBlockEditingKey((current) => (current === blockKey ? null : current));
+    };
+
+    const saveWikiBlockEdit = (blockKey) => {
+        if (wikiBlockSaveProcessingKey !== null) {
+            return;
+        }
+
+        const nextMarkdown = String(wikiBlockEditDrafts[blockKey] ?? '').trim();
+        const runId = Number(manualBlockEdit?.run_id ?? 0);
+        const updateUrl = manualBlockEditUrl(targetClaimId);
+
+        if (!updateUrl || !runId || !current_version?.id || !targetClaimId) {
+            setWikiBlockEditError('Lagring mangler gyldig Wiki-kontekst. Last inn funnet på nytt fra Kjøringer.');
+            return;
+        }
+
+        if (!nextMarkdown) {
+            setWikiBlockEditError('Tekstblokken kan ikke være tom.');
+            return;
+        }
+
+        setWikiBlockEditError(null);
+        setWikiBlockSaveProcessingKey(blockKey);
+        router.patch(
+            updateUrl,
+            {
+                run_id: runId,
+                expected_page_version_id: current_version.id,
+                blocks: [
+                    {
+                        block_key: blockKey,
+                        markdown: nextMarkdown,
+                    },
+                ],
+                back_url: reviewReference?.back_url ?? undefined,
+            },
+            {
+                preserveScroll: true,
+                onError: (formErrors) => {
+                    const firstBlockError = Object.entries(formErrors).find(([key]) => key.startsWith('blocks.'))?.[1];
+                    setWikiBlockEditError(
+                        formErrors.blocks
+                        ?? firstBlockError
+                        ?? formErrors.expected_page_version_id
+                        ?? formErrors.run_id
+                        ?? 'Tekstendringen kunne ikke lagres. Kontroller teksten og prøv igjen.',
+                    );
+                },
+                onSuccess: () => {
+                    setWikiBlockEditDrafts({});
+                    setWikiBlockEditingKey(null);
+                    setWikiBlockEditError(null);
+                },
+                onFinish: () => setWikiBlockSaveProcessingKey(null),
+            },
+        );
+    };
+
+    const linkOrphanConceptCandidate = (targetPageId) => {
+        if (linkingCandidateId !== null || !structureFinding?.id || !current_version?.id) {
+            return;
+        }
+
+        setLinkingCandidateId(targetPageId);
+        router.patch(
+            `/app/wiki/${page.slug}/structure-findings/${structureFinding.id}/link-target`,
+            {
+                target_page_id: targetPageId,
+                expected_page_version_id: current_version.id,
+                back_url: structureFinding?.back_url ?? undefined,
+            },
+            {
+                preserveScroll: true,
+                onFinish: () => {
+                    setLinkingCandidateId(null);
+                    setConfirmingCandidateId(null);
+                },
+            },
+        );
+    };
 
     useEffect(() => {
         if (!targetClaimId || hasFocusedReview) {
@@ -363,7 +772,26 @@ export default function WikiShow({
         });
 
         return () => window.cancelAnimationFrame(frame);
-    }, [targetBlockKey, page.slug]);
+    }, [targetBlockKey, page.slug, current_version?.id]);
+
+    useEffect(() => {
+        if (!hasStructureFinding) {
+            return undefined;
+        }
+
+        const targetElement = document.getElementById(`structure-finding-${structureFinding.id}`);
+
+        if (!targetElement) {
+            return undefined;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            targetElement.focus?.({ preventScroll: true });
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [hasStructureFinding, structureFinding?.id, page.slug]);
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
@@ -744,6 +1172,27 @@ export default function WikiShow({
                                 </p>
                             )}
                         </div>
+
+                        {isInlineReview && canHandleClaim && canEditWikiClaims && targetBlockKey && (() => {
+                            const targetBlock = contentBlocks.find((block) => block.block_key === targetBlockKey) ?? null;
+
+                            return targetBlock?.content_origin === 'mixed'
+                                && manualBlockEdit?.run_id
+                                && wikiBlockEditingKey !== targetBlockKey;
+                        })() && (
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => startWikiBlockEdit(
+                                        targetBlockKey,
+                                        getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === targetBlockKey) ?? {}),
+                                    )}
+                                    className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                                >
+                                    Rediger teksten
+                                </button>
+                            </div>
+                        )}
 
                         {canHandleClaim && isPendingDecision && (
                             <div className="space-y-3 rounded-xl border border-slate-100 bg-white/80 px-3 py-3">
@@ -1554,7 +2003,7 @@ export default function WikiShow({
                     );
                 })()}
 
-                {reviewReference && (
+                {(reviewReference || hasStructureFinding) && (
                     <div>
                         <Link
                             href={backHref}
@@ -1564,6 +2013,25 @@ export default function WikiShow({
                             {tw.review_reference_back_to_findings ?? 'Tilbake til funn'}
                         </Link>
                     </div>
+                )}
+
+                {hasStructureFinding && (
+                    <StructureFindingContextPanel
+                        finding={structureFinding}
+                        tw={tw}
+                        pageTypeLabel={pageTypeLabel}
+                        outgoingLinks={outgoingLinks}
+                        incomingLinks={incomingLinks}
+                        backlinks={backlinks}
+                        relatedArticles={relatedArticles}
+                        relatedConcepts={relatedConcepts}
+                        relatedEntities={relatedEntities}
+                        onLinkCandidate={linkOrphanConceptCandidate}
+                        linkingCandidateId={linkingCandidateId}
+                        confirmingCandidateId={confirmingCandidateId}
+                        onRequestConfirm={setConfirmingCandidateId}
+                        onCancelConfirm={() => setConfirmingCandidateId(null)}
+                    />
                 )}
 
                 {reviewReference?.status === 'superseded' && (
@@ -1620,6 +2088,17 @@ export default function WikiShow({
                                 {contentBlocks.length > 0 ? (
                                     contentBlocks.map((block) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
+                                        const currentBlockMarkdown = getWikiBlockMarkdown(block);
+                                        const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
+                                        const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
+                                        const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
+                                        const canSaveBlockEdit = Boolean(
+                                            canEditWikiClaims
+                                            && manualBlockEdit?.run_id
+                                            && current_version?.id
+                                            && targetClaimId
+                                            && !wikiBlockSaveProcessingKey,
+                                        );
 
                                         return (
                                             <div
@@ -1631,7 +2110,55 @@ export default function WikiShow({
                                                     ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
                                                     : undefined}
                                             >
-                                                <ReactMarkdown components={{ a: WikiArticleLink }}>{block.markdown}</ReactMarkdown>
+                                                {isEditingTargetBlock ? (
+                                                    <div className="space-y-3">
+                                                        <label className="block space-y-2">
+                                                            <span className="text-base font-semibold text-violet-700">
+                                                                {tw.wiki_block_edit_label ?? 'Rediger teksten'}
+                                                            </span>
+                                                            <textarea
+                                                                autoFocus
+                                                                rows={10}
+                                                                value={currentDraft}
+                                                                onChange={(e) => setWikiBlockEditDrafts((prev) => ({
+                                                                    ...prev,
+                                                                    [block.block_key]: e.target.value,
+                                                                }))}
+                                                                className="w-full rounded-lg border border-violet-200 bg-white px-4 py-3 text-lg leading-8 text-slate-900 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                            />
+                                                        </label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                type="button"
+                                                                disabled={!canSaveBlockEdit}
+                                                                onClick={() => saveWikiBlockEdit(block.block_key)}
+                                                                className="rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {wikiBlockSaveProcessingKey === block.block_key ? 'Lagrer...' : 'Lagre endring'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={wikiBlockSaveProcessingKey === block.block_key}
+                                                                onClick={() => cancelWikiBlockEdit(block.block_key)}
+                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                Avbryt
+                                                            </button>
+                                                        </div>
+                                                        {wikiBlockValidationError && (
+                                                            <p className="text-base text-rose-600">
+                                                                {wikiBlockValidationError}
+                                                            </p>
+                                                        )}
+                                                        {!manualBlockEdit?.run_id && (
+                                                            <p className="text-base text-slate-500">
+                                                                Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                )}
                                                 {isTargetBlock && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                                         <div className="space-y-1">

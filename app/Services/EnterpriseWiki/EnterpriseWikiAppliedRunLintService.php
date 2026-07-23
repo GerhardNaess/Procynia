@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use Illuminate\Support\Collection;
 
 /**
  * Structural lint for an applied maintainer decision run.
@@ -436,7 +437,7 @@ class EnterpriseWikiAppliedRunLintService
         match ($page->page_type) {
             EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $this->checkArticleLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
             EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $this->checkSummaryLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
-            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->checkConceptLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->checkConceptLinks($run, $page, $outgoing, $touchedIds, $counts),
             EnterpriseWikiPage::PAGE_TYPE_ENTITY  => $this->checkEntityLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
             default                               => null,
         };
@@ -689,21 +690,45 @@ class EnterpriseWikiAppliedRunLintService
         }
     }
 
+    /**
+     * A concept page counts as linked when it has an outgoing link to an article or summary
+     * page — either the legacy structural link_type (concept_to_article/concept_to_summary,
+     * built from run co-membership) or a canonical wikilink whose target page is actually an
+     * article or summary. A wikilink to another concept page never counts.
+     *
+     * @param  Collection<int, EnterpriseWikiPageLink>  $outgoing
+     */
     private function checkConceptLinks(
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
-        array $outgoingTypes,
+        Collection $outgoing,
         array &$touchedIds,
         array &$counts,
     ): void {
+        $outgoingTypes = $outgoing->pluck('link_type')->all();
+
         $hasBacklink = in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE, $outgoingTypes, true)
             || in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY, $outgoingTypes, true);
+
+        if (! $hasBacklink) {
+            $wikilinkTargetIds = $outgoing
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+                ->pluck('to_page_id')
+                ->all();
+
+            if ($wikilinkTargetIds !== []) {
+                $hasBacklink = EnterpriseWikiPage::query()
+                    ->whereIn('id', $wikilinkTargetIds)
+                    ->whereIn('page_type', [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY])
+                    ->exists();
+            }
+        }
 
         if (! $hasBacklink) {
             $this->upsertFinding(
                 $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE),
                 EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Concept page has no links to article or summary pages.',
+                'Concept page has no outgoing link to an article or summary page.',
                 $touchedIds,
                 $counts,
             );

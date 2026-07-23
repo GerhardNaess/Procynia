@@ -368,6 +368,180 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
+    public function test_no_finding_when_concept_has_outgoing_wikilink_to_article(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $article  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_no_finding_when_concept_has_outgoing_wikilink_to_summary(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $summary  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        $this->createLink($customer, $concept, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_creates_finding_when_concept_only_has_wikilinks_to_other_concepts(): void
+    {
+        $customer      = $this->createCustomer();
+        $run           = $this->createAppliedRun($customer);
+        $concept       = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $otherConcept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Other Concept');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        $this->createLink($customer, $concept, $otherConcept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_creates_finding_when_concept_only_has_incoming_links(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $article  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        // Only incoming (article -> concept), no outgoing link from the concept page itself.
+        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_no_finding_when_concept_has_legacy_concept_to_article_link(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $article  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_no_finding_when_concept_has_legacy_concept_to_summary_link(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $summary  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+        $this->createLink($customer, $concept, $summary, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_creates_finding_when_wikilink_target_is_neither_article_nor_summary(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $entity   = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entity');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+
+        // A wikilink to a valid page whose page_type is neither article nor summary must not
+        // count as a valid backlink.
+        $this->createLink($customer, $concept, $entity, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_regression_page_230_concept_with_wikilink_to_article_is_not_orphan(): void
+    {
+        $customer      = $this->createCustomer();
+        $run           = $this->createAppliedRun($customer);
+        $concept       = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Roller i styringsmodellen');
+        $article       = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+        $otherConcept1 = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Rolle A');
+        $otherConcept2 = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Rolle B');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+
+        // Mirrors the reported page 230 shape: several outgoing wikilinks to other concept
+        // pages plus one outgoing wikilink to an article.
+        $this->createLink($customer, $concept, $otherConcept1, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $this->createLink($customer, $concept, $otherConcept2, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+        ]);
+    }
+
+    public function test_reopened_run_closes_stale_orphan_concept_finding_once_wikilink_is_added(): void
+    {
+        $customer = $this->createCustomer();
+        $run      = $this->createAppliedRun($customer);
+        $concept  = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+        $this->createClaim($this->currentVersion($concept), 'Claim.');
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'status'                  => EnterpriseWikiLintFinding::STATUS_OPEN,
+        ]);
+
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $concept->id,
+            'code'                    => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'status'                  => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+        ]);
+    }
+
     public function test_creates_finding_when_entity_has_no_article_or_summary_link(): void
     {
         $customer = $this->createCustomer();
