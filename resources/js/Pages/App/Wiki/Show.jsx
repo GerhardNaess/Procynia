@@ -269,6 +269,138 @@ function LinkedPageList({ pages, label }) {
     );
 }
 
+const ORPHAN_CONCEPT_CANDIDATE_REASON_KEYS = {
+    incoming_wikilink: 'structure_finding_candidate_reason_incoming_wikilink',
+    structural_pairing: 'structure_finding_candidate_reason_structural_pairing',
+    mentions_title: 'structure_finding_candidate_reason_mentions_title',
+    shared_canonical_fact: 'structure_finding_candidate_reason_shared_canonical_fact',
+};
+
+const ORPHAN_CONCEPT_CANDIDATE_REASON_FALLBACKS = {
+    incoming_wikilink: 'Denne siden lenker allerede inn til begrepssiden.',
+    structural_pairing: 'Siden er allerede koblet til begrepssiden gjennom eksisterende sidestruktur.',
+    mentions_title: 'Sidens tekst nevner allerede begrepssidens tittel.',
+    shared_canonical_fact: 'Sidene deler et eksisterende faktagrunnlag.',
+};
+
+function OrphanConceptCandidateList({
+    finding,
+    tw,
+    pageTypeLabel,
+    onLinkCandidate,
+    linkingCandidateId,
+    confirmingCandidateId,
+    onRequestConfirm,
+    onCancelConfirm,
+}) {
+    if (finding.code !== 'orphan_concept_page' || finding.status !== 'open') {
+        return null;
+    }
+
+    const candidates = finding.candidate_targets ?? [];
+
+    return (
+        <div className="mt-5 rounded-2xl border border-sky-100 bg-white/80 p-4">
+            <h3 className="text-base font-semibold text-slate-800">
+                {tw.structure_finding_candidates_heading ?? 'Kandidater for tilkobling'}
+            </h3>
+            <p className="mt-1 text-base leading-7 text-slate-600">
+                {tw.structure_finding_candidates_intro ?? 'Denne begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside. Kandidatene under er valgt fordi eksisterende Wiki-data allerede knytter dem til denne siden.'}
+            </p>
+
+            {candidates.length === 0 && (
+                <p className="mt-3 text-base leading-7 text-slate-500">
+                    {tw.structure_finding_candidates_empty ?? 'Det finnes ingen dokumenterbar kandidat i eksisterende Wiki-data ennå. Legg til en relevant Wiki-lenke manuelt i teksten i stedet for å bruke et svakt forslag.'}
+                </p>
+            )}
+
+            <ul className="mt-3 space-y-3">
+                {candidates.map((candidate) => {
+                    const isConfirming = confirmingCandidateId === candidate.page_id;
+                    const isLinking = linkingCandidateId === candidate.page_id;
+
+                    return (
+                        <li key={candidate.page_id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-base font-semibold text-slate-800">{candidate.title}</p>
+                                    <p className="text-sm text-slate-500">{pageTypeLabel(candidate.page_type)}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <a
+                                        href={`/app/wiki/${candidate.slug}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        {tw.structure_finding_candidate_open_button ?? 'Åpne siden'}
+                                    </a>
+                                    {finding.can_link_related_page && !isConfirming && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onRequestConfirm(candidate.page_id)}
+                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800"
+                                        >
+                                            {tw.structure_finding_candidate_link_button ?? 'Koble til denne siden'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                                {(candidate.reasons ?? []).map((reason) => (
+                                    <li key={reason}>
+                                        {tw[ORPHAN_CONCEPT_CANDIDATE_REASON_KEYS[reason]]
+                                            ?? ORPHAN_CONCEPT_CANDIDATE_REASON_FALLBACKS[reason]
+                                            ?? reason}
+                                    </li>
+                                ))}
+                            </ul>
+
+                            {isConfirming && (
+                                <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-3">
+                                    <p className="text-sm text-violet-900">
+                                        {(tw.structure_finding_candidate_confirm_text
+                                            ?? 'Dette oppretter en utgående Wiki-lenke fra «:from» til «:to». Fortsette?')
+                                            .replace(':from', finding.page_title)
+                                            .replace(':to', candidate.title)}
+                                    </p>
+                                    <div className="mt-2 flex gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={isLinking}
+                                            onClick={() => onLinkCandidate(candidate.page_id)}
+                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+                                        >
+                                            {isLinking
+                                                ? (tw.structure_finding_candidate_linking ?? 'Kobler til …')
+                                                : (tw.structure_finding_candidate_confirm_button ?? 'Bekreft kobling')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={isLinking}
+                                            onClick={() => onCancelConfirm()}
+                                            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                        >
+                                            {tw.structure_finding_candidate_cancel_button ?? 'Avbryt'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </li>
+                    );
+                })}
+            </ul>
+
+            {!finding.can_link_related_page && (
+                <p className="mt-3 text-sm text-slate-500">
+                    {tw.structure_finding_candidates_read_only_note ?? 'Du har lesetilgang til dette funnet. En bruker med redigeringstilgang til Wiki-innhold kan opprette koblingen.'}
+                </p>
+            )}
+        </div>
+    );
+}
+
 function StructureFindingContextPanel({
     finding,
     tw,
@@ -279,6 +411,11 @@ function StructureFindingContextPanel({
     relatedArticles,
     relatedConcepts,
     relatedEntities,
+    onLinkCandidate,
+    linkingCandidateId,
+    confirmingCandidateId,
+    onRequestConfirm,
+    onCancelConfirm,
 }) {
     if (!finding) {
         return null;
@@ -390,6 +527,17 @@ function StructureFindingContextPanel({
                 </div>
             </div>
 
+            <OrphanConceptCandidateList
+                finding={finding}
+                tw={tw}
+                pageTypeLabel={pageTypeLabel}
+                onLinkCandidate={onLinkCandidate}
+                linkingCandidateId={linkingCandidateId}
+                confirmingCandidateId={confirmingCandidateId}
+                onRequestConfirm={onRequestConfirm}
+                onCancelConfirm={onCancelConfirm}
+            />
+
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-600">
                 <p className="font-semibold text-slate-800">
                     {tw.structure_finding_handling_heading ?? 'Behandling'}
@@ -461,6 +609,8 @@ export default function WikiShow({
     const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
+    const [confirmingCandidateId, setConfirmingCandidateId] = useState(null);
+    const [linkingCandidateId, setLinkingCandidateId] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
@@ -555,6 +705,29 @@ export default function WikiShow({
                     setWikiBlockEditError(null);
                 },
                 onFinish: () => setWikiBlockSaveProcessingKey(null),
+            },
+        );
+    };
+
+    const linkOrphanConceptCandidate = (targetPageId) => {
+        if (linkingCandidateId !== null || !structureFinding?.id || !current_version?.id) {
+            return;
+        }
+
+        setLinkingCandidateId(targetPageId);
+        router.patch(
+            `/app/wiki/${page.slug}/structure-findings/${structureFinding.id}/link-target`,
+            {
+                target_page_id: targetPageId,
+                expected_page_version_id: current_version.id,
+                back_url: structureFinding?.back_url ?? undefined,
+            },
+            {
+                preserveScroll: true,
+                onFinish: () => {
+                    setLinkingCandidateId(null);
+                    setConfirmingCandidateId(null);
+                },
             },
         );
     };
@@ -1853,6 +2026,11 @@ export default function WikiShow({
                         relatedArticles={relatedArticles}
                         relatedConcepts={relatedConcepts}
                         relatedEntities={relatedEntities}
+                        onLinkCandidate={linkOrphanConceptCandidate}
+                        linkingCandidateId={linkingCandidateId}
+                        confirmingCandidateId={confirmingCandidateId}
+                        onRequestConfirm={setConfirmingCandidateId}
+                        onCancelConfirm={() => setConfirmingCandidateId(null)}
                     />
                 )}
 

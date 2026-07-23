@@ -322,6 +322,7 @@ Route::prefix('app')
             Route::get('/runs/{run}/findings', [WikiController::class, 'runFindings'])->name('runs.findings');
             Route::patch('/runs/{run}/cancel', [WikiController::class, 'cancelRun'])->name('runs.cancel');
             Route::patch('/{slug}/claims/{claim}/manual-block-edit', [WikiController::class, 'updateManualMixedBlockEdit'])->name('claims.manual-block-edit.update');
+            Route::patch('/{slug}/structure-findings/{finding}/link-target', [WikiController::class, 'linkOrphanConceptTarget'])->name('structure-findings.link-target');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');

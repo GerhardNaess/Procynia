@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\EnterpriseWikiOrphanConceptLinkException;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -20,6 +21,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiOrphanConceptLinkService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
@@ -46,6 +48,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
+        private readonly EnterpriseWikiOrphanConceptLinkService $orphanConceptLinkService,
     ) {}
 
     public function index(Request $request): Response
@@ -1121,6 +1124,7 @@ class WikiController extends Controller
         ?EnterpriseWikiPageVersion $currentVersion,
         int $customerId,
         ?string $backUrl,
+        ?User $user,
     ): ?array {
         $rawFindingId = $request->query('finding_id');
 
@@ -1150,6 +1154,17 @@ class WikiController extends Controller
         $versionId = $finding->enterprise_wiki_page_version_id !== null
             ? (int) $finding->enterprise_wiki_page_version_id
             : null;
+        $isCurrentVersion = $versionId === null || ($currentVersion !== null && $versionId === (int) $currentVersion->id);
+
+        $canLinkRelatedPage = $user instanceof User
+            && $user->is_active
+            && $user->canAccessCustomerFrontend()
+            && $user->canApproveWikiClaims();
+
+        $isOrphanConceptFinding = $finding->code === EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE
+            && $finding->status === EnterpriseWikiLintFinding::STATUS_OPEN
+            && $isCurrentVersion
+            && $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT;
 
         return [
             'id' => $finding->id,
@@ -1167,12 +1182,16 @@ class WikiController extends Controller
             'page_version_id' => $versionId,
             'page_version_number' => $finding->version?->version_number,
             'current_page_version_id' => $currentVersion?->id,
-            'is_current_version' => $versionId === null || ($currentVersion !== null && $versionId === (int) $currentVersion->id),
+            'is_current_version' => $isCurrentVersion,
             'run_id' => $finding->enterprise_wiki_ingest_run_id,
             'run_source_id' => $finding->run?->source_id,
             'detected_at' => $finding->detected_at?->toIso8601String(),
             'resolved_at' => $finding->resolved_at?->toIso8601String(),
             'back_url' => $backUrl,
+            'candidate_targets' => $isOrphanConceptFinding
+                ? $this->orphanConceptLinkService->findCandidates($page)
+                : [],
+            'can_link_related_page' => $isOrphanConceptFinding && $canLinkRelatedPage,
         ];
     }
 
@@ -1522,7 +1541,7 @@ class WikiController extends Controller
             ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
         $structureFinding = $reviewReference === null
-            ? $this->buildStructureFindingReference($request, $page, $currentVersion, $customerId, $backUrl)
+            ? $this->buildStructureFindingReference($request, $page, $currentVersion, $customerId, $backUrl, $user)
             : null;
         $manualBlockEdit = $canApproveWikiClaims
             ? $this->manualMixedBlockEditContext($page, $currentVersion, $customerId)
@@ -1698,6 +1717,106 @@ class WikiController extends Controller
         return redirect()
             ->route('app.wiki.show', $routeParams)
             ->with('success', 'Wiki-teksten er lagret som ny aktiv versjon.');
+    }
+
+    /**
+     * Resolves an open orphan_concept_page finding by creating a real outgoing [[wikilink]] from
+     * this concept page to a candidate article/summary page the maintainer picked from the
+     * documentably-related list built in buildStructureFindingReference(). See
+     * EnterpriseWikiOrphanConceptLinkService for the placement/versioning/relint mechanics.
+     */
+    public function linkOrphanConceptTarget(Request $request, string $slug, EnterpriseWikiLintFinding $finding): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend(), 404);
+
+        $validated = $request->validate([
+            'target_page_id' => ['required', 'integer'],
+            'expected_page_version_id' => ['required', 'integer'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
+        ], [
+            'target_page_id.required' => 'Velg en side å koble til.',
+            'expected_page_version_id.required' => 'Sideversjon mangler. Last inn siden på nytt og prøv igjen.',
+        ]);
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        abort_unless(
+            (int) $finding->enterprise_wiki_page_id === (int) $page->id
+                && (int) $finding->customer_id === (int) $customerId
+                && $finding->code === EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            404,
+        );
+
+        $backUrl = isset($validated['back_url']) && is_string($validated['back_url'])
+            ? $this->normalizeReviewBackUrl($validated['back_url'])
+            : null;
+
+        $routeParams = array_filter([
+            'slug' => $page->slug,
+            'finding_id' => $finding->id,
+            'back_url' => $backUrl,
+        ], static fn ($value): bool => $value !== null);
+
+        if ($finding->status !== EnterpriseWikiLintFinding::STATUS_OPEN) {
+            return redirect()
+                ->route('app.wiki.show', $routeParams)
+                ->with('error', 'Dette funnet er ikke lenger åpent. Last inn siden på nytt.');
+        }
+
+        try {
+            $result = $this->orphanConceptLinkService->linkConceptToTarget(
+                $page,
+                (int) $validated['target_page_id'],
+                (int) $validated['expected_page_version_id'],
+                $user,
+            );
+        } catch (EnterpriseWikiOrphanConceptLinkException $e) {
+            return match ($e->reason) {
+                EnterpriseWikiOrphanConceptLinkException::REASON_UNAUTHORIZED => abort(403),
+                EnterpriseWikiOrphanConceptLinkException::REASON_STALE_VERSION => redirect()
+                    ->route('app.wiki.show', $routeParams)
+                    ->with('error', 'Wiki-siden er endret av noen andre. Last inn siden på nytt før du kobler til en side.'),
+                default => redirect()
+                    ->route('app.wiki.show', $routeParams)
+                    ->with('error', 'Kandidatsiden er ikke lenger gyldig. Last inn siden på nytt og prøv igjen.'),
+            };
+        } catch (\Throwable $e) {
+            Log::warning('[PROCYNIA][WIKI_ORPHAN_CONCEPT_LINK] Failed to link concept page to target.', [
+                'page_id' => $page->id,
+                'finding_id' => $finding->id,
+                'target_page_id' => $validated['target_page_id'],
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('app.wiki.show', $routeParams)
+                ->with('error', 'Koblingen kunne ikke opprettes. Ingen ny Wiki-versjon ble aktivert.');
+        }
+
+        $successRouteParams = array_filter([
+            'slug' => $page->slug,
+            'back_url' => $backUrl,
+        ], static fn ($value): bool => $value !== null);
+
+        if ($result['already_linked']) {
+            return redirect()
+                ->route('app.wiki.show', $successRouteParams)
+                ->with('success', 'Siden er allerede koblet til denne kandidaten.');
+        }
+
+        $successMessage = $result['resolved_finding']
+            ? 'Koblingen ble opprettet, og strukturfunnet er nå løst.'
+            : 'Koblingen ble opprettet. Kontroller strukturfunnet — det kan kreve en ny lint-kjøring for å lukkes.';
+
+        return redirect()
+            ->route('app.wiki.show', $successRouteParams)
+            ->with('success', $successMessage);
     }
 
     /**
