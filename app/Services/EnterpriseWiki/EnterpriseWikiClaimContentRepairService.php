@@ -3,11 +3,15 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
+use App\Models\User;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -58,7 +62,767 @@ class EnterpriseWikiClaimContentRepairService
         private readonly EnterpriseWikiPostIngestQaService $qaService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
+        private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
     ) {}
+
+    /**
+     * Apply a manual edit to one or more existing mixed-provenance content blocks.
+     *
+     * The single-block calling form is:
+     *   applyManualMixedBlockEdit($run, $page, $version, $claim, 'block-0003', 'new markdown', $actor)
+     *
+     * The multi-block calling form is:
+     *   applyManualMixedBlockEdit($run, $page, $version, $claim, ['block-0003' => '...', ...], $actor)
+     *
+     * @param  string|array<string, string>|list<array<string, mixed>>  $contentBlockKey
+     * @return array{
+     *     page_version_id: int,
+     *     previous_page_version_id: int,
+     *     changed_content_block_keys: list<string>,
+     *     copied_claim_ids: list<int>,
+     *     new_claim_ids: list<int>,
+     *     extracted_claims: int,
+     *     verified_claims: int,
+     *     canonical_fact_ids: list<int>
+     * }
+     */
+    public function applyManualMixedBlockEdit(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        EnterpriseWikiClaim $reviewClaim,
+        string|array $contentBlockKey,
+        string|User|null $markdownOrActor,
+        ?User $actor = null,
+    ): array {
+        [$submittedMarkdownByBlockKey, $actor] = $this->normalizeManualMixedBlockEdits($contentBlockKey, $markdownOrActor, $actor);
+
+        $this->assertManualMixedBlockEditScope(
+            $run,
+            $page,
+            $expectedCurrentVersion,
+            $reviewClaim,
+            array_keys($submittedMarkdownByBlockKey),
+            $actor,
+        );
+
+        $stagedVersion = null;
+
+        try {
+            $staged = $this->createStagedManualMixedBlockVersion(
+                $run,
+                $page,
+                $expectedCurrentVersion,
+                $submittedMarkdownByBlockKey,
+                $actor,
+            );
+            $stagedVersion = $staged['version'];
+            $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
+
+            if (! array_key_exists($reviewClaimBlockKey, $staged['changed_blocks'])) {
+                throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] must belong to a changed content block.");
+            }
+
+            $newClaimIds = [];
+            $extractedClaims = 0;
+            $verifiedClaims = 0;
+            $canonicalRecordingCandidates = [];
+
+            foreach ($staged['changed_blocks'] as $blockKey => $block) {
+                $extraction = $this->extractPageClaimsService->extractClaimsForManualMixedBlock(
+                    $run->fresh() ?? $run,
+                    $stagedVersion->fresh() ?? $stagedVersion,
+                    $block,
+                );
+
+                $blockClaimIds = $extraction['claim_ids'];
+                $extractedClaims += $extraction['claims'];
+                array_push($newClaimIds, ...$blockClaimIds);
+
+                $verification = $this->verifyPageClaimsService->verifyClaimsForManualMixedBlock(
+                    $run->fresh() ?? $run,
+                    $page->fresh() ?? $page,
+                    $expectedCurrentVersion->fresh() ?? $expectedCurrentVersion,
+                    $stagedVersion->fresh() ?? $stagedVersion,
+                    $blockKey,
+                    $blockClaimIds,
+                );
+
+                if ($verification['busy'] > 0) {
+                    throw new \RuntimeException("Manual Wiki block edit could not verify all claims for content block [{$blockKey}].");
+                }
+
+                $verifiedClaims += $verification['claims'];
+                array_push($canonicalRecordingCandidates, ...$verification['canonical_recording_candidates']);
+            }
+
+            $this->assertManualMixedBlockClaimsVerified(
+                $stagedVersion->fresh() ?? $stagedVersion,
+                array_keys($staged['changed_blocks']),
+                $newClaimIds,
+            );
+
+            $canonicalFactIds = $this->promoteStagedManualMixedBlockVersion(
+                $run,
+                $page,
+                $expectedCurrentVersion,
+                $stagedVersion,
+                array_keys($staged['changed_blocks']),
+                $newClaimIds,
+                $canonicalRecordingCandidates,
+            );
+
+            return [
+                'page_version_id' => $stagedVersion->id,
+                'previous_page_version_id' => $expectedCurrentVersion->id,
+                'changed_content_block_keys' => array_keys($staged['changed_blocks']),
+                'copied_claim_ids' => $staged['copied_claim_ids'],
+                'new_claim_ids' => array_values($newClaimIds),
+                'extracted_claims' => $extractedClaims,
+                'verified_claims' => $verifiedClaims,
+                'canonical_fact_ids' => $canonicalFactIds,
+            ];
+        } catch (\Throwable $e) {
+            $this->cleanupStagedVersion($stagedVersion);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param  string|array<string, string>|list<array<string, mixed>>  $contentBlockKey
+     * @return array{0: array<string, string>, 1: User}
+     */
+    private function normalizeManualMixedBlockEdits(
+        string|array $contentBlockKey,
+        string|User|null $markdownOrActor,
+        ?User $actor,
+    ): array {
+        if (is_array($contentBlockKey)) {
+            if ($markdownOrActor instanceof User && $actor === null) {
+                $actor = $markdownOrActor;
+            } elseif ($markdownOrActor !== null && ! $markdownOrActor instanceof User) {
+                throw new \InvalidArgumentException('Manual Wiki block edit received invalid markdown arguments.');
+            }
+
+            if (! $actor instanceof User) {
+                throw new \InvalidArgumentException('Manual Wiki block edit requires an actor.');
+            }
+
+            $edits = [];
+
+            if (array_is_list($contentBlockKey)) {
+                foreach ($contentBlockKey as $block) {
+                    if (! is_array($block)) {
+                        throw new \InvalidArgumentException('Manual Wiki block edit block payload must be an array.');
+                    }
+
+                    $key = trim((string) ($block['block_key'] ?? $block['content_block_key'] ?? ''));
+                    $markdown = $block['markdown'] ?? null;
+
+                    if (! is_string($markdown)) {
+                        throw new \InvalidArgumentException("Manual Wiki block edit for block [{$key}] requires markdown.");
+                    }
+
+                    $this->putManualMixedBlockEdit($edits, $key, $markdown);
+                }
+            } else {
+                foreach ($contentBlockKey as $key => $markdown) {
+                    if (! is_string($markdown)) {
+                        throw new \InvalidArgumentException("Manual Wiki block edit for block [{$key}] requires markdown.");
+                    }
+
+                    $this->putManualMixedBlockEdit($edits, (string) $key, $markdown);
+                }
+            }
+        } else {
+            if (! is_string($markdownOrActor)) {
+                throw new \InvalidArgumentException('Manual Wiki block edit requires markdown.');
+            }
+
+            if (! $actor instanceof User) {
+                throw new \InvalidArgumentException('Manual Wiki block edit requires an actor.');
+            }
+
+            $edits = [];
+            $this->putManualMixedBlockEdit($edits, $contentBlockKey, $markdownOrActor);
+        }
+
+        if ($edits === []) {
+            throw new \InvalidArgumentException('Manual Wiki block edit requires at least one content block.');
+        }
+
+        return [$edits, $actor];
+    }
+
+    /**
+     * @param  array<string, string>  $edits
+     */
+    private function putManualMixedBlockEdit(array &$edits, string $contentBlockKey, string $markdown): void
+    {
+        $contentBlockKey = trim($contentBlockKey);
+        $markdown = trim($markdown);
+
+        if ($contentBlockKey === '') {
+            throw new \InvalidArgumentException('Manual Wiki block edit requires a content_block_key.');
+        }
+
+        if (array_key_exists($contentBlockKey, $edits)) {
+            throw new \InvalidArgumentException("Manual Wiki block edit received duplicate content_block_key [{$contentBlockKey}].");
+        }
+
+        if ($markdown === '') {
+            throw new \InvalidArgumentException("Manual Wiki block edit for content block [{$contentBlockKey}] requires non-empty markdown.");
+        }
+
+        $edits[$contentBlockKey] = $markdown;
+    }
+
+    /**
+     * @param  list<string>  $submittedBlockKeys
+     */
+    private function assertManualMixedBlockEditScope(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        EnterpriseWikiClaim $reviewClaim,
+        array $submittedBlockKeys,
+        User $actor,
+    ): void {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException("Run [{$run->id}] is not applied.");
+        }
+
+        if ($run->source_type !== EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+            throw new \InvalidArgumentException("Run [{$run->id}] does not use an Enterprise Wiki document source.");
+        }
+
+        if ((int) $page->customer_id !== (int) $run->customer_id) {
+            throw new \InvalidArgumentException("Page [{$page->id}] does not belong to run customer [{$run->customer_id}].");
+        }
+
+        $documentExists = EnterpriseWikiDocument::query()
+            ->where('customer_id', $run->customer_id)
+            ->whereKey($run->source_id)
+            ->exists();
+
+        if (! $documentExists) {
+            throw new \InvalidArgumentException("Source document [{$run->source_id}] not found for run [{$run->id}].");
+        }
+
+        $actorExists = (int) ($actor->id ?? 0) > 0
+            && User::query()
+                ->whereKey($actor->id)
+                ->where('customer_id', $run->customer_id)
+                ->exists();
+
+        if (! $actorExists
+            || (int) ($actor->customer_id ?? 0) !== (int) $run->customer_id
+            || ! $actor->canApproveWikiClaims()
+        ) {
+            throw new \InvalidArgumentException('User cannot manually edit this Wiki claim.');
+        }
+
+        $current = EnterpriseWikiPageVersion::query()->find($expectedCurrentVersion->id);
+
+        if ($current === null
+            || (int) $current->enterprise_wiki_page_id !== (int) $page->id
+            || ! $current->is_current
+            || $current->is_staged
+        ) {
+            throw new \InvalidArgumentException("Expected page version [{$expectedCurrentVersion->id}] is not the current published version for page [{$page->id}].");
+        }
+
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->first();
+
+        if ($runPage === null) {
+            throw new \InvalidArgumentException("Page [{$page->id}] is not part of run [{$run->id}].");
+        }
+
+        if ((int) ($runPage->generated_page_version_id ?? 0) !== (int) $current->id) {
+            throw new \InvalidArgumentException("Run [{$run->id}] page [{$page->id}] does not point to expected current page version [{$current->id}].");
+        }
+
+        $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
+
+        if ((int) $reviewClaim->enterprise_wiki_page_id !== (int) $page->id
+            || (int) $reviewClaim->enterprise_wiki_page_version_id !== (int) $current->id
+            || $reviewClaimBlockKey === ''
+            || ! in_array($reviewClaimBlockKey, $submittedBlockKeys, true)
+        ) {
+            throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] does not belong to one of the submitted current page blocks.");
+        }
+
+        $blocksByKey = $this->blocksByStableKey($current);
+
+        foreach ($submittedBlockKeys as $blockKey) {
+            if (! array_key_exists($blockKey, $blocksByKey)) {
+                throw new \InvalidArgumentException("Content block [{$blockKey}] was not found in current page version [{$current->id}].");
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, string>  $submittedMarkdownByBlockKey
+     * @return array{
+     *     version: EnterpriseWikiPageVersion,
+     *     changed_blocks: array<string, array<string, mixed>>,
+     *     copied_claim_ids: list<int>
+     * }
+     */
+    private function createStagedManualMixedBlockVersion(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        array $submittedMarkdownByBlockKey,
+        User $actor,
+    ): array {
+        return DB::transaction(function () use ($run, $page, $expectedCurrentVersion, $submittedMarkdownByBlockKey, $actor): array {
+            $lockedPage = EnterpriseWikiPage::query()
+                ->whereKey($page->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedPage === null || (int) $lockedPage->customer_id !== (int) $run->customer_id) {
+                throw new \RuntimeException("Page [{$page->id}] is no longer available for run [{$run->id}].");
+            }
+
+            $current = EnterpriseWikiPageVersion::query()
+                ->whereKey($expectedCurrentVersion->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($current === null
+                || (int) $current->enterprise_wiki_page_id !== (int) $lockedPage->id
+                || ! $current->is_current
+                || $current->is_staged
+            ) {
+                throw new \RuntimeException("Expected page version [{$expectedCurrentVersion->id}] is no longer current.");
+            }
+
+            $runPage = EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('enterprise_wiki_page_id', $lockedPage->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($runPage === null || (int) ($runPage->generated_page_version_id ?? 0) !== (int) $current->id) {
+                throw new \RuntimeException("Run [{$run->id}] page [{$lockedPage->id}] no longer points to expected current page version [{$current->id}].");
+            }
+
+            $prepared = $this->manualMixedBlockEditedContent($current, $submittedMarkdownByBlockKey);
+
+            $stagedVersion = EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $lockedPage->id,
+                'version_number' => (int) $current->version_number + 1,
+                'is_current' => false,
+                'is_staged' => true,
+                'content_markdown' => $this->markdownFromBlocks($prepared['blocks']),
+                'content_blocks_json' => $prepared['blocks'],
+                'generated_by_model' => null,
+                'generation_prompt_hash' => null,
+                'created_by_user_id' => $actor->id,
+            ]);
+
+            return [
+                'version' => $stagedVersion,
+                'changed_blocks' => $prepared['changed_blocks'],
+                'copied_claim_ids' => $this->copyClaimsForUnchangedBlocks(
+                    $current,
+                    $stagedVersion,
+                    array_keys($prepared['changed_blocks']),
+                    array_keys($this->blocksByStableKey($current)),
+                ),
+            ];
+        });
+    }
+
+    /**
+     * @param  array<string, string>  $submittedMarkdownByBlockKey
+     * @return array{
+     *     blocks: list<array<string, mixed>>,
+     *     changed_blocks: array<string, array<string, mixed>>
+     * }
+     */
+    private function manualMixedBlockEditedContent(EnterpriseWikiPageVersion $current, array $submittedMarkdownByBlockKey): array
+    {
+        $blocksByKey = $this->blocksByStableKey($current);
+        $unknownKeys = array_values(array_diff(array_keys($submittedMarkdownByBlockKey), array_keys($blocksByKey)));
+
+        if ($unknownKeys !== []) {
+            throw new \InvalidArgumentException('Manual Wiki block edit referenced unknown content block(s): '.implode(', ', $unknownKeys));
+        }
+
+        $blocks = array_values((array) ($current->content_blocks_json ?? []));
+        $changedBlocks = [];
+
+        foreach ($blocks as $index => $block) {
+            if (! is_array($block)) {
+                throw new \RuntimeException("Page version [{$current->id}] contains an invalid content block.");
+            }
+
+            $blockKey = trim((string) ($block['block_key'] ?? ''));
+
+            if (! array_key_exists($blockKey, $submittedMarkdownByBlockKey)) {
+                continue;
+            }
+
+            $nextMarkdown = $submittedMarkdownByBlockKey[$blockKey];
+
+            if (trim((string) ($block['markdown'] ?? '')) === $nextMarkdown) {
+                continue;
+            }
+
+            if ((string) ($block['content_origin'] ?? '') !== 'mixed') {
+                throw new \InvalidArgumentException("Content block [{$blockKey}] is not a mixed-provenance block.");
+            }
+
+            $block['markdown'] = $nextMarkdown;
+            $blocks[$index] = $block;
+            $changedBlocks[$blockKey] = $block;
+        }
+
+        if ($changedBlocks === []) {
+            throw new \InvalidArgumentException('Manual Wiki block edit did not change any content block.');
+        }
+
+        return [
+            'blocks' => array_values($blocks),
+            'changed_blocks' => $changedBlocks,
+        ];
+    }
+
+    /**
+     * @param  list<string>  $changedBlockKeys
+     * @param  list<string>  $allCurrentBlockKeys
+     * @return list<int>
+     */
+    private function copyClaimsForUnchangedBlocks(
+        EnterpriseWikiPageVersion $previousVersion,
+        EnterpriseWikiPageVersion $stagedVersion,
+        array $changedBlockKeys,
+        array $allCurrentBlockKeys,
+    ): array {
+        $unchangedBlockKeys = array_values(array_diff($allCurrentBlockKeys, $changedBlockKeys));
+
+        if ($unchangedBlockKeys === []) {
+            return [];
+        }
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $previousVersion->id)
+            ->whereIn('content_block_key', $unchangedBlockKeys)
+            ->with('sourceReferences')
+            ->orderBy('position_order')
+            ->get();
+
+        $copiedClaimIds = [];
+
+        foreach ($claims as $claim) {
+            $copiedClaim = EnterpriseWikiClaim::query()->create($this->claimClonePayload($claim, $stagedVersion));
+
+            foreach ($claim->sourceReferences as $sourceReference) {
+                EnterpriseWikiSourceReference::query()->create(array_merge([
+                    'enterprise_wiki_claim_id' => $copiedClaim->id,
+                ], $this->sourceReferenceClonePayload($sourceReference)));
+            }
+
+            $copiedClaimIds[] = $copiedClaim->id;
+        }
+
+        return $copiedClaimIds;
+    }
+
+    /**
+     * @param  list<string>  $changedBlockKeys
+     * @param  list<int>  $newClaimIds
+     */
+    private function assertManualMixedBlockClaimsVerified(
+        EnterpriseWikiPageVersion $stagedVersion,
+        array $changedBlockKeys,
+        array $newClaimIds,
+    ): void {
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $stagedVersion->id)
+            ->whereIn('content_block_key', $changedBlockKeys)
+            ->get();
+
+        $actualIds = $claims->pluck('id')->map(fn (mixed $id): int => (int) $id)->sort()->values()->all();
+        $expectedIds = collect($newClaimIds)->map(fn (mixed $id): int => (int) $id)->sort()->values()->all();
+
+        if ($actualIds !== $expectedIds) {
+            throw new \RuntimeException('Manual Wiki block edit staged claims do not match the claims extracted for changed block(s).');
+        }
+
+        $unfinished = $claims->first(
+            fn (EnterpriseWikiClaim $claim): bool => $claim->verified_at === null || $claim->verification_claimed_at !== null || $claim->verification_claim_token !== null
+        );
+
+        if ($unfinished !== null) {
+            throw new \RuntimeException("Manual Wiki block edit claim [{$unfinished->id}] was not fully verified.");
+        }
+    }
+
+    /**
+     * @param  list<string>  $changedBlockKeys
+     * @param  list<int>  $newClaimIds
+     * @param  list<array{
+     *     claim_id: int,
+     *     original_content_origin: string,
+     *     verification_status: string,
+     *     reason: ?string,
+     *     supporting_excerpt: ?string
+     * }>  $canonicalRecordingCandidates
+     * @return list<int>
+     */
+    private function promoteStagedManualMixedBlockVersion(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        EnterpriseWikiPageVersion $stagedVersion,
+        array $changedBlockKeys,
+        array $newClaimIds,
+        array $canonicalRecordingCandidates,
+    ): array {
+        return DB::transaction(function () use ($run, $page, $expectedCurrentVersion, $stagedVersion, $changedBlockKeys, $newClaimIds, $canonicalRecordingCandidates): array {
+            $lockedPage = EnterpriseWikiPage::query()
+                ->whereKey($page->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedPage === null || (int) $lockedPage->customer_id !== (int) $run->customer_id) {
+                throw new \RuntimeException("Page [{$page->id}] is no longer available for run [{$run->id}].");
+            }
+
+            $current = EnterpriseWikiPageVersion::query()
+                ->whereKey($expectedCurrentVersion->id)
+                ->lockForUpdate()
+                ->first();
+            $staged = EnterpriseWikiPageVersion::query()
+                ->whereKey($stagedVersion->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($current === null
+                || (int) $current->enterprise_wiki_page_id !== (int) $lockedPage->id
+                || ! $current->is_current
+                || $current->is_staged
+            ) {
+                throw new \RuntimeException("Expected page version [{$expectedCurrentVersion->id}] is no longer current.");
+            }
+
+            if ($staged === null
+                || (int) $staged->enterprise_wiki_page_id !== (int) $lockedPage->id
+                || $staged->is_current
+                || ! $staged->is_staged
+                || $staged->generated_by_model !== null
+                || (int) ($staged->created_by_user_id ?? 0) <= 0
+                || (int) $staged->version_number !== (int) $current->version_number + 1
+            ) {
+                throw new \RuntimeException("Staged page version [{$stagedVersion->id}] is no longer promotable.");
+            }
+
+            $runPage = EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('enterprise_wiki_page_id', $lockedPage->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($runPage === null || (int) ($runPage->generated_page_version_id ?? 0) !== (int) $current->id) {
+                throw new \RuntimeException("Run [{$run->id}] page [{$lockedPage->id}] no longer points to expected current page version [{$current->id}].");
+            }
+
+            $stagedPointerExists = EnterpriseWikiIngestRunPage::query()
+                ->where('generated_page_version_id', $staged->id)
+                ->exists();
+
+            if ($stagedPointerExists) {
+                throw new \RuntimeException("A run/page row already points to staged page version [{$staged->id}].");
+            }
+
+            $this->assertManualMixedBlockClaimsVerified($staged, $changedBlockKeys, $newClaimIds);
+            $canonicalFactIds = $this->recordDeferredCanonicalFacts($run, $staged, $changedBlockKeys, $canonicalRecordingCandidates);
+
+            $current->update(['is_current' => false]);
+            $staged->update([
+                'is_current' => true,
+                'is_staged' => false,
+            ]);
+            $runPage->update([
+                'generated_page_version_id' => $staged->id,
+                'claims_extracted_at' => now(),
+                'claims_claimed_at' => null,
+                'claims_claim_token' => null,
+            ]);
+
+            return $canonicalFactIds;
+        });
+    }
+
+    /**
+     * @param  list<string>  $changedBlockKeys
+     * @param  list<array{
+     *     claim_id: int,
+     *     original_content_origin: string,
+     *     verification_status: string,
+     *     reason: ?string,
+     *     supporting_excerpt: ?string
+     * }>  $candidates
+     * @return list<int>
+     */
+    private function recordDeferredCanonicalFacts(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPageVersion $stagedVersion,
+        array $changedBlockKeys,
+        array $candidates,
+    ): array {
+        $canonicalFactIds = [];
+
+        foreach ($candidates as $candidate) {
+            if (! is_array($candidate)) {
+                throw new \RuntimeException('Manual mixed block verification returned an invalid canonical recording candidate.');
+            }
+
+            $claim = EnterpriseWikiClaim::query()
+                ->with('sourceReferences')
+                ->findOrFail((int) ($candidate['claim_id'] ?? 0));
+
+            if ((int) $claim->enterprise_wiki_page_version_id !== (int) $stagedVersion->id
+                || ! in_array((string) ($claim->content_block_key ?? ''), $changedBlockKeys, true)
+            ) {
+                throw new \RuntimeException("Canonical recording candidate claim [{$claim->id}] is outside the edited staged block scope.");
+            }
+
+            $verificationStatus = (string) ($candidate['verification_status'] ?? '');
+            $recordingReason = $verificationStatus === EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED
+                ? ($candidate['supporting_excerpt'] ?? null)
+                : ($candidate['reason'] ?? null);
+
+            $fact = $this->canonicalizationService->recordOutcome(
+                $claim,
+                $run->customer_id,
+                (string) ($candidate['original_content_origin'] ?? ''),
+                $verificationStatus,
+                is_string($recordingReason) && trim($recordingReason) !== '' ? trim($recordingReason) : null,
+            );
+
+            if ($fact !== null) {
+                $canonicalFactIds[] = $fact->id;
+            }
+        }
+
+        return array_values(array_unique($canonicalFactIds));
+    }
+
+    private function cleanupStagedVersion(?EnterpriseWikiPageVersion $stagedVersion): void
+    {
+        if ($stagedVersion === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($stagedVersion): void {
+            $locked = EnterpriseWikiPageVersion::query()
+                ->whereKey($stagedVersion->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked !== null && $locked->is_staged && ! $locked->is_current) {
+                $locked->delete();
+            }
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function claimClonePayload(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $stagedVersion): array
+    {
+        return [
+            'enterprise_wiki_page_id' => $claim->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $stagedVersion->id,
+            'claim_text' => $claim->claim_text,
+            'content_origin' => $claim->content_origin,
+            'page_excerpt' => $claim->page_excerpt,
+            'content_block_key' => $claim->content_block_key,
+            'canonical_fact_id' => $claim->canonical_fact_id,
+            'review_reason' => $claim->review_reason,
+            'review_metadata' => $claim->review_metadata,
+            'generation_issue' => $claim->generation_issue,
+            'blocking_override' => $claim->blocking_override,
+            'blocking_override_by_user_id' => $claim->blocking_override_by_user_id,
+            'blocking_override_at' => $claim->blocking_override_at,
+            'position_order' => $claim->position_order,
+            'confidence' => $claim->confidence,
+            'conflict_flag' => $claim->conflict_flag,
+            'approval_status' => $claim->approval_status,
+            'approved_by_user_id' => $claim->approved_by_user_id,
+            'approved_at' => $claim->approved_at,
+            'approval_comment' => $claim->approval_comment,
+            'verified_at' => $claim->verified_at,
+            'verification_claimed_at' => null,
+            'verification_claim_token' => null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sourceReferenceClonePayload(EnterpriseWikiSourceReference $reference): array
+    {
+        return [
+            'source_type' => $reference->source_type,
+            'source_id' => $reference->source_id,
+            'source_element_key' => $reference->source_element_key,
+            'source_element_type' => $reference->source_element_type,
+            'source_row_key' => $reference->source_row_key,
+            'source_label' => $reference->source_label,
+            'excerpt' => $reference->excerpt,
+            'source_hash' => $reference->source_hash,
+            'page_reference' => $reference->page_reference,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $blocks
+     */
+    private function markdownFromBlocks(array $blocks): string
+    {
+        return implode("\n\n", array_map(
+            static fn (array $block): string => (string) ($block['markdown'] ?? ''),
+            $blocks,
+        ));
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function blocksByStableKey(EnterpriseWikiPageVersion $version): array
+    {
+        $blocks = [];
+
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (! is_array($block)) {
+                throw new \RuntimeException("Page version [{$version->id}] contains an invalid content block.");
+            }
+
+            $blockKey = trim((string) ($block['block_key'] ?? ''));
+
+            if ($blockKey === '') {
+                throw new \RuntimeException("Page version [{$version->id}] contains a content block without block_key.");
+            }
+
+            if (array_key_exists($blockKey, $blocks)) {
+                throw new \RuntimeException("Page version [{$version->id}] contains duplicate content block key [{$blockKey}].");
+            }
+
+            $blocks[$blockKey] = $block;
+        }
+
+        return $blocks;
+    }
 
     /**
      * Attempt a bounded, targeted content repair for a run whose qa_status is repair_required.
