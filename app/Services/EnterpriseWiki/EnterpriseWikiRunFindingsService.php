@@ -174,7 +174,7 @@ class EnterpriseWikiRunFindingsService
         $canHandleClaim = $claim !== null && $user instanceof User && ! $isSuperseded && $finding->isOpen()
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
 
-        $url = $this->pageUrl($page, $claim?->id, $returnUrl);
+        $url = $this->pageUrl($page, $claim?->id, $returnUrl, $claim === null ? $finding->id : null);
         $actionLabel = match (true) {
             $url === null => null,
             $claim !== null && $finding->isOpen() && ! $isSuperseded => $canHandleClaim ? 'open_and_handle' : 'view_source',
@@ -461,8 +461,12 @@ class EnterpriseWikiRunFindingsService
             : 'claim-'.$claim->id;
     }
 
-    private function pageUrl(?EnterpriseWikiPage $page, ?int $claimId, ?string $returnUrl = null): ?string
-    {
+    private function pageUrl(
+        ?EnterpriseWikiPage $page,
+        ?int $claimId,
+        ?string $returnUrl = null,
+        ?int $structureFindingId = null,
+    ): ?string {
         if ($page === null) {
             return null;
         }
@@ -471,6 +475,8 @@ class EnterpriseWikiRunFindingsService
 
         if ($claimId !== null) {
             $parameters['claim_id'] = $claimId;
+        } elseif ($structureFindingId !== null) {
+            $parameters['finding_id'] = $structureFindingId;
         }
 
         if ($returnUrl !== null) {

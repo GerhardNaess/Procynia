@@ -269,10 +269,144 @@ function LinkedPageList({ pages, label }) {
     );
 }
 
+function StructureFindingContextPanel({
+    finding,
+    tw,
+    pageTypeLabel,
+    outgoingLinks,
+    incomingLinks,
+    backlinks,
+    relatedArticles,
+    relatedConcepts,
+    relatedEntities,
+}) {
+    if (!finding) {
+        return null;
+    }
+
+    const hasDirectLinks = outgoingLinks.length > 0
+        || incomingLinks.length > 0
+        || backlinks.length > 0;
+    const hasRelevantPages = relatedArticles.length > 0
+        || relatedConcepts.length > 0
+        || relatedEntities.length > 0;
+    const severityClass = LINT_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-600';
+
+    return (
+        <section
+            id={`structure-finding-${finding.id}`}
+            data-testid="structure-finding-panel"
+            tabIndex={-1}
+            className="rounded-3xl border border-sky-200 bg-sky-50/80 p-6 shadow-[0_12px_30px_rgba(2,132,199,0.10)]"
+        >
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-3xl space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                        <Badge label={finding.severity_label ?? finding.severity} cls={severityClass} />
+                        <Badge label={finding.status_label ?? finding.status} cls="bg-white text-slate-600 ring-1 ring-slate-200" />
+                    </div>
+                    <div className="space-y-2">
+                        <p className="text-base font-semibold uppercase tracking-[0.18em] text-sky-700">
+                            {tw.structure_finding_panel_kicker ?? 'Sidefunn'}
+                        </p>
+                        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
+                            {tw.structure_finding_panel_heading ?? 'Problem med sidestrukturen'}
+                        </h2>
+                        <p className="text-base leading-7 text-slate-700">
+                            {finding.description || finding.message || (tw.structure_finding_panel_unknown ?? 'Dette funnet gjelder strukturen på Wiki-siden.')}
+                        </p>
+                        <p className="text-base leading-7 text-slate-600">
+                            {tw.structure_finding_panel_scope_note ?? 'Dette gjelder hele siden, ikke et bestemt avsnitt. Bruk lenkestatusen under til å vurdere hvilke Wiki-sider denne siden bør kobles til.'}
+                        </p>
+                    </div>
+                </div>
+                <dl className="grid min-w-64 gap-2 rounded-2xl border border-sky-100 bg-white/80 p-4 text-base text-slate-700">
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_page_label ?? 'Side'}
+                        </dt>
+                        <dd>{finding.page_title}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_page_type_label ?? 'Sidetype'}
+                        </dt>
+                        <dd>{pageTypeLabel(finding.page_type)}</dd>
+                    </div>
+                    <div>
+                        <dt className="text-sm font-semibold text-slate-500">
+                            {tw.structure_finding_type_label ?? 'Funntype'}
+                        </dt>
+                        <dd>{finding.category_label ?? finding.code}</dd>
+                    </div>
+                </dl>
+            </div>
+
+            {finding.message && finding.message !== finding.description && (
+                <p className="mt-4 rounded-2xl border border-sky-100 bg-white/70 px-4 py-3 text-base leading-7 text-slate-600">
+                    <span className="font-semibold text-slate-700">
+                        {tw.structure_finding_detected_reason_label ?? 'Hvorfor funnet ble opprettet'}:
+                    </span>{' '}
+                    {finding.message}
+                </p>
+            )}
+
+            {finding.is_current_version === false && (
+                <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-7 text-amber-800">
+                    {tw.structure_finding_superseded_note ?? 'Funnet peker til en eldre sideversjon. Kontroller gjeldende side før du gjør endringer.'}
+                </p>
+            )}
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-sky-100 bg-white/80 p-4">
+                    <h3 className="text-base font-semibold text-slate-800">
+                        {tw.structure_finding_existing_links_heading ?? 'Eksisterende Wiki-lenker'}
+                    </h3>
+                    <div className="mt-3 space-y-3">
+                        <LinkedPageList pages={outgoingLinks} label={tw.structure_finding_outgoing_links ?? 'Utgående lenker'} />
+                        <LinkedPageList pages={backlinks.length > 0 ? backlinks : incomingLinks} label={tw.structure_finding_incoming_links ?? 'Sider som lenker hit'} />
+                        {!hasDirectLinks && (
+                            <p className="text-base leading-7 text-slate-500">
+                                {tw.structure_finding_no_direct_links ?? 'Ingen direkte Wiki-lenker er registrert for denne siden ennå.'}
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="rounded-2xl border border-sky-100 bg-white/80 p-4">
+                    <h3 className="text-base font-semibold text-slate-800">
+                        {tw.structure_finding_relevant_pages_heading ?? 'Relevante sider i eksisterende data'}
+                    </h3>
+                    <div className="mt-3 space-y-3">
+                        <LinkedPageList pages={relatedArticles} label={tw.traversal_related_articles ?? 'Relaterte artikler'} />
+                        <LinkedPageList pages={relatedConcepts} label={tw.traversal_related_concepts ?? 'Konsepter'} />
+                        <LinkedPageList pages={relatedEntities} label={tw.traversal_related_entities ?? 'Entiteter'} />
+                        {!hasRelevantPages && (
+                            <p className="text-base leading-7 text-slate-500">
+                                {tw.structure_finding_no_suggestions ?? 'Det finnes ingen sikre koblingsforslag i eksisterende Wiki-data. Legg heller til en relevant Wiki-lenke manuelt enn å bruke et svakt forslag.'}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-600">
+                <p className="font-semibold text-slate-800">
+                    {tw.structure_finding_handling_heading ?? 'Behandling'}
+                </p>
+                <p>
+                    {tw.structure_finding_handling_note ?? 'Det finnes ingen separat manuell lukking for sidestrukturfunn i dagens Wiki-flyt. Funnet lukkes av eksisterende lint-kjøring når lenkestrukturen er rettet.'}
+                </p>
+            </div>
+        </section>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
     review_reference: reviewReference = null,
+    structure_finding: structureFinding = null,
     claims,
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
@@ -285,6 +419,7 @@ export default function WikiShow({
     can_edit_wiki_claims: canEditWikiClaims = false,
     manual_block_edit: manualBlockEdit = null,
     outgoing_links: outgoingLinks = [],
+    incoming_links: incomingLinks = [],
     related_articles: relatedArticles = [],
     related_concepts: relatedConcepts = [],
     related_entities: relatedEntities = [],
@@ -299,7 +434,8 @@ export default function WikiShow({
     // one of 'ready' | 'superseded' | 'block_missing' | 'not_found'.
     const targetClaimId = reviewReference?.status === 'ready' ? String(reviewReference.claim_id) : null;
     const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
-    const backHref = reviewReference?.back_url ?? '/app/wiki?tab=runs';
+    const hasStructureFinding = Boolean(structureFinding?.id);
+    const backHref = reviewReference?.back_url ?? structureFinding?.back_url ?? '/app/wiki?tab=runs';
     const hasFocusedReview = targetBlockKey !== null;
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
@@ -464,6 +600,25 @@ export default function WikiShow({
 
         return () => window.cancelAnimationFrame(frame);
     }, [targetBlockKey, page.slug, current_version?.id]);
+
+    useEffect(() => {
+        if (!hasStructureFinding) {
+            return undefined;
+        }
+
+        const targetElement = document.getElementById(`structure-finding-${structureFinding.id}`);
+
+        if (!targetElement) {
+            return undefined;
+        }
+
+        const frame = window.requestAnimationFrame(() => {
+            targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            targetElement.focus?.({ preventScroll: true });
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [hasStructureFinding, structureFinding?.id, page.slug]);
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
@@ -1675,7 +1830,7 @@ export default function WikiShow({
                     );
                 })()}
 
-                {reviewReference && (
+                {(reviewReference || hasStructureFinding) && (
                     <div>
                         <Link
                             href={backHref}
@@ -1685,6 +1840,20 @@ export default function WikiShow({
                             {tw.review_reference_back_to_findings ?? 'Tilbake til funn'}
                         </Link>
                     </div>
+                )}
+
+                {hasStructureFinding && (
+                    <StructureFindingContextPanel
+                        finding={structureFinding}
+                        tw={tw}
+                        pageTypeLabel={pageTypeLabel}
+                        outgoingLinks={outgoingLinks}
+                        incomingLinks={incomingLinks}
+                        backlinks={backlinks}
+                        relatedArticles={relatedArticles}
+                        relatedConcepts={relatedConcepts}
+                        relatedEntities={relatedEntities}
+                    />
                 )}
 
                 {reviewReference?.status === 'superseded' && (

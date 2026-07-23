@@ -3250,10 +3250,16 @@ class WikiControllerTest extends TestCase
 
             return $pageRow !== null
                 && $claimRow !== null
-                && $pageRow['target_url'] === route('app.wiki.show', ['slug' => $pageRow['page_slug']])
+                && $pageRow['target_url'] === route('app.wiki.show', [
+                    'slug' => $pageRow['page_slug'],
+                    'finding_id' => $pageFinding->id,
+                ])
                 && $pageRow['target_page_id'] === $page->id
                 && $pageRow['target_claim_id'] === null
-                && $claimRow['target_url'] === route('app.wiki.show', ['slug' => $pageRow['page_slug']]).'?claim_id='.$claim->id
+                && $claimRow['target_url'] === route('app.wiki.show', [
+                    'slug' => $pageRow['page_slug'],
+                    'claim_id' => $claim->id,
+                ])
                 && $claimRow['target_page_id'] === $page->id
                 && $claimRow['target_claim_id'] === $claim->id;
         });

@@ -362,18 +362,20 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             && data_get($inertia, 'props.review_reference.back_url') === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]));
     }
 
-    public function test_structural_open_page_finding_keeps_page_url_without_claim_specific_block_handling(): void
+    public function test_structural_open_page_finding_sends_stable_context_and_shows_page_panel(): void
     {
+        app()->setLocale('no');
+
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
         $document = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $document);
-        $page = $this->createPage($customer, 'Begrepsside uten lenker');
+        $page = $this->createPage($customer, 'Begrepsside uten lenker', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
         $version = $this->createVersionWithBlocks($page, [
             ['block_key' => 'block-0001', 'markdown' => '# Begrepsside uten lenker'],
         ]);
         $this->createRunPage($run, $page, $version);
-        EnterpriseWikiLintFinding::query()->create([
+        $lintFinding = EnterpriseWikiLintFinding::query()->create([
             'customer_id' => $customer->id,
             'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $page->id,
@@ -392,12 +394,70 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         $this->assertNotNull($finding);
         $this->assertSame('view_page', $finding['action']);
         $this->assertStringNotContainsString('claim_id=', (string) $finding['url']);
+        $this->assertStringContainsString('finding_id='.$lintFinding->id, (string) $finding['url']);
 
         $path = parse_url($finding['url'], PHP_URL_PATH).'?'.parse_url($finding['url'], PHP_URL_QUERY);
         $response = $this->actingAs($user)->get($path);
 
         $response->assertOk();
-        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference') === null);
+        $response->assertViewHas('page', function (array $inertia) use ($lintFinding, $document, $page): bool {
+            $structureFinding = data_get($inertia, 'props.structure_finding', []);
+
+            return data_get($inertia, 'props.review_reference') === null
+                && ($structureFinding['id'] ?? null) === $lintFinding->id
+                && ($structureFinding['code'] ?? null) === EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE
+                && ($structureFinding['category_label'] ?? null) === 'Begrepsside er ikke koblet til andre sider'
+                && ($structureFinding['description'] ?? null) === 'Begrepssiden har ingen lenker til artikkel- eller sammendragssider.'
+                && ($structureFinding['message'] ?? null) === 'Begrepsside er ikke koblet til andre sider.'
+                && ($structureFinding['page_id'] ?? null) === $page->id
+                && ($structureFinding['page_type'] ?? null) === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
+                && ($structureFinding['back_url'] ?? null) === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id])
+                && ! array_key_exists('block_key', $structureFinding);
+        });
+    }
+
+    public function test_direct_page_open_does_not_show_structure_finding_panel(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Vanlig side');
+        $this->createVersionWithBlocks($page, [
+            ['block_key' => 'block-0001', 'markdown' => '# Vanlig side'],
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.structure_finding') === null
+            && data_get($inertia, 'props.review_reference') === null);
+    }
+
+    public function test_structure_finding_context_is_scoped_to_customer_and_page(): void
+    {
+        $customer = $this->createCustomer();
+        $other = $this->createCustomer('Annen navigasjonskunde');
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'Riktig side');
+        $otherPage = $this->createPage($other, 'Annen side');
+        $wrongPage = $this->createPage($customer, 'Feil side');
+        $this->createVersionWithBlocks($page, [
+            ['block_key' => 'block-0001', 'markdown' => '# Riktig side'],
+        ]);
+        $foreignFinding = $this->createStructureFinding($other, $otherPage);
+        $wrongPageFinding = $this->createStructureFinding($customer, $wrongPage);
+
+        $foreignResponse = $this->actingAs($user)->get("/app/wiki/{$page->slug}?finding_id={$foreignFinding->id}");
+        $wrongPageResponse = $this->actingAs($user)->get("/app/wiki/{$page->slug}?finding_id={$wrongPageFinding->id}");
+        $invalidResponse = $this->actingAs($user)->get("/app/wiki/{$page->slug}?finding_id=not-a-number");
+
+        $foreignResponse->assertOk();
+        $wrongPageResponse->assertOk();
+        $invalidResponse->assertOk();
+
+        foreach ([$foreignResponse, $wrongPageResponse, $invalidResponse] as $response) {
+            $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.structure_finding') === null
+                && data_get($inertia, 'props.review_reference') === null);
+        }
     }
 
     private function createCustomer(string $name = 'Navigasjon AS'): Customer
@@ -435,13 +495,16 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         ]);
     }
 
-    private function createPage(Customer $customer, string $title): EnterpriseWikiPage
-    {
+    private function createPage(
+        Customer $customer,
+        string $title,
+        string $pageType = EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+    ): EnterpriseWikiPage {
         return EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'slug' => Str::slug($title).'-'.Str::lower(Str::random(6)),
             'title' => $title,
-            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'page_type' => $pageType,
             'status' => EnterpriseWikiPage::STATUS_APPROVED,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
@@ -503,6 +566,20 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
             'source_hash' => str_pad('h', 64, '0'),
             'excerpt' => 'Brukerstøtte håndterer registrering og prioritering av hendelser og forespørsler.',
             'page_reference' => null,
+        ]);
+    }
+
+    private function createStructureFinding(Customer $customer, EnterpriseWikiPage $page): EnterpriseWikiLintFinding
+    {
+        return EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_claim_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Begrepsside er ikke koblet til andre sider.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
         ]);
     }
 

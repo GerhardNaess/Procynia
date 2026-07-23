@@ -1100,14 +1100,106 @@ class WikiController extends Controller
             return null;
         }
 
-        $target = route('app.wiki.show', ['slug' => $pageSlug]);
+        $parameters = ['slug' => $pageSlug];
         $claimId = $finding->enterprise_wiki_claim_id !== null ? (int) $finding->enterprise_wiki_claim_id : null;
 
         if ($claimId !== null && $claimId > 0) {
-            $target .= '?claim_id='.$claimId;
+            $parameters['claim_id'] = $claimId;
+        } else {
+            $parameters['finding_id'] = $finding->id;
         }
 
-        return $target;
+        return route('app.wiki.show', $parameters);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function buildStructureFindingReference(
+        Request $request,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+        int $customerId,
+        ?string $backUrl,
+    ): ?array {
+        $rawFindingId = $request->query('finding_id');
+
+        if ($rawFindingId === null || $rawFindingId === '' || ! is_numeric($rawFindingId)) {
+            return null;
+        }
+
+        $findingId = (int) $rawFindingId;
+
+        if ($findingId <= 0) {
+            return null;
+        }
+
+        $finding = EnterpriseWikiLintFinding::query()
+            ->whereKey($findingId)
+            ->where('customer_id', $customerId)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->whereNull('enterprise_wiki_claim_id')
+            ->with(['run:id,source_id', 'version:id,version_number'])
+            ->first();
+
+        if (! $finding instanceof EnterpriseWikiLintFinding) {
+            return null;
+        }
+
+        $copy = $this->qualityCheckCopy($finding->code);
+        $versionId = $finding->enterprise_wiki_page_version_id !== null
+            ? (int) $finding->enterprise_wiki_page_version_id
+            : null;
+
+        return [
+            'id' => $finding->id,
+            'code' => $finding->code,
+            'category_label' => $copy['label'],
+            'description' => $copy['description'],
+            'message' => $finding->message,
+            'severity' => $finding->severity,
+            'severity_label' => $this->lintSeverityLabel($finding->severity),
+            'status' => $finding->status,
+            'status_label' => __('procynia.wiki.runs_findings_status_'.$finding->status),
+            'page_id' => $page->id,
+            'page_title' => $page->title,
+            'page_type' => $page->page_type,
+            'page_version_id' => $versionId,
+            'page_version_number' => $finding->version?->version_number,
+            'current_page_version_id' => $currentVersion?->id,
+            'is_current_version' => $versionId === null || ($currentVersion !== null && $versionId === (int) $currentVersion->id),
+            'run_id' => $finding->enterprise_wiki_ingest_run_id,
+            'run_source_id' => $finding->run?->source_id,
+            'detected_at' => $finding->detected_at?->toIso8601String(),
+            'resolved_at' => $finding->resolved_at?->toIso8601String(),
+            'back_url' => $backUrl,
+        ];
+    }
+
+    /**
+     * @return array{label: string, description: string}
+     */
+    private function qualityCheckCopy(string $code): array
+    {
+        $label = __('procynia.wiki.quality_checks.'.$code.'.label');
+        $description = __('procynia.wiki.quality_checks.'.$code.'.description');
+
+        $unresolvedLabel = 'procynia.wiki.quality_checks.'.$code.'.label';
+        $unresolvedDescription = 'procynia.wiki.quality_checks.'.$code.'.description';
+
+        return [
+            'label' => $label === $unresolvedLabel ? __('procynia.wiki.quality_check_unknown_label').': '.$code : $label,
+            'description' => $description === $unresolvedDescription ? __('procynia.wiki.quality_check_unknown_description').' ('.$code.')' : $description,
+        ];
+    }
+
+    private function lintSeverityLabel(string $severity): string
+    {
+        return match ($severity) {
+            EnterpriseWikiLintFinding::SEVERITY_ERROR => __('procynia.wiki.lint_severity_error'),
+            EnterpriseWikiLintFinding::SEVERITY_WARNING => __('procynia.wiki.lint_severity_warning'),
+            default => __('procynia.wiki.lint_severity_info'),
+        };
     }
 
     public function show(Request $request, string $slug): Response
@@ -1429,6 +1521,9 @@ class WikiController extends Controller
         $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
             ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
+        $structureFinding = $reviewReference === null
+            ? $this->buildStructureFindingReference($request, $page, $currentVersion, $customerId, $backUrl)
+            : null;
         $manualBlockEdit = $canApproveWikiClaims
             ? $this->manualMixedBlockEditContext($page, $currentVersion, $customerId)
             : null;
@@ -1452,6 +1547,7 @@ class WikiController extends Controller
                 'content_blocks_json' => $this->renderedContentBlocks($currentVersion, $page, $customerId),
             ] : null,
             'review_reference' => $reviewReference,
+            'structure_finding' => $structureFinding,
             'claims' => $claims,
             'claim_summary' => $claimSummary,
             'lint_findings' => $lintFindings,
