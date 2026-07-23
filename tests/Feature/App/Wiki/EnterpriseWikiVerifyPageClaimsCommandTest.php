@@ -14,10 +14,13 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
+use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
 use Tests\TestCase;
@@ -1218,6 +1221,394 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
+    // Manual mixed-block verification — claim scoped, no parallel verification engine
+    // =========================================================================
+
+    public function test_manual_mixed_block_verification_uses_only_claim_source_references_as_ai_evidence(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, , $sibling] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (
+                string $claimText,
+                array $sourceElements,
+                string $fallbackSourceText,
+                string $languageCode,
+                ?string $blockMarkdown,
+                ?string $documentLabel = null,
+            ) use ($claim): bool {
+                return $claimText === $claim->claim_text
+                    && $sourceElements === [[
+                        'key' => 'claim-ref-1',
+                        'type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                        'excerpt' => 'Critical incidents shall be responded to within 30 minutes.',
+                        'page_reference' => 'Avsnitt 9',
+                    ]]
+                    && $fallbackSourceText === ''
+                    && $languageCode === 'no'
+                    && $blockMarkdown === null
+                    && $documentLabel === 'source-doc.pdf';
+            })
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['claim-ref-1'],
+                reason: 'The claim is supported by its own source reference.',
+            ));
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $this->assertSame(1, $result['claims']);
+        $this->assertSame(1, $result['references']);
+        $this->assertNotNull($claim->fresh()->verified_at);
+        $this->assertNull($sibling->fresh()->verified_at);
+    }
+
+    public function test_manual_mixed_block_verification_does_not_query_sibling_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, , $sibling] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['claim-ref-1'],
+                reason: 'The claim is supported by its own source reference.',
+            ));
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $queries = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $sourceReferenceQueries = collect($queries)
+            ->filter(fn (array $query): bool => str_contains($query['query'], 'enterprise_wiki_source_references'));
+
+        $this->assertTrue($sourceReferenceQueries->isNotEmpty());
+
+        foreach ($sourceReferenceQueries as $query) {
+            $bindings = array_map(static fn ($binding): string => (string) $binding, $query['bindings'] ?? []);
+
+            $this->assertNotContains((string) $sibling->id, $bindings);
+        }
+
+        $this->assertNull($sibling->fresh()->verified_at);
+    }
+
+    public function test_manual_mixed_block_verification_reuses_supported_fact_without_lint_or_decision_reset(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, $document] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $claim->update([
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            'approved_at' => now(),
+        ]);
+
+        EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => $document->file_hash_sha256,
+            'source_element_keys' => ['claim-ref-1'],
+            'source_element_keys_hash' => hash('sha256', json_encode(['claim-ref-1'], JSON_THROW_ON_ERROR)),
+            'normalized_fingerprint' => hash('sha256', $claim->claim_text),
+            'canonical_text' => $claim->claim_text,
+            'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+            'verification_reason' => 'Previously verified supported.',
+            'verified_at' => now(),
+            'is_stale' => false,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('resetClaimDecisionAfterFirstSourceReference')
+            ->never();
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(1, $result['reused']);
+        $this->assertSame(1, $result['references']);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $claim->approval_status);
+        $this->assertNotNull($claim->approved_at);
+        $this->assertSame(1, EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count());
+    }
+
+    public function test_manual_mixed_block_supported_ai_verdict_does_not_reset_approval_status_or_lint(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $claim->update([
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,
+            'approved_at' => now(),
+        ]);
+
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('resetClaimDecisionAfterFirstSourceReference')
+            ->never();
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (
+                string $claimText,
+                array $sourceElements,
+                string $fallbackSourceText,
+                string $languageCode,
+                ?string $blockMarkdown,
+            ) use ($claim): bool {
+                return $claimText === $claim->claim_text
+                    && $sourceElements !== []
+                    && $sourceElements[0]['key'] === 'claim-ref-1'
+                    && $fallbackSourceText === ''
+                    && $languageCode === 'no'
+                    && $blockMarkdown === null;
+            })
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['claim-ref-1'],
+                reason: 'The claim is supported by its own source reference.',
+            ));
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(1, $result['claims']);
+        $this->assertSame(1, $result['references']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $claim->approval_status);
+        $this->assertNotNull($claim->approved_at);
+        $this->assertNull($claim->review_reason);
+        $this->assertNull($claim->generation_issue);
+        $this->assertNotNull($claim->verified_at);
+        $this->assertSame(1, EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count());
+    }
+
+    public function test_manual_mixed_block_best_practice_claim_uses_existing_best_practice_path_without_ai_or_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createManualMixedBlockVerificationFixture($customer);
+        $text = 'Virksomheten bør gjennomføre årlig tilgangsgjennomgang.';
+
+        $claim->sourceReferences()->delete();
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$text}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $text,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ]],
+        ]);
+        $claim->update([
+            'claim_text' => $text,
+            'page_excerpt' => $text,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('resetClaimDecisionAfterFirstSourceReference')
+            ->never();
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(1, $result['no_support']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNotNull($claim->verified_at);
+        $this->assertFalse($claim->sourceReferences()->exists());
+    }
+
+    public function test_manual_mixed_block_verification_marks_unsupported_generated_content_without_ai_or_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $claim->sourceReferences()->delete();
+        $claim->update([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('resetClaimDecisionAfterFirstSourceReference')
+            ->never();
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(1, $result['no_support']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame('unsupported_generated_content', $claim->generation_issue);
+        $this->assertNotNull($claim->verified_at);
+        $this->assertFalse($claim->sourceReferences()->exists());
+    }
+
+    public function test_manual_mixed_block_source_based_claim_without_own_reference_becomes_internal_error_without_ai(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $claim->sourceReferences()->delete();
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(1, $result['no_support']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, $claim->content_origin);
+        $this->assertSame('source_based_claim_missing_source_reference', $claim->generation_issue);
+        $this->assertNotNull($claim->verified_at);
+    }
+
+    public function test_manual_mixed_block_retry_skips_verified_claim_after_next_claim_ai_exception(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, , $sibling] = $this->createManualMixedBlockVerificationFixture($customer);
+        $calls = 0;
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->twice()
+            ->andReturnUsing(function (string $claimText) use (&$calls, $claim): array {
+                $calls++;
+
+                if ($claimText === $claim->claim_text) {
+                    return $this->verificationResult(
+                        supportingSourceElementKeys: ['claim-ref-1'],
+                        reason: 'The first claim is supported.',
+                    );
+                }
+
+                throw new \RuntimeException('Verification AI failed for the second claim.');
+            });
+
+        try {
+            app(EnterpriseWikiVerifyPageClaimsService::class)
+                ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id, $sibling->id]);
+
+            $this->fail('Expected the second claim AI call to throw.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Verification AI failed for the second claim.', $e->getMessage());
+        }
+
+        $claim->refresh();
+        $sibling->refresh();
+
+        $this->assertSame(2, $calls);
+        $this->assertNotNull($claim->verified_at);
+        $this->assertNull($sibling->verified_at);
+        $this->assertNull($sibling->verification_claimed_at);
+        $this->assertNull($sibling->verification_claim_token);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (string $claimText, array $sourceElements) use ($sibling): bool {
+                return $claimText === $sibling->claim_text
+                    && $sourceElements !== []
+                    && $sourceElements[0]['key'] === 'sibling-ref-1';
+            })
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['sibling-ref-1'],
+                reason: 'The second claim is supported on retry.',
+            ));
+
+        $retryResult = app(EnterpriseWikiVerifyPageClaimsService::class)
+            ->verifyClaimsForManualMixedBlock($run->fresh(), [$claim->id, $sibling->id]);
+
+        $this->assertSame(1, $retryResult['skipped']);
+        $this->assertSame(1, $retryResult['claims']);
+        $this->assertNotNull($claim->fresh()->verified_at);
+        $this->assertNotNull($sibling->fresh()->verified_at);
+    }
+
+    public function test_claim_scoped_internal_error_write_is_skipped_when_lease_token_is_lost(): void
+    {
+        $customer = $this->createCustomer();
+        [, , , $claim] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $claim->update([
+            'verification_claimed_at' => now(),
+            'verification_claim_token' => 'other-worker-token',
+        ]);
+
+        $method = new \ReflectionMethod(EnterpriseWikiVerifyPageClaimsService::class, 'markInternalGenerationError');
+        $updated = $method->invoke(
+            app(EnterpriseWikiVerifyPageClaimsService::class),
+            $claim->fresh(),
+            'genuine_content_mismatch',
+            'lost-token',
+        );
+
+        $claim->refresh();
+
+        $this->assertFalse($updated);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertNull($claim->verified_at);
+        $this->assertSame('other-worker-token', $claim->verification_claim_token);
+        $this->assertNull($claim->generation_issue);
+    }
+
+    public function test_ordinary_verify_still_uses_block_source_elements_not_manual_mixed_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim, , $sibling] = $this->createManualMixedBlockVerificationFixture($customer);
+
+        $sibling->update(['verified_at' => now()]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->withArgs(function (
+                string $claimText,
+                array $sourceElements,
+                string $fallbackSourceText,
+                string $languageCode,
+                ?string $blockMarkdown,
+            ) use ($claim): bool {
+                return $claimText === $claim->claim_text
+                    && count($sourceElements) === 1
+                    && $sourceElements[0]['key'] === 'block-only-1'
+                    && $fallbackSourceText === self::FAKE_EXCERPT
+                    && $languageCode === 'no'
+                    && $blockMarkdown !== null;
+            })
+            ->andReturn($this->verificationResult(
+                supportingSourceElementKeys: ['block-only-1'],
+                reason: 'The ordinary verifier still uses block source elements.',
+            ));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $this->assertNotNull($claim->fresh()->verified_at);
+    }
+
+    // =========================================================================
     // Edge cases: pages without versions or claims
     // =========================================================================
 
@@ -1356,6 +1747,98 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * @return array{
+     *     0: EnterpriseWikiIngestRun,
+     *     1: EnterpriseWikiPage,
+     *     2: EnterpriseWikiPageVersion,
+     *     3: EnterpriseWikiClaim,
+     *     4: EnterpriseWikiDocument,
+     *     5: EnterpriseWikiClaim
+     * }
+     */
+    private function createManualMixedBlockVerificationFixture(Customer $customer): array
+    {
+        $claimText = 'Kritiske hendelser skal besvares innen 30 minutter.';
+        $siblingText = 'Servicedesk følger opp ordinære henvendelser i åpningstiden.';
+
+        [$run, $page, $version, $claim, $document] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            $claimText,
+            [[
+                'source_element_key' => 'block-only-1',
+                'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                'source_excerpt' => 'The block-level source element must not be used by claim-scoped verification.',
+                'page_reference' => 'Block source',
+            ]],
+        );
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$claimText}\n\n{$siblingText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => "{$claimText}\n\n{$siblingText}",
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_elements' => [[
+                    'source_element_key' => 'block-only-1',
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                    'source_excerpt' => 'The block-level source element must not be used by claim-scoped verification.',
+                    'page_reference' => 'Block source',
+                ]],
+            ]],
+        ]);
+
+        $claim->update([
+            'claim_text' => $claimText,
+            'page_excerpt' => $claimText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'verified_at' => null,
+            'verification_claimed_at' => null,
+            'verification_claim_token' => null,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'claim-ref-1',
+            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+            'source_label' => $document->original_filename,
+            'excerpt' => 'Critical incidents shall be responded to within 30 minutes.',
+            'source_hash' => $document->file_hash_sha256,
+            'page_reference' => 'Avsnitt 9',
+        ]);
+
+        $sibling = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $siblingText,
+            'page_excerpt' => $siblingText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $sibling->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'sibling-ref-1',
+            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+            'source_label' => $document->original_filename,
+            'excerpt' => 'The sibling reference must not be read by the scoped verifier.',
+            'source_hash' => $document->file_hash_sha256,
+            'page_reference' => 'Avsnitt 10',
+        ]);
+
+        return [$run, $page->fresh(), $version->fresh(), $claim->fresh(), $document, $sibling->fresh()];
+    }
 
     private function createCustomer(string $name = 'Test AS'): Customer
     {

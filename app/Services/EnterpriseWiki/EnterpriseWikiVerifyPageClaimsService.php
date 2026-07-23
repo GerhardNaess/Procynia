@@ -53,6 +53,10 @@ class EnterpriseWikiVerifyPageClaimsService
      */
     private const LEASE_SECONDS = ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS + self::TIMEOUT_SAFETY_MARGIN_SECONDS;
 
+    private const EVIDENCE_SCOPE_BLOCK = 'block';
+
+    private const EVIDENCE_SCOPE_CLAIM_REFERENCES = 'claim_references';
+
     public function __construct(
         private readonly WikiClaimVerificationAiClient $aiClient,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
@@ -87,6 +91,7 @@ class EnterpriseWikiVerifyPageClaimsService
 
         $languageCode = $this->resolveLanguageCode($run->customer_id);
         $sourceText = (string) ($document->extracted_text ?? '');
+        $policy = $this->ordinaryVerificationPolicy($sourceText);
 
         $pivotRows = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
@@ -128,165 +133,14 @@ class EnterpriseWikiVerifyPageClaimsService
             $pages++;
 
             foreach ($pageClaims as $claim) {
-                // Authoritative checkpoint: this claim already completed verification —
-                // supported or not — so skip without an AI call.
-                if ($claim->verified_at !== null) {
-                    $skipped++;
+                $outcome = $this->verifyClaimWithPolicy($claim, $run, $document, $version, $languageCode, $policy);
 
-                    continue;
-                }
-
-                $token = (string) Str::uuid();
-                $reservation = $this->reserve($claim, $token);
-
-                if ($reservation === 'completed') {
-                    $skipped++;
-
-                    continue;
-                }
-
-                if ($reservation === 'busy') {
-                    $busy++;
-
-                    continue;
-                }
-
-                $claims++;
-
-                $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
-
-                if ($anchorFailure !== null) {
-                    $this->markInternalGenerationError($claim, $anchorFailure);
-                    $noSupport++;
-
-                    continue;
-                }
-
-                // Best-practice classification fix: a claim already classified best_practice
-                // (inherited from its generation block) must never be run through "prove this is
-                // in the customer's source document" — that is exactly what best_practice content
-                // deliberately is not, and doing so is precisely how a legitimate suggestion used
-                // to get silently downgraded to unsupported_generated_content (or, worse, upgraded
-                // to source_based on a coincidental partial text match). Only re-validate that it
-                // is still genuinely normative and still anchored — never prove source support.
-                if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-                    && $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)
-                ) {
-                    $outcome = $this->persistBestPracticeVerification($claim->id, $token, $run->customer_id, $version);
-
-                    if ($outcome === null) {
-                        $busy++;
-
-                        continue;
-                    }
-
-                    $noSupport++;
-
-                    continue;
-                }
-
-                // Cross-page overgeneration fix: before calling AI, check whether this claim
-                // expresses a fact already verified SUPPORTED for another occurrence (same
-                // customer, content_origin, document/source version, and cited source elements —
-                // Del 3/6). Only claims carrying a real structured source reference are eligible;
-                // a claim with none (e.g. an unstructured/manual reference) has nothing safe to
-                // key on and is always verified independently.
-                //
-                // A verified_unsupported fact is deliberately NEVER reused as a final result (run-
-                // 39 fix): a negative outcome can be based on different wording, a different Wiki
-                // block, different source excerpts, an earlier verification bug, or since-improved
-                // verification logic — copying it forward would block a claim without this
-                // specific occurrence ever having been checked against its OWN current text, block,
-                // and source references. An unsupported fact only marks the claim as eligible for
-                // deterministic-support/AI verification below, exactly like a claim with no
-                // reusable fact at all — canonical_fact_id may end up pointing at the same or a new
-                // fact once recordOutcome() runs, but the fact never decides the outcome itself.
-                $reusableFact = $this->canonicalizationService->findReusableFact($claim, $run->customer_id);
-
-                if ($reusableFact !== null && $reusableFact->verification_status === EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED) {
-                    Log::info('[WIKI_CLAIM_VERIFICATION] Reusing an existing canonical fact verification result.', [
-                        'claim_id' => $claim->id,
-                        'canonical_fact_id' => $reusableFact->id,
-                        'verification_status' => $reusableFact->verification_status,
-                    ]);
-
-                    $outcome = $this->persistReusedFact($claim->id, $token, $reusableFact);
-
-                    if ($outcome === null) {
-                        $busy++;
-
-                        continue;
-                    }
-
-                    $reused++;
-                    $references++;
-
-                    continue;
-                }
-
-                if ($reusableFact !== null) {
-                    Log::info('[WIKI_CLAIM_VERIFICATION] Found a verified_unsupported canonical fact but re-verifying this occurrence independently instead of reusing it.', [
-                        'claim_id' => $claim->id,
-                        'canonical_fact_id' => $reusableFact->id,
-                    ]);
-                }
-
-                $block = $this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''));
-                $candidateElements = $this->candidateElementsForAi($block);
-
-                // Run-38 fix: a verbatim/near-verbatim claim never needs an AI call at all — see
-                // EnterpriseWikiClaimCanonicalizationService::detectDeterministicSupport().
-                if ($this->canonicalizationService->detectDeterministicSupport(
-                    $claim->claim_text,
-                    array_column($candidateElements, 'excerpt'),
-                )) {
-                    $outcome = $this->persistDeterministicSupport($claim->id, $token, $document, $version, $block);
-
-                    if ($outcome === null) {
-                        $busy++;
-
-                        continue;
-                    }
-
-                    if ($outcome === 'unsupported') {
-                        $noSupport++;
-                    } else {
-                        $references++;
-                    }
-
-                    continue;
-                }
-
-                try {
-                    $result = $this->aiClient->verifyClaim(
-                        claimText: $claim->claim_text,
-                        sourceElements: $candidateElements,
-                        fallbackSourceText: $sourceText,
-                        languageCode: $languageCode,
-                        blockMarkdown: $block['markdown'] ?? null,
-                        documentLabel: $document->original_filename,
-                    );
-                } catch (Throwable $e) {
-                    $this->release($claim->id, $token);
-
-                    throw $e;
-                }
-
-                $outcome = $this->persist($claim->id, $token, $document, $result, $version, $block, $sourceText);
-
-                if ($outcome === null) {
-                    // Another worker reclaimed this lease as stale while the AI call was in
-                    // flight; that worker's own attempt is the one that will persist a result.
-                    $busy++;
-
-                    continue;
-                }
-
-                if ($outcome === 'unsupported') {
-                    $noSupport++;
-                } else {
-                    $references++;
-                }
+                $claims += $outcome['claims'];
+                $references += $outcome['references'];
+                $skipped += $outcome['skipped'];
+                $noSupport += $outcome['no_support'];
+                $busy += $outcome['busy'];
+                $reused += $outcome['reused'];
             }
         }
 
@@ -299,6 +153,120 @@ class EnterpriseWikiVerifyPageClaimsService
             'busy' => $busy,
             'reused' => $reused,
         ];
+    }
+
+    /**
+     * Claim-scoped verification for claims extracted from one manually edited mixed block.
+     *
+     * This is deliberately not reachable from the ordinary page/run verify() pipeline. Callers
+     * must pass the exact newly-created claim ids/models for the edited block; this method never
+     * discovers sibling claims from the page version and never reads block-level source elements
+     * as evidence. Source-based claims are verified only against their own sourceReferences.
+     *
+     * @param  list<int|EnterpriseWikiClaim>  $claims
+     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int, busy: int, reused: int}
+     *
+     * @throws \InvalidArgumentException if the run is not applied, the source document is missing, or any claim id is not found
+     * @throws \RuntimeException if AI is unavailable or verification fails
+     */
+    public function verifyClaimsForManualMixedBlock(EnterpriseWikiIngestRun $run, array $claims): array
+    {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have claims verified."
+            );
+        }
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('id', $run->source_id)
+            ->first();
+
+        if ($document === null) {
+            throw new \InvalidArgumentException(
+                "Source document [{$run->source_id}] not found for run [{$run->id}]."
+            );
+        }
+
+        $claimIds = [];
+
+        foreach ($claims as $claim) {
+            $claimIds[] = $claim instanceof EnterpriseWikiClaim
+                ? (int) $claim->id
+                : (int) $claim;
+        }
+
+        $claimIds = array_values(array_unique(array_filter($claimIds, static fn (int $id): bool => $id > 0)));
+
+        if ($claimIds === []) {
+            return [
+                'pages' => 0,
+                'claims' => 0,
+                'references' => 0,
+                'skipped' => 0,
+                'no_support' => 0,
+                'busy' => 0,
+                'reused' => 0,
+            ];
+        }
+
+        $scopedClaims = EnterpriseWikiClaim::query()
+            ->whereIn('id', $claimIds)
+            ->with('sourceReferences')
+            ->get()
+            ->keyBy('id');
+
+        if ($scopedClaims->count() !== count($claimIds)) {
+            $missingIds = array_values(array_diff($claimIds, $scopedClaims->keys()->map(fn ($id): int => (int) $id)->all()));
+
+            throw new \InvalidArgumentException('Claim id(s) not found for manual mixed-block verification: '.implode(', ', $missingIds));
+        }
+
+        $versions = EnterpriseWikiPageVersion::query()
+            ->whereIn('id', $scopedClaims->pluck('enterprise_wiki_page_version_id')->unique()->values()->all())
+            ->get()
+            ->keyBy('id');
+
+        $languageCode = $this->resolveLanguageCode($run->customer_id);
+        $policy = $this->manualMixedBlockVerificationPolicy();
+        $result = [
+            'pages' => $scopedClaims
+                ->pluck('enterprise_wiki_page_id')
+                ->unique()
+                ->count(),
+            'claims' => 0,
+            'references' => 0,
+            'skipped' => 0,
+            'no_support' => 0,
+            'busy' => 0,
+            'reused' => 0,
+        ];
+
+        foreach ($claimIds as $claimId) {
+            /** @var EnterpriseWikiClaim $claim */
+            $claim = $scopedClaims->get($claimId);
+            /** @var EnterpriseWikiPageVersion|null $version */
+            $version = $versions->get($claim->enterprise_wiki_page_version_id);
+
+            if ($version === null) {
+                throw new \InvalidArgumentException("Page version [{$claim->enterprise_wiki_page_version_id}] not found for claim [{$claim->id}].");
+            }
+
+            if (! $version->is_current) {
+                throw new \InvalidArgumentException("Claim [{$claim->id}] is not attached to a current page version.");
+            }
+
+            $outcome = $this->verifyClaimWithPolicy($claim, $run, $document, $version, $languageCode, $policy);
+
+            $result['claims'] += $outcome['claims'];
+            $result['references'] += $outcome['references'];
+            $result['skipped'] += $outcome['skipped'];
+            $result['no_support'] += $outcome['no_support'];
+            $result['busy'] += $outcome['busy'];
+            $result['reused'] += $outcome['reused'];
+        }
+
+        return $result;
     }
 
     /**
@@ -447,6 +415,438 @@ class EnterpriseWikiVerifyPageClaimsService
     }
 
     /**
+     * @return array{
+     *     evidence_scope: string,
+     *     fallback_source_text: string,
+     *     allow_block_markdown_context: bool,
+     *     allow_block_markdown_safety_fallback: bool,
+     *     allow_claim_decision_reset: bool,
+     *     allow_best_practice_promotion: bool,
+     *     verify_unsupported_without_ai: bool
+     * }
+     */
+    private function ordinaryVerificationPolicy(string $fallbackSourceText): array
+    {
+        return [
+            'evidence_scope' => self::EVIDENCE_SCOPE_BLOCK,
+            'fallback_source_text' => $fallbackSourceText,
+            'allow_block_markdown_context' => true,
+            'allow_block_markdown_safety_fallback' => true,
+            'allow_claim_decision_reset' => true,
+            'allow_best_practice_promotion' => true,
+            'verify_unsupported_without_ai' => false,
+        ];
+    }
+
+    /**
+     * @return array{
+     *     evidence_scope: string,
+     *     fallback_source_text: string,
+     *     allow_block_markdown_context: bool,
+     *     allow_block_markdown_safety_fallback: bool,
+     *     allow_claim_decision_reset: bool,
+     *     allow_best_practice_promotion: bool,
+     *     verify_unsupported_without_ai: bool
+     * }
+     */
+    private function manualMixedBlockVerificationPolicy(): array
+    {
+        return [
+            'evidence_scope' => self::EVIDENCE_SCOPE_CLAIM_REFERENCES,
+            'fallback_source_text' => '',
+            'allow_block_markdown_context' => false,
+            'allow_block_markdown_safety_fallback' => false,
+            'allow_claim_decision_reset' => false,
+            'allow_best_practice_promotion' => false,
+            'verify_unsupported_without_ai' => true,
+        ];
+    }
+
+    /**
+     * @param  array{
+     *     evidence_scope: string,
+     *     fallback_source_text: string,
+     *     allow_block_markdown_context: bool,
+     *     allow_block_markdown_safety_fallback: bool,
+     *     allow_claim_decision_reset: bool,
+     *     allow_best_practice_promotion: bool,
+     *     verify_unsupported_without_ai: bool
+     * }  $policy
+     * @return array{claims: int, references: int, skipped: int, no_support: int, busy: int, reused: int}
+     */
+    private function verifyClaimWithPolicy(
+        EnterpriseWikiClaim $claim,
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiDocument $document,
+        EnterpriseWikiPageVersion $version,
+        string $languageCode,
+        array $policy,
+    ): array {
+        $counts = $this->emptyClaimVerificationCounts();
+
+        // Authoritative checkpoint: this claim already completed verification —
+        // supported or not — so skip without an AI call.
+        if ($claim->verified_at !== null) {
+            $counts['skipped']++;
+
+            return $counts;
+        }
+
+        $token = (string) Str::uuid();
+        $reservation = $this->reserve($claim, $token);
+
+        if ($reservation === 'completed') {
+            $counts['skipped']++;
+
+            return $counts;
+        }
+
+        if ($reservation === 'busy') {
+            $counts['busy']++;
+
+            return $counts;
+        }
+
+        $counts['claims']++;
+
+        $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
+
+        if ($anchorFailure !== null) {
+            $updated = $this->markInternalGenerationError(
+                $claim,
+                $anchorFailure,
+                $policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES ? $token : null,
+            );
+            $counts[$updated ? 'no_support' : 'busy']++;
+
+            return $counts;
+        }
+
+        // Best-practice classification fix: a claim already classified best_practice
+        // (inherited from its generation block) must never be run through "prove this is
+        // in the customer's source document" — that is exactly what best_practice content
+        // deliberately is not, and doing so is precisely how a legitimate suggestion used
+        // to get silently downgraded to unsupported_generated_content (or, worse, upgraded
+        // to source_based on a coincidental partial text match). Only re-validate that it
+        // is still genuinely normative and still anchored — never prove source support.
+        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+            && $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)
+        ) {
+            $outcome = $this->persistBestPracticeVerification($claim->id, $token, $run->customer_id, $version);
+
+            if ($outcome === null) {
+                $counts['busy']++;
+
+                return $counts;
+            }
+
+            $counts['no_support']++;
+
+            return $counts;
+        }
+
+        if ($policy['verify_unsupported_without_ai']
+            && $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT
+        ) {
+            $outcome = $this->persist(
+                $claim->id,
+                $token,
+                $document,
+                $this->unsupportedGeneratedContentVerificationResult(),
+                $version,
+                null,
+                '',
+                [],
+                false,
+                false,
+            );
+
+            if ($outcome === null) {
+                $counts['busy']++;
+
+                return $counts;
+            }
+
+            $counts['no_support']++;
+
+            return $counts;
+        }
+
+        $evidence = $this->verificationEvidenceForPolicy($claim, $version, $policy);
+        $candidateElements = $evidence['candidate_elements'];
+
+        if ($policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES
+            && $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+            && $candidateElements === []
+        ) {
+            $updated = $this->markInternalGenerationError($claim, 'source_based_claim_missing_source_reference', $token);
+            $counts[$updated ? 'no_support' : 'busy']++;
+
+            return $counts;
+        }
+
+        // Cross-page overgeneration fix: before calling AI, check whether this claim
+        // expresses a fact already verified SUPPORTED for another occurrence (same
+        // customer, content_origin, document/source version, and cited source elements —
+        // Del 3/6). Only claims carrying a real structured source reference are eligible;
+        // a claim with none (e.g. an unstructured/manual reference) has nothing safe to
+        // key on and is always verified independently.
+        //
+        // A verified_unsupported fact is deliberately NEVER reused as a final result (run-
+        // 39 fix): a negative outcome can be based on different wording, a different Wiki
+        // block, different source excerpts, an earlier verification bug, or since-improved
+        // verification logic — copying it forward would block a claim without this
+        // specific occurrence ever having been checked against its OWN current text, block,
+        // and source references. An unsupported fact only marks the claim as eligible for
+        // deterministic-support/AI verification below, exactly like a claim with no
+        // reusable fact at all — canonical_fact_id may end up pointing at the same or a new
+        // fact once recordOutcome() runs, but the fact never decides the outcome itself.
+        $reusableFact = $this->canonicalizationService->findReusableFact($claim, $run->customer_id);
+
+        if ($reusableFact !== null && $reusableFact->verification_status === EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED) {
+            Log::info('[WIKI_CLAIM_VERIFICATION] Reusing an existing canonical fact verification result.', [
+                'claim_id' => $claim->id,
+                'canonical_fact_id' => $reusableFact->id,
+                'verification_status' => $reusableFact->verification_status,
+            ]);
+
+            $outcome = $this->persistReusedFact($claim->id, $token, $reusableFact, $policy['allow_claim_decision_reset']);
+
+            if ($outcome === null) {
+                $counts['busy']++;
+
+                return $counts;
+            }
+
+            $counts['reused']++;
+            $counts['references']++;
+
+            return $counts;
+        }
+
+        if ($reusableFact !== null) {
+            Log::info('[WIKI_CLAIM_VERIFICATION] Found a verified_unsupported canonical fact but re-verifying this occurrence independently instead of reusing it.', [
+                'claim_id' => $claim->id,
+                'canonical_fact_id' => $reusableFact->id,
+            ]);
+        }
+
+        // Run-38 fix: a verbatim/near-verbatim claim never needs an AI call at all — see
+        // EnterpriseWikiClaimCanonicalizationService::detectDeterministicSupport().
+        if ($this->canonicalizationService->detectDeterministicSupport(
+            $claim->claim_text,
+            array_column($candidateElements, 'excerpt'),
+        )) {
+            $outcome = $this->persistDeterministicSupport(
+                $claim->id,
+                $token,
+                $document,
+                $version,
+                $evidence['block_for_safety_net'],
+                $evidence['elements_by_key'],
+                $policy['allow_claim_decision_reset'],
+                $policy['allow_best_practice_promotion'],
+            );
+
+            if ($outcome === null) {
+                $counts['busy']++;
+
+                return $counts;
+            }
+
+            if ($outcome === 'unsupported') {
+                $counts['no_support']++;
+            } else {
+                $counts['references']++;
+            }
+
+            return $counts;
+        }
+
+        try {
+            $result = $this->aiClient->verifyClaim(
+                claimText: $claim->claim_text,
+                sourceElements: $candidateElements,
+                fallbackSourceText: $evidence['fallback_source_text'],
+                languageCode: $languageCode,
+                blockMarkdown: $evidence['block_markdown_for_ai'],
+                documentLabel: $document->original_filename,
+            );
+        } catch (Throwable $e) {
+            $this->release($claim->id, $token);
+
+            throw $e;
+        }
+
+        $outcome = $this->persist(
+            $claim->id,
+            $token,
+            $document,
+            $result,
+            $version,
+            $evidence['block_for_safety_net'],
+            $evidence['fallback_source_text'],
+            $evidence['elements_by_key'],
+            $policy['allow_claim_decision_reset'],
+            $policy['allow_best_practice_promotion'],
+        );
+
+        if ($outcome === null) {
+            // Another worker reclaimed this lease as stale while the AI call was in
+            // flight; that worker's own attempt is the one that will persist a result.
+            $counts['busy']++;
+
+            return $counts;
+        }
+
+        if ($outcome === 'unsupported') {
+            $counts['no_support']++;
+        } else {
+            $counts['references']++;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return array{claims: int, references: int, skipped: int, no_support: int, busy: int, reused: int}
+     */
+    private function emptyClaimVerificationCounts(): array
+    {
+        return [
+            'claims' => 0,
+            'references' => 0,
+            'skipped' => 0,
+            'no_support' => 0,
+            'busy' => 0,
+            'reused' => 0,
+        ];
+    }
+
+    /**
+     * @param  array{
+     *     evidence_scope: string,
+     *     fallback_source_text: string,
+     *     allow_block_markdown_context: bool,
+     *     allow_block_markdown_safety_fallback: bool,
+     *     allow_claim_decision_reset: bool,
+     *     allow_best_practice_promotion: bool,
+     *     verify_unsupported_without_ai: bool
+     * }  $policy
+     * @return array{
+     *     candidate_elements: list<array{key: string, type: ?string, excerpt: string, page_reference: ?string}>,
+     *     elements_by_key: array<string, array<string, mixed>>,
+     *     block_for_safety_net: ?array<string, mixed>,
+     *     block_markdown_for_ai: ?string,
+     *     fallback_source_text: string
+     * }
+     */
+    private function verificationEvidenceForPolicy(EnterpriseWikiClaim $claim, EnterpriseWikiPageVersion $version, array $policy): array
+    {
+        $block = $this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''));
+
+        if ($policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES) {
+            $elementsByKey = $this->elementsByKeyForClaimSourceReferences($claim);
+
+            return [
+                'candidate_elements' => $this->candidateElementsForClaimSourceReferences($claim),
+                'elements_by_key' => $elementsByKey,
+                'block_for_safety_net' => $policy['allow_block_markdown_safety_fallback'] ? $block : null,
+                'block_markdown_for_ai' => null,
+                'fallback_source_text' => '',
+            ];
+        }
+
+        return [
+            'candidate_elements' => $this->candidateElementsForAi($block),
+            'elements_by_key' => $this->elementsByKey($block),
+            'block_for_safety_net' => $policy['allow_block_markdown_safety_fallback'] ? $block : null,
+            'block_markdown_for_ai' => $policy['allow_block_markdown_context'] ? ($block['markdown'] ?? null) : null,
+            'fallback_source_text' => $policy['fallback_source_text'],
+        ];
+    }
+
+    /**
+     * @return array{key: string, type: ?string, excerpt: string, page_reference: ?string}[]
+     */
+    private function candidateElementsForClaimSourceReferences(EnterpriseWikiClaim $claim): array
+    {
+        $elements = [];
+
+        foreach ($this->sourceReferencesForClaim($claim) as $reference) {
+            $key = (string) ($reference->source_element_key ?? '');
+            $excerpt = trim((string) ($reference->excerpt ?? ''));
+
+            if ($key === '' || $excerpt === '') {
+                continue;
+            }
+
+            $elements[] = [
+                'key' => $key,
+                'type' => $reference->source_element_type,
+                'excerpt' => $excerpt,
+                'page_reference' => $reference->page_reference,
+            ];
+        }
+
+        return $elements;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>> keyed by source_element_key
+     */
+    private function elementsByKeyForClaimSourceReferences(EnterpriseWikiClaim $claim): array
+    {
+        $byKey = [];
+
+        foreach ($this->sourceReferencesForClaim($claim) as $reference) {
+            $key = (string) ($reference->source_element_key ?? '');
+            $excerpt = trim((string) ($reference->excerpt ?? ''));
+
+            if ($key === '' || $excerpt === '') {
+                continue;
+            }
+
+            $byKey[$key] = [
+                'source_element_key' => $key,
+                'source_element_type' => $reference->source_element_type,
+                'source_row_key' => $reference->source_row_key,
+                'source_excerpt' => $excerpt,
+                'page_reference' => $reference->page_reference,
+            ];
+        }
+
+        return $byKey;
+    }
+
+    /**
+     * @return iterable<EnterpriseWikiSourceReference>
+     */
+    private function sourceReferencesForClaim(EnterpriseWikiClaim $claim): iterable
+    {
+        return $claim->relationLoaded('sourceReferences')
+            ? $claim->sourceReferences
+            : $claim->sourceReferences()->get();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function unsupportedGeneratedContentVerificationResult(): array
+    {
+        return [
+            'verdict' => WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED,
+            'same_meaning_across_languages' => true,
+            'claim_language' => '',
+            'source_language' => '',
+            'supporting_source_element_keys' => [],
+            'reason' => 'Påstanden er klassifisert som generert innhold uten kildegrunnlag for denne blokken.',
+            'unsupported_parts' => '',
+            'checks' => [],
+        ];
+    }
+
+    /**
      * Atomically reserve a claim for verification — see
      * EnterpriseWikiExtractPageClaimsService::reserve() for the same compare-and-swap pattern.
      *
@@ -560,9 +960,19 @@ class EnterpriseWikiVerifyPageClaimsService
      *
      * @return string|null 'supported', 'unsupported', or null if the reservation was lost
      */
-    private function persist(int $claimId, string $token, EnterpriseWikiDocument $document, array $result, EnterpriseWikiPageVersion $version, ?array $block, string $fallbackSourceText): ?string
-    {
-        return DB::transaction(function () use ($claimId, $token, $document, $result, $version, $block, $fallbackSourceText): ?string {
+    private function persist(
+        int $claimId,
+        string $token,
+        EnterpriseWikiDocument $document,
+        array $result,
+        EnterpriseWikiPageVersion $version,
+        ?array $block,
+        string $fallbackSourceText,
+        ?array $elementsByKeyOverride = null,
+        bool $allowClaimDecisionReset = true,
+        bool $allowBestPracticePromotion = true,
+    ): ?string {
+        return DB::transaction(function () use ($claimId, $token, $document, $result, $version, $block, $fallbackSourceText, $elementsByKeyOverride, $allowClaimDecisionReset, $allowBestPracticePromotion): ?string {
             $claim = EnterpriseWikiClaim::query()
                 ->where('id', $claimId)
                 ->where('verification_claim_token', $token)
@@ -594,12 +1004,23 @@ class EnterpriseWikiVerifyPageClaimsService
             // (source_based/best_practice), never on internal_error/unsupported.
             $originalContentOrigin = (string) $claim->content_origin;
 
-            $elementsByKey = $this->elementsByKey($block);
+            $elementsByKey = $elementsByKeyOverride ?? $this->elementsByKey($block);
             $safetyNet = $this->applyDeterministicSafetyNet($claim->claim_text, $result, $elementsByKey, $block, $fallbackSourceText);
 
-            return $this->applyVerdictOutcome($claim, $safetyNet['verdict'], $result, $elementsByKey, $document, $originalContentOrigin, $fallbackSourceText, array_filter([
-                'deterministic_reason' => $safetyNet['deterministic_reason'],
-            ]));
+            return $this->applyVerdictOutcome(
+                $claim,
+                $safetyNet['verdict'],
+                $result,
+                $elementsByKey,
+                $document,
+                $originalContentOrigin,
+                $fallbackSourceText,
+                array_filter([
+                    'deterministic_reason' => $safetyNet['deterministic_reason'],
+                ]),
+                $allowClaimDecisionReset,
+                $allowBestPracticePromotion,
+            );
         });
     }
 
@@ -613,9 +1034,17 @@ class EnterpriseWikiVerifyPageClaimsService
      *
      * @return string|null 'supported', 'unsupported' (anchor failure), or null if the reservation was lost
      */
-    private function persistDeterministicSupport(int $claimId, string $token, EnterpriseWikiDocument $document, EnterpriseWikiPageVersion $version, ?array $block): ?string
-    {
-        return DB::transaction(function () use ($claimId, $token, $document, $version, $block): ?string {
+    private function persistDeterministicSupport(
+        int $claimId,
+        string $token,
+        EnterpriseWikiDocument $document,
+        EnterpriseWikiPageVersion $version,
+        ?array $block,
+        ?array $elementsByKeyOverride = null,
+        bool $allowClaimDecisionReset = true,
+        bool $allowBestPracticePromotion = true,
+    ): ?string {
+        return DB::transaction(function () use ($claimId, $token, $document, $version, $block, $elementsByKeyOverride, $allowClaimDecisionReset, $allowBestPracticePromotion): ?string {
             $claim = EnterpriseWikiClaim::query()
                 ->where('id', $claimId)
                 ->where('verification_claim_token', $token)
@@ -643,7 +1072,7 @@ class EnterpriseWikiVerifyPageClaimsService
             }
 
             $originalContentOrigin = (string) $claim->content_origin;
-            $elementsByKey = $this->elementsByKey($block);
+            $elementsByKey = $elementsByKeyOverride ?? $this->elementsByKey($block);
 
             $result = [
                 'verdict' => WikiClaimVerificationAiClient::VERDICT_SUPPORTED,
@@ -665,6 +1094,8 @@ class EnterpriseWikiVerifyPageClaimsService
                 $originalContentOrigin,
                 '',
                 ['classification_basis' => 'deterministic_verbatim_match'],
+                $allowClaimDecisionReset,
+                $allowBestPracticePromotion,
             );
         });
     }
@@ -688,6 +1119,8 @@ class EnterpriseWikiVerifyPageClaimsService
         string $originalContentOrigin,
         string $fallbackSourceText,
         array $extraReviewMetadata = [],
+        bool $allowClaimDecisionReset = true,
+        bool $allowBestPracticePromotion = true,
     ): string {
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_CONTRADICTED
             || $verdict === WikiClaimVerificationAiClient::VERDICT_PARTIALLY_SUPPORTED
@@ -724,7 +1157,7 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED) {
-            $bestPractice = $this->isPositiveBestPracticeSuggestion($claim);
+            $bestPractice = $allowBestPracticePromotion && $this->isPositiveBestPracticeSuggestion($claim);
 
             // Run-38 fix: a plain not_supported verdict used to store review_reason/review_metadata
             // as null — leaving no trace of why AI rejected the claim, unlike the contradicted/
@@ -796,7 +1229,9 @@ class EnterpriseWikiVerifyPageClaimsService
                 'page_reference' => $sourceElement['page_reference'] ?? null,
             ]);
 
-            $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
+            if ($allowClaimDecisionReset) {
+                $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
+            }
         }
 
         $claim->update([
@@ -1045,9 +1480,9 @@ class EnterpriseWikiVerifyPageClaimsService
      *
      * @return string|null 'supported', 'unsupported', or null if the reservation was lost
      */
-    private function persistReusedFact(int $claimId, string $token, EnterpriseWikiCanonicalFact $fact): ?string
+    private function persistReusedFact(int $claimId, string $token, EnterpriseWikiCanonicalFact $fact, bool $allowClaimDecisionReset = true): ?string
     {
-        return DB::transaction(function () use ($claimId, $token, $fact): ?string {
+        return DB::transaction(function () use ($claimId, $token, $fact, $allowClaimDecisionReset): ?string {
             $claim = EnterpriseWikiClaim::query()
                 ->where('id', $claimId)
                 ->where('verification_claim_token', $token)
@@ -1080,7 +1515,7 @@ class EnterpriseWikiVerifyPageClaimsService
                     ->where('enterprise_wiki_claim_id', $claim->id)
                     ->exists();
 
-                if ($hasExistingReferences) {
+                if ($hasExistingReferences && $allowClaimDecisionReset) {
                     $this->lintService->resetClaimDecisionAfterFirstSourceReference($claim, true);
                 }
 
@@ -1166,10 +1601,16 @@ class EnterpriseWikiVerifyPageClaimsService
         return null;
     }
 
-    private function markInternalGenerationError(EnterpriseWikiClaim $claim, string $issue): void
+    private function markInternalGenerationError(EnterpriseWikiClaim $claim, string $issue, ?string $token = null): bool
     {
-        EnterpriseWikiClaim::query()
-            ->where('id', $claim->id)
+        $query = EnterpriseWikiClaim::query()
+            ->where('id', $claim->id);
+
+        if ($token !== null) {
+            $query->where('verification_claim_token', $token);
+        }
+
+        return $query
             ->update([
                 'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
@@ -1178,7 +1619,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'verified_at' => now(),
                 'verification_claimed_at' => null,
                 'verification_claim_token' => null,
-            ]);
+            ]) > 0;
     }
 
     /**
