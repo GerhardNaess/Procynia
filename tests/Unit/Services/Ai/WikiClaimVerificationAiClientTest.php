@@ -77,6 +77,42 @@ class WikiClaimVerificationAiClientTest extends TestCase
         $this->assertStringContainsString('reinforcement', $prompt);
     }
 
+    /**
+     * Readability/language-flow fix: reason/unsupported_parts previously had no output-language
+     * instruction at all, so the model defaulted to English free text regardless of the
+     * customer's Wiki language — this is the root cause of English explanation text on a
+     * Norwegian-locale findings list, fixed here rather than in presentation code.
+     */
+    public function test_developer_prompt_instructs_norwegian_output_for_reason_fields_by_default(): void
+    {
+        $payload = $this->capturePayload(languageCode: 'no');
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('Respond in Norwegian for the "reason" and "unsupported_parts" fields', $prompt);
+    }
+
+    public function test_developer_prompt_instructs_english_output_for_reason_fields_when_language_is_en(): void
+    {
+        $payload = $this->capturePayload(languageCode: 'en');
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('Respond in English for the "reason" and "unsupported_parts" fields', $prompt);
+    }
+
+    /**
+     * Technical/audit fields (verdict, checks, supporting_source_element_keys, claim_language,
+     * source_language, same_meaning_across_languages) must never be subject to the output-language
+     * instruction — only the two human-readable free-text fields are.
+     */
+    public function test_developer_prompt_marks_structural_fields_as_unaffected_by_language(): void
+    {
+        $payload = $this->capturePayload();
+        $prompt = data_get($payload, 'input.0.content.0.text');
+
+        $this->assertStringContainsString('verdict/checks/supporting_source_element_keys/', $prompt);
+        $this->assertStringContainsString('are structural and unaffected', $prompt);
+    }
+
     public function test_rejects_an_unknown_verdict(): void
     {
         $this->expectException(RuntimeException::class);
@@ -129,7 +165,7 @@ class WikiClaimVerificationAiClientTest extends TestCase
         $this->assertSame('match', $decoded['checks']['numbers_and_units']);
     }
 
-    private function capturePayload(array $sourceElements = []): array
+    private function capturePayload(array $sourceElements = [], string $languageCode = 'no'): array
     {
         $captured = null;
         $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
@@ -139,7 +175,7 @@ class WikiClaimVerificationAiClientTest extends TestCase
                 return $this->response($this->rawResult());
             });
         });
-        app(WikiClaimVerificationAiClient::class)->verifyClaim('Påstand', $sourceElements, 'Kilde', 'no');
+        app(WikiClaimVerificationAiClient::class)->verifyClaim('Påstand', $sourceElements, 'Kilde', $languageCode);
 
         return $captured;
     }

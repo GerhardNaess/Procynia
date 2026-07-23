@@ -293,6 +293,11 @@ class WikiClaimVerificationAiClient
             'the specific part of the claim without support when verdict is "partially_supported", and must',
             'be an empty string otherwise.',
             '',
+            "Respond in {$languageName} for the \"reason\" and \"unsupported_parts\" fields — this is the",
+            'Wiki\'s own language and what the customer reads on the finding, regardless of which language',
+            'the cited source excerpt(s) happen to be written in. verdict/checks/supporting_source_element_keys/',
+            'claim_language/source_language/same_meaning_across_languages are structural and unaffected.',
+            '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
     }
