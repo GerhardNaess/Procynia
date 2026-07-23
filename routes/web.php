@@ -19,9 +19,9 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
-use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
+use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
 use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiSourceController;
@@ -321,6 +321,7 @@ Route::prefix('app')
             Route::get('/runs/{run}/pages', [WikiController::class, 'runPages'])->name('runs.pages');
             Route::get('/runs/{run}/findings', [WikiController::class, 'runFindings'])->name('runs.findings');
             Route::patch('/runs/{run}/cancel', [WikiController::class, 'cancelRun'])->name('runs.cancel');
+            Route::patch('/{slug}/claims/{claim}/manual-block-edit', [WikiController::class, 'updateManualMixedBlockEdit'])->name('claims.manual-block-edit.update');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');

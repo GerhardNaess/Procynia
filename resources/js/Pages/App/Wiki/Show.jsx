@@ -282,13 +282,15 @@ export default function WikiShow({
     document_owner_summary: documentOwnerSummary = null,
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
+    can_edit_wiki_claims: canEditWikiClaims = false,
+    manual_block_edit: manualBlockEdit = null,
     outgoing_links: outgoingLinks = [],
     related_articles: relatedArticles = [],
     related_concepts: relatedConcepts = [],
     related_entities: relatedEntities = [],
     backlinks = [],
 }) {
-    const { translations = {}, auth = {} } = usePage().props;
+    const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
@@ -319,21 +321,39 @@ export default function WikiShow({
     const [claimTextEdits, setClaimTextEdits] = useState({});
     const [wikiBlockEditingKey, setWikiBlockEditingKey] = useState(null);
     const [wikiBlockEditDrafts, setWikiBlockEditDrafts] = useState({});
-    const [wikiBlockSavedMarkdowns, setWikiBlockSavedMarkdowns] = useState({});
+    const [wikiBlockSaveProcessingKey, setWikiBlockSaveProcessingKey] = useState(null);
+    const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
 
-    const getWikiBlockMarkdown = (block) => wikiBlockSavedMarkdowns[block.block_key] ?? block.markdown;
+    const getWikiBlockMarkdown = (block) => block.markdown;
+    const getWikiBlockRawMarkdown = (block) => typeof block.raw_markdown === 'string'
+        ? block.raw_markdown
+        : block.markdown;
+    const manualBlockEditUrl = (claimId) => {
+        const template = String(manualBlockEdit?.update_url_template ?? '');
+
+        if (!template || !claimId) {
+            return null;
+        }
+
+        return template.replace('__CLAIM_ID__', encodeURIComponent(String(claimId)));
+    };
+    const wikiBlockValidationError = wikiBlockEditError
+        ?? errors.blocks
+        ?? Object.entries(errors).find(([key]) => key.startsWith('blocks.'))?.[1]
+        ?? errors.expected_page_version_id
+        ?? errors.run_id
+        ?? null;
 
     const startWikiBlockEdit = (blockKey, fallbackMarkdown) => {
-        const currentMarkdown = wikiBlockSavedMarkdowns[blockKey] ?? fallbackMarkdown;
-
+        setWikiBlockEditError(null);
         setWikiBlockEditDrafts((prev) => ({
             ...prev,
-            [blockKey]: currentMarkdown,
+            [blockKey]: fallbackMarkdown,
         }));
         setWikiBlockEditingKey(blockKey);
     };
@@ -348,18 +368,59 @@ export default function WikiShow({
     };
 
     const saveWikiBlockEdit = (blockKey) => {
-        const nextMarkdown = String(wikiBlockEditDrafts[blockKey] ?? '');
+        if (wikiBlockSaveProcessingKey !== null) {
+            return;
+        }
 
-        setWikiBlockSavedMarkdowns((prev) => ({
-            ...prev,
-            [blockKey]: nextMarkdown,
-        }));
-        setWikiBlockEditDrafts((prev) => {
-            const next = { ...prev };
-            delete next[blockKey];
-            return next;
-        });
-        setWikiBlockEditingKey((current) => (current === blockKey ? null : current));
+        const nextMarkdown = String(wikiBlockEditDrafts[blockKey] ?? '').trim();
+        const runId = Number(manualBlockEdit?.run_id ?? 0);
+        const updateUrl = manualBlockEditUrl(targetClaimId);
+
+        if (!updateUrl || !runId || !current_version?.id || !targetClaimId) {
+            setWikiBlockEditError('Lagring mangler gyldig Wiki-kontekst. Last inn funnet på nytt fra Kjøringer.');
+            return;
+        }
+
+        if (!nextMarkdown) {
+            setWikiBlockEditError('Tekstblokken kan ikke være tom.');
+            return;
+        }
+
+        setWikiBlockEditError(null);
+        setWikiBlockSaveProcessingKey(blockKey);
+        router.patch(
+            updateUrl,
+            {
+                run_id: runId,
+                expected_page_version_id: current_version.id,
+                blocks: [
+                    {
+                        block_key: blockKey,
+                        markdown: nextMarkdown,
+                    },
+                ],
+                back_url: reviewReference?.back_url ?? undefined,
+            },
+            {
+                preserveScroll: true,
+                onError: (formErrors) => {
+                    const firstBlockError = Object.entries(formErrors).find(([key]) => key.startsWith('blocks.'))?.[1];
+                    setWikiBlockEditError(
+                        formErrors.blocks
+                        ?? firstBlockError
+                        ?? formErrors.expected_page_version_id
+                        ?? formErrors.run_id
+                        ?? 'Tekstendringen kunne ikke lagres. Kontroller teksten og prøv igjen.',
+                    );
+                },
+                onSuccess: () => {
+                    setWikiBlockEditDrafts({});
+                    setWikiBlockEditingKey(null);
+                    setWikiBlockEditError(null);
+                },
+                onFinish: () => setWikiBlockSaveProcessingKey(null),
+            },
+        );
     };
 
     useEffect(() => {
@@ -402,7 +463,7 @@ export default function WikiShow({
         });
 
         return () => window.cancelAnimationFrame(frame);
-    }, [targetBlockKey, page.slug]);
+    }, [targetBlockKey, page.slug, current_version?.id]);
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
@@ -784,13 +845,19 @@ export default function WikiShow({
                             )}
                         </div>
 
-                        {isInlineReview && canHandleClaim && targetBlockKey && wikiBlockEditingKey !== targetBlockKey && (
+                        {isInlineReview && canHandleClaim && canEditWikiClaims && targetBlockKey && (() => {
+                            const targetBlock = contentBlocks.find((block) => block.block_key === targetBlockKey) ?? null;
+
+                            return targetBlock?.content_origin === 'mixed'
+                                && manualBlockEdit?.run_id
+                                && wikiBlockEditingKey !== targetBlockKey;
+                        })() && (
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => startWikiBlockEdit(
                                         targetBlockKey,
-                                        contentBlocks.find((block) => block.block_key === targetBlockKey)?.markdown ?? '',
+                                        getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === targetBlockKey) ?? {}),
                                     )}
                                     className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
                                 >
@@ -1675,8 +1742,16 @@ export default function WikiShow({
                                     contentBlocks.map((block) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
+                                        const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
-                                        const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockMarkdown;
+                                        const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
+                                        const canSaveBlockEdit = Boolean(
+                                            canEditWikiClaims
+                                            && manualBlockEdit?.run_id
+                                            && current_version?.id
+                                            && targetClaimId
+                                            && !wikiBlockSaveProcessingKey,
+                                        );
 
                                         return (
                                             <div
@@ -1708,23 +1783,31 @@ export default function WikiShow({
                                                         <div className="flex flex-wrap gap-2">
                                                             <button
                                                                 type="button"
-                                                                disabled
+                                                                disabled={!canSaveBlockEdit}
                                                                 onClick={() => saveWikiBlockEdit(block.block_key)}
-                                                                className="rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
-                                                                Lagre endring
+                                                                {wikiBlockSaveProcessingKey === block.block_key ? 'Lagrer...' : 'Lagre endring'}
                                                             </button>
                                                             <button
                                                                 type="button"
+                                                                disabled={wikiBlockSaveProcessingKey === block.block_key}
                                                                 onClick={() => cancelWikiBlockEdit(block.block_key)}
-                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                                                                className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 Avbryt
                                                             </button>
                                                         </div>
-                                                        <p className="text-sm text-slate-500">
-                                                            Lagring kobles til i neste steg.
-                                                        </p>
+                                                        {wikiBlockValidationError && (
+                                                            <p className="text-base text-rose-600">
+                                                                {wikiBlockValidationError}
+                                                            </p>
+                                                        )}
+                                                        {!manualBlockEdit?.run_id && (
+                                                            <p className="text-base text-slate-500">
+                                                                Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>

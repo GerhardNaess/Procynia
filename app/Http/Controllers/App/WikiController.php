@@ -14,6 +14,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
@@ -29,6 +30,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -43,6 +45,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
     ) {}
 
     public function index(Request $request): Response
@@ -1426,6 +1429,9 @@ class WikiController extends Controller
         $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
             ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
+        $manualBlockEdit = $canApproveWikiClaims
+            ? $this->manualMixedBlockEditContext($page, $currentVersion, $customerId)
+            : null;
 
         return Inertia::render('App/Wiki/Show', [
             'page' => [
@@ -1457,11 +1463,275 @@ class WikiController extends Controller
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
             'backlinks' => $backlinks,
             'can_handle_wiki_claims' => $canHandleWikiClaims,
+            'can_edit_wiki_claims' => (bool) $canApproveWikiClaims,
+            'manual_block_edit' => $manualBlockEdit,
             'source_documents' => $sourceDocuments,
             'document_owner_approvals' => $documentOwnerApprovals,
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,
             'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
         ]);
+    }
+
+    public function updateManualMixedBlockEdit(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        abort_unless($user instanceof User && $user->is_active && $user->canAccessCustomerFrontend() && $user->canApproveWikiClaims(), 403);
+
+        $validated = $request->validate([
+            'run_id' => ['required', 'integer'],
+            'expected_page_version_id' => ['required', 'integer'],
+            'blocks' => ['required', 'array', 'min:1', 'max:25'],
+            'blocks.*' => ['required', 'array'],
+            'blocks.*.block_key' => ['required', 'string', 'max:255', 'distinct'],
+            'blocks.*.markdown' => ['required', 'string', 'max:20000'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
+        ], [
+            'run_id.required' => 'Kjøringskontekst mangler. Åpne funnet fra Kjøringer og prøv igjen.',
+            'expected_page_version_id.required' => 'Sideversjon mangler. Last inn siden på nytt og prøv igjen.',
+            'blocks.required' => 'Velg minst én tekstblokk som skal lagres.',
+            'blocks.*.block_key.required' => 'Tekstblokken mangler block_key. Last inn siden på nytt og prøv igjen.',
+            'blocks.*.block_key.distinct' => 'Samme tekstblokk kan bare sendes én gang.',
+            'blocks.*.markdown.required' => 'Tekstblokken kan ikke være tom.',
+        ]);
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        abort_unless((int) $claim->enterprise_wiki_page_id === (int) $page->id, 404);
+
+        $run = EnterpriseWikiIngestRun::query()
+            ->where('customer_id', $customerId)
+            ->whereKey((int) $validated['run_id'])
+            ->first() ?? abort(404);
+
+        $expectedCurrentVersion = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->whereKey((int) $validated['expected_page_version_id'])
+            ->first();
+
+        if (! $expectedCurrentVersion instanceof EnterpriseWikiPageVersion) {
+            throw ValidationException::withMessages([
+                'expected_page_version_id' => 'Ugyldig sideversjon for denne Wiki-siden.',
+            ]);
+        }
+
+        $backUrl = isset($validated['back_url']) && is_string($validated['back_url'])
+            ? $this->normalizeReviewBackUrl($validated['back_url'])
+            : null;
+
+        if (! $expectedCurrentVersion->is_current
+            || $expectedCurrentVersion->is_staged
+            || (int) $claim->enterprise_wiki_page_version_id !== (int) $expectedCurrentVersion->id
+        ) {
+            return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
+        }
+
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->first();
+
+        if (! $runPage instanceof EnterpriseWikiIngestRunPage) {
+            abort(404);
+        }
+
+        if ((int) ($runPage->generated_page_version_id ?? 0) !== (int) $expectedCurrentVersion->id) {
+            return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
+        }
+
+        $submittedBlocks = $this->validatedManualMixedBlockEditBlocks((array) $validated['blocks'], $expectedCurrentVersion);
+
+        try {
+            $result = $this->claimContentRepairService->applyManualMixedBlockEdit(
+                $run,
+                $page,
+                $expectedCurrentVersion,
+                $claim,
+                $submittedBlocks,
+                $user,
+            );
+        } catch (\InvalidArgumentException $e) {
+            if ($this->isManualMixedBlockEditConflict($e)) {
+                return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
+            }
+
+            throw ValidationException::withMessages([
+                'blocks' => $this->manualMixedBlockEditValidationMessage($e),
+            ]);
+        } catch (\RuntimeException $e) {
+            if ($this->isManualMixedBlockEditConflict($e)) {
+                return $this->manualMixedBlockEditConflictRedirect($page, $claim, $backUrl);
+            }
+
+            Log::warning('[PROCYNIA][WIKI_MANUAL_BLOCK_EDIT] Failed to save manual mixed block edit.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'claim_id' => $claim->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->manualMixedBlockEditFailureRedirect($page, $claim, $backUrl);
+        } catch (\Throwable $e) {
+            Log::warning('[PROCYNIA][WIKI_MANUAL_BLOCK_EDIT] Unexpected failure while saving manual mixed block edit.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'claim_id' => $claim->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $this->manualMixedBlockEditFailureRedirect($page, $claim, $backUrl);
+        }
+
+        $routeParams = ['slug' => $page->slug];
+        $newClaimId = collect($result['new_claim_ids'] ?? [])
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->first(static fn (int $id): bool => $id > 0);
+
+        if ($newClaimId !== null) {
+            $routeParams['claim_id'] = $newClaimId;
+        }
+
+        if ($backUrl !== null) {
+            $routeParams['back_url'] = $backUrl;
+        }
+
+        return redirect()
+            ->route('app.wiki.show', $routeParams)
+            ->with('success', 'Wiki-teksten er lagret som ny aktiv versjon.');
+    }
+
+    /**
+     * @return array{run_id: int, update_url_template: string}|null
+     */
+    private function manualMixedBlockEditContext(
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+        int $customerId,
+    ): ?array {
+        if (! $currentVersion instanceof EnterpriseWikiPageVersion) {
+            return null;
+        }
+
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('generated_page_version_id', $currentVersion->id)
+            ->whereHas('run', fn ($query) => $query
+                ->where('customer_id', $customerId)
+                ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+            )
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $runPage instanceof EnterpriseWikiIngestRunPage) {
+            return null;
+        }
+
+        return [
+            'run_id' => (int) $runPage->enterprise_wiki_ingest_run_id,
+            'update_url_template' => route('app.wiki.claims.manual-block-edit.update', [
+                'slug' => $page->slug,
+                'claim' => '__CLAIM_ID__',
+            ]),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $blocks
+     * @return list<array{block_key: string, markdown: string}>
+     */
+    private function validatedManualMixedBlockEditBlocks(array $blocks, EnterpriseWikiPageVersion $version): array
+    {
+        $currentBlockKeys = collect((array) ($version->content_blocks_json ?? []))
+            ->filter(fn ($block): bool => is_array($block))
+            ->mapWithKeys(fn (array $block): array => [trim((string) ($block['block_key'] ?? '')) => true])
+            ->filter(fn (bool $exists, string $blockKey): bool => $blockKey !== '')
+            ->all();
+        $submittedBlocks = [];
+
+        foreach ($blocks as $block) {
+            if (! is_array($block)) {
+                throw ValidationException::withMessages([
+                    'blocks' => 'Ugyldig tekstblokk. Last inn siden på nytt og prøv igjen.',
+                ]);
+            }
+
+            $blockKey = trim((string) ($block['block_key'] ?? ''));
+
+            if ($blockKey === '' || ! array_key_exists($blockKey, $currentBlockKeys)) {
+                throw ValidationException::withMessages([
+                    'blocks' => 'Tekstblokken finnes ikke i gjeldende Wiki-versjon. Last inn siden på nytt og prøv igjen.',
+                ]);
+            }
+
+            $submittedBlocks[] = [
+                'block_key' => $blockKey,
+                'markdown' => trim((string) ($block['markdown'] ?? '')),
+            ];
+        }
+
+        return $submittedBlocks;
+    }
+
+    private function manualMixedBlockEditConflictRedirect(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, ?string $backUrl): RedirectResponse
+    {
+        return redirect()
+            ->route('app.wiki.show', array_filter([
+                'slug' => $page->slug,
+                'claim_id' => $claim->id,
+                'back_url' => $backUrl,
+            ], static fn ($value): bool => $value !== null))
+            ->with('error', 'Wiki-siden er endret av noen andre. Last inn siden på nytt før du lagrer.');
+    }
+
+    private function manualMixedBlockEditFailureRedirect(EnterpriseWikiPage $page, EnterpriseWikiClaim $claim, ?string $backUrl): RedirectResponse
+    {
+        return redirect()
+            ->route('app.wiki.show', array_filter([
+                'slug' => $page->slug,
+                'claim_id' => $claim->id,
+                'back_url' => $backUrl,
+            ], static fn ($value): bool => $value !== null))
+            ->with('error', 'Tekstendringen kunne ikke lagres. Ingen ny Wiki-versjon ble aktivert.');
+    }
+
+    private function manualMixedBlockEditValidationMessage(\InvalidArgumentException $exception): string
+    {
+        $message = $exception->getMessage();
+
+        if (str_contains($message, 'duplicate content_block_key')) {
+            return 'Samme tekstblokk kan bare sendes én gang.';
+        }
+
+        if (str_contains($message, 'requires non-empty markdown')) {
+            return 'Tekstblokken kan ikke være tom.';
+        }
+
+        if (str_contains($message, 'not a mixed-provenance block')) {
+            return 'Bare mixed Wiki-blokker kan redigeres i denne flyten.';
+        }
+
+        if (str_contains($message, 'did not change any content block')) {
+            return 'Teksten er uendret. Gjør en endring før du lagrer.';
+        }
+
+        return 'Tekstendringen kan ikke lagres. Kontroller tekstblokken og prøv igjen.';
+    }
+
+    private function isManualMixedBlockEditConflict(\Throwable $exception): bool
+    {
+        $message = $exception->getMessage();
+
+        return str_contains($message, 'no longer current')
+            || str_contains($message, 'no longer points to expected current page version')
+            || str_contains($message, 'does not point to expected current page version')
+            || str_contains($message, 'not the current published version')
+            || str_contains($message, 'no longer promotable');
     }
 
     /**
@@ -1579,6 +1849,8 @@ class WikiController extends Controller
                 'block_key' => $block['block_key'] ?? null,
                 'position' => $block['position'] ?? 0,
                 'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
+                'raw_markdown' => (string) $block['markdown'],
+                'content_origin' => $block['content_origin'] ?? null,
             ])
             ->values()
             ->all();
