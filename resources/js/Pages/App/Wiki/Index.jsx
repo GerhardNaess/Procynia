@@ -2669,26 +2669,34 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     );
 }
 
+// Readability pass (low-vision user report): a dedicated, larger badge for this findings list
+// only — the shared BADGE constant above (h-6/text-xs) stays untouched everywhere else in this
+// file (Kjøringer status chips, Quality tab, page-type/source badges, etc.) so this fix stays
+// scoped to the Funn/Wiki-side/Alvorlighet/Status/Handling list, not a site-wide badge redesign.
+const FINDING_BADGE = 'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 whitespace-nowrap';
+
 const FINDING_SEVERITY_STYLES = {
     critical: 'bg-rose-100 text-rose-700',
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
     suggestion: 'bg-sky-100 text-sky-700',
-    info: 'bg-slate-100 text-slate-500',
+    // slate-500 measured ~4.6:1 on white/slate-100 — bumped to slate-700 (~10:1) so the "info"
+    // variant is never the least legible badge in the row (readability pass).
+    info: 'bg-slate-100 text-slate-700',
 };
 
 const FINDING_STATUS_STYLES = {
     requires_action: 'bg-rose-100 text-rose-700',
     open: 'bg-amber-100 text-amber-700',
     resolved: 'bg-emerald-100 text-emerald-700',
-    informative: 'bg-slate-100 text-slate-500',
-    superseded: 'bg-slate-100 text-slate-400',
+    informative: 'bg-slate-100 text-slate-700',
+    superseded: 'bg-slate-100 text-slate-600',
     // Best-practice suggestion statuses — deliberately neutral/positive, never the rose/critical
     // styling used for real quality defects (Del 1).
     pending_review: 'bg-sky-100 text-sky-700',
     approved: 'bg-emerald-100 text-emerald-700',
     approved_edited: 'bg-emerald-100 text-emerald-700',
-    rejected: 'bg-slate-100 text-slate-500',
+    rejected: 'bg-slate-100 text-slate-700',
 };
 
 // Claim-based findings (EnterpriseWikiClaimFindingExplainer categories) carry a concrete claim
@@ -2756,7 +2764,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
 
     if (!state || state.status === 'loading') {
         return (
-            <div id={panelId} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+            <div id={panelId} className="flex items-center gap-2 py-2 text-base leading-6 text-slate-600">
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-rose-500" aria-hidden="true" />
                 {tw.runs_findings_loading ?? 'Henter kvalitetsfunn …'}
             </div>
@@ -2765,12 +2773,12 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
 
     if (state.status === 'error') {
         return (
-            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-sm text-rose-600">
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-700">
                 <span>{tw.runs_findings_error ?? 'Kunne ikke hente kvalitetsfunnene. Prøv igjen.'}</span>
                 <button
                     type="button"
                     onClick={onRetry}
-                    className="shrink-0 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                    className="shrink-0 rounded-md border border-rose-200 px-3.5 py-2 text-base font-medium leading-6 text-rose-700 transition hover:bg-rose-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
                 >
                     {tw.runs_pages_retry ?? 'Prøv igjen'}
                 </button>
@@ -2783,10 +2791,10 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
     const visibleFindings = findings.filter((f) => matchesFindingsLocalFilter(f, localFilter));
 
     return (
-        <div id={panelId} className="space-y-3">
-            <div>
-                <h4 className="text-sm font-semibold text-slate-700">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h4>
-                <p className="mt-0.5 text-xs text-slate-500">
+        <div id={panelId} className="space-y-4">
+            <div className="space-y-1.5">
+                <h4 className="text-lg font-semibold text-slate-800">{tw.runs_findings_heading ?? 'Kvalitetsfunn'}</h4>
+                <p className="text-base leading-6 text-slate-700">
                     {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
                     {' · '}
                     {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
@@ -2797,21 +2805,21 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                     {summary.superseded > 0 && `${summary.superseded} ${tw.runs_findings_superseded ?? 'ikke lenger aktuelt'} · `}
                 </p>
                 {summary.explanation && (
-                    <p className="mt-1 text-xs font-medium text-slate-600">{summary.explanation}</p>
+                    <p className="text-base font-medium leading-6 text-slate-700">{summary.explanation}</p>
                 )}
             </div>
 
             {findings.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                     {FINDINGS_LOCAL_FILTERS.map((filterKey) => (
                         <button
                             key={filterKey}
                             type="button"
                             onClick={() => setLocalFilter(filterKey)}
-                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+                            className={`rounded-full px-4 py-2.5 text-base font-semibold leading-6 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500 ${
                                 localFilter === filterKey
                                     ? 'bg-slate-800 text-white'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                             }`}
                         >
                             {findingsLocalFilterLabel(filterKey, tw)}
@@ -2821,14 +2829,14 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
             )}
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-full divide-y divide-slate-100 text-sm">
-                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
+                    <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-600">
                         <tr className="text-left">
-                            <th className="px-3 py-2">{tw.runs_findings_col_finding ?? 'Funn'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th className="px-3 py-2">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
-                            <th className="px-3 py-2">{tw.runs_findings_col_status ?? 'Status'}</th>
-                            <th className="px-3 py-2 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th className="px-4 py-3">{tw.runs_findings_col_finding ?? 'Funn'}</th>
+                            <th className="px-4 py-3">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th className="px-4 py-3">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
+                            <th className="px-4 py-3">{tw.runs_findings_col_status ?? 'Status'}</th>
+                            <th className="px-4 py-3 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -2839,8 +2847,8 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                             return (
                                 <Fragment key={finding.id}>
                                     <tr className="align-top text-slate-700">
-                                        <td className="max-w-[280px] px-3 py-2">
-                                            <div className="flex items-start gap-1.5">
+                                        <td className="max-w-[360px] px-4 py-3">
+                                            <div className="flex items-start gap-2">
                                                 {isClaimFinding && (
                                                     <button
                                                         type="button"
@@ -2849,104 +2857,109 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                                         aria-label={isExpanded
                                                             ? (tw.claim_finding_collapse_details ?? 'Skjul detaljer')
                                                             : (tw.claim_finding_expand_details ?? 'Vis detaljer')}
-                                                        className="mt-0.5 shrink-0 select-none rounded px-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                                                        className="mt-0.5 shrink-0 select-none rounded p-2 text-base leading-6 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                                                     >
                                                         {isExpanded ? '▾' : '▸'}
                                                     </button>
                                                 )}
-                                                <div className="min-w-0 flex-1">
+                                                <div className="min-w-0 flex-1 space-y-1">
                                                     {finding.category_label && (
-                                                        <span className="mb-0.5 inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                                                        <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-base font-semibold uppercase tracking-wide leading-6 text-sky-800">
                                                             {finding.category_label}
                                                         </span>
                                                     )}
-                                                    <span className="block font-medium text-slate-900">{finding.title}</span>
-                                                    <span className="mt-0.5 block text-xs text-slate-500">
+                                                    <span className="block text-base leading-6 font-semibold text-slate-900">{finding.title}</span>
+                                                    <span className="block text-base leading-6 text-slate-600">
                                                         {finding.category === 'best_practice_suggestion' && (
-                                                            <span className="font-medium text-slate-400">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
+                                                            <span className="font-medium text-slate-700">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
                                                         )}
                                                         {finding.explanation}
                                                     </span>
                                                     {finding.recommended_action && (
-                                                        <span className="mt-1 block text-xs text-slate-400">
+                                                        <span className="block text-base leading-6 text-slate-600">
                                                             {finding.recommended_action}
                                                         </span>
                                                     )}
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="max-w-[200px] px-3 py-2">
+                                        <td className="max-w-[240px] px-4 py-3">
                                             {finding.scope === 'run' ? (
-                                                <span className="text-slate-500">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
+                                                <span className="text-base leading-6 text-slate-600">{tw.runs_findings_scope_run ?? 'Gjelder hele kjøringen'}</span>
                                             ) : (
-                                                <span className="block truncate" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
+                                                <span className="block break-words text-base leading-6" title={finding.page_title ?? ''}>{finding.page_title ?? '—'}</span>
                                             )}
                                         </td>
-                                        <td className="px-3 py-2">
-                                            <span className={`${BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-500'}`}>
+                                        <td className="px-4 py-3">
+                                            <span className={`${FINDING_BADGE} ${FINDING_SEVERITY_STYLES[finding.severity] ?? 'bg-slate-100 text-slate-700'}`}>
                                                 {finding.severity_label}
                                             </span>
                                         </td>
-                                        <td className="px-3 py-2">
-                                            <span className={`${BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                                                {finding.status_label}
-                                            </span>
-                                            {isClaimFinding ? (
-                                                <>
-                                                    {finding.system_recommends_blocking && (
-                                                        <span className="mt-1 block text-[11px] text-amber-600">
-                                                            {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
-                                                        </span>
-                                                    )}
-                                                    <span className="mt-1 block text-[11px] text-slate-400">
-                                                        {findingBlockingStatusLabel(finding, tw)}
-                                                    </span>
-                                                </>
-                                            ) : typeof finding.blocks_run === 'boolean' && (
-                                                <span className="mt-1 block text-[11px] text-slate-400" title={finding.blocking_reason ?? ''}>
-                                                    {finding.blocks_run
-                                                        ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
-                                                        : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
+                                        <td className="px-4 py-3">
+                                            <div className="space-y-1.5">
+                                                <span className={`${FINDING_BADGE} ${FINDING_STATUS_STYLES[finding.status] ?? 'bg-slate-100 text-slate-700'}`}>
+                                                    {finding.status_label}
                                                 </span>
-                                            )}
+                                                {isClaimFinding ? (
+                                                    <>
+                                                        {finding.system_recommends_blocking && (
+                                                            <span className="block text-base leading-6 text-amber-800">
+                                                                {tw.claim_finding_system_recommends_blocking ?? 'Systemet anbefaler blokkering'}
+                                                            </span>
+                                                        )}
+                                                        <span className="block text-base leading-6 text-slate-600">
+                                                            {findingBlockingStatusLabel(finding, tw)}
+                                                        </span>
+                                                    </>
+                                                ) : typeof finding.blocks_run === 'boolean' && (
+                                                    <span className="block text-base leading-6 text-slate-600" title={finding.blocking_reason ?? ''}>
+                                                        {finding.blocks_run
+                                                            ? (tw.runs_findings_blocks_run ?? 'Blokkerer kjøringen')
+                                                            : (tw.runs_findings_blocks_none ?? 'Blokkerer ikke')}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
-                                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                                        <td className="px-4 py-3 text-right whitespace-nowrap">
                                             {finding.url && finding.action ? (
-                                                <Link href={finding.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                                <Link
+                                                    href={finding.url}
+                                                    className="inline-flex items-center rounded-lg px-3 py-2 text-base font-semibold leading-6 text-violet-700 underline decoration-violet-300 decoration-2 underline-offset-2 transition hover:bg-violet-50 hover:text-violet-800 hover:decoration-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+                                                >
                                                     {finding.action_label}
                                                 </Link>
                                             ) : (
-                                                <span className="text-slate-400">—</span>
+                                                <span className="text-base leading-6 text-slate-500">—</span>
                                             )}
                                         </td>
                                     </tr>
                                     {isExpanded && (
                                         <tr key={`${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
-                                            <td colSpan={5} className="px-3 py-3">
-                                                <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs leading-5">
+                                            <td colSpan={5} className="px-4 py-4">
+                                                <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-6">
                                                     <div>
-                                                        <span className="font-semibold text-slate-500">
+                                                        <span className="font-semibold text-slate-700">
                                                             {tw.claim_finding_claim_text_label ?? 'Påstand'}:
                                                         </span>{' '}
                                                         <span className="text-slate-800">{finding.claim_text || '—'}</span>
                                                     </div>
                                                     <div>
-                                                        <span className="font-semibold text-slate-500">
+                                                        <span className="font-semibold text-slate-700">
                                                             {tw.claim_finding_source_excerpt_label ?? 'Kildeutdrag'}:
                                                         </span>
                                                         {finding.has_source_excerpt ? (
-                                                            <ul className="mt-1 space-y-1.5">
+                                                            <ul className="mt-2 space-y-2">
                                                                 {finding.source_excerpts.map((ref, index) => (
-                                                                    <li key={index} className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5">
+                                                                    <li key={index} className="rounded border border-slate-100 bg-slate-50 px-3 py-2">
                                                                         {ref.page_reference && (
-                                                                            <span className="mr-1 font-medium text-slate-500">{ref.page_reference}:</span>
+                                                                            <span className="mr-1 font-medium text-slate-700">{ref.page_reference}:</span>
                                                                         )}
                                                                         <span className="text-slate-700">{ref.excerpt}</span>
                                                                     </li>
                                                                 ))}
                                                             </ul>
                                                         ) : (
-                                                            <p className="mt-1 italic text-slate-400">
+                                                            <p className="mt-2 italic text-slate-600">
                                                                 {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                                             </p>
                                                         )}
