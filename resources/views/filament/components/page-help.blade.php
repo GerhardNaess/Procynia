@@ -35,7 +35,7 @@
 @if (!empty($editUrl))
     <div class="mt-4 border-t border-gray-100 pt-4 dark:border-gray-700">
         <a href="{{ $editUrl }}"
-           class="inline-flex items-center gap-1.5 text-xs font-medium text-primary-600 hover:text-primary-500">
+           class="inline-flex items-center gap-1.5 text-base font-medium text-primary-600 hover:text-primary-500">
             <x-filament::icon
                 icon="heroicon-m-pencil-square"
                 class="h-3.5 w-3.5"

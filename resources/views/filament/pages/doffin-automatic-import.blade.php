@@ -11,10 +11,10 @@
     <div class="mx-auto max-w-6xl space-y-6">
         <section class="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="space-y-3">
-                <p class="text-sm font-medium text-gray-500">Doffin driftkontroll</p>
+                <p class="text-base font-medium text-gray-600">Doffin driftkontroll</p>
                 <div class="space-y-2">
                     <h2 class="text-3xl font-semibold tracking-tight text-gray-950">Doffin automatisering</h2>
-                    <p class="max-w-2xl text-sm leading-6 text-gray-600">
+                    <p class="max-w-2xl text-base leading-6 text-gray-600">
                         Hold planlagt Doffin-batchimport og watch inbox discovery av eller på uten å endre kode.
                     </p>
                 </div>
@@ -31,45 +31,45 @@
                     @endphp
 
                     <div class="space-y-2">
-                        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Doffin batch-import</p>
+                        <p class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Doffin batch-import</p>
                         <h3 class="text-lg font-semibold text-gray-950">Planlagt import</h3>
-                        <p class="text-sm leading-6 text-gray-600">
+                        <p class="text-base leading-6 text-gray-600">
                             Standard arbeidsflyt for automatisk import av nye kunngjøringer.
                         </p>
                     </div>
 
                     <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Miljø</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchEnvEnabled ? $okBadge : $errBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Miljø</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $batchEnvEnabled ? $okBadge : $errBadge }}">
                                 {{ $batchEnvEnabled ? 'På' : 'Av' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Admin</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchAdminEnabled ? $okBadge : $errBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Admin</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $batchAdminEnabled ? $okBadge : $errBadge }}">
                                 {{ $batchAdminEnabled ? 'På' : 'Av' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">API</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchApiConfigured ? $okBadge : $warnBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">API</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $batchApiConfigured ? $okBadge : $warnBadge }}">
                                 {{ $batchApiConfigured ? 'Klar' : 'Mangler' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Status</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchEffectiveEnabled ? $okBadge : $warnBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Status</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $batchEffectiveEnabled ? $okBadge : $warnBadge }}">
                                 {{ $batchEffectiveEnabled ? 'Aktiv' : 'Stoppet' }}
                             </div>
                         </div>
                     </div>
 
                     @if (! $batchEffectiveEnabled && $batchSkipReasonLabel !== '')
-                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-base leading-6 text-warning-800">
                             <span class="font-semibold">Planlagt batch-import er ikke aktiv.</span>
                             <span class="block mt-1">{{ $batchSkipReasonLabel }}</span>
                         </div>
@@ -86,45 +86,45 @@
                     @endphp
 
                     <div class="space-y-2">
-                        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Doffin overvåkningsprofiler</p>
+                        <p class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Doffin overvåkningsprofiler</p>
                         <h3 class="text-lg font-semibold text-gray-950">Watch inbox discovery</h3>
-                        <p class="text-sm leading-6 text-gray-600">
+                        <p class="text-base leading-6 text-gray-600">
                             Automatisk søk etter nye treff for aktive watch-profiler.
                         </p>
                     </div>
 
                     <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Miljø</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchEnvEnabled ? $okBadge : $errBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Miljø</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $watchEnvEnabled ? $okBadge : $errBadge }}">
                                 {{ $watchEnvEnabled ? 'På' : 'Av' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Admin</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchAdminEnabled ? $okBadge : $errBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Admin</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $watchAdminEnabled ? $okBadge : $errBadge }}">
                                 {{ $watchAdminEnabled ? 'På' : 'Av' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">API</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchApiConfigured ? $okBadge : $warnBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">API</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $watchApiConfigured ? $okBadge : $warnBadge }}">
                                 {{ $watchApiConfigured ? 'Klar' : 'Mangler' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl bg-white px-4 py-3">
-                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Status</div>
-                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchEffectiveEnabled ? $okBadge : $warnBadge }}">
+                            <div class="text-base font-semibold uppercase tracking-[0.12em] text-gray-600">Status</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-1 text-base font-medium leading-6 {{ $watchEffectiveEnabled ? $okBadge : $warnBadge }}">
                                 {{ $watchEffectiveEnabled ? 'Aktiv' : 'Stoppet' }}
                             </div>
                         </div>
                     </div>
 
                     @if (! $watchEffectiveEnabled && $watchSkipReasonLabel !== '')
-                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-base leading-6 text-warning-800">
                             <span class="font-semibold">Watch inbox discovery er ikke aktiv.</span>
                             <span class="block mt-1">{{ $watchSkipReasonLabel }}</span>
                         </div>
@@ -152,7 +152,7 @@
                         </span>
                     </x-filament::button>
 
-                    <p class="text-sm text-gray-500">
+                    <p class="text-base leading-6 text-gray-600">
                         Begge brytere krever gyldig lokal eller test Doffin API-konfigurasjon før en planlagt kjøring får kontakte API-et.
                     </p>
                 </div>
@@ -160,7 +160,7 @@
         </section>
 
         @if ($lastError)
-            <div class="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+            <div class="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-base leading-6 text-danger-700">
                 {{ $lastError }}
             </div>
         @endif

@@ -1,7 +1,7 @@
 <x-filament-panels::page>
     <div class="space-y-6">
         <section class="max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <p class="text-sm text-gray-600">
+            <p class="text-base leading-6 text-gray-600">
                 Uptime Kuma brukes til oppetidsovervåkning av Procynia og sentrale endepunkter.
                 Selve overvåkningen kjøres som eget Docker-basert verktøy, mens Procynia Admin fungerer som inngang til driftsoversikten.
             </p>
@@ -9,31 +9,31 @@
 
         <section class="max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="space-y-1">
-                <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Overvåkningsverktøy</div>
+                <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Overvåkningsverktøy</div>
                 <h3 class="text-lg font-semibold text-gray-900">Uptime Kuma</h3>
             </div>
 
-            <dl class="mt-5 space-y-3 text-sm">
+            <dl class="mt-5 space-y-3 text-base">
                 <div class="flex gap-4">
-                    <dt class="w-28 shrink-0 font-medium text-gray-500">Verktøy</dt>
+                    <dt class="w-28 shrink-0 font-medium text-gray-600">Verktøy</dt>
                     <dd class="text-gray-900">Uptime Kuma</dd>
                 </div>
                 <div class="flex gap-4">
-                    <dt class="w-28 shrink-0 font-medium text-gray-500">Status</dt>
+                    <dt class="w-28 shrink-0 font-medium text-gray-600">Status</dt>
                     <dd class="text-gray-900">Konfigurert</dd>
                 </div>
                 <div class="flex gap-4">
-                    <dt class="w-28 shrink-0 font-medium text-gray-500">Adresse</dt>
-                    <dd class="font-mono text-xs text-gray-900">
+                    <dt class="w-28 shrink-0 font-medium text-gray-600">Adresse</dt>
+                    <dd class="font-mono text-base text-gray-900">
                         @if ($this->uptimeKumaUrl !== '')
                             {{ $this->uptimeKumaUrl }}
                         @else
-                            <span class="text-gray-400">Ikke konfigurert</span>
+                            <span class="text-gray-600">Ikke konfigurert</span>
                         @endif
                     </dd>
                 </div>
                 <div class="flex gap-4">
-                    <dt class="w-28 shrink-0 font-medium text-gray-500">Bruk</dt>
+                    <dt class="w-28 shrink-0 font-medium text-gray-600">Bruk</dt>
                     <dd class="text-gray-900">Oppetidsovervåkning og varsling</dd>
                 </div>
             </dl>
@@ -44,7 +44,7 @@
                         href="{{ $this->uptimeKumaUrl }}"
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
+                        class="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-base font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
                     >
                         Åpne Uptime Kuma
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true">
@@ -53,8 +53,8 @@
                         </svg>
                     </a>
                 @else
-                    <p class="text-sm text-amber-600">
-                        Uptime Kuma URL er ikke konfigurert. Sett <code class="rounded bg-amber-50 px-1 font-mono text-xs">UPTIME_KUMA_URL</code> i miljøkonfigurasjonen.
+                    <p class="text-base leading-6 text-amber-800">
+                        Uptime Kuma URL er ikke konfigurert. Sett <code class="rounded bg-amber-50 px-1.5 py-0.5 font-mono text-base">UPTIME_KUMA_URL</code> i miljøkonfigurasjonen.
                     </p>
                 @endif
             </div>
@@ -62,10 +62,10 @@
 
         <section class="max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="space-y-1">
-                <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Veiledning</div>
+                <div class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">Veiledning</div>
                 <h3 class="text-lg font-semibold text-gray-900">Anbefalt bruk</h3>
             </div>
-            <p class="mt-3 text-sm text-gray-600">
+            <p class="mt-3 text-base leading-6 text-gray-600">
                 Bruk Uptime Kuma til å overvåke Procynia web, health-endpoint, admin-login og andre kritiske endepunkter.
                 Varsling og monitorer administreres direkte i Uptime Kuma.
             </p>

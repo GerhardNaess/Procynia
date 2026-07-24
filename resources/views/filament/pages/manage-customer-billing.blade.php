@@ -238,12 +238,12 @@
             <div class="space-y-6">
                 <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
                     <div class="space-y-2">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Status</div>
+                        <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Status</div>
                         <div class="flex flex-wrap items-center gap-3">
-                            <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ $billingBusinessStatusClass }}">
+                            <span class="inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 {{ $billingBusinessStatusClass }}">
                                 {{ $billingBusinessStatusLabel }}
                             </span>
-                            <span class="text-sm text-gray-600 dark:text-gray-400">{{ $billingBusinessStatusText }}</span>
+                            <span class="text-base leading-6 text-gray-600 dark:text-gray-400">{{ $billingBusinessStatusText }}</span>
                         </div>
                     </div>
                 </div>
@@ -251,54 +251,54 @@
                 <div class="space-y-3">
                     <div>
                         <h3 class="text-base font-semibold text-gray-950 dark:text-white">Kundens avtale</h3>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Kort oversikt over avtalen og linjene som ligger til grunn.</p>
+                        <p class="text-base leading-6 text-gray-600 dark:text-gray-400">Kort oversikt over avtalen og linjene som ligger til grunn.</p>
                     </div>
 
                     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Plan</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Plan</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessCustomer['plan_label'] ?? $record->planName() }}</div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Faktureres</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Faktureres</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessCustomer['billing_interval_label'] ?? 'Ikke satt' }}</div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Kunderabatt</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Kunderabatt</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">
                                 {{ $billingBusinessDiscountPercent > 0 ? number_format($billingBusinessDiscountPercent, 2, ',', ' ') . ' %' : 'Ingen rabatt' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Inkludert</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Inkludert</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">
                                 Brukere: {{ $billingBusinessCustomer['included_users'] ?? 0 }} · AI-kreditter: {{ filled($billingBusinessCustomer['included_ai_credits'] ?? null) ? $billingBusinessCustomer['included_ai_credits'] : 'Ikke satt' }}
                             </div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Tilleggstjenester</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Tilleggstjenester</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessAdditionalLines->count() }} linjer</div>
                         </div>
 
                         @if ($billingBusinessHasCustomerSpecificPrices)
                             <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Kundespesifikk pris</div>
+                                <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Kundespesifikk pris</div>
                                 <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessCustomerSpecificPriceLines->count() }} linjer</div>
-                                <div class="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                                <div class="mt-3 space-y-2 text-base leading-6 text-gray-600 dark:text-gray-400">
                                     <div>
-                                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Standardpris</div>
+                                        <div class="text-base font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Standardpris</div>
                                         <div class="font-semibold text-gray-950 dark:text-white">{{ data_get($billingBusinessCustomerSpecificPriceDetail, 'standard_amount_label', 'Ikke beregnbar') }}</div>
                                     </div>
                                     <div>
-                                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Avtalt pris</div>
+                                        <div class="text-base font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Avtalt pris</div>
                                         <div class="font-semibold text-gray-950 dark:text-white">{{ data_get($billingBusinessCustomerSpecificPriceDetail, 'custom_amount_label', 'Ikke beregnbar') }}</div>
                                     </div>
                                     @if (filled(data_get($billingBusinessCustomerSpecificPriceDetail, 'metadata.notes')))
-                                        <div class="text-xs text-gray-500 dark:text-gray-400">{{ data_get($billingBusinessCustomerSpecificPriceDetail, 'metadata.notes') }}</div>
+                                        <div class="text-base leading-6 text-gray-600 dark:text-gray-400">{{ data_get($billingBusinessCustomerSpecificPriceDetail, 'metadata.notes') }}</div>
                                     @endif
                                 </div>
                             </div>
@@ -306,7 +306,7 @@
                     </div>
 
                     @if (! $billingBusinessHasCustomerSpecificPrices)
-                        <div class="text-sm text-gray-500 dark:text-gray-400">
+                        <div class="text-base leading-6 text-gray-600 dark:text-gray-400">
                             Ingen kundespesifikke priser registrert.
                         </div>
                     @endif
@@ -319,28 +319,28 @@
 
                     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum aktive interne linjer</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Sum aktive interne linjer</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessTotals['before_discount_label'] ?? 'Ikke beregnbar' }}</div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Rabatt</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Rabatt</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessTotals['discount_percent_label'] ?? 'Ingen rabatt' }}</div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Rabattbeløp</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Rabattbeløp</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessTotals['discount_amount_label'] ?? 'Ikke beregnbar' }}</div>
                         </div>
 
                         <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum etter rabatt</div>
+                            <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Sum etter rabatt</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBusinessTotals['after_discount_label'] ?? 'Ikke beregnbar' }}</div>
                         </div>
                     </div>
 
                     @if (($billingBusinessTotals['has_multiple_currencies'] ?? false) === true)
-                        <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-sm text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
+                        <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-base leading-6 text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
                             <div class="font-semibold">Ikke beregnbar på tvers av valuta</div>
                             <p class="mt-1">Totalsummen vises per valuta.</p>
                         </div>
@@ -348,8 +348,8 @@
                         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             @foreach ($billingBusinessTotals['currency_groups'] as $currencyGroup)
                                 <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
-                                    <div class="text-sm font-semibold text-gray-950 dark:text-white">{{ $currencyGroup['currency_label'] ?? '—' }}</div>
-                                    <div class="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                    <div class="text-base font-semibold text-gray-950 dark:text-white">{{ $currencyGroup['currency_label'] ?? '—' }}</div>
+                                    <div class="mt-2 space-y-1 text-base leading-6 text-gray-600 dark:text-gray-400">
                                         <div>Linjer: {{ $currencyGroup['line_count'] ?? 0 }}</div>
                                         <div>Sum beregnbare linjer: {{ $currencyGroup['before_discount_label'] ?? 'Ikke beregnbar' }}</div>
                                         <div>Rabatt: {{ $currencyGroup['discount_amount_label'] ?? 'Ikke beregnbar' }}</div>
@@ -361,15 +361,15 @@
                     @endif
 
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
+                        <table class="w-full text-left text-base leading-6">
                             <thead class="border-b border-gray-200 dark:border-gray-700">
                                 <tr>
-                                    <th class="pb-2 font-medium text-gray-500">Beskrivelse</th>
-                                    <th class="pb-2 font-medium text-gray-500">Type</th>
-                                    <th class="pb-2 font-medium text-gray-500">Antall</th>
-                                    <th class="pb-2 font-medium text-gray-500">Pris</th>
-                                    <th class="pb-2 font-medium text-gray-500">Sum</th>
-                                    <th class="pb-2 font-medium text-gray-500">Status</th>
+                                    <th class="pb-2 font-medium text-gray-600">Beskrivelse</th>
+                                    <th class="pb-2 font-medium text-gray-600">Type</th>
+                                    <th class="pb-2 font-medium text-gray-600">Antall</th>
+                                    <th class="pb-2 font-medium text-gray-600">Pris</th>
+                                    <th class="pb-2 font-medium text-gray-600">Sum</th>
+                                    <th class="pb-2 font-medium text-gray-600">Status</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
@@ -389,18 +389,18 @@
                                         <td class="py-2">{{ $line['sum_label'] ?? 'Ikke beregnbar' }}</td>
                                         <td class="py-2">
                                             <div class="space-y-1">
-                                                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $lineStatusClass }}">
+                                                <span class="inline-flex items-center rounded-full px-2.5 py-1 text-base font-semibold leading-6 {{ $lineStatusClass }}">
                                                     {{ $line['status_label'] ?? 'Ikke beregnbar' }}
                                                 </span>
                                                 @if (filled($line['reason'] ?? null))
-                                                    <div class="text-xs text-gray-500 dark:text-gray-400">{{ $line['reason'] }}</div>
+                                                    <div class="text-base leading-6 text-gray-600 dark:text-gray-400">{{ $line['reason'] }}</div>
                                                 @endif
                                             </div>
                                         </td>
                                     </tr>
                                 @empty
                                     <tr>
-                                        <td class="py-4 text-sm text-gray-500" colspan="6">Ingen linjer å vise ennå.</td>
+                                        <td class="py-4 text-base text-gray-600" colspan="6">Ingen linjer å vise ennå.</td>
                                     </tr>
                                 @endforelse
                             </tbody>
@@ -416,45 +416,45 @@
                     @if (filled($billingLatestInvoice))
                         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                             <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Siste faktura</div>
+                                <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Siste faktura</div>
                                 <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingLatestInvoiceLabel }}</div>
                             </div>
 
                             <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Fakturastatus</div>
+                                <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Fakturastatus</div>
                                 <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingLatestInvoiceStatusLabel }}</div>
                             </div>
 
                             <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Betalt beløp</div>
+                                <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Betalt beløp</div>
                                 <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingLatestInvoiceAmountLabel }}</div>
                             </div>
 
                             <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Fakturadato</div>
+                                <div class="text-base font-semibold uppercase tracking-wide text-gray-600">Fakturadato</div>
                                 <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingLatestInvoiceDateLabel }}</div>
                             </div>
                         </div>
 
                         @if (! $billingHasLineToInvoiceLinks)
-                            <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-sm text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
+                            <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-base leading-6 text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
                                 Procynia finner ingen sikker kobling mellom linjene og fakturaen.
                             </div>
                         @endif
                     @else
-                        <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-sm text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
+                        <div class="rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-base leading-6 text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
                             <div class="font-semibold">Faktura mangler</div>
                             <div class="mt-3 grid gap-3 md:grid-cols-3">
                                 <div class="rounded-xl bg-white/70 px-4 py-3 text-gray-800 dark:bg-gray-950/20 dark:text-gray-100">
-                                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Fakturastatus</div>
+                                    <div class="text-base font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Fakturastatus</div>
                                     <div class="mt-1 font-semibold">Ingen faktura funnet</div>
                                 </div>
                                 <div class="rounded-xl bg-white/70 px-4 py-3 text-gray-800 dark:bg-gray-950/20 dark:text-gray-100">
-                                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Betalt beløp</div>
+                                    <div class="text-base font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Betalt beløp</div>
                                     <div class="mt-1 font-semibold">Ikke registrert</div>
                                 </div>
                                 <div class="rounded-xl bg-white/70 px-4 py-3 text-gray-800 dark:bg-gray-950/20 dark:text-gray-100">
-                                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Fakturadato</div>
+                                    <div class="text-base font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">Fakturadato</div>
                                     <div class="mt-1 font-semibold">Ikke registrert</div>
                                 </div>
                             </div>
