@@ -64,11 +64,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const currentUrl = page.url ?? '';
     const user = auth?.user;
     const locale = page.props.locale ?? 'nb-NO';
-    const customerName = user?.customer?.name ?? translations.frontend.support_mode_customer;
-    const customerLabel = user?.customer?.name
-        ? translations.frontend.customer_area
-        : translations.frontend.support_mode_label;
-    const customerInitial = customerName.trim().charAt(0).toUpperCase() || 'P';
     const userName = user?.name ?? '';
     const userEmail = user?.email ?? '';
     const userBidRoleLabel = user?.bid_role_label ?? '';
@@ -433,28 +428,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             </div>
 
                             <div className="flex items-center justify-between gap-3 lg:justify-end">
-                                <div className="flex items-center gap-3 rounded-xl bg-transparent px-1 py-1">
-                                    <NotificationBell
-                                        menuRef={notificationsMenuRef}
-                                        isOpen={isNotificationsOpen}
-                                        locale={locale}
-                                        notifications={notificationState}
-                                        onToggle={toggleNotifications}
-                                        onMarkNotification={markNotificationAsRead}
-                                        onMarkAllRead={markAllNotificationsAsRead}
-                                    />
-
-                                    <span aria-hidden="true" className="h-9 w-px bg-slate-200" />
-
-                                    <span
-                                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-sm font-semibold text-amber-800"
-                                        role="img"
-                                        aria-label={`${customerLabel}: ${customerName}`}
-                                        title={`${customerLabel}: ${customerName}`}
-                                    >
-                                        {customerInitial}
-                                    </span>
-                                </div>
+                                <NotificationBell
+                                    menuRef={notificationsMenuRef}
+                                    isOpen={isNotificationsOpen}
+                                    locale={locale}
+                                    notifications={notificationState}
+                                    onToggle={toggleNotifications}
+                                    onMarkNotification={markNotificationAsRead}
+                                    onMarkAllRead={markAllNotificationsAsRead}
+                                />
 
                                 <div ref={userMenuRef} className="relative">
                                     <button
