@@ -446,13 +446,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                                     <span aria-hidden="true" className="h-9 w-px bg-slate-200" />
 
-                                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-sm font-semibold text-amber-800">
+                                    <span
+                                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-sm font-semibold text-amber-800"
+                                        role="img"
+                                        aria-label={`${customerLabel}: ${customerName}`}
+                                        title={`${customerLabel}: ${customerName}`}
+                                    >
                                         {customerInitial}
                                     </span>
-                                    <div className="min-w-0">
-                                        <div className="truncate text-sm font-semibold text-slate-900">{customerName}</div>
-                                        <div className="text-xs text-slate-500">{customerLabel}</div>
-                                    </div>
                                 </div>
 
                                 <div ref={userMenuRef} className="relative">
