@@ -176,7 +176,7 @@ function InfoTile({
     setOpenInfoKey,
     texts = {},
     className = '',
-    titleClassName = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500',
+    titleClassName = 'text-xs font-semibold uppercase tracking-[0.12em] text-slate-600',
     dense = false,
     children,
 }) {
@@ -205,7 +205,7 @@ function Card({ title, subtitle, infoKey, infoText, action, children, className 
             <div className={classNames('flex items-start justify-between gap-4', dense ? 'mb-3' : 'mb-4')}>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
                             {title}
                         </div>
                         {infoKey ? (
@@ -213,7 +213,7 @@ function Card({ title, subtitle, infoKey, infoText, action, children, className 
                         ) : null}
                     </div>
                     {subtitle ? (
-                        <p className={classNames('mt-1 text-sm text-slate-500', dense ? 'leading-5' : 'leading-6')}>
+                        <p className={classNames('mt-1 text-base text-slate-600', dense ? 'leading-5' : 'leading-6')}>
                             {subtitle}
                         </p>
                     ) : null}
@@ -235,7 +235,7 @@ function AttentionPill({ severity, count }) {
     };
 
     return (
-        <span className={classNames('inline-flex min-w-12 items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold', palette[severity] ?? palette.neutral)}>
+        <span className={classNames('inline-flex min-w-12 items-center justify-center rounded-full border px-2.5 py-1 text-sm font-semibold', palette[severity] ?? palette.neutral)}>
             {count}
         </span>
     );
@@ -266,17 +266,17 @@ function AttentionCaseRow({ item, texts = {} }) {
         >
             <SeverityDot severity={item.severity} />
             <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-slate-950">
+                <div className="truncate text-base font-semibold text-slate-950">
                     {item.title}
                 </div>
-                <div className="mt-0.5 text-[11px] font-semibold text-slate-700">
+                <div className="mt-0.5 text-sm font-semibold text-slate-700">
                     {item.reason}
                 </div>
-                <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                <div className="mt-0.5 text-sm leading-5 text-slate-600">
                     {item.secondary}
                 </div>
             </div>
-            <span className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700 opacity-0 transition group-hover:opacity-100">
+            <span className="mt-1 text-sm font-semibold uppercase tracking-[0.12em] text-violet-700 opacity-0 transition group-hover:opacity-100">
                 {texts.open_case}
             </span>
         </Link>
@@ -300,17 +300,17 @@ function AttentionCategoryPanel({ item, isOpen, onToggle, texts = {} }) {
             >
                 <SeverityDot severity={item.severity} />
                 <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-slate-950">
+                    <div className="text-base font-semibold text-slate-950">
                         {item.title}
                     </div>
-                    <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                    <div className="mt-0.5 text-sm leading-5 text-slate-600">
                         {item.subtitle}
                     </div>
                 </div>
                 <AttentionPill severity={item.severity} count={item.count} />
                 <span
                     className={classNames(
-                        'inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white/80 text-lg leading-none text-slate-400 transition-transform',
+                        'inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white/80 text-lg leading-none text-slate-500 transition-transform',
                         isOpen ? 'rotate-90 border-slate-400 text-slate-700' : '',
                     )}
                     aria-hidden="true"
@@ -328,7 +328,7 @@ function AttentionCategoryPanel({ item, isOpen, onToggle, texts = {} }) {
                             ))}
                         </div>
                     ) : (
-                        <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-base text-slate-600">
                             {texts.no_category_items}
                         </div>
                     )}
@@ -473,7 +473,7 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, text
                                 className="flex min-w-0 flex-col items-center"
                                 title={`${point.label} ${point.month} · ${texts.tooltips?.median_label} ${formatNumber(point.median_days, locale)} ${texts.units?.days} · ${texts.tooltips?.basis_label} ${formatNumber(point.sample_size, locale)}`}
                             >
-                                <div className="mb-1 text-[11px] font-semibold text-slate-900">
+                                <div className="mb-1 text-xs font-semibold text-slate-900">
                                     {formatNumber(point.median_days, locale)}
                                     {' '}
                                     {texts.units?.days_short}
@@ -484,10 +484,10 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, text
                                         style={{ height: `${barHeight}px` }}
                                     />
                                 </div>
-                                <div className="mt-1 text-center text-[11px] font-semibold text-slate-900">
+                                <div className="mt-1 text-center text-xs font-semibold text-slate-900">
                                     {point.label}
                                 </div>
-                                <div className="text-center text-[10px] text-slate-400">
+                                <div className="text-center text-xs text-slate-600">
                                     {texts.tooltips?.sample_prefix}
                                     {formatNumber(point.sample_size, locale)}
                                 </div>
@@ -496,7 +496,7 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, text
                     })}
                 </div>
             ) : (
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-base text-slate-600">
                     {texts.no_monthly_points}
                 </div>
             )}
@@ -625,7 +625,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                         ]}
                     />
                 </div>
-                <p className="max-w-4xl text-[15px] leading-7 text-slate-500">
+                <p className="max-w-4xl text-base leading-7 text-slate-600">
                     {pageSubtitle}
                 </p>
             </section>
@@ -699,14 +699,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                 →
                                             </button>
                                         </div>
-                                        <div className="text-[11px] text-slate-500">
+                                        <div className="text-xs text-slate-600">
                                             {calendarText.hover_hint}
                                         </div>
                                     </div>
 
                                     <div className="grid gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,0.8fr)_minmax(0,1.1fr)]">
                                         <label className="block">
-                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {calendarText.month_label}
                                             </span>
                                             <select
@@ -715,7 +715,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                     const nextMonth = Number(event.target.value);
                                                     setVisibleMonthStart(new Date(visibleMonthStart.getFullYear(), nextMonth, 1));
                                                 }}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
                                             >
                                                 {monthOptions.map((option) => (
                                                     <option key={option.value} value={option.value}>
@@ -726,7 +726,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                         </label>
 
                                         <label className="block">
-                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {calendarText.year_label}
                                             </span>
                                             <select
@@ -735,7 +735,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                     const nextYear = Number(event.target.value);
                                                     setVisibleMonthStart(new Date(nextYear, visibleMonthStart.getMonth(), 1));
                                                 }}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
                                             >
                                                 {calendarYearOptions.map((year) => (
                                                     <option key={year} value={String(year)}>
@@ -746,7 +746,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                         </label>
 
                                         <div>
-                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="deadline-date-jump">
+                                            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="deadline-date-jump">
                                                 {calendarText.jump_label}
                                             </label>
                                             <div className="flex gap-2">
@@ -755,7 +755,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                     type="date"
                                                     value={jumpDateValue}
                                                     onChange={(event) => setJumpDateValue(event.target.value)}
-                                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
                                                 />
                                                 <button
                                                     type="button"
@@ -768,7 +768,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                         setVisibleMonthStart(startOfMonth(nextDate));
                                                         setSelectedDateKey(toDateKey(nextDate));
                                                     }}
-                                                    className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+                                                    className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
                                                 >
                                                     {actionsText.show}
                                                 </button>
@@ -777,7 +777,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                     </div>
                                 </div>
 
-                                <div className="mt-2 grid grid-cols-7 gap-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="mt-2 grid grid-cols-7 gap-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {calendarText.weekdays?.map((label) => (
                                         <div key={label} className="px-1 py-0.5 text-center">
                                             {label}
@@ -797,17 +797,17 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
                                                 onClick={() => setSelectedDateKey(day.dateKey)}
                                                 className={classNames(
                                                     'group relative min-h-10 rounded-xl border px-1 py-0.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-                                                    day.inCurrentMonth ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/70 text-slate-300',
+                                                    day.inCurrentMonth ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/70 text-slate-400',
                                                     day.isToday ? 'ring-2 ring-violet-200' : '',
                                                     isSelected ? 'border-violet-400 bg-violet-50' : '',
                                                 )}
                                             >
                                                 <div className="flex items-start justify-between gap-2">
-                                                    <div className="text-[11px] font-semibold">
+                                                    <div className="text-xs font-semibold">
                                                         {day.dayOfMonth}
                                                     </div>
                                                     {items.length > 0 ? (
-                                                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-100 px-1 text-[9px] font-semibold text-violet-700">
+                                                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1 text-xs font-semibold text-violet-700">
                                                             {items.length}
                                                         </span>
                                                     ) : null}

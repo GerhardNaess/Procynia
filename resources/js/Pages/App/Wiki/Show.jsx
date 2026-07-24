@@ -53,7 +53,7 @@ const PAGE_STATUS_STYLES = {
     pending_review: 'bg-amber-100 text-amber-700',
     draft: 'bg-slate-200 text-slate-600',
     rejected: 'bg-rose-100 text-rose-700',
-    archived: 'bg-slate-200 text-slate-500',
+    archived: 'bg-slate-200 text-slate-700',
 };
 
 const PAGE_TYPE_STYLES = {
@@ -67,7 +67,7 @@ const CONFIDENCE_STYLES = {
     high: 'bg-emerald-100 text-emerald-700',
     medium: 'bg-amber-100 text-amber-700',
     low: 'bg-rose-100 text-rose-700',
-    uncertain: 'bg-slate-200 text-slate-500',
+    uncertain: 'bg-slate-200 text-slate-700',
 };
 
 const CLAIM_STATUS_STYLES = {
@@ -110,7 +110,7 @@ const HIGH_VOLUME_THRESHOLD = 100;
 
 function Badge({ label, cls }) {
     return (
-        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+        <span className={`inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${cls}`}>
             {label}
         </span>
     );
@@ -211,7 +211,7 @@ function ClaimSummary({ summary, tw }) {
 const LINT_SEVERITY_STYLES = {
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
-    info: 'bg-slate-100 text-slate-600',
+    info: 'bg-slate-100 text-slate-700',
 };
 
 const WIKI_INLINE_LINK_CLASS =
@@ -309,7 +309,7 @@ function OrphanConceptCandidateList({
             </p>
 
             {candidates.length === 0 && (
-                <p className="mt-3 text-base leading-7 text-slate-500">
+                <p className="mt-3 text-base leading-7 text-slate-600">
                     {tw.structure_finding_candidates_empty ?? 'Det finnes ingen dokumenterbar kandidat i eksisterende Wiki-data ennå. Legg til en relevant Wiki-lenke manuelt i teksten i stedet for å bruke et svakt forslag.'}
                 </p>
             )}
@@ -324,14 +324,14 @@ function OrphanConceptCandidateList({
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                     <p className="text-base font-semibold text-slate-800">{candidate.title}</p>
-                                    <p className="text-sm text-slate-500">{pageTypeLabel(candidate.page_type)}</p>
+                                    <p className="text-base text-slate-600">{pageTypeLabel(candidate.page_type)}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <a
                                         href={`/app/wiki/${candidate.slug}`}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                        className="rounded-lg border border-slate-300 px-3.5 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
                                     >
                                         {tw.structure_finding_candidate_open_button ?? 'Åpne siden'}
                                     </a>
@@ -339,7 +339,7 @@ function OrphanConceptCandidateList({
                                         <button
                                             type="button"
                                             onClick={() => onRequestConfirm(candidate.page_id)}
-                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800"
+                                            className="rounded-lg bg-violet-700 px-3.5 py-2 text-base font-semibold text-white hover:bg-violet-800"
                                         >
                                             {tw.structure_finding_candidate_link_button ?? 'Koble til denne siden'}
                                         </button>
@@ -347,7 +347,7 @@ function OrphanConceptCandidateList({
                                 </div>
                             </div>
 
-                            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-base leading-7 text-slate-600">
                                 {(candidate.reasons ?? []).map((reason) => (
                                     <li key={reason}>
                                         {tw[ORPHAN_CONCEPT_CANDIDATE_REASON_KEYS[reason]]
@@ -359,7 +359,7 @@ function OrphanConceptCandidateList({
 
                             {isConfirming && (
                                 <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-3">
-                                    <p className="text-sm text-violet-900">
+                                    <p className="text-base leading-6 text-violet-900">
                                         {(tw.structure_finding_candidate_confirm_text
                                             ?? 'Dette oppretter en utgående Wiki-lenke fra «:from» til «:to». Fortsette?')
                                             .replace(':from', finding.page_title)
@@ -370,7 +370,7 @@ function OrphanConceptCandidateList({
                                             type="button"
                                             disabled={isLinking}
                                             onClick={() => onLinkCandidate(candidate.page_id)}
-                                            className="rounded-lg bg-violet-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+                                            className="rounded-lg bg-violet-700 px-3.5 py-2 text-base font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
                                         >
                                             {isLinking
                                                 ? (tw.structure_finding_candidate_linking ?? 'Kobler til …')
@@ -380,7 +380,7 @@ function OrphanConceptCandidateList({
                                             type="button"
                                             disabled={isLinking}
                                             onClick={() => onCancelConfirm()}
-                                            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                            className="rounded-lg border border-slate-300 px-3.5 py-2 text-base font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                                         >
                                             {tw.structure_finding_candidate_cancel_button ?? 'Avbryt'}
                                         </button>
@@ -393,7 +393,7 @@ function OrphanConceptCandidateList({
             </ul>
 
             {!finding.can_link_related_page && (
-                <p className="mt-3 text-sm text-slate-500">
+                <p className="mt-3 text-base leading-6 text-slate-600">
                     {tw.structure_finding_candidates_read_only_note ?? 'Du har lesetilgang til dette funnet. En bruker med redigeringstilgang til Wiki-innhold kan opprette koblingen.'}
                 </p>
             )}
@@ -459,19 +459,19 @@ function StructureFindingContextPanel({
                 </div>
                 <dl className="grid min-w-64 gap-2 rounded-2xl border border-sky-100 bg-white/80 p-4 text-base text-slate-700">
                     <div>
-                        <dt className="text-sm font-semibold text-slate-500">
+                        <dt className="text-base font-semibold text-slate-700">
                             {tw.structure_finding_page_label ?? 'Side'}
                         </dt>
                         <dd>{finding.page_title}</dd>
                     </div>
                     <div>
-                        <dt className="text-sm font-semibold text-slate-500">
+                        <dt className="text-base font-semibold text-slate-700">
                             {tw.structure_finding_page_type_label ?? 'Sidetype'}
                         </dt>
                         <dd>{pageTypeLabel(finding.page_type)}</dd>
                     </div>
                     <div>
-                        <dt className="text-sm font-semibold text-slate-500">
+                        <dt className="text-base font-semibold text-slate-700">
                             {tw.structure_finding_type_label ?? 'Funntype'}
                         </dt>
                         <dd>{finding.category_label ?? finding.code}</dd>
@@ -1730,35 +1730,35 @@ export default function WikiShow({
                             <ul className="space-y-3">
                                 {sourceReferences.map((ref) => (
                                     <li key={ref.id} className="space-y-1.5">
-                                        <p className="text-xs font-semibold text-slate-600">
+                                        <p className="text-base font-semibold text-slate-700">
                                             {ref.source_label}
                                         </p>
                                         {ref.source_type && (
-                                            <p className="text-xs text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.source_type ?? 'Kildetype'}: {sourceTypeLabel(ref.source_type)}
                                             </p>
                                         )}
                                         {ref.source_element_type && (
-                                            <p className="text-xs text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.source_element_type ?? 'Kildeelement'}: {sourceElementTypeLabel(ref.source_element_type)}
                                             </p>
                                         )}
                                         {ref.source_row_key && ref.source_row_key !== ref.source_element_key && (
-                                            <p className="text-xs text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.source_row_key ?? 'Radnøkkel'}: {ref.source_row_key}
                                             </p>
                                         )}
                                         {ref.page_reference && (
-                                            <p className="text-xs text-slate-400">
+                                            <p className="text-base text-slate-600">
                                                 {tw.source_page_reference ?? 'Plassering i kilden'}: {ref.page_reference}
                                             </p>
                                         )}
                                         {ref.excerpt ? (
-                                            <p className="text-xs leading-5 text-slate-400 line-clamp-3">
+                                            <p className="text-base leading-6 text-slate-600 line-clamp-3">
                                                 {ref.excerpt}
                                             </p>
                                         ) : (
-                                            <p className="text-xs italic text-slate-300">
+                                            <p className="text-base italic text-slate-600">
                                                 {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
                                             </p>
                                         )}

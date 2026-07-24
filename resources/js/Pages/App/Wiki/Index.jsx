@@ -26,13 +26,13 @@ function formatTime(value, locale) {
     return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
-const BADGE = 'inline-flex h-6 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap';
+const BADGE = 'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 whitespace-nowrap';
 
 // Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
 // border, no hover/focus state) so an action always reads as a clickable control, never as a
 // status label. Base carries layout + a11y (focus ring, disabled state, no word-wrapping inside
 // the label); variants only change color/emphasis.
-const ACTION_BUTTON_BASE = 'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
+const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
 const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
 const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
@@ -42,7 +42,7 @@ const STATUS_STYLES = {
     pending_review: 'bg-amber-100 text-amber-700',
     draft: 'bg-slate-200 text-slate-600',
     rejected: 'bg-rose-100 text-rose-700',
-    archived: 'bg-slate-200 text-slate-500',
+    archived: 'bg-slate-200 text-slate-700',
 };
 
 function StatusBadge({ status, label }) {
@@ -110,7 +110,7 @@ const INGEST_STATUS_STYLES = {
 const SEVERITY_STYLES = {
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
-    info: 'bg-slate-100 text-slate-600',
+    info: 'bg-slate-100 text-slate-700',
 };
 
 const INGEST_STATUS_LABELS = {
@@ -2546,11 +2546,11 @@ const OWNER_STATUS_STYLES = {
     pending: 'bg-amber-100 text-amber-700',
     mixed: 'bg-amber-100 text-amber-700',
     missing_owner: 'bg-rose-100 text-rose-700',
-    awaiting_sync: 'bg-slate-100 text-slate-500',
-    blocked_by_quality: 'bg-slate-100 text-slate-500',
-    processing: 'bg-slate-100 text-slate-500',
+    awaiting_sync: 'bg-slate-100 text-slate-700',
+    blocked_by_quality: 'bg-slate-100 text-slate-700',
+    processing: 'bg-slate-100 text-slate-700',
     processing_failed: 'bg-rose-100 text-rose-700',
-    superseded: 'bg-slate-100 text-slate-400',
+    superseded: 'bg-slate-100 text-slate-600',
 };
 
 /**
