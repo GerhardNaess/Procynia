@@ -1268,6 +1268,7 @@ class AiController extends Controller
                 (int) $record->customer_id,
                 $languageCode,
                 $request->user()?->id,
+                $record->ai_instructions,
             );
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][WIKI_ANSWER] Wiki answer generation failed.', [

@@ -78,6 +78,48 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->assertSame(RequirementWikiAnswerService::ENGINE_VERSION, $answer->engine_version);
     }
 
+    /**
+     * AI-to-Wiki consolidation: generate()'s optional $caseInstructions parameter (the owning
+     * SavedNotice's ai_instructions) must reach RequirementWikiAnswerAiClient::generateAnswer()
+     * unchanged, as its final positional argument — see that client's own tests for how it is framed
+     * in the prompt as a style-only directive.
+     */
+    public function test_case_instructions_are_forwarded_to_the_answer_ai_client(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn ($identifier, $text, $pages, $languageCode, $caseInstructions) => $caseInstructions === 'Skriv formelt og presist.')
+            ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no', null, 'Skriv formelt og presist.');
+    }
+
+    public function test_no_case_instructions_forwards_null_to_the_answer_ai_client(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn ($identifier, $text, $pages, $languageCode, $caseInstructions) => $caseInstructions === null)
+            ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+    }
+
     public function test_old_answers_without_the_new_fields_can_still_be_loaded(): void
     {
         $customer = $this->createWikiCustomer();

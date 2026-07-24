@@ -43,6 +43,13 @@ use Illuminate\Support\Facades\DB;
  * concrete commitments, and now also the fact-checking basis for the alignment/revision steps. They
  * are never the sole permitted knowledge source, and a missing claim never by itself invalidates a
  * professionally sound best-practice statement.
+ *
+ * Prompt layering (AI-to-Wiki consolidation): generate()'s optional $caseInstructions parameter
+ * (the owning SavedNotice's ai_instructions) is passed straight through to
+ * RequirementWikiAnswerAiClient::generateAnswer() as a subordinate style directive — governs HOW the
+ * answer is phrased (tone/terminology/style/capitalization), never WHAT it claims. It is never used
+ * for the revision pass (reviseConflictingSectionsOnce()): that step's only job is resolving a
+ * detected possible_conflict against the Wiki text itself, not re-applying style preferences.
  */
 class RequirementWikiAnswerService
 {
@@ -70,7 +77,9 @@ class RequirementWikiAnswerService
      * Purpose: Generate (or regenerate) the Wiki-based expert answer for one requirement.
      * Inputs: The requirement, the customer id it belongs to (never trusted from the requirement
      *         itself — always the owning SavedNotice's own customer_id, resolved by the caller),
-     *         the language to answer in, and the user triggering generation.
+     *         the language to answer in, the user triggering generation, and the owning SavedNotice's
+     *         free-text case_instructions (ai_instructions) — governs tone/terminology/style only,
+     *         see RequirementWikiAnswerAiClient::generateAnswer() for the exact priority contract.
      * Returns: The persisted (created or updated in place) Wiki-answer row.
      * Side effects: Writes exactly one row to saved_notice_ai_requirement_wiki_answers, upserted
      *               by saved_notice_ai_requirement_id. Never touches saved_notice_ai_requirements
@@ -83,6 +92,7 @@ class RequirementWikiAnswerService
         int $customerId,
         string $languageCode,
         ?int $userId = null,
+        ?string $caseInstructions = null,
     ): SavedNoticeAiRequirementWikiAnswer {
         $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
@@ -94,6 +104,7 @@ class RequirementWikiAnswerService
             (string) $requirement->requirement_text,
             $pagesForAi,
             $languageCode,
+            $caseInstructions,
         );
         $answerSections = $answer['answer_sections'];
 

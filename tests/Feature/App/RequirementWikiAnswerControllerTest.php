@@ -88,6 +88,39 @@ class RequirementWikiAnswerControllerTest extends TestCase
         $response->assertJsonPath('requirement_id', $requirement->id);
         $response->assertJsonPath('wiki_answer.coverage_status', SavedNoticeAiRequirementWikiAnswer::COVERAGE_NONE);
         $response->assertJsonPath('wiki_answer.text', 'Anbefalt fremgangsmåte basert på beste praksis.');
+    }
+
+    /**
+     * AI-to-Wiki consolidation: the case's ai_instructions (set on the owning SavedNotice via the
+     * existing AI-instrukser page) must reach RequirementWikiAnswerAiClient::generateAnswer() as its
+     * final argument — confirms the full HTTP → controller → service → AI-client chain, not just the
+     * service-level unit test.
+     */
+    public function test_the_saved_notices_ai_instructions_reach_the_answer_ai_client(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-INSTR-001', 'Wiki answer instructions case');
+        $savedNotice->update(['ai_instructions' => 'Skriv formelt og presist, uten fyllord.']);
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon innen ti dager.',
+        ]);
+
+        $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('selectNextAction'));
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn (string $identifier, string $text, array $pages, string $language, ?string $caseInstructions): bool => $caseInstructions === 'Skriv formelt og presist, uten fyllord.')
+            ->andReturn(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]]));
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
+
+        $response = $this->actingAs($context['user'])->postJson(
+            "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
+        );
+
+        $response->assertOk();
         $this->assertDatabaseCount('saved_notice_ai_requirement_wiki_answers', 1);
     }
 
