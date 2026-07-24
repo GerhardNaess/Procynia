@@ -23,7 +23,7 @@ export default function WatchProfilesEdit({ watchProfile, ownerOptions, departme
             <div className="space-y-7">
                 <section className="space-y-1.5">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger Watch Profile</h1>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery.
                     </p>
                 </section>

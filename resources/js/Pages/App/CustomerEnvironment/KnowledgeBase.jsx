@@ -62,12 +62,12 @@ function CatalogModal({
                 <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
-                        {description ? <p className="text-sm leading-6 text-slate-500">{description}</p> : null}
+                        {description ? <p className="text-base leading-6 text-slate-600">{description}</p> : null}
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -76,30 +76,30 @@ function CatalogModal({
                 <form onSubmit={onSubmit} className="px-6 py-6">
                     <div className="space-y-4">
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">{nameLabel}</span>
+                            <span className="text-base font-medium text-slate-700">{nameLabel}</span>
                             <input
                                 type="text"
                                 value={form.data.name}
                                 onChange={(event) => form.setData('name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
-                            {form.errors.name ? <p className="text-sm text-rose-600">{form.errors.name}</p> : null}
+                            {form.errors.name ? <p className="text-base text-rose-700">{form.errors.name}</p> : null}
                         </label>
 
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">{descriptionLabel}</span>
+                            <span className="text-base font-medium text-slate-700">{descriptionLabel}</span>
                             <textarea
                                 rows={4}
                                 value={form.data.description}
                                 onChange={(event) => form.setData('description', event.target.value)}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
-                            {form.errors.description ? <p className="text-sm text-rose-600">{form.errors.description}</p> : null}
+                            {form.errors.description ? <p className="text-base text-rose-700">{form.errors.description}</p> : null}
                         </label>
 
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">{statusLabel}</span>
-                            <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
+                            <span className="text-base font-medium text-slate-700">{statusLabel}</span>
+                            <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
                                 <input
                                     type="checkbox"
                                     checked={Boolean(form.data.is_active)}
@@ -108,14 +108,14 @@ function CatalogModal({
                                 />
                                 <span>{form.data.is_active ? activeLabel : inactiveLabel}</span>
                             </label>
-                            {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
+                            {form.errors.is_active ? <p className="text-base text-rose-700">{form.errors.is_active}</p> : null}
                         </label>
 
                         {showTopicSelector ? (
                             <div className="space-y-2">
-                                <span className="text-sm font-medium text-slate-700">{topicsInCategoryLabel}</span>
+                                <span className="text-base font-medium text-slate-700">{topicsInCategoryLabel}</span>
                                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                                    <p className="text-xs leading-5 text-slate-500">{topicsInCategoryHintLabel}</p>
+                                    <p className="text-base leading-6 text-slate-600">{topicsInCategoryHintLabel}</p>
 
                                     {topicOptions.length > 0 ? (
                                         <div className="space-y-2">
@@ -126,7 +126,7 @@ function CatalogModal({
                                                 return (
                                                     <label
                                                         key={topicId}
-                                                        className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 transition hover:border-violet-300"
+                                                        className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-700 transition hover:border-violet-300"
                                                     >
                                                         <input
                                                             type="checkbox"
@@ -136,21 +136,21 @@ function CatalogModal({
                                                         />
                                                         <span className="min-w-0">
                                                             <span className="block font-medium text-slate-900">{topic.name}</span>
-                                                            {topic.description ? <span className="block text-xs leading-5 text-slate-500">{topic.description}</span> : null}
+                                                            {topic.description ? <span className="block text-base leading-6 text-slate-600">{topic.description}</span> : null}
                                                         </span>
                                                     </label>
                                                 );
                                             })}
                                         </div>
                                     ) : (
-                                        <p className="text-sm leading-6 text-slate-500">{noTopicsSelectedLabel}</p>
+                                        <p className="text-base leading-6 text-slate-600">{noTopicsSelectedLabel}</p>
                                     )}
                                 </div>
                                 {onCreateTopicForCategory ? (
                                     <button
                                         type="button"
                                         onClick={onCreateTopicForCategory}
-                                        className="text-sm font-medium text-violet-600 transition hover:text-violet-800"
+                                        className="text-base font-medium text-violet-600 transition hover:text-violet-800"
                                     >
                                         + {createTopicForCategoryLabel}
                                     </button>
@@ -160,7 +160,7 @@ function CatalogModal({
 
                         {showCategorySelector ? (
                             <div className="space-y-2">
-                                <span className="text-sm font-medium text-slate-700">{linkCategoriesLabel}</span>
+                                <span className="text-base font-medium text-slate-700">{linkCategoriesLabel}</span>
                                 {categoryOptions.length > 0 ? (
                                     <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                                         {categoryOptions.map((category) => {
@@ -170,7 +170,7 @@ function CatalogModal({
                                             return (
                                                 <label
                                                     key={categoryId}
-                                                    className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 transition hover:border-violet-300"
+                                                    className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-700 transition hover:border-violet-300"
                                                 >
                                                     <input
                                                         type="checkbox"
@@ -180,7 +180,7 @@ function CatalogModal({
                                                     />
                                                     <span className="min-w-0">
                                                         <span className="block font-medium text-slate-900">{category.name}</span>
-                                                        {category.description ? <span className="block text-xs leading-5 text-slate-500">{category.description}</span> : null}
+                                                        {category.description ? <span className="block text-base leading-6 text-slate-600">{category.description}</span> : null}
                                                     </span>
                                                 </label>
                                             );
@@ -195,14 +195,14 @@ function CatalogModal({
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             {cancelLabel}
                         </button>
                         <button
                             type="submit"
                             disabled={form.processing}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {saveLabel}
                         </button>
@@ -265,12 +265,12 @@ function CatalogSection({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                     <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{title}</h2>
-                    {description ? <p className="max-w-3xl text-sm leading-6 text-slate-500">{description}</p> : null}
+                    {description ? <p className="max-w-3xl text-base leading-6 text-slate-600">{description}</p> : null}
                 </div>
                 <button
                     type="button"
                     onClick={openCreate}
-                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
                 >
                     {createLabel}
                 </button>
@@ -288,14 +288,14 @@ function CatalogSection({
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder={`${nameLabel}...`}
-                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-sm outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+                                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-4 text-base outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
                             />
                         </div>
                         {categoryFilterOptions.length > 0 ? (
                             <select
                                 value={categoryFilter}
                                 onChange={(e) => setCategoryFilter(e.target.value)}
-                                className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
+                                className="h-10 rounded-xl border border-slate-200 bg-slate-50 px-3 text-base text-slate-700 outline-none transition focus:border-violet-300 focus:bg-white focus:ring-4 focus:ring-violet-100"
                             >
                                 <option value="">{categoryFilterLabel}</option>
                                 {categoryFilterOptions.map((cat) => (
@@ -308,7 +308,7 @@ function CatalogSection({
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50/80">
-                                <tr className="text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <tr className="text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <th className="px-4 py-3">{nameLabel}</th>
                                     <th className="px-4 py-3">{descriptionLabel}</th>
                                     <th className="px-4 py-3">{statusLabel}</th>
@@ -320,24 +320,24 @@ function CatalogSection({
                                     const isBusy = busyAction === `${sectionKey}:${item.id}`;
 
                                     return (
-                                        <tr key={item.id} className="align-top text-sm text-slate-700">
+                                        <tr key={item.id} className="align-top text-base text-slate-700">
                                             <td className="px-4 py-3.5 font-medium text-slate-950">{item.name}</td>
-                                            <td className="px-4 py-3.5 text-slate-500">
+                                            <td className="px-4 py-3.5 text-slate-600">
                                                 <div className="space-y-1.5">
                                                     <div>{item.description || '—'}</div>
                                                     {showTopicsSummary ? (
                                                         item.topics?.length > 0 ? (
-                                                            <div className="text-xs leading-5 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-600">
                                                                 <span className="font-medium text-slate-600">{topicsForCategoryLabel}:</span>{' '}
                                                                 {item.topics.map((topic) => topic.name).join(', ')}
                                                             </div>
                                                         ) : (
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-xs leading-5 text-slate-400">{noTopicsAddedLabel}</span>
+                                                                <span className="text-base leading-6 text-slate-600">{noTopicsAddedLabel}</span>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => openEdit(item)}
-                                                                    className="text-xs font-medium text-violet-600 transition hover:text-violet-800"
+                                                                    className="text-base font-medium text-violet-600 transition hover:text-violet-800"
                                                                 >
                                                                     {addTopicsLabel}
                                                                 </button>
@@ -350,8 +350,8 @@ function CatalogSection({
                                                 <span
                                                     className={
                                                         item.is_active
-                                                            ? 'inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
-                                                            : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                            ? 'inline-flex items-center rounded-full bg-emerald-100 px-3 py-1.5 text-base font-semibold leading-6 text-emerald-700'
+                                                            : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
                                                     }
                                                 >
                                                     {item.status_label ?? (item.is_active ? activeLabel : inactiveLabel)}
@@ -362,7 +362,7 @@ function CatalogSection({
                                                     <button
                                                         type="button"
                                                         onClick={() => openEdit(item)}
-                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
                                                         {editLabel}
                                                     </button>
@@ -370,7 +370,7 @@ function CatalogSection({
                                                         type="button"
                                                         onClick={() => deleteRecord(item)}
                                                         disabled={isBusy}
-                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         {isBusy ? `${deleteLabel}...` : deleteLabel}
                                                     </button>
@@ -386,8 +386,8 @@ function CatalogSection({
                 </>
             ) : (
                 <div className="rounded-[22px] border border-dashed border-slate-200 bg-slate-50/70 px-5 py-8">
-                    <div className="text-sm font-semibold text-slate-900">{emptyTitle}</div>
-                    <p className="mt-1 text-sm leading-6 text-slate-500">{emptyDescription}</p>
+                    <div className="text-base font-semibold text-slate-900">{emptyTitle}</div>
+                    <p className="mt-1 text-base leading-6 text-slate-600">{emptyDescription}</p>
                 </div>
             )}
         </section>
@@ -591,7 +591,7 @@ export default function KnowledgeBaseSettings({
             <div className="space-y-7">
                 <section className="space-y-3">
                     <div className="space-y-2">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             {sectionTitle}
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
@@ -605,11 +605,11 @@ export default function KnowledgeBaseSettings({
                                 sections={knowledgeBaseHelpSections}
                             />
                         </div>
-                        {subtitleText ? <p className="max-w-3xl text-[15px] leading-7 text-slate-500">{subtitleText}</p> : null}
+                        {subtitleText ? <p className="max-w-3xl text-base leading-7 text-slate-600">{subtitleText}</p> : null}
                     </div>
 
                     {noteText ? (
-                        <div className="rounded-[20px] border border-violet-200 bg-violet-50 px-5 py-4 text-sm leading-6 text-violet-900">
+                        <div className="rounded-[20px] border border-violet-200 bg-violet-50 px-5 py-4 text-base leading-6 text-violet-900">
                             {noteText}
                         </div>
                     ) : null}

@@ -35,12 +35,12 @@ function EnvironmentModal({ isOpen, title, description, onClose, children, foote
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
-                        {description ? <p className="text-sm leading-6 text-slate-500">{description}</p> : null}
+                        {description ? <p className="text-base leading-6 text-slate-600">{description}</p> : null}
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -70,10 +70,10 @@ function SectionTabs({ activeTab, onChange, showPermissions = false }) {
                         type="button"
                         onClick={() => onChange(tab.key)}
                         className={classNames(
-                            'rounded-xl px-4 py-2.5 text-sm font-semibold transition',
+                            'rounded-xl px-4 py-2.5 text-base font-semibold transition',
                             isActive
                                 ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
-                                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                         )}
                     >
                         {tab.label}
@@ -114,7 +114,7 @@ function DepartmentSelector({
                                 <label
                                     key={department.value}
                                     className={classNames(
-                                        'flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition',
+                                        'flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 text-base transition',
                                         checked
                                             ? 'border-violet-300 bg-violet-50 text-violet-900'
                                             : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -133,21 +133,21 @@ function DepartmentSelector({
                     </div>
                 </div>
             ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-base text-slate-600">
                     Ingen tilgjengelige avdelinger.
                 </div>
             )}
-            <p className="text-xs leading-5 text-slate-400">
+            <p className="text-base leading-6 text-slate-600">
                 {helperText}
             </p>
             {inactiveSelections.length > 0 ? (
                 <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">Historiske inaktive avdelinger</div>
+                    <div className="text-base font-medium uppercase tracking-[0.12em] text-slate-600">Historiske inaktive avdelinger</div>
                     <div className="flex flex-wrap gap-2">
                         {inactiveSelections.map((department) => (
                             <span
                                 key={department.id}
-                                className="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700"
+                                className="inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700"
                             >
                                 {department.name}
                             </span>
@@ -168,10 +168,10 @@ function CollapsibleSection({ title, description, isOpen, onToggle, children }) 
                 className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left"
             >
                 <div className="space-y-1">
-                    <div className="text-sm font-semibold text-slate-900">{title}</div>
-                    {description ? <p className="text-xs leading-5 text-slate-500">{description}</p> : null}
+                    <div className="text-base font-semibold text-slate-900">{title}</div>
+                    {description ? <p className="text-base leading-6 text-slate-600">{description}</p> : null}
                 </div>
-                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-600">
                     {isOpen ? 'Skjul' : 'Vis'}
                 </span>
             </button>
@@ -398,7 +398,7 @@ export default function CustomerEnvironmentIndex({
                             ]}
                         />
                     </div>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         Administrer avdelinger og brukere for deres virksomhet. All administrasjon er begrenset til eget kundemiljø.
                     </p>
                 </section>
@@ -410,7 +410,7 @@ export default function CustomerEnvironmentIndex({
                         <div className="flex flex-col gap-3 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <h2 className="text-lg font-semibold text-slate-950">Avdelinger</h2>
-                                <p className="mt-1 text-sm leading-6 text-slate-500">
+                                <p className="mt-1 text-base leading-6 text-slate-600">
                                     Opprett og vedlikehold aktive avdelinger som kan brukes for organisering av brukere og videre arbeid i kundemiljøet.
                                 </p>
                             </div>
@@ -418,12 +418,12 @@ export default function CustomerEnvironmentIndex({
                                 <button
                                     type="button"
                                     onClick={openCreateDepartment}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
                                 >
                                     Opprett avdeling
                                 </button>
                             ) : (
-                                <div className="text-sm text-slate-500">
+                                <div className="text-base text-slate-600">
                                     Kun systemeier kan opprette nye avdelinger.
                                 </div>
                             )}
@@ -433,13 +433,13 @@ export default function CustomerEnvironmentIndex({
                             {departments.length === 0 ? (
                                 <div className="px-6 py-16 text-center">
                                     <div className="text-lg font-semibold text-slate-900">Ingen avdelinger ennå</div>
-                                    <p className="mt-2 text-sm text-slate-500">Opprett den første avdelingen for å strukturere kundemiljøet.</p>
+                                    <p className="mt-2 text-base text-slate-600">Opprett den første avdelingen for å strukturere kundemiljøet.</p>
                                 </div>
                             ) : (
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full divide-y divide-slate-200">
                                         <thead className="bg-slate-50">
-                                            <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <tr className="text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 <th className="px-6 py-4">Navn</th>
                                                 <th className="px-6 py-4">Beskrivelse</th>
                                                 <th className="px-6 py-4">Brukere</th>
@@ -450,22 +450,22 @@ export default function CustomerEnvironmentIndex({
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {departments.map((department) => (
-                                                <tr key={department.id} className="text-sm text-slate-700">
+                                                <tr key={department.id} className="text-base text-slate-700">
                                                     <td className="px-6 py-4 font-medium text-slate-950">{department.name}</td>
-                                                    <td className="px-6 py-4 text-slate-500">{department.description || '—'}</td>
-                                                    <td className="px-6 py-4 text-slate-500">{department.user_count}</td>
+                                                    <td className="px-6 py-4 text-slate-600">{department.description || '—'}</td>
+                                                    <td className="px-6 py-4 text-slate-600">{department.user_count}</td>
                                                     <td className="px-6 py-4">
                                                         <span
                                                             className={
                                                                 department.is_active
-                                                                    ? 'inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
-                                                                    : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                                    ? 'inline-flex items-center rounded-full bg-emerald-100 px-3 py-1.5 text-base font-semibold leading-6 text-emerald-700'
+                                                                    : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
                                                             }
                                                         >
                                                             {department.is_active ? 'Aktiv' : 'Inaktiv'}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-slate-500">{formatDate(department.updated_at, locale)}</td>
+                                                    <td className="px-6 py-4 text-slate-600">{formatDate(department.updated_at, locale)}</td>
                                                     <td className="px-6 py-4">
                                                         <div className="flex flex-wrap gap-2">
                                                             {canCreateDepartments ? (
@@ -473,7 +473,7 @@ export default function CustomerEnvironmentIndex({
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => openEditDepartment(department)}
-                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                     >
                                                                         Rediger
                                                                     </button>
@@ -483,8 +483,8 @@ export default function CustomerEnvironmentIndex({
                                                                         disabled={togglingDepartmentId === department.id}
                                                                         className={
                                                                             department.is_active
-                                                                                ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                                                : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                                ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
+                                                                                : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
                                                                         }
                                                                     >
                                                                         {department.is_active
@@ -497,7 +497,7 @@ export default function CustomerEnvironmentIndex({
                                                                     </button>
                                                                 </>
                                                             ) : (
-                                                                <span className="text-xs font-medium text-slate-400">
+                                                                <span className="text-base font-medium text-slate-600">
                                                                     Kun systemeier kan endre avdelinger
                                                                 </span>
                                                             )}
@@ -517,13 +517,13 @@ export default function CustomerEnvironmentIndex({
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
                                     <h2 className="text-lg font-semibold text-slate-950">Brukere</h2>
-                                    <p className="mt-1 text-sm leading-6 text-slate-500">
+                                    <p className="mt-1 text-base leading-6 text-slate-600">
                                         Administrer brukere, bid-roller og avdelingstilknytning for eget kundemiljø.
                                     </p>
                                 </div>
                                 <a
                                     href={userCreateHref}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
                                 >
                                     Opprett bruker
                                 </a>
@@ -531,21 +531,21 @@ export default function CustomerEnvironmentIndex({
 
                             <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_220px_180px]">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Søk</span>
+                                    <span className="text-base font-medium text-slate-700">Søk</span>
                                     <input
                                         type="text"
                                         value={userSearch}
                                         onChange={(event) => setUserSearch(event.target.value)}
                                         placeholder="Søk på navn eller e-post"
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     />
                                 </label>
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Avdeling</span>
+                                    <span className="text-base font-medium text-slate-700">Avdeling</span>
                                     <select
                                         value={userDepartmentFilter}
                                         onChange={(event) => setUserDepartmentFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         <option value="">Alle avdelinger</option>
                                         {departmentFilterOptions.map((department) => (
@@ -556,11 +556,11 @@ export default function CustomerEnvironmentIndex({
                                     </select>
                                 </label>
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Status</span>
+                                    <span className="text-base font-medium text-slate-700">Status</span>
                                     <select
                                         value={userStatusFilter}
                                         onChange={(event) => setUserStatusFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         <option value="all">Alle</option>
                                         <option value="active">Aktive</option>
@@ -574,7 +574,7 @@ export default function CustomerEnvironmentIndex({
                             {filteredUsers.length === 0 ? (
                                 <div className="px-6 py-16 text-center">
                                     <div className="text-lg font-semibold text-slate-900">Ingen brukere i utvalget</div>
-                                    <p className="mt-2 text-sm text-slate-500">
+                                    <p className="mt-2 text-base text-slate-600">
                                         Juster filtrene, eller opprett den første brukeren for kundemiljøet.
                                     </p>
                                 </div>
@@ -582,7 +582,7 @@ export default function CustomerEnvironmentIndex({
                                 <div className="overflow-x-auto">
                                     <table className="min-w-full divide-y divide-slate-200">
                                         <thead className="bg-slate-50">
-                                            <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <tr className="text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 <th className="px-6 py-4">Navn</th>
                                                 <th className="px-6 py-4">E-post</th>
                                                 <th className="px-6 py-4">Rolle</th>
@@ -593,10 +593,10 @@ export default function CustomerEnvironmentIndex({
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {filteredUsers.map((user) => (
-                                                <tr key={user.id} className="text-sm text-slate-700">
+                                                <tr key={user.id} className="text-base text-slate-700">
                                                     <td className="px-6 py-4">
                                                         <div className="font-medium text-slate-950">{user.name}</div>
-                                                        <div className="mt-1 text-xs text-slate-400">
+                                                        <div className="mt-1 text-base text-slate-600">
                                                             Opprettet {formatDate(user.created_at, locale)}
                                                         </div>
                                                     </td>
@@ -605,19 +605,19 @@ export default function CustomerEnvironmentIndex({
                                                         <span
                                                             className={
                                                                 user.bid_role_value === 'system_owner'
-                                                                    ? 'inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700'
-                                                                    : 'inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700'
+                                                                    ? 'inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700'
+                                                                    : 'inline-flex items-center rounded-full bg-sky-100 px-3 py-1.5 text-base font-semibold leading-6 text-sky-700'
                                                             }
                                                         >
                                                             {user.bid_role}
                                                         </span>
                                                         {user.is_qa ? (
-                                                            <span className="ml-2 inline-flex rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                                                            <span className="ml-2 inline-flex items-center rounded-full bg-teal-100 px-3 py-1.5 text-base font-semibold leading-6 text-teal-700">
                                                                 QA
                                                             </span>
                                                         ) : null}
                                                         {user.bid_manager_scope_summary ? (
-                                                            <div className="mt-2 text-xs font-medium text-slate-500">
+                                                            <div className="mt-2 text-base font-medium text-slate-600">
                                                                 {user.bid_manager_scope_summary}
                                                             </div>
                                                         ) : null}
@@ -625,7 +625,7 @@ export default function CustomerEnvironmentIndex({
                                                     <td className="px-6 py-4">
                                                         <div className="space-y-3">
                                                             <div className="space-y-2">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Brukeren tilhører
                                                                 </div>
                                                                 {user.departments.length > 0 ? (
@@ -635,8 +635,8 @@ export default function CustomerEnvironmentIndex({
                                                                                 key={department.id}
                                                                                 className={
                                                                                     department.is_active
-                                                                                        ? 'inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700'
-                                                                                        : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                                                        ? 'inline-flex items-center rounded-full bg-violet-100 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700'
+                                                                                        : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
                                                                                 }
                                                                             >
                                                                                 {department.name}
@@ -644,16 +644,16 @@ export default function CustomerEnvironmentIndex({
                                                                         ))}
                                                                     </div>
                                                                 ) : (
-                                                                    <span className="text-slate-400">Ingen avdeling</span>
+                                                                    <span className="text-slate-600">Ingen avdeling</span>
                                                                 )}
                                                             </div>
 
                                                             {user.bid_role_value === 'system_owner' ? (
                                                                 <div className="space-y-2">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Administrativt ansvarsområde
                                                                     </div>
-                                                                    <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                                                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
                                                                         Hele kundemiljøet
                                                                     </span>
                                                                 </div>
@@ -661,11 +661,11 @@ export default function CustomerEnvironmentIndex({
 
                                                             {user.bid_role_value === 'bid_manager' ? (
                                                                 <div className="space-y-2">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Administrativt ansvarsområde
                                                                     </div>
                                                                     {user.bid_manager_scope_value === 'company' ? (
-                                                                        <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                                                                        <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
                                                                             Hele selskapet
                                                                         </span>
                                                                     ) : user.managed_departments.length > 0 ? (
@@ -675,8 +675,8 @@ export default function CustomerEnvironmentIndex({
                                                                                     key={department.id}
                                                                                     className={
                                                                                         department.is_active
-                                                                                            ? 'inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700'
-                                                                                            : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                                                            ? 'inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700'
+                                                                                            : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
                                                                                     }
                                                                                 >
                                                                                     {department.name}
@@ -684,7 +684,7 @@ export default function CustomerEnvironmentIndex({
                                                                             ))}
                                                                         </div>
                                                                     ) : (
-                                                                        <span className="text-slate-400">Ingen avdelinger</span>
+                                                                        <span className="text-slate-600">Ingen avdelinger</span>
                                                                     )}
                                                                 </div>
                                                             ) : null}
@@ -694,8 +694,8 @@ export default function CustomerEnvironmentIndex({
                                                         <span
                                                             className={
                                                                 user.is_active
-                                                                    ? 'inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
-                                                                    : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                                    ? 'inline-flex items-center rounded-full bg-emerald-100 px-3 py-1.5 text-base font-semibold leading-6 text-emerald-700'
+                                                                    : 'inline-flex items-center rounded-full bg-slate-200 px-3 py-1.5 text-base font-semibold leading-6 text-slate-700'
                                                             }
                                                         >
                                                             {user.is_active ? 'Aktiv' : 'Inaktiv'}
@@ -705,7 +705,7 @@ export default function CustomerEnvironmentIndex({
                                                         <div className="flex flex-wrap gap-2">
                                                             <a
                                                                 href={userEditHref(user)}
-                                                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 Rediger
                                                             </a>
@@ -716,9 +716,9 @@ export default function CustomerEnvironmentIndex({
                                                                 className={
                                                                     user.can_toggle_active
                                                                         ? user.is_active
-                                                                            ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                                            : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
-                                                                        : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400'
+                                                                            ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
+                                                                            : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                        : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-base font-semibold text-slate-600'
                                                                 }
                                                             >
                                                                 {user.is_active
@@ -751,31 +751,31 @@ export default function CustomerEnvironmentIndex({
                 >
                     <form id="department-environment-form" onSubmit={handleDepartmentSubmit} className="space-y-6">
                         {firstDepartmentError ? (
-                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-800">
                                 {firstDepartmentError}
                             </div>
                         ) : null}
 
                         <label className="block space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Navn</span>
+                            <span className="text-base font-medium text-slate-700">Navn</span>
                             <input
                                 type="text"
                                 value={departmentForm.data.name}
                                 onChange={(event) => departmentForm.setData('name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
-                            {departmentForm.errors.name ? <p className="text-sm text-rose-600">{departmentForm.errors.name}</p> : null}
+                            {departmentForm.errors.name ? <p className="text-base text-rose-700">{departmentForm.errors.name}</p> : null}
                         </label>
 
                         <label className="block space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Beskrivelse</span>
+                            <span className="text-base font-medium text-slate-700">Beskrivelse</span>
                             <textarea
                                 rows={4}
                                 value={departmentForm.data.description}
                                 onChange={(event) => departmentForm.setData('description', event.target.value)}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
-                            {departmentForm.errors.description ? <p className="text-sm text-rose-600">{departmentForm.errors.description}</p> : null}
+                            {departmentForm.errors.description ? <p className="text-base text-rose-700">{departmentForm.errors.description}</p> : null}
                         </label>
 
                         <div className="sticky bottom-0 -mx-6 mt-6 border-t border-slate-200 bg-white/95 px-6 pt-5 backdrop-blur-sm">
@@ -783,14 +783,14 @@ export default function CustomerEnvironmentIndex({
                                 <button
                                     type="button"
                                     onClick={closeDepartmentModal}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     Avbryt
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={departmentForm.processing}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {departmentForm.processing ? 'Lagrer...' : departmentModalState.mode === 'edit' ? 'Lagre avdeling' : 'Opprett avdeling'}
                                 </button>
@@ -803,19 +803,19 @@ export default function CustomerEnvironmentIndex({
                     <section className="space-y-5">
                         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <h2 className="text-lg font-semibold text-slate-950">Tilganger</h2>
-                            <p className="mt-1 text-sm leading-6 text-slate-500">
+                            <p className="mt-1 text-base leading-6 text-slate-600">
                                 Styr hvilke roller som har tilgang til å utføre spesifikke handlinger i kundemiljøet. System Owner har alltid full tilgang og kan ikke endres.
                             </p>
 
                             <div className="mt-6 overflow-x-auto">
-                                <table className="w-full text-sm">
+                                <table className="w-full text-base">
                                     <thead>
                                         <tr className="border-b border-slate-200">
-                                            <th className="pb-3 pr-6 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <th className="pb-3 pr-6 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 Handling
                                             </th>
                                             {permissionSettings.role_columns.map((col) => (
-                                                <th key={col.value} className="pb-3 px-4 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th key={col.value} className="pb-3 px-4 text-center text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {col.label}
                                                 </th>
                                             ))}

@@ -42,7 +42,7 @@ function resolveLabel(value, labels, fallback) {
 function SummaryCard({ label, value, hint, hintLabel }) {
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            <div className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                 <span>{label}</span>
                 {hint && (
                     <InfoHint
@@ -68,18 +68,18 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
             <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
                 <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{message}</p>
+                <p className="mt-2 text-base leading-6 text-slate-600">{message}</p>
                 <div className="mt-5 flex justify-end gap-3">
                     <button
                         onClick={onCancel}
-                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
                     >
                         {cancelLabel}
                     </button>
                     <button
                         onClick={onConfirm}
                         className={classNames(
-                            'rounded-lg px-4 py-2 text-sm font-medium text-white',
+                            'rounded-lg px-4 py-2 text-base font-medium text-white',
                             danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
                         )}
                     >
@@ -358,12 +358,12 @@ export default function BillingIndex() {
         <CustomerAppLayout title={tb.title ?? 'Abonnement'}>
             <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
                 {flash?.success && (
-                    <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                    <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-base leading-6 text-green-800">
                         {flash.success}
                     </div>
                 )}
                 {flash?.error && (
-                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base leading-6 text-red-800">
                         {flash.error}
                     </div>
                 )}
@@ -398,10 +398,10 @@ export default function BillingIndex() {
                             ]}
                         />
                     </div>
-                    <p className="max-w-4xl text-sm leading-6 text-slate-600">
+                    <p className="max-w-4xl text-base leading-6 text-slate-600">
                         {tb.subtitle ?? 'Oversikt over abonnement, tilleggstjenester og fakturaer.'}
                     </p>
-                    <p className="max-w-4xl text-sm leading-6 text-slate-600">
+                    <p className="max-w-4xl text-base leading-6 text-slate-600">
                         {tb.intro ?? 'Her ser du kundens abonnement, tilleggstjenester og fakturering. Fakturaer og PDF-er vises når de finnes.'}
                     </p>
                 </header>
@@ -434,29 +434,29 @@ export default function BillingIndex() {
                     </div>
 
                     <div className="mt-4 space-y-4">
-                        <p className="text-sm leading-6 text-slate-600">
+                        <p className="text-base leading-6 text-slate-600">
                             {hasRegisteredSubscription
                                 ? (subscriptionText.registered ?? 'Abonnementet er registrert.')
                                 : (subscriptionText.empty ?? 'Ingen aktivt abonnement er registrert.')}
                         </p>
 
-                        <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm md:grid-cols-2">
-                            <dt className="text-slate-500">{subscriptionText.plan ?? 'Abonnement'}</dt>
+                        <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-base md:grid-cols-2">
+                            <dt className="text-slate-600">{subscriptionText.plan ?? 'Abonnement'}</dt>
                             <dd className="font-medium text-slate-900">{currentPlanLabel}</dd>
 
-                            <dt className="text-slate-500">{subscriptionText.interval ?? 'Intervall'}</dt>
+                            <dt className="text-slate-600">{subscriptionText.interval ?? 'Intervall'}</dt>
                             <dd className="font-medium text-slate-900">{currentIntervalLabel}</dd>
 
                             {subscription?.included_users !== undefined && subscription?.included_users !== null && (
                                 <>
-                                    <dt className="text-slate-500">{subscriptionText.included_users ?? 'Inkluderte brukere'}</dt>
+                                    <dt className="text-slate-600">{subscriptionText.included_users ?? 'Inkluderte brukere'}</dt>
                                     <dd className="font-medium text-slate-900">{subscription.included_users}</dd>
                                 </>
                             )}
 
                             {subscription?.included_ai_credits !== undefined && subscription?.included_ai_credits !== null && (
                                 <>
-                                    <dt className="flex items-center gap-1.5 text-slate-500">
+                                    <dt className="flex items-center gap-1.5 text-slate-600">
                                         {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
                                         <InfoHint size="sm" label="Vis forklaring for KI-tilbud" text={tb.hint_ai_credits} />
                                     </dt>
@@ -469,7 +469,7 @@ export default function BillingIndex() {
                             {canChangePlan && (
                                 <button
                                     onClick={openPlanChangeModal}
-                                    className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                                    className="rounded-lg border border-blue-200 px-4 py-2 text-base font-medium text-blue-700 hover:bg-blue-50"
                                 >
                                     {planChangeText.button ?? 'Endre abonnement'}
                                 </button>
@@ -477,7 +477,7 @@ export default function BillingIndex() {
                             {subscription?.status === 'active' && !subscription.cancel_at_period_end && (
                                 <button
                                     onClick={() => setConfirmCancel(true)}
-                                    className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                                    className="rounded-lg border border-red-200 px-4 py-2 text-base font-medium text-red-700 hover:bg-red-50"
                                 >
                                     {tb.cancel ?? 'Si opp abonnement'}
                                 </button>
@@ -485,7 +485,7 @@ export default function BillingIndex() {
                             {subscription?.cancel_at_period_end && (
                                 <button
                                     onClick={() => setConfirmResume(true)}
-                                    className="rounded-lg border border-green-200 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-50"
+                                    className="rounded-lg border border-green-200 px-4 py-2 text-base font-medium text-green-700 hover:bg-green-50"
                                 >
                                     {tb.resume ?? 'Gjenoppta abonnement'}
                                 </button>
@@ -504,9 +504,9 @@ export default function BillingIndex() {
 
                     {billingLines.length > 0 ? (
                         <div className="mt-4 overflow-x-auto">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
                                         <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
@@ -519,7 +519,7 @@ export default function BillingIndex() {
                                                 {resolveBillingLineLabel(line)}
                                             </td>
                                             <td className="py-3 pr-4">
-                                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-base font-medium leading-6 text-slate-700">
                                                     {resolveLineTypeLabel(line.interval)}
                                                 </span>
                                             </td>
@@ -534,7 +534,7 @@ export default function BillingIndex() {
                             </table>
                         </div>
                     ) : (
-                        <p className="mt-4 text-sm leading-6 text-slate-600">
+                        <p className="mt-4 text-base leading-6 text-slate-600">
                             {servicesText.empty ?? 'Ingen tilleggstjenester registrert. Tilleggstjenester beskriver ekstra tjenester som er knyttet til abonnementet, men er ikke økonomisk fasit.'}
                         </p>
                     )}
@@ -544,24 +544,24 @@ export default function BillingIndex() {
                     <h2 className="text-base font-semibold text-slate-900">
                         {invoicesText.heading ?? 'Fakturaer og betalinger'}
                     </h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                    <p className="mt-2 text-base leading-6 text-slate-600">
                         {invoicesText.help ?? 'Her finner du utestående beløp, fakturahistorikk og eventuelle PDF-er.'}
                     </p>
 
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                             {invoicesText.outstanding_label ?? 'Utestående beløp'}
                         </div>
-                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                        <div className="mt-2 text-base font-semibold text-slate-900">
                             {outstandingAmountLabel ?? (invoicesText.no_outstanding ?? 'Ingen utestående beløp registrert.')}
                         </div>
                     </div>
 
                     {sortedInvoices.length > 0 ? (
                         <div className="mt-4 overflow-x-auto">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-base">
                                 <thead>
-                                    <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                                    <tr className="border-b border-slate-100 text-left text-base font-medium uppercase tracking-wide text-slate-600">
                                         <th className="pb-2 pr-4">{invoicesTableText.number ?? 'Fakturanummer'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.date ?? 'Dato'}</th>
                                         <th className="pb-2 pr-4">{invoicesTableText.amount ?? 'Beløp'}</th>
@@ -572,7 +572,7 @@ export default function BillingIndex() {
                                 <tbody className="divide-y divide-slate-50">
                                     {sortedInvoices.map((invoice) => (
                                         <tr key={invoice.id}>
-                                            <td className="py-3 pr-4 font-mono text-xs text-slate-700">
+                                            <td className="py-3 pr-4 font-mono text-base text-slate-700">
                                                 {invoice.number ?? '—'}
                                             </td>
                                             <td className="py-3 pr-4 text-slate-700">{formatDate(invoice.date)}</td>
@@ -588,7 +588,7 @@ export default function BillingIndex() {
                                                         href={invoice.invoice_pdf ?? invoice.hosted_invoice_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="text-sm font-medium text-blue-600 hover:underline"
+                                                        className="text-base font-medium text-blue-700 hover:underline"
                                                     >
                                                         PDF
                                                     </a>
@@ -602,7 +602,7 @@ export default function BillingIndex() {
                             </table>
                         </div>
                     ) : (
-                        <p className="mt-4 text-sm leading-6 text-slate-600">
+                        <p className="mt-4 text-base leading-6 text-slate-600">
                             {invoicesText.empty ?? 'Ingen fakturaer tilgjengelig.'}
                         </p>
                     )}
@@ -618,7 +618,7 @@ export default function BillingIndex() {
                                     ? (planChangeText.confirm ?? 'Bekreft abonnementsendring')
                                     : (planChangeText.heading ?? 'Endre abonnement')}
                             </h3>
-                            <p className="text-sm leading-6 text-slate-600">
+                            <p className="text-base leading-6 text-slate-600">
                                 {planChangeStep === 'confirm'
                                     ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
                                     : (planChangeText.description ?? 'Velg et nytt abonnement.')}
@@ -626,7 +626,7 @@ export default function BillingIndex() {
                         </div>
 
                         {planChangeError && (
-                            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base leading-6 text-red-700">
                                 {planChangeError}
                             </div>
                         )}
@@ -634,20 +634,20 @@ export default function BillingIndex() {
                         {planChangeStep === 'selection' ? (
                             <>
                                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                    <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                                         {planPreviewSummary?.label ?? planChangeText.current_plan ?? 'Nåværende abonnement'}
                                     </div>
-                                    <div className="mt-2 text-sm font-semibold text-slate-900">
+                                    <div className="mt-2 text-base font-semibold text-slate-900">
                                         {planPreviewSummary?.name ?? currentPlanLabel}
                                     </div>
-                                    <div className="mt-1 text-sm text-slate-600">
+                                    <div className="mt-1 text-base text-slate-600">
                                         {planPreviewIntervalTitle}: {planPreviewIntervalLabel}
                                     </div>
                                     {planPreviewSummary && (
-                                        <dl className="mt-4 grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+                                        <dl className="mt-4 grid gap-x-8 gap-y-3 text-base md:grid-cols-2">
                                             {planPreviewSummary.priceLabel && (
                                                 <div>
-                                                    <dt className="text-slate-500">
+                                                    <dt className="text-slate-600">
                                                         {planChangeText.price ?? 'Pris'}
                                                     </dt>
                                                     <dd className="mt-1 font-medium text-slate-900">
@@ -657,7 +657,7 @@ export default function BillingIndex() {
                                             )}
                                             {planPreviewSummary.includedUsers !== null && planPreviewSummary.includedUsers !== undefined && (
                                                 <div>
-                                                    <dt className="text-slate-500">
+                                                    <dt className="text-slate-600">
                                                         {subscriptionText.included_users ?? 'Inkluderte brukere'}
                                                     </dt>
                                                     <dd className="mt-1 font-medium text-slate-900">
@@ -667,7 +667,7 @@ export default function BillingIndex() {
                                             )}
                                             {planPreviewSummary.includedAiCredits !== null && planPreviewSummary.includedAiCredits !== undefined && (
                                                 <div>
-                                                    <dt className="text-slate-500">
+                                                    <dt className="text-slate-600">
                                                         {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
                                                     </dt>
                                                     <dd className="mt-1 font-medium text-slate-900">
@@ -681,13 +681,13 @@ export default function BillingIndex() {
 
                                 <div className="mt-5 grid gap-5 lg:grid-cols-2">
                                     <div>
-                                        <label className="block text-sm font-medium text-slate-700">
+                                        <label className="block text-base font-medium text-slate-700">
                                             {planChangeText.select_plan ?? 'Velg nytt abonnement'}
                                         </label>
                                         <select
                                             value={selectedPlanKey}
                                             onChange={(event) => handlePlanSelection(event.target.value)}
-                                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                                         >
                                             {availablePlans.map((plan) => (
                                                 <option key={plan.key} value={plan.key}>
@@ -696,12 +696,12 @@ export default function BillingIndex() {
                                             ))}
                                         </select>
                                         {errors.plan && (
-                                            <p className="mt-2 text-sm text-red-600">{errors.plan}</p>
+                                            <p className="mt-2 text-base text-red-700">{errors.plan}</p>
                                         )}
                                     </div>
 
                                     <div>
-                                        <div className="block text-sm font-medium text-slate-700">
+                                        <div className="block text-base font-medium text-slate-700">
                                             {planChangeText.select_interval ?? 'Velg faktureringsperiode'}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2">
@@ -711,21 +711,21 @@ export default function BillingIndex() {
                                                     type="button"
                                                     onClick={() => setSelectedInterval(normalizeKey(interval.interval))}
                                                     className={classNames(
-                                                        'rounded-full border px-3 py-2 text-sm font-medium transition',
+                                                        'rounded-full border px-3 py-2 text-base font-medium transition',
                                                         normalizeKey(interval.interval) === selectedInterval
                                                             ? 'border-blue-300 bg-blue-50 text-blue-800'
                                                             : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                                                     )}
                                                 >
                                                     <span className="block">{interval.label}</span>
-                                                    <span className="block text-xs font-normal text-slate-500">
+                                                    <span className="block text-base font-normal text-slate-600">
                                                         {formatPlanIntervalPrice(interval.price_nok, interval.interval)}
                                                     </span>
                                                 </button>
                                             ))}
                                         </div>
                                         {errors.interval && (
-                                            <p className="mt-2 text-sm text-red-600">{errors.interval}</p>
+                                            <p className="mt-2 text-base text-red-700">{errors.interval}</p>
                                         )}
                                     </div>
                                 </div>
@@ -733,7 +733,7 @@ export default function BillingIndex() {
                                 <div className="mt-6 flex flex-wrap justify-end gap-3">
                                     <button
                                         onClick={closePlanChangeModal}
-                                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
                                     >
                                         {planChangeText.cancel ?? 'Avbryt'}
                                     </button>
@@ -741,7 +741,7 @@ export default function BillingIndex() {
                                         onClick={openPlanChangeConfirmation}
                                         disabled={!canConfirmPlanChange}
                                         className={classNames(
-                                            'rounded-lg px-4 py-2 text-sm font-medium text-white',
+                                            'rounded-lg px-4 py-2 text-base font-medium text-white',
                                             canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
                                         )}
                                     >
@@ -758,24 +758,24 @@ export default function BillingIndex() {
                                 </AlertBox>
 
                                 {selectedPlanSummary && (
-                                    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
-                                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-base text-slate-900">
+                                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                                             {planChangeText.summary ?? 'Oppsummering'}
                                         </div>
                                         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-                                            <div className="text-slate-500">
+                                            <div className="text-slate-600">
                                                 {planChangeText.from_plan ?? 'Fra abonnement'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {currentPlanLabel}
                                             </div>
-                                            <div className="text-slate-500">
+                                            <div className="text-slate-600">
                                                 {planChangeText.to_plan ?? 'Til abonnement'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {selectedPlanSummary.name}
                                             </div>
-                                            <div className="text-slate-500">
+                                            <div className="text-slate-600">
                                                 {planChangeText.billing_interval ?? 'Intervall'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
@@ -783,7 +783,7 @@ export default function BillingIndex() {
                                             </div>
                                             {selectedPlanSummary.priceLabel && (
                                                 <>
-                                                    <div className="text-slate-500">
+                                                    <div className="text-slate-600">
                                                         {planChangeText.price ?? 'Pris'}
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
@@ -793,7 +793,7 @@ export default function BillingIndex() {
                                             )}
                                             {selectedPlanSummary.includedUsers !== null && selectedPlanSummary.includedUsers !== undefined && (
                                                 <>
-                                                    <div className="text-slate-500">
+                                                    <div className="text-slate-600">
                                                         {planChangeText.included_users ?? 'Inkluderte brukere'}
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
@@ -803,7 +803,7 @@ export default function BillingIndex() {
                                             )}
                                             {selectedPlanSummary.includedAiCredits !== null && selectedPlanSummary.includedAiCredits !== undefined && (
                                                 <>
-                                                    <div className="text-slate-500">
+                                                    <div className="text-slate-600">
                                                         {planChangeText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
@@ -818,7 +818,7 @@ export default function BillingIndex() {
                                 <div className="mt-6 flex flex-wrap justify-end gap-3">
                                     <button
                                         onClick={() => setPlanChangeStep('selection')}
-                                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
                                     >
                                         {planChangeText.back ?? 'Gå tilbake'}
                                     </button>
@@ -826,7 +826,7 @@ export default function BillingIndex() {
                                         onClick={handlePlanChangeSubmit}
                                         disabled={!canConfirmPlanChange}
                                         className={classNames(
-                                            'rounded-lg px-4 py-2 text-sm font-medium text-white',
+                                            'rounded-lg px-4 py-2 text-base font-medium text-white',
                                             canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
                                         )}
                                     >
