@@ -55,7 +55,7 @@ export default function NoticeShow({ notice }) {
         <CustomerAppLayout title={notice.title}>
             <div className="space-y-6">
                 <div>
-                    <Link href="/app/notices" className="text-sm font-medium text-slate-600 transition hover:text-slate-950">
+                    <Link href="/app/notices" className="text-base font-medium text-slate-600 transition hover:text-slate-950">
                         {translations.common.back}
                     </Link>
                 </div>
@@ -63,15 +63,15 @@ export default function NoticeShow({ notice }) {
                 <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="grid gap-6 lg:grid-cols-2">
                         <div className="space-y-3">
-                            <div className="text-sm text-slate-500">{notice.notice_id}</div>
+                            <div className="text-base text-slate-600">{notice.notice_id}</div>
                             {reasonSummary ? (
-                                <div className="text-sm text-slate-600 whitespace-pre-line">
+                                <div className="text-base text-slate-600 whitespace-pre-line">
                                     <div style={reasonSummaryStyle}>{reasonSummary}</div>
                                     {shouldCollapseReasonSummary ? (
                                         <button
                                             type="button"
                                             onClick={() => setIsReasonSummaryExpanded((current) => !current)}
-                                            className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
+                                            className="mt-2 text-base font-medium text-violet-700 transition hover:text-violet-800"
                                         >
                                             {isReasonSummaryExpanded ? 'Vis mindre' : 'Mer'}
                                         </button>
@@ -80,10 +80,10 @@ export default function NoticeShow({ notice }) {
                             ) : null}
                             {notice.relevance_score !== null || notice.relevance_level ? (
                                 <div className="flex flex-wrap gap-3 pt-2">
-                                    <span className="rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white">
+                                    <span className="rounded-full bg-slate-900 px-3 py-1 text-base font-medium text-white">
                                         {translations.frontend.relevance_score} {notice.relevance_score ?? '—'}
                                     </span>
-                                    <span className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-700">
+                                    <span className="rounded-full border border-slate-200 px-3 py-1 text-base font-medium text-slate-700">
                                         {notice.relevance_level || '—'}
                                     </span>
                                 </div>
@@ -91,25 +91,25 @@ export default function NoticeShow({ notice }) {
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-slate-400">{translations.frontend.published}</div>
-                                <div className="mt-1 text-sm text-slate-800">{formatDate(notice.publication_date, locale)}</div>
+                                <div className="text-base uppercase tracking-wide text-slate-600">{translations.frontend.published}</div>
+                                <div className="mt-1 text-base text-slate-800">{formatDate(notice.publication_date, locale)}</div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-slate-400">{translations.common.deadline}</div>
-                                <div className="mt-1 text-sm text-slate-800">{formatDate(notice.deadline, locale)}</div>
+                                <div className="text-base uppercase tracking-wide text-slate-600">{translations.common.deadline}</div>
+                                <div className="mt-1 text-base text-slate-800">{formatDate(notice.deadline, locale)}</div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-slate-400">{translations.frontend.status}</div>
-                                <div className="mt-1 text-sm text-slate-800">{notice.status || '—'}</div>
+                                <div className="text-base uppercase tracking-wide text-slate-600">{translations.frontend.status}</div>
+                                <div className="mt-1 text-base text-slate-800">{notice.status || '—'}</div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-slate-400">{translations.frontend.buyer}</div>
-                                <div className="mt-1 text-sm text-slate-800">{notice.buyer_name || '—'}</div>
+                                <div className="text-base uppercase tracking-wide text-slate-600">{translations.frontend.buyer}</div>
+                                <div className="mt-1 text-base text-slate-800">{notice.buyer_name || '—'}</div>
                             </div>
                         </div>
                     </div>
                     {notice.description ? (
-                        <div className="mt-6 border-t border-slate-200 pt-6 text-sm leading-7 text-slate-700">
+                        <div className="mt-6 border-t border-slate-200 pt-6 text-base leading-7 text-slate-700">
                             <div className="whitespace-pre-line" style={descriptionStyle}>
                                 {description}
                             </div>
@@ -117,7 +117,7 @@ export default function NoticeShow({ notice }) {
                                 <button
                                     type="button"
                                     onClick={() => setIsDescriptionExpanded((current) => !current)}
-                                    className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
+                                    className="mt-2 text-base font-medium text-violet-700 transition hover:text-violet-800"
                                 >
                                     {isDescriptionExpanded ? 'Vis mindre' : 'Mer'}
                                 </button>
@@ -130,12 +130,12 @@ export default function NoticeShow({ notice }) {
                     <div className="mb-4 flex items-center justify-between gap-4">
                         <div>
                             <h2 className="text-lg font-semibold text-slate-950">{translations.frontend.matched_for_customer}</h2>
-                            <p className="text-sm text-slate-500">{translations.frontend.customer_safe_reasoning}</p>
+                            <p className="text-base text-slate-600">{translations.frontend.customer_safe_reasoning}</p>
                         </div>
                     </div>
 
                     {notice.department_contexts.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-base text-slate-600">
                             {translations.frontend.no_department_context}
                         </div>
                     ) : (
@@ -145,11 +145,11 @@ export default function NoticeShow({ notice }) {
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div>
                                             <div className="font-medium text-slate-950">{context.department || translations.common.not_available}</div>
-                                            <div className="text-sm text-slate-500">
+                                            <div className="text-base text-slate-600">
                                                 {context.watch_profile_name || translations.common.none}
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-3 text-sm">
+                                        <div className="flex items-center gap-3 text-base">
                                             <span className="rounded-full bg-slate-900 px-3 py-1 font-medium text-white">{context.score}</span>
                                             <span className="rounded-full border border-slate-200 px-3 py-1 font-medium text-slate-700">
                                                 {context.relevance_level}
@@ -166,12 +166,12 @@ export default function NoticeShow({ notice }) {
                     <div className="mb-4 flex items-center justify-between gap-4">
                         <div>
                             <h2 className="text-lg font-semibold text-slate-950">{translations.frontend.cpv}</h2>
-                            <p className="text-sm text-slate-500">{translations.frontend.relevant_for_departments}</p>
+                            <p className="text-base text-slate-600">{translations.frontend.relevant_for_departments}</p>
                         </div>
                     </div>
 
                     {notice.cpv_codes.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-base text-slate-600">
                             {translations.common.none}
                         </div>
                     ) : (
@@ -179,7 +179,7 @@ export default function NoticeShow({ notice }) {
                             {notice.cpv_codes.map((cpv) => (
                                 <div key={cpv.code} className="grid gap-4 py-4 lg:grid-cols-[180px_minmax(0,1fr)]">
                                     <div className="font-medium text-slate-950">{cpv.code}</div>
-                                    <div className="text-sm text-slate-600">{cpv.description || translations.common.not_available}</div>
+                                    <div className="text-base text-slate-600">{cpv.description || translations.common.not_available}</div>
                                 </div>
                             ))}
                         </div>
@@ -190,12 +190,12 @@ export default function NoticeShow({ notice }) {
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
                         <div>
                             <h2 className="text-lg font-semibold text-slate-950">{translations.frontend.documents}</h2>
-                            <p className="text-sm text-slate-500">{translations.frontend.document_count.replace(':count', notice.documents.length)}</p>
+                            <p className="text-base text-slate-600">{translations.frontend.document_count.replace(':count', notice.documents.length)}</p>
                         </div>
                         {notice.documents.length > 1 ? (
                             <a
                                 href={notice.download_all_url}
-                                className="rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                className="rounded-full bg-slate-950 px-4 py-2 text-base font-medium text-white transition hover:bg-slate-800"
                             >
                                 {translations.frontend.download_all}
                             </a>
@@ -203,7 +203,7 @@ export default function NoticeShow({ notice }) {
                     </div>
 
                     {notice.documents.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                        <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-base text-slate-600">
                             {translations.frontend.no_documents}
                         </div>
                     ) : (
@@ -211,12 +211,12 @@ export default function NoticeShow({ notice }) {
                             {notice.documents.map((document) => (
                                 <div key={document.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))]">
                                     <div className="font-medium text-slate-950">{document.title}</div>
-                                    <div className="text-sm text-slate-500">{document.mime_type || translations.common.not_available}</div>
-                                    <div className="text-sm text-slate-500">{formatFileSize(document.file_size)}</div>
+                                    <div className="text-base text-slate-600">{document.mime_type || translations.common.not_available}</div>
+                                    <div className="text-base text-slate-600">{formatFileSize(document.file_size)}</div>
                                     <div className="flex justify-start lg:justify-end">
                                         <a
                                             href={document.download_url}
-                                            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                            className="rounded-full border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                         >
                                             {translations.common.download}
                                         </a>

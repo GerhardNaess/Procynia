@@ -147,19 +147,19 @@ export default function CpvSelector({
 
     return (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">CPV</span>
+            <span className="text-base font-medium text-slate-700">CPV</span>
             <div className="relative">
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
                     <div className="flex flex-wrap items-center gap-1.5">
                         {selectedItems.map((item) => (
                             <span
                                 key={item.code}
-                                className="inline-flex max-w-full items-center gap-2 rounded-full bg-violet-100 px-3 py-1.5 text-xs font-medium text-violet-800 ring-1 ring-inset ring-violet-200"
+                                className="inline-flex max-w-full items-center gap-2 rounded-full bg-violet-100 px-3 py-1.5 text-base font-medium leading-6 text-violet-800 ring-1 ring-inset ring-violet-200"
                             >
                                 <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
                                     {item.label}
                                 </span>
-                                <span className="shrink-0 text-violet-500">{item.code}</span>
+                                <span className="shrink-0 text-violet-700">{item.code}</span>
                                 <button
                                     type="button"
                                     onClick={() => removeItem(item.code)}
@@ -190,7 +190,7 @@ export default function CpvSelector({
                                 }}
                                 onKeyDown={handleKeyDown}
                                 placeholder="Søk etter CPV med vanlig språk"
-                                className="min-w-[120px] flex-1 border-none bg-transparent p-0 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
+                                className="min-w-[120px] flex-1 border-none bg-transparent p-0 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:ring-0"
                                 role="combobox"
                                 aria-expanded={isOpen}
                                 aria-controls={listboxId}
@@ -208,13 +208,13 @@ export default function CpvSelector({
                         className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-xl border border-slate-200 bg-white p-2 shadow-[0_16px_40px_rgba(15,23,42,0.12)]"
                     >
                         {inputValue.trim() === '' ? (
-                            <div className="px-2 pb-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                            <div className="px-2 pb-2 text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                 Populære valg
                             </div>
                         ) : null}
 
                         {isLoading ? (
-                            <div className="px-3 py-3 text-sm text-slate-500">Laster CPV-treff...</div>
+                            <div className="px-3 py-3 text-base text-slate-600">Laster CPV-treff...</div>
                         ) : null}
 
                         {!isLoading && suggestions.map((item, index) => (
@@ -231,18 +231,18 @@ export default function CpvSelector({
                                     index === activeIndex ? 'bg-violet-50 text-violet-900' : 'hover:bg-slate-50',
                                 )}
                             >
-                                <span className="min-w-0 pr-3 text-sm text-slate-800">{item.label}</span>
-                                <span className="shrink-0 text-xs font-medium text-slate-500">{item.code}</span>
+                                <span className="min-w-0 pr-3 text-base text-slate-800">{item.label}</span>
+                                <span className="shrink-0 text-base font-medium text-slate-600">{item.code}</span>
                             </button>
                         ))}
 
                         {showEmptyState ? (
-                            <div className="px-3 py-3 text-sm text-slate-500">Ingen CPV-treff</div>
+                            <div className="px-3 py-3 text-base text-slate-600">Ingen CPV-treff</div>
                         ) : null}
                     </div>
                 ) : null}
             </div>
-            <p className="text-xs text-slate-400">Velg ett eller flere CPV-områder med vanlig språk eller kode.</p>
+            <p className="text-base leading-6 text-slate-600">Velg ett eller flere CPV-områder med vanlig språk eller kode.</p>
         </label>
     );
 }

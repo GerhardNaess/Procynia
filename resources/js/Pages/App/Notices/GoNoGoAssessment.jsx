@@ -28,9 +28,9 @@ const ACTIVE_COLOR = {
     bad:     'border-rose-200 bg-rose-50 text-rose-700',
 };
 const INACTIVE_COLOR = {
-    good:    'border-slate-200 bg-white text-slate-500 hover:border-emerald-200 hover:text-emerald-600',
-    neutral: 'border-slate-200 bg-white text-slate-500 hover:border-amber-200 hover:text-amber-600',
-    bad:     'border-slate-200 bg-white text-slate-500 hover:border-rose-200 hover:text-rose-600',
+    good:    'border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600',
+    neutral: 'border-slate-200 bg-white text-slate-600 hover:border-amber-200 hover:text-amber-600',
+    bad:     'border-slate-200 bg-white text-slate-600 hover:border-rose-200 hover:text-rose-600',
 };
 
 function ratingSemantic(ratingValue, isReversed) {
@@ -102,7 +102,7 @@ function generateSummary(criteria, answers) {
 
 function WeightBadge({ weight, isReversed }) {
     return (
-        <span className="inline-flex items-center rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+        <span className="inline-flex items-center rounded border border-slate-200 bg-slate-100 px-2 py-1 text-base font-semibold leading-6 text-slate-600">
             Vekt {weight}{isReversed ? ' · reversert' : ''}
         </span>
     );
@@ -189,16 +189,16 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                 <div className="flex items-center justify-between gap-4">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <h2 className="text-xl font-semibold tracking-tight text-slate-950">Beslutningsvurdering</h2>
-                        <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-500">
+                        <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-medium leading-6 text-slate-600">
                             {ratedCount} av {totalPoints} vurdert
                         </span>
                         {isCollapsed && (
                             allRated && verdict ? (
-                                <span className={`shrink-0 rounded-full border px-3 py-0.5 text-xs font-semibold ${verdict.className}`}>
+                                <span className={`shrink-0 rounded-full border px-3 py-1.5 text-base font-semibold leading-6 ${verdict.className}`}>
                                     {verdict.label}
                                 </span>
                             ) : (
-                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-0.5 text-xs font-medium text-slate-400">
+                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-medium leading-6 text-slate-600">
                                     Vurdering ikke fullført
                                 </span>
                             )
@@ -208,7 +208,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                         type="button"
                         onClick={() => setIsCollapsed(v => !v)}
                         aria-expanded={!isCollapsed}
-                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-700"
                     >
                         {isCollapsed ? <><ChevronDown className="h-3.5 w-3.5" />Vis</> : <><ChevronUp className="h-3.5 w-3.5" />Skjul</>}
                     </button>
@@ -216,7 +216,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
 
                 {/* ── Collapsed summary ─────────────────────────── */}
                 {isCollapsed && (
-                    <p className="mt-2 text-sm text-slate-500">
+                    <p className="mt-2 text-base leading-6 text-slate-600">
                         {allRated && summary ? summary : 'Fullfør alle vurderingspunktene for å se foreløpig anbefaling.'}
                     </p>
                 )}
@@ -224,16 +224,16 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                 {/* ── Expanded ──────────────────────────────────── */}
                 {!isCollapsed && (
                     <>
-                        <p className="mt-1 text-sm text-slate-500">
+                        <p className="mt-1 text-base leading-6 text-slate-600">
                             Vurder saken på tvers av {totalPoints} dimensjoner som grunnlag for Go/No-go-beslutningen.
-                            {template?.name && <span className="ml-1 text-slate-400">· {template.name}</span>}
+                            {template?.name && <span className="ml-1 text-slate-600">· {template.name}</span>}
                         </p>
 
                         {/* Progress */}
                         <div className="mt-3.5">
                             <div className="mb-1 flex items-center justify-between">
-                                <span className="text-xs text-slate-400">{ratedCount} av {totalPoints} vurderinger fullført</span>
-                                <span className="text-xs text-slate-400">{Math.round((ratedCount / Math.max(totalPoints, 1)) * 100)}%</span>
+                                <span className="text-base text-slate-600">{ratedCount} av {totalPoints} vurderinger fullført</span>
+                                <span className="text-base text-slate-600">{Math.round((ratedCount / Math.max(totalPoints, 1)) * 100)}%</span>
                             </div>
                             <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                                 <div
@@ -247,15 +247,15 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                         <div className="mt-4">
                             {allRated && verdict ? (
                                 <div className={`rounded-2xl border px-4 py-3.5 ${verdict.className}`}>
-                                    <div className="flex items-center gap-2 text-sm font-semibold">
+                                    <div className="flex items-center gap-2 text-base font-semibold">
                                         <span className={`h-2 w-2 shrink-0 rounded-full ${verdict.dot}`} />
                                         <span>Foreløpig beslutningsgrunnlag: {verdict.label}</span>
                                     </div>
-                                    {summary && <p className="mt-1.5 text-xs leading-5 opacity-80">{summary}</p>}
-                                    <p className="mt-1 text-xs opacity-55">Beslutningen tas av deg – dette er et strukturert grunnlag.</p>
+                                    {summary && <p className="mt-1.5 text-base leading-6 opacity-90">{summary}</p>}
+                                    <p className="mt-1 text-base leading-6 opacity-75">Beslutningen tas av deg – dette er et strukturert grunnlag.</p>
                                 </div>
                             ) : (
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-400">
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                     Fullfør alle vurderingspunktene for å se foreløpig anbefaling.
                                 </div>
                             )}
@@ -270,11 +270,11 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">{index + 1}</span>
-                                                    <span className="text-sm font-semibold text-slate-900">{criterion.title}</span>
+                                                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">{index + 1}</span>
+                                                    <span className="text-base font-semibold text-slate-900">{criterion.title}</span>
                                                     <WeightBadge weight={criterion.weight} isReversed={criterion.is_score_reversed} />
                                                 </div>
-                                                <p className="mt-0.5 text-xs leading-5 text-slate-500">{criterion.short_description}</p>
+                                                <p className="mt-0.5 text-base leading-6 text-slate-600">{criterion.short_description}</p>
                                             </div>
 
                                             <div className="flex shrink-0 flex-wrap items-center gap-1">
@@ -286,7 +286,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                                             key={`${criterion.id}-${rv}`}
                                                             type="button"
                                                             onClick={() => handleRatingClick(criterion.id, rv)}
-                                                            className={`inline-flex h-6 items-center rounded-full border px-2.5 text-[11px] font-semibold transition ${isSelected ? ACTIVE_COLOR[semantic] : INACTIVE_COLOR[semantic]}`}
+                                                            className={`inline-flex h-9 items-center rounded-full border px-3 text-base font-semibold leading-6 transition ${isSelected ? ACTIVE_COLOR[semantic] : INACTIVE_COLOR[semantic]}`}
                                                         >
                                                             {RATING_LABELS[rv]}
                                                         </button>
@@ -297,7 +297,8 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                                     type="button"
                                                     onClick={() => setActiveHelpKey(criterion.id)}
                                                     title="Vurderingshjelp"
-                                                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] font-bold text-slate-400 transition hover:border-violet-200 hover:text-violet-600"
+                                                    aria-label="Vurderingshjelp"
+                                                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-bold text-slate-600 transition hover:border-violet-200 hover:text-violet-600"
                                                 >
                                                     ?
                                                 </button>
@@ -311,7 +312,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                             onChange={e => handleCommentChange(criterion.id, e.target.value)}
                                             rows={1}
                                             placeholder="Begrunnelse (valgfritt)…"
-                                            className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                            className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                         />
                                     </div>
                                 );
@@ -321,7 +322,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                         {/* Save bar */}
                         {saveUrl && (
                             <div className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                <span className="text-xs text-slate-400">
+                                <span className="text-base text-slate-600">
                                     {hasPendingChanges
                                         ? 'Ulagrede endringer'
                                         : lastSavedAt
@@ -332,7 +333,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                     type="button"
                                     onClick={handleSave}
                                     disabled={isSaving || !hasPendingChanges}
-                                    className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-default disabled:opacity-40"
+                                    className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-default disabled:opacity-40"
                                 >
                                     {isSaving ? 'Lagrer…' : 'Lagre vurdering'}
                                 </button>

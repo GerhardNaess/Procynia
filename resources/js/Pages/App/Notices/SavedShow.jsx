@@ -325,20 +325,20 @@ function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle,
                 className="flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-100/80"
             >
                 <div className="min-w-0 space-y-1">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                         {title}
                     </div>
-                    <div className="truncate text-sm font-semibold text-slate-950">
+                    <div className="text-base font-semibold text-slate-950">
                         {summary}
                     </div>
                     {hint ? (
-                        <div className="text-sm leading-6 text-slate-500">
+                        <div className="text-base leading-6 text-slate-600">
                             {hint}
                         </div>
                     ) : null}
                 </div>
 
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-600">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-base font-semibold text-slate-600">
                     {isOpen ? '−' : '+'}
                 </div>
             </button>
@@ -358,26 +358,26 @@ function PhaseCommentCard({ comment, locale, text }) {
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-slate-950">
+                        <div className="text-base font-semibold text-slate-950">
                             {comment.user?.name || text.unknownUser}
                         </div>
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1.5 text-base font-semibold leading-6 text-slate-700">
                             {comment.user?.bid_role_label || text.bidRoleContributor}
                         </span>
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-base text-slate-600">
                         {comment.user?.email || '—'}
                         {' · '}
                         {formatDate(comment.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
                     </div>
                 </div>
 
-                <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                <span className="rounded-full bg-violet-50 px-2.5 py-1.5 text-base font-semibold leading-6 text-violet-700">
                     {comment.phase_status_label}
                 </span>
             </div>
 
-            <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">
+            <p className="mt-3 whitespace-pre-line text-base leading-6 text-slate-700">
                 {comment.comment}
             </p>
         </article>
@@ -843,7 +843,7 @@ export default function SavedNoticeShow({ notice }) {
                 <section className="space-y-3">
                     <Link
                         href={notice.back_url}
-                        className="inline-flex items-center text-sm font-medium text-slate-600 transition hover:text-slate-950"
+                        className="inline-flex items-center text-base font-medium text-slate-600 transition hover:text-slate-950"
                     >
                         {notice.back_label}
                     </Link>
@@ -853,7 +853,7 @@ export default function SavedNoticeShow({ notice }) {
                             <div className="flex flex-wrap items-center gap-2">
                                 <span
                                     className={classNames(
-                                        'inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset',
+                                        'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset',
                                         bidStatusBadgeClassName(notice.bid_status),
                                     )}
                                 >
@@ -861,19 +861,19 @@ export default function SavedNoticeShow({ notice }) {
                                 </span>
                                 <span
                                     className={classNames(
-                                        'inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset',
+                                        'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset',
                                         sourceBadgeClassName,
                                     )}
                                 >
                                     {sourceTypeLabel}
                                 </span>
                                 {notice.archived_at && notice.history_type_label ? (
-                                    <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                                    <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 ring-1 ring-inset ring-violet-200">
                                         {tsn.type_prefix} {notice.history_type_label}
                                     </span>
                                 ) : null}
                                 {notice.archived_at ? (
-                                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
+                                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-base font-semibold leading-6 text-slate-600 ring-1 ring-inset ring-slate-200">
                                         {tsn.archived}
                                     </span>
                                 ) : null}
@@ -881,7 +881,7 @@ export default function SavedNoticeShow({ notice }) {
 
                             <div className="space-y-1.5">
                                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{notice.title}</h1>
-                                <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                                <p className="max-w-3xl text-base leading-7 text-slate-600">
                                     {notice.organization_name || tsn.organization_unknown}
                                 </p>
                             </div>
@@ -892,11 +892,11 @@ export default function SavedNoticeShow({ notice }) {
                                 <div className="space-y-1">
                                     <Link
                                         href={notice.ai_show_url}
-                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                     >
                                         {tsn.case_documents_cta_label ?? 'Åpne saksdokumenter og AI'}
                                     </Link>
-                                    <p className="max-w-sm text-xs leading-5 text-slate-500">
+                                    <p className="max-w-sm text-base leading-6 text-slate-600">
                                         {tsn.case_documents_cta_help ?? 'Last opp og arbeid med dokumenter som gjelder denne konkrete saken.'}
                                     </p>
                                 </div>
@@ -906,7 +906,7 @@ export default function SavedNoticeShow({ notice }) {
                                     href={notice.external_url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                 >
                                     {externalLinkLabel}
                                 </a>
@@ -942,20 +942,20 @@ export default function SavedNoticeShow({ notice }) {
                 <BidStatusPipeline currentStatus={notice.bid_status} />
 
                 <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_360px] xl:items-start">
-                    <aside className="space-y-4">
+                    <aside className="min-w-0 space-y-4">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
                                     <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.status_panel}</h2>
-                                    <p className="mt-1 text-sm text-slate-500">{tsn.status_panel_subtitle}</p>
+                                    <p className="mt-1 text-base text-slate-600">{tsn.status_panel_subtitle}</p>
                                 </div>
 
                                 <div className="space-y-3">
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.current_status}</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
-                                        <p className="mt-1 text-sm leading-6 text-slate-600">{guidance.description}</p>
-                                        <div className="mt-3 text-sm leading-6 text-slate-500">{guidance.closureRule}</div>
+                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.current_status}</div>
+                                        <div className="mt-1 text-base font-semibold text-slate-950">{notice.bid_status_label}</div>
+                                        <p className="mt-1 text-base leading-6 text-slate-600">{guidance.description}</p>
+                                        <div className="mt-3 text-base leading-6 text-slate-600">{guidance.closureRule}</div>
                                     </div>
 
                                 </div>
@@ -963,12 +963,12 @@ export default function SavedNoticeShow({ notice }) {
                         </section>
                     </aside>
 
-                    <main className="space-y-6">
+                    <main className="min-w-0 space-y-6">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
                                 <div>
                                     <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.information}</h2>
-                                    <p className="mt-1 text-sm text-slate-500">
+                                    <p className="mt-1 text-base text-slate-600">
                                         {isPrivateRequest
                                             ? tsn.private_request_subtitle
                                             : tsn.notice_subtitle}
@@ -979,21 +979,21 @@ export default function SavedNoticeShow({ notice }) {
                                     isEditingDeadlines ? (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered}</div>
-                                                <div className="text-sm font-medium text-slate-900">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.registered}</div>
+                                                <div className="text-base font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.deadline}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1.5">
-                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="reference_number">
+                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="reference_number">
                                                     {tsn.reference}
                                                 </label>
                                                 <input
@@ -1001,14 +1001,14 @@ export default function SavedNoticeShow({ notice }) {
                                                     type="text"
                                                     value={deadlineForm.data.reference_number}
                                                     onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                                 {deadlineForm.errors.reference_number ? (
-                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.reference_number}</p>
+                                                    <p className="text-base text-rose-700">{deadlineForm.errors.reference_number}</p>
                                                 ) : null}
                                             </div>
                                             <div className="space-y-1.5">
-                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_name">
+                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="contact_person_name">
                                                     {tsn.contact_person}
                                                 </label>
                                                 <input
@@ -1016,14 +1016,14 @@ export default function SavedNoticeShow({ notice }) {
                                                     type="text"
                                                     value={deadlineForm.data.contact_person_name}
                                                     onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                                 {deadlineForm.errors.contact_person_name ? (
-                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_name}</p>
+                                                    <p className="text-base text-rose-700">{deadlineForm.errors.contact_person_name}</p>
                                                 ) : null}
                                             </div>
                                             <div className="space-y-1.5">
-                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_email">
+                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="contact_person_email">
                                                     {tsn.contact_email}
                                                 </label>
                                                 <input
@@ -1031,15 +1031,15 @@ export default function SavedNoticeShow({ notice }) {
                                                     type="email"
                                                     value={deadlineForm.data.contact_person_email}
                                                     onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                                 {deadlineForm.errors.contact_person_email ? (
-                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_email}</p>
+                                                    <p className="text-base text-rose-700">{deadlineForm.errors.contact_person_email}</p>
                                                 ) : null}
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link}</div>
-                                                <div className="text-sm font-medium text-slate-900">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.external_link}</div>
+                                                <div className="text-base font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
                                                             href={notice.external_url}
@@ -1053,7 +1053,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 </div>
                                             </div>
                                             <div className="space-y-1.5 md:col-span-2">
-                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="notes">
+                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="notes">
                                                     {tsn.notes}
                                                 </label>
                                                 <textarea
@@ -1061,45 +1061,45 @@ export default function SavedNoticeShow({ notice }) {
                                                     value={deadlineForm.data.notes}
                                                     onChange={(event) => deadlineForm.setData('notes', event.target.value)}
                                                     rows={4}
-                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                     placeholder={tsn.notes_placeholder}
                                                 />
                                                 {deadlineForm.errors.notes ? (
-                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.notes}</p>
+                                                    <p className="text-base text-rose-700">{deadlineForm.errors.notes}</p>
                                                 ) : null}
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered}</div>
-                                                <div className="text-sm font-medium text-slate-900">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.registered}</div>
+                                                <div className="text-base font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.deadline}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.reference}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || tsn.not_registered}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.reference}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.reference_number || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_person}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || tsn.not_registered}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_person}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.contact_person_name || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_email}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || tsn.not_registered}</div>
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_email}</div>
+                                                <div className="text-base font-medium text-slate-900">{notice.contact_person_email || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link}</div>
-                                                <div className="text-sm font-medium text-slate-900">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.external_link}</div>
+                                                <div className="text-base font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
                                                             href={notice.external_url}
@@ -1117,24 +1117,24 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.announcement}</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.notice_id || '—'}</div>
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.announcement}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.notice_id || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.organization_name || '—'}</div>
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.organization_name || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.published}</div>
-                                            <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.published}</div>
+                                            <div className="text-base font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.official_deadline}</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : '—'}</div>
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.official_deadline}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.cpv}</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.cpv_code || '—'}</div>
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.cpv}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.cpv_code || '—'}</div>
                                         </div>
                                     </div>
                                 )}
@@ -1143,10 +1143,10 @@ export default function SavedNoticeShow({ notice }) {
                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div>
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-blue-700">
                                                     {tsn.business_review_title}
                                                 </div>
-                                                <p className="mt-1 text-sm text-blue-950/75">
+                                                <p className="mt-1 text-base text-blue-950/75">
                                                     {tsn.business_review_description}
                                                 </p>
                                             </div>
@@ -1154,7 +1154,7 @@ export default function SavedNoticeShow({ notice }) {
                                             <button
                                                 type="button"
                                                 onClick={addBusinessReview}
-                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-base font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
                                             >
                                                 {tsn.business_review_add}
                                             </button>
@@ -1169,17 +1169,17 @@ export default function SavedNoticeShow({ notice }) {
                                                     >
                                                         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                                                             <label className="min-w-0 flex-1 space-y-2">
-                                                                <span className="text-sm font-medium text-slate-700">
+                                                                <span className="text-base font-medium text-slate-700">
                                                                     {tsn.business_review_item_label} {index + 1}
                                                                 </span>
                                                                 <input
                                                                     type="date"
                                                                     value={review.business_review_at}
                                                                     onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
-                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                                                                 />
                                                                 {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
-                                                                    <p className="text-sm text-rose-600">
+                                                                    <p className="text-base text-rose-700">
                                                                         {deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
                                                                     </p>
                                                                 ) : null}
@@ -1188,7 +1188,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeBusinessReview(index)}
-                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                             >
                                                                 {tsn.delete}
                                                             </button>
@@ -1196,7 +1196,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     </div>
                                                 ))
                                             ) : (
-                                                <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-sm text-blue-900/70">
+                                                <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-base text-blue-900/70">
                                                     {tsn.business_review_empty}
                                                 </div>
                                             )}
@@ -1204,7 +1204,7 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
                                 ) : businessReviews.length > 0 ? (
                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-blue-700">
                                             {tsn.business_review_title}
                                         </div>
                                         <div className="mt-3 space-y-3">
@@ -1215,7 +1215,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         aria-hidden="true"
                                                     />
                                                     <div className="min-w-0">
-                                                        <div className="text-sm font-medium text-slate-900">
+                                                        <div className="text-base font-medium text-slate-900">
                                                             {formatDate(review.business_review_at, locale)}
                                                         </div>
                                                     </div>
@@ -1226,16 +1226,16 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : null}
 
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.summary}</div>
-                                    <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.summary}</div>
+                                    <div className="mt-2 text-base leading-7 text-slate-700 whitespace-pre-line">
                                         {notice.summary || tsn.no_summary}
                                     </div>
                                 </div>
 
                                 {isPrivateRequest && notice.notes && !isEditingDeadlines ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.notes}</div>
-                                        <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.notes}</div>
+                                        <div className="mt-2 text-base leading-7 text-slate-700 whitespace-pre-line">
                                             {notice.notes}
                                         </div>
                                     </div>
@@ -1245,10 +1245,10 @@ export default function SavedNoticeShow({ notice }) {
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div>
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {frontend.documents}
                                                 </div>
-                                                <div className="mt-1 text-sm text-slate-500">
+                                                <div className="mt-1 text-base text-slate-600">
                                                     {frontend.document_count
                                                         ? frontend.document_count.replace(':count', String(documents.length))
                                                         : String(documents.length)}
@@ -1258,14 +1258,14 @@ export default function SavedNoticeShow({ notice }) {
                                             {downloadAllUrl && documents.length > 1 ? (
                                                 <a
                                                     href={downloadAllUrl}
-                                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                 >
                                                     {frontend.download_all}
                                                 </a>
                                             ) : null}
                                         </div>
 
-                                        <p className="mt-4 text-sm text-slate-500">
+                                        <p className="mt-4 text-base text-slate-600">
                                             {frontend.download_instruction}
                                         </p>
 
@@ -1273,18 +1273,18 @@ export default function SavedNoticeShow({ notice }) {
                                             {documents.map((document) => (
                                                 <div key={document.id} className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] md:items-center">
                                                     <div className="min-w-0">
-                                                        <div className="truncate text-sm font-medium text-slate-950">{document.title}</div>
-                                                        <div className="mt-1 text-xs text-slate-500">
+                                                        <div className="text-base font-medium text-slate-950">{document.title}</div>
+                                                        <div className="mt-1 text-base text-slate-600">
                                                             {document.created_at ? formatDate(document.created_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                         </div>
                                                     </div>
-                                                    <div className="text-sm text-slate-500">{document.mime_type || common.not_available}</div>
-                                                    <div className="text-sm text-slate-500">{formatFileSize(document.file_size)}</div>
+                                                    <div className="text-base text-slate-600">{document.mime_type || common.not_available}</div>
+                                                    <div className="text-base text-slate-600">{formatFileSize(document.file_size)}</div>
                                                     <div className="flex justify-start md:justify-end">
                                                         <a
                                                             href={document.download_url}
                                                             aria-label={`${frontend.download_link_aria_label_prefix ?? frontend.download_link}: ${document.title}`}
-                                                            className="inline-flex items-center text-sm font-semibold text-violet-700 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-800"
+                                                            className="inline-flex items-center text-base font-semibold text-violet-700 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-800"
                                                         >
                                                             {frontend.download_link}
                                                         </a>
@@ -1320,7 +1320,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 aria-expanded={isCurrentPhase ? true : isOpen}
                                                 disabled={isCurrentPhase}
                                                 className={classNames(
-                                                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition disabled:cursor-default',
+                                                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-base font-semibold leading-6 transition disabled:cursor-default',
                                                     isHighlighted
                                                         ? 'border-violet-200 bg-violet-50 text-violet-700'
                                                         : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:text-violet-700',
@@ -1333,7 +1333,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     {phaseOption.label}
                                                 </span>
                                                 {isCurrentPhase && (
-                                                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet-700">
+                                                    <span className="rounded-full bg-violet-100 px-2 py-1 text-base font-bold uppercase tracking-[0.12em] leading-6 text-violet-700">
                                                         {tsn.active_label}
                                                     </span>
                                                 )}
@@ -1350,14 +1350,14 @@ export default function SavedNoticeShow({ notice }) {
                                         className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
                                     >
                                         <div>
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {tsn.active_phase_label}
                                             </div>
-                                            <div className="mt-1 text-sm font-semibold text-slate-950">
+                                            <div className="mt-1 text-base font-semibold text-slate-950">
                                                 {guidance.phaseTitle}
                                             </div>
                                         </div>
-                                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700">
+                                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-700">
                                             {isActivePhaseExpanded ? '−' : '+'}
                                         </span>
                                     </button>
@@ -1365,8 +1365,8 @@ export default function SavedNoticeShow({ notice }) {
                                     {isActivePhaseExpanded && (
                                         <div className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4">
                                             <div>
-                                                <p className="text-sm leading-6 text-slate-600">{guidance.description}</p>
-                                                <div className="mt-2 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+                                                <p className="text-base leading-6 text-slate-600">{guidance.description}</p>
+                                                <div className="mt-2 text-base leading-6 text-slate-600">{guidance.closureRule}</div>
                                             </div>
 
                                             <div className="space-y-3">
@@ -1375,7 +1375,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         <PhaseCommentCard key={comment.id} comment={comment} locale={locale} text={tsn} />
                                                     ))
                                                 ) : (
-                                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-base text-slate-600">
                                                         {tsn.phase_comment_empty}
                                                     </div>
                                                 )}
@@ -1389,32 +1389,32 @@ export default function SavedNoticeShow({ notice }) {
                                                     }}
                                                     className="space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                                 >
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                         {tsn.phase_comment_new}
                                                     </div>
 
                                                     <label className="space-y-1.5">
-                                                        <span className="text-sm font-medium text-slate-800">
+                                                        <span className="text-base font-medium text-slate-800">
                                                             {tsn.phase_comment_form_label}
                                                         </span>
                                                         <textarea
                                                             value={phaseCommentForm.data.comment}
                                                             onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
                                                             rows={4}
-                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                             placeholder={tsn.phase_comment_placeholder}
                                                         />
                                                     </label>
 
                                                     {(phaseCommentForm.errors.comment || errors.comment) ? (
-                                                        <p className="text-sm text-rose-600">{phaseCommentForm.errors.comment ?? errors.comment}</p>
+                                                        <p className="text-base text-rose-700">{phaseCommentForm.errors.comment ?? errors.comment}</p>
                                                     ) : null}
 
                                                     <div className="flex flex-wrap gap-3">
                                                         <button
                                                             type="submit"
                                                             disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
                                                         </button>
@@ -1450,10 +1450,10 @@ export default function SavedNoticeShow({ notice }) {
                                             >
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div>
-                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                             {tsn.phase_prefix} {phaseOption.number}
                                                         </div>
-                                                        <h3 className="mt-1 text-sm font-semibold text-slate-950">
+                                                        <h3 className="mt-1 text-base font-semibold text-slate-950">
                                                             {phaseOption.label}
                                                         </h3>
                                                     </div>
@@ -1461,7 +1461,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleCommentPhase(phaseOption.status)}
-                                                        className="inline-flex min-h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                        className="inline-flex min-h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
                                                         {tsn.phase_comment_hide}
                                                     </button>
@@ -1474,7 +1474,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         ))}
                                                     </div>
                                                 ) : (
-                                                    <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                                                    <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-base text-slate-600">
                                                         {tsn.phase_comment_empty_for_phase}
                                                     </div>
                                                 )}
@@ -1493,9 +1493,9 @@ export default function SavedNoticeShow({ notice }) {
                                                         <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.info_center_title}</h2>
                                                         <InfoHint size="sm" align="right" label={tsn.info_center_hint_label ?? 'Vis forklaring for Informasjonssenter'} text={tsn.info_center_hint} />
                                                     </div>
-                                                    <p className="mt-1 text-sm text-slate-500">{tsn.info_center_description}</p>
+                                                    <p className="mt-1 text-base text-slate-600">{tsn.info_center_description}</p>
                                                 </div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                    <p className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">
                                         {infoItemSummary}
                                     </p>
                                 </div>
@@ -1503,7 +1503,7 @@ export default function SavedNoticeShow({ notice }) {
                                 <button
                                     type="button"
                                     onClick={openInfoItemCreator}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                 >
                                     {tsn.new_action}
                                 </button>
@@ -1519,39 +1519,39 @@ export default function SavedNoticeShow({ notice }) {
                                 >
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <label className="space-y-2 md:col-span-2">
-                                            <span className="text-sm font-medium text-slate-700">{tsn.subject_label}</span>
+                                            <span className="text-base font-medium text-slate-700">{tsn.subject_label}</span>
                                             <input
                                                 type="text"
                                                 value={infoItemForm.data.subject}
                                                 onChange={(event) => infoItemForm.setData('subject', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 placeholder={tsn.subject_placeholder}
                                             />
                                             {infoItemForm.errors.subject ? (
-                                                <p className="text-sm text-rose-600">{infoItemForm.errors.subject}</p>
+                                                <p className="text-base text-rose-700">{infoItemForm.errors.subject}</p>
                                             ) : null}
                                         </label>
 
                                         <label className="space-y-2 md:col-span-2">
-                                            <span className="text-sm font-medium text-slate-700">{tsn.description_label}</span>
+                                            <span className="text-base font-medium text-slate-700">{tsn.description_label}</span>
                                             <textarea
                                                 value={infoItemForm.data.body}
                                                 onChange={(event) => infoItemForm.setData('body', event.target.value)}
                                                 rows={5}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 placeholder={tsn.description_placeholder}
                                             />
                                             {infoItemForm.errors.body ? (
-                                                <p className="text-sm text-rose-600">{infoItemForm.errors.body}</p>
+                                                <p className="text-base text-rose-700">{infoItemForm.errors.body}</p>
                                             ) : null}
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">{tsn.owner_label}</span>
+                                            <span className="text-base font-medium text-slate-700">{tsn.owner_label}</span>
                                             <select
                                                 value={infoItemForm.data.owner_user_id}
                                                 onChange={(event) => infoItemForm.setData('owner_user_id', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
                                                 <option value="">{tsn.no_owner}</option>
                                                 {infoItemOwnerOptions.map((option) => (
@@ -1561,29 +1561,29 @@ export default function SavedNoticeShow({ notice }) {
                                                 ))}
                                             </select>
                                             {infoItemForm.errors.owner_user_id ? (
-                                                <p className="text-sm text-rose-600">{infoItemForm.errors.owner_user_id}</p>
+                                                <p className="text-base text-rose-700">{infoItemForm.errors.owner_user_id}</p>
                                             ) : null}
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">{tsn.follow_up_deadline_label}</span>
+                                            <span className="text-base font-medium text-slate-700">{tsn.follow_up_deadline_label}</span>
                                             <input
                                                 type="date"
                                                 value={infoItemForm.data.response_due_at}
                                                 onChange={(event) => infoItemForm.setData('response_due_at', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             />
                                             {infoItemForm.errors.response_due_at ? (
-                                                <p className="text-sm text-rose-600">{infoItemForm.errors.response_due_at}</p>
+                                                <p className="text-base text-rose-700">{infoItemForm.errors.response_due_at}</p>
                                             ) : null}
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">{tsn.status_label}</span>
+                                            <span className="text-base font-medium text-slate-700">{tsn.status_label}</span>
                                             <select
                                                 value={infoItemForm.data.status}
                                                 onChange={(event) => infoItemForm.setData('status', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
                                                 {infoItemStatusOptions.map((option) => (
                                                     <option key={option.value} value={option.value}>
@@ -1592,7 +1592,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 ))}
                                             </select>
                                             {infoItemForm.errors.status ? (
-                                                <p className="text-sm text-rose-600">{infoItemForm.errors.status}</p>
+                                                <p className="text-base text-rose-700">{infoItemForm.errors.status}</p>
                                             ) : null}
                                         </label>
 
@@ -1604,8 +1604,8 @@ export default function SavedNoticeShow({ notice }) {
                                                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                                             />
                                             <div className="space-y-1">
-                                                <span className="block text-sm font-medium text-slate-700">{tsn.requires_response_label}</span>
-                                                <p className="text-xs text-slate-500">
+                                                <span className="block text-base font-medium text-slate-700">{tsn.requires_response_label}</span>
+                                                <p className="text-base text-slate-600">
                                                     {tsn.requires_response_help}
                                                 </p>
                                             </div>
@@ -1613,19 +1613,19 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                                             {tsn.classification_title}
                                         </div>
-                                        <p className="mt-1 text-sm text-slate-500">
+                                        <p className="mt-1 text-base text-slate-600">
                                             {tsn.classification_help}
                                         </p>
                                         <div className="mt-4 grid gap-4 md:grid-cols-3">
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">{tsn.type_label}</span>
+                                                <span className="text-base font-medium text-slate-700">{tsn.type_label}</span>
                                                 <select
                                                     value={infoItemForm.data.type}
                                                     onChange={(event) => infoItemForm.setData('type', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 >
                                                     {infoItemTypeOptions.map((option) => (
                                                         <option key={option.value} value={option.value}>
@@ -1634,16 +1634,16 @@ export default function SavedNoticeShow({ notice }) {
                                                     ))}
                                                 </select>
                                                 {infoItemForm.errors.type ? (
-                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.type}</p>
+                                                    <p className="text-base text-rose-700">{infoItemForm.errors.type}</p>
                                                 ) : null}
                                             </label>
 
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">{tsn.direction_label}</span>
+                                                <span className="text-base font-medium text-slate-700">{tsn.direction_label}</span>
                                                 <select
                                                     value={infoItemForm.data.direction}
                                                     onChange={(event) => infoItemForm.setData('direction', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 >
                                                     {infoItemDirectionOptions.map((option) => (
                                                         <option key={option.value} value={option.value}>
@@ -1652,16 +1652,16 @@ export default function SavedNoticeShow({ notice }) {
                                                     ))}
                                                 </select>
                                                 {infoItemForm.errors.direction ? (
-                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.direction}</p>
+                                                    <p className="text-base text-rose-700">{infoItemForm.errors.direction}</p>
                                                 ) : null}
                                             </label>
 
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">{tsn.channel_label}</span>
+                                                <span className="text-base font-medium text-slate-700">{tsn.channel_label}</span>
                                                 <select
                                                     value={infoItemForm.data.channel}
                                                     onChange={(event) => infoItemForm.setData('channel', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 >
                                                     {infoItemChannelOptions.map((option) => (
                                                         <option key={option.value} value={option.value}>
@@ -1670,7 +1670,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     ))}
                                                 </select>
                                                 {infoItemForm.errors.channel ? (
-                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.channel}</p>
+                                                    <p className="text-base text-rose-700">{infoItemForm.errors.channel}</p>
                                                 ) : null}
                                             </label>
                                         </div>
@@ -1680,7 +1680,7 @@ export default function SavedNoticeShow({ notice }) {
                                         <button
                                             type="submit"
                                             disabled={infoItemForm.processing || infoItemForm.data.body.trim() === ''}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {infoItemForm.processing ? tsn.save_action_saving : tsn.save_action}
                                         </button>
@@ -1688,7 +1688,7 @@ export default function SavedNoticeShow({ notice }) {
                                             type="button"
                                             onClick={cancelInfoItemCreator}
                                             disabled={infoItemForm.processing}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {common.cancel}
                                         </button>
@@ -1716,15 +1716,15 @@ export default function SavedNoticeShow({ notice }) {
                                                             <StatusBadge tone="slate">{item.channel_label}</StatusBadge>
                                                         </div>
 
-                                                        <div className="text-sm font-semibold text-slate-950">
+                                                        <div className="text-base font-semibold text-slate-950">
                                                             {item.subject || tsn.no_subject}
                                                         </div>
 
-                                                        <div className="whitespace-pre-line text-sm leading-6 text-slate-700">
+                                                        <div className="whitespace-pre-line text-base leading-6 text-slate-700">
                                                             {item.body}
                                                         </div>
 
-                                                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                                                        <div className="flex flex-wrap gap-2 text-base text-slate-600">
                                                             {item.owner ? (
                                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
                                                                     {tsn.owner_prefix} {item.owner.name}
@@ -1749,17 +1749,17 @@ export default function SavedNoticeShow({ notice }) {
 
                                                         {isClosed && item.closure_comment ? (
                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tsn.close_comment_label}
                                                                 </div>
-                                                                <div className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+                                                                <div className="mt-2 whitespace-pre-line text-base leading-6 text-slate-700">
                                                                     {item.closure_comment}
                                                                 </div>
                                                             </div>
                                                         ) : null}
                                                     </div>
 
-                                                    <div className="shrink-0 space-y-2 text-xs text-slate-500 lg:text-right">
+                                                    <div className="shrink-0 space-y-2 text-base text-slate-600 lg:text-right">
                                                         <div className="font-medium text-slate-700">
                                                             {tsn.created_prefix} {formatDate(item.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
                                                         </div>
@@ -1771,7 +1771,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => openInfoItemCloser(item)}
-                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                                                                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
                                                             >
                                                                 {isCloseFormOpen ? tsn.close_action_hide : tsn.close_action}
                                                             </button>
@@ -1789,10 +1789,10 @@ export default function SavedNoticeShow({ notice }) {
                                                     >
                                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                             <div>
-                                                                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.16em] text-emerald-700">
                                                                     {tsn.close_action_title}
                                                                 </div>
-                                                                <p className="mt-1 text-sm text-slate-600">
+                                                                <p className="mt-1 text-base text-slate-600">
                                                                     {tsn.close_action_help}
                                                                 </p>
                                                             </div>
@@ -1800,26 +1800,26 @@ export default function SavedNoticeShow({ notice }) {
                                                             <button
                                                                 type="button"
                                                                 onClick={cancelInfoItemCloser}
-                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {common.cancel}
                                                             </button>
                                                         </div>
 
                                                         <label className="mt-4 block space-y-2">
-                                                            <span className="text-sm font-medium text-slate-700">{tsn.close_action_comment_label}</span>
+                                                            <span className="text-base font-medium text-slate-700">{tsn.close_action_comment_label}</span>
                                                             <textarea
                                                                 value={closeInfoItemForm.data.closure_comment}
                                                                 onChange={(event) => closeInfoItemForm.setData('closure_comment', event.target.value)}
                                                                 rows={3}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
                                                                 placeholder={tsn.close_action_placeholder}
                                                             />
-                                                            <p className="text-xs leading-5 text-slate-500">
+                                                            <p className="text-base leading-6 text-slate-600">
                                                                 {tsn.close_action_note}
                                                             </p>
                                                             {closeInfoItemForm.errors.closure_comment ? (
-                                                                <p className="text-sm text-rose-600">{closeInfoItemForm.errors.closure_comment}</p>
+                                                                <p className="text-base text-rose-700">{closeInfoItemForm.errors.closure_comment}</p>
                                                             ) : null}
                                                         </label>
 
@@ -1827,7 +1827,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             <button
                                                                 type="submit"
                                                                 disabled={closeInfoItemForm.processing}
-                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {closeInfoItemForm.processing ? tsn.close_action_saving : tsn.close_action_save}
                                                             </button>
@@ -1839,7 +1839,7 @@ export default function SavedNoticeShow({ notice }) {
                                     })}
                                 </div>
                             ) : (
-                                <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                                <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-base text-slate-600">
                                     {tsn.no_actions_yet}
                                 </div>
                             )}
@@ -1850,12 +1850,12 @@ export default function SavedNoticeShow({ notice }) {
                                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
                                         <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.submissions_title}</h2>
-                                        <p className="mt-1 text-sm text-slate-500">{tsn.submissions_subtitle}</p>
+                                        <p className="mt-1 text-base text-slate-600">{tsn.submissions_subtitle}</p>
                                     </div>
                                 </div>
 
                                 {notice.submissions.length === 0 ? (
-                                        <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                                        <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-base text-slate-600">
                                         {tsn.no_submissions}
                                     </div>
                                 ) : (
@@ -1867,16 +1867,16 @@ export default function SavedNoticeShow({ notice }) {
                                             >
                                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                                     <div>
-                                                        <div className="text-sm font-semibold text-slate-950">{submission.label}</div>
-                                                        <div className="mt-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                        <div className="text-base font-semibold text-slate-950">{submission.label}</div>
+                                                        <div className="mt-1 text-base font-medium uppercase tracking-[0.12em] text-slate-600">
                                                             {tsn.round_prefix} {submission.sequence_number}
                                                         </div>
                                                     </div>
 
                                                     <div
                                                         className={classNames(
-                                                            'text-sm font-medium',
-                                                            submission.submitted_at ? 'text-slate-900' : 'text-slate-500',
+                                                            'text-base font-medium',
+                                                            submission.submitted_at ? 'text-slate-900' : 'text-slate-600',
                                                         )}
                                                     >
                                                         {submission.submitted_at ? formatDate(submission.submitted_at, locale, { hour: '2-digit', minute: '2-digit' }) : tsn.not_registered}
@@ -1890,12 +1890,12 @@ export default function SavedNoticeShow({ notice }) {
                         ) : null}
                     </main>
 
-                    <aside className="space-y-3">
+                    <aside className="min-w-0 space-y-3">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
                                     <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.actions_title}</h2>
-                                    <p className="mt-1 text-sm text-slate-500">{tsn.actions_subtitle}</p>
+                                    <p className="mt-1 text-base text-slate-600">{tsn.actions_subtitle}</p>
                                 </div>
 
                                 <div className="space-y-3">
@@ -1906,10 +1906,10 @@ export default function SavedNoticeShow({ notice }) {
                                         isOpen={openActionSection === 'decision'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'decision' ? null : 'decision'))}
                                     >
-                                        <p className="text-sm leading-6 text-slate-600">{guidance.nextStepDescription}</p>
+                                        <p className="text-base leading-6 text-slate-600">{guidance.nextStepDescription}</p>
 
                                         {statusForm.errors.status ? (
-                                            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-medium text-rose-700">
+                                            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
                                                 {statusForm.errors.status}
                                             </div>
                                         ) : null}
@@ -1921,7 +1921,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     onClick={() => triggerStatusAction(primaryAction)}
                                                     disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
                                                     className={classNames(
-                                                        'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                        'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
                                                         actionButtonClassName(primaryAction.tone, primaryAction.status),
                                                     )}
                                                 >
@@ -1938,7 +1938,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             onClick={() => triggerStatusAction(action)}
                                                             disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
                                                             className={classNames(
-                                                                'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
                                                                 actionButtonClassName(action.tone, action.status),
                                                             )}
                                                         >
@@ -1949,7 +1949,7 @@ export default function SavedNoticeShow({ notice }) {
                                             ) : null}
 
                                             {!primaryAction && secondaryActions.length === 0 ? (
-                                                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-500">
+                                                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-base text-slate-600">
                                                     {noStatusActionsMessage}
                                                 </div>
                                             ) : null}
@@ -1964,20 +1964,20 @@ export default function SavedNoticeShow({ notice }) {
                                                 className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                             >
                                                 {closureActionGuidance(activeClosureAction.status, tsn) ? (
-                                                    <div className={classNames('rounded-xl border px-3 py-3 text-sm font-medium', closureActionGuidance(activeClosureAction.status, tsn)?.className)}>
+                                                    <div className={classNames('rounded-xl border px-3 py-3 text-base font-medium', closureActionGuidance(activeClosureAction.status, tsn)?.className)}>
                                                         {closureActionGuidance(activeClosureAction.status, tsn)?.text}
                                                     </div>
                                                 ) : null}
 
                                                 <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_reason">
+                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_closure_reason">
                                                         {tsn.close_reason_label}
                                                     </label>
                                                     <select
                                                         id="bid_closure_reason"
                                                         value={statusForm.data.bid_closure_reason}
                                                         onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
                                                         <option value="">{tsn.close_reason_placeholder}</option>
                                                         {closureReasonOptions.map((option) => (
@@ -1987,12 +1987,12 @@ export default function SavedNoticeShow({ notice }) {
                                                         ))}
                                                     </select>
                                                     {statusForm.errors.bid_closure_reason ? (
-                                                        <p className="text-sm text-rose-600">{statusForm.errors.bid_closure_reason}</p>
+                                                        <p className="text-base text-rose-700">{statusForm.errors.bid_closure_reason}</p>
                                                     ) : null}
                                                 </div>
 
                                                 <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_note">
+                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_closure_note">
                                                         {tsn.close_note_label}
                                                     </label>
                                                     <textarea
@@ -2000,7 +2000,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         value={statusForm.data.bid_closure_note}
                                                         onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
                                                         rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                         placeholder={tsn.close_note_placeholder}
                                                     />
                                                 </div>
@@ -2009,7 +2009,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     <button
                                                         type="submit"
                                                         disabled={isStatusActionProcessing}
-                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         {isStatusActionProcessing ? tsn.updating : statusActionLabel(activeClosureAction.status, tsn)}
                                                     </button>
@@ -2017,7 +2017,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         type="button"
                                                         onClick={resetStatusForm}
                                                         disabled={isStatusActionProcessing}
-                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         {common.cancel}
                                                     </button>
@@ -2030,7 +2030,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 type="button"
                                                 onClick={createSubmission}
                                                 disabled={submissionForm.processing}
-                                                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {submissionForm.processing ? tsn.registering : tsn.add_submission}
                                             </button>
@@ -2053,7 +2053,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                                                 <input type="hidden" name="_method" value="patch" />
                                                 <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_manager_user_id">
+                                                    <label className="text-base font-medium text-slate-800" htmlFor="bid_manager_user_id">
                                                         {tsn.bid_manager_section_title}
                                                     </label>
                                                     <select
@@ -2061,7 +2061,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         name="bid_manager_user_id"
                                                         value={bidManagerForm.data.bid_manager_user_id}
                                                         onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
                                                         <option value="">{tsn.not_set}</option>
                                                         {bidManagerOptions.map((option) => (
@@ -2070,18 +2070,18 @@ export default function SavedNoticeShow({ notice }) {
                                                             </option>
                                                         ))}
                                                     </select>
-                                                    <p className="text-xs text-slate-400">
+                                                    <p className="text-base text-slate-600">
                                                         {tsn.bid_manager_help}
                                                     </p>
                                                     {(bidManagerForm.errors.bid_manager_user_id || errors.bid_manager_user_id) ? (
-                                                        <p className="text-sm text-rose-600">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
+                                                        <p className="text-base text-rose-700">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
                                                     ) : null}
                                                 </div>
 
                                                 <button
                                                     type="submit"
                                                     disabled={!isBidManagerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {bidManagerForm.processing ? tsn.bid_manager_saving : tsn.bid_manager_save}
                                                 </button>
@@ -2105,7 +2105,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
                                                 <input type="hidden" name="_method" value="patch" />
                                                 <div className="space-y-1.5">
-                                                    <label className="text-sm font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
+                                                    <label className="text-base font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
                                                         {tsn.opportunity_owner_section_title}
                                                     </label>
                                                     <select
@@ -2113,7 +2113,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         name="opportunity_owner_user_id"
                                                         value={opportunityOwnerForm.data.opportunity_owner_user_id}
                                                         onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
                                                         <option value="">{tsn.not_set}</option>
                                                         {opportunityOwnerOptions.map((option) => (
@@ -2122,18 +2122,18 @@ export default function SavedNoticeShow({ notice }) {
                                                             </option>
                                                         ))}
                                                     </select>
-                                                    <p className="text-xs text-slate-400">
+                                                    <p className="text-base text-slate-600">
                                                         {tsn.opportunity_owner_help}
                                                     </p>
                                                     {(opportunityOwnerForm.errors.opportunity_owner_user_id || errors.opportunity_owner_user_id) ? (
-                                                        <p className="text-sm text-rose-600">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
+                                                        <p className="text-base text-rose-700">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
                                                     ) : null}
                                                 </div>
 
                                                 <button
                                                     type="submit"
                                                     disabled={!isOpportunityOwnerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {opportunityOwnerForm.processing ? tsn.opportunity_owner_saving : tsn.opportunity_owner_save}
                                                 </button>
@@ -2159,15 +2159,15 @@ export default function SavedNoticeShow({ notice }) {
                                                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                                 <div className="space-y-2">
                                                                     <div>
-                                                    <div className="text-sm font-semibold text-slate-950">
+                                                    <div className="text-base font-semibold text-slate-950">
                                                                             {access.user?.name || tsn.unknown_user}
                                                                         </div>
-                                                                        <div className="text-xs text-slate-500">
+                                                                        <div className="text-base text-slate-600">
                                                                             {access.user?.email || '—'}
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                                                                    <div className="flex flex-wrap gap-2 text-base text-slate-600">
                                                                         <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
                                                                             {accessRoleLabel(access.access_role, tsn)}
                                                                         </span>
@@ -2184,7 +2184,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => revokeCaseAccess(access.revoke_url)}
-                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                                                                     >
                                                                         {tsn.access_revoke}
                                                                     </button>
@@ -2194,7 +2194,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     ))}
                                                 </div>
                                             ) : (
-                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-base text-slate-600">
                                                     {tsn.case_access_empty}
                                                 </div>
                                             )}
@@ -2203,7 +2203,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <form onSubmit={grantCaseAccess} className="space-y-4 border-t border-slate-200 pt-4">
                                                     <div className="grid gap-4">
                                                         <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium text-slate-800" htmlFor="case_access_user_id">
+                                                            <label className="text-base font-medium text-slate-800" htmlFor="case_access_user_id">
                                                                 {tsn.case_access_user_label}
                                                             </label>
                                                             <select
@@ -2211,7 +2211,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 name="user_id"
                                                                 value={caseAccessForm.data.user_id}
                                                                 onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                             >
                                                                 <option value="">{tsn.case_access_user_placeholder}</option>
                                                                 {caseAccessUserOptions.map((option) => (
@@ -2221,12 +2221,12 @@ export default function SavedNoticeShow({ notice }) {
                                                                 ))}
                                                             </select>
                                                             {(caseAccessForm.errors.user_id || errors.user_id) ? (
-                                                                <p className="text-sm text-rose-600">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
+                                                                <p className="text-base text-rose-700">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
                                                             ) : null}
                                                         </div>
 
                                                         <div className="space-y-1.5">
-                                                            <label className="text-sm font-medium text-slate-800" htmlFor="case_access_role">
+                                                            <label className="text-base font-medium text-slate-800" htmlFor="case_access_role">
                                                                 {tsn.case_access_role_label}
                                                             </label>
                                                             <select
@@ -2234,7 +2234,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 name="access_role"
                                                                 value={caseAccessForm.data.access_role}
                                                                 onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
-                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                             >
                                                                 {caseAccessRoleOptions.map((option) => (
                                                                     <option key={option.value} value={option.value}>
@@ -2243,7 +2243,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 ))}
                                                             </select>
                                                             {(caseAccessForm.errors.access_role || errors.access_role) ? (
-                                                                <p className="text-sm text-rose-600">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
+                                                                <p className="text-base text-rose-700">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
                                                             ) : null}
                                                         </div>
                                                     </div>
@@ -2252,14 +2252,14 @@ export default function SavedNoticeShow({ notice }) {
                                                         <button
                                                             type="submit"
                                                             disabled={!isCaseAccessDirty || caseAccessForm.processing || !caseAccess.store_url}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {caseAccessForm.processing ? tsn.case_access_saving : tsn.case_access_save}
                                                         </button>
                                                     </div>
                                                 </form>
                                             ) : (
-                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-base text-slate-600">
                                                     {tsn.case_access_no_permission}
                                                 </div>
                                             )}
@@ -2281,10 +2281,10 @@ export default function SavedNoticeShow({ notice }) {
                                                 >
                                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                         <div>
-                                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
                                                                 {tsn.archive_move_title}
                                                             </div>
-                                                            <p className="mt-1 text-sm text-slate-600">
+                                                            <p className="mt-1 text-base text-slate-600">
                                                                 {tsn.archive_move_help}
                                                             </p>
                                                         </div>
@@ -2292,18 +2292,18 @@ export default function SavedNoticeShow({ notice }) {
                                                         <button
                                                             type="button"
                                                             onClick={cancelArchiveSavedNoticeForm}
-                                                            className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
                                                             {common.cancel}
                                                         </button>
                                                     </div>
 
                                                     <label className="mt-4 block space-y-2">
-                                                        <span className="text-sm font-medium text-slate-700">{tsn.archive_type_label}</span>
+                                                        <span className="text-base font-medium text-slate-700">{tsn.archive_type_label}</span>
                                                         <select
                                                             value={archiveHistoryForm.data.history_type}
                                                             onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
-                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         >
                                                             <option value="">{tsn.archive_type_placeholder}</option>
                                                             {historyTypeOptions.map((option) => (
@@ -2313,7 +2313,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             ))}
                                                         </select>
                                                         {archiveHistoryForm.errors.history_type ? (
-                                                            <p className="text-sm text-rose-600">{archiveHistoryForm.errors.history_type}</p>
+                                                            <p className="text-base text-rose-700">{archiveHistoryForm.errors.history_type}</p>
                                                         ) : null}
                                                     </label>
 
@@ -2322,7 +2322,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             type="button"
                                                             onClick={submitArchiveSavedNotice}
                                                             disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {archiveHistoryForm.processing ? tsn.archive_saving : tsn.archive_save}
                                                         </button>
@@ -2333,14 +2333,14 @@ export default function SavedNoticeShow({ notice }) {
                                                     <button
                                                         type="button"
                                                         onClick={openArchiveSavedNoticeForm}
-                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
                                                         {tsn.archive_case_action}
                                                     </button>
                                                 </div>
                                             )
                                         ) : !notice.archived_at ? (
-                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-base text-slate-600">
                                                 {tsn.archive_not_allowed}
                                             </div>
                                         ) : null}
