@@ -920,12 +920,40 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Generate and persist one answer draft for a visible requirement candidate.
+     * Purpose: Legacy Knowledge Base answer-draft generation endpoint — DEPRECATED (Wiki-answer
+     * consolidation): the Enterprise Wiki answer engine (generateRequirementWikiAnswer()) is now the
+     * sole operational answer generator in "I arbeid". This endpoint no longer calls
+     * RequirementAnswerDraftService; it only performs its existing authorization/customer-resolution
+     * side effects, then returns a controlled 410 Gone — never a 500. The original logic is preserved
+     * verbatim as legacyGenerateRequirementAnswerDraft() (unused, undeleted) so it is not lost.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A 410 Gone JSON response.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function generateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $record->aiRequirements()->whereKey($requirement->id)->firstOrFail();
+
+        return response()->json([
+            'requirement_id' => $requirement->id,
+            'error' => 'Svarutkast fra Kunnskapsbase er avviklet. Bruk Wiki-svar i stedet.',
+        ], 410);
+    }
+
+    /**
+     * Purpose: The answer-draft generation logic generateRequirementAnswerDraft() used to run before
+     * this flow was replaced by the Wiki-answer engine — kept, unused by any route, purely so the
+     * underlying capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A JSON response with the persisted answer draft payload.
      * Side effects: May call OpenAI and updates the requirement row.
      */
-    public function generateRequirementAnswerDraft(
+    private function legacyGenerateRequirementAnswerDraft(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
@@ -1204,12 +1232,39 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Persist edits to one visible requirement answer draft.
+     * Purpose: Legacy Knowledge Base answer-draft edit endpoint — DEPRECATED (Wiki-answer
+     * consolidation): editing now happens on the Wiki answer (updateRequirementWikiAnswer()). This
+     * endpoint only performs its existing authorization/customer-resolution side effects, then
+     * returns a controlled 410 Gone — never a 500. Original logic preserved verbatim as
+     * legacyUpdateRequirementAnswerDraft() (unused, undeleted).
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A 410 Gone JSON response.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function updateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $record->aiRequirements()->whereKey($requirement->id)->firstOrFail();
+
+        return response()->json([
+            'requirement_id' => $requirement->id,
+            'error' => 'Svarutkast fra Kunnskapsbase er avviklet. Bruk Wiki-svar i stedet.',
+        ], 410);
+    }
+
+    /**
+     * Purpose: The answer-draft edit logic updateRequirementAnswerDraft() used to run before this
+     * flow was replaced by the Wiki-answer engine — kept, unused by any route, purely so the
+     * underlying capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A JSON response with the persisted answer draft payload.
      * Side effects: Updates the requirement row.
      */
-    public function updateRequirementAnswerDraft(
+    private function legacyUpdateRequirementAnswerDraft(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
