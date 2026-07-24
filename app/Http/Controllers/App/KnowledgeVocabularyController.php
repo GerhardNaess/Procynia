@@ -15,10 +15,8 @@ use App\Services\Ai\Knowledge\KnowledgeVocabularyAnalysisBatchService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularyApprovalService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Support\CustomerContext;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -34,8 +32,7 @@ class KnowledgeVocabularyController extends Controller
         private readonly KnowledgeVocabularyAnalysisBatchService $analysisBatchService,
         private readonly KnowledgeVocabularyApprovalService $approvalService,
         private readonly AiUsageGuard $aiUsageGuard,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Render the vocabulary workspace within the AI area.
@@ -68,8 +65,30 @@ class KnowledgeVocabularyController extends Controller
      * Inputs: The current frontend request.
      * Returns: A redirect back to the vocabulary workspace.
      * Side effects: Persists a batch row, runs analysis, and creates pending suggestions.
+     *
+     * DEPRECATED (AI-to-Wiki consolidation, see docs/ai-wiki-consolidation-analysis.md): new
+     * analysis batches are blocked below — this feature's approved vocabulary only ever
+     * constrained two narrow chunk-metadata fields (service_product_tag/theme_tag) during Knowledge
+     * Base ingestion and never reached the Ai/Requirements or Ai/Retrieval prompt logic. Existing
+     * approved terms and pending suggestions remain readable/reviewable; no data is deleted.
      */
     public function storeBatch(Request $request): RedirectResponse
+    {
+        // Authorization/customer-resolution side effects only — the batch is never created below.
+        $this->frontendContext($request);
+
+        return redirect()
+            ->route('app.ai.knowledge-vocabulary.index')
+            ->with('error', __('procynia.ai.knowledge_vocabulary_deprecated_batch_message'));
+    }
+
+    /**
+     * Purpose: The actual batch-creation logic storeBatch() used to run before this feature was
+     * deprecated in favor of Enterprise Wiki — kept, unused by any route, purely so the underlying
+     * capability is not deleted per the "no destructive cleanup in this phase" rule. Safe to remove
+     * once Standardvokabular is fully retired.
+     */
+    private function legacyStoreBatch(Request $request): RedirectResponse
     {
         [$user, $customerId] = $this->frontendContext($request);
         $payload = $request->validate([
@@ -436,12 +455,12 @@ class KnowledgeVocabularyController extends Controller
                         'id' => (int) data_get($term, 'id', 0),
                         'type' => (string) data_get($term, 'type', $type),
                         'canonical_name' => (string) data_get($term, 'canonical_name', ''),
-                'synonyms' => (array) data_get($term, 'synonyms', []),
-                'description' => data_get($term, 'description'),
-                'approved' => (bool) data_get($term, 'approved', true),
-                'edit_url' => route('app.ai.knowledge-vocabulary.terms.update', ['term' => (int) data_get($term, 'id', 0)]),
-                'delete_url' => route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => (int) data_get($term, 'id', 0)]),
-            ])
+                        'synonyms' => (array) data_get($term, 'synonyms', []),
+                        'description' => data_get($term, 'description'),
+                        'approved' => (bool) data_get($term, 'approved', true),
+                        'edit_url' => route('app.ai.knowledge-vocabulary.terms.update', ['term' => (int) data_get($term, 'id', 0)]),
+                        'delete_url' => route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => (int) data_get($term, 'id', 0)]),
+                    ])
                     ->values()
                     ->all(),
             ];
@@ -797,5 +816,4 @@ class KnowledgeVocabularyController extends Controller
 
         return $normalized !== '' ? $normalized : $type;
     }
-
 }
