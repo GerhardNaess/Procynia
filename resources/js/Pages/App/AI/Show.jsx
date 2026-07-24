@@ -1696,7 +1696,6 @@ export default function AiShow({
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
-    answer_basis_items: answerBasisItemsProp = [],
     export_docx_url: exportDocxUrl = '',
 }) {
     const currentCaseId = caseData?.id ?? null;
@@ -2027,25 +2026,17 @@ export default function AiShow({
             ? rememberedRequirementId
             : null;
     });
-    const [answerDraftsByRequirementId, setAnswerDraftsByRequirementId] = useState({});
-    const [answerBasisSelectionsByRequirementId, setAnswerBasisSelectionsByRequirementId] = useState({});
-    const [answerDraftGeneratingRequirementId, setAnswerDraftGeneratingRequirementId] = useState(null);
-    const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
-    const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
-    const [answerDraftError, setAnswerDraftError] = useState(null);
+    // Enterprise Wiki answer engine is the sole operational answer generator in "I arbeid"
+    // (AI-to-Wiki consolidation, Wiki-answer-as-sole-engine phase). wikiAnswerEditsByRequirementId
+    // holds the local, editable buffer for the generated answer text — mirrors the shape the legacy
+    // answer-draft flow used (text + isDirty), so a hand-edited answer is never lost until saved.
+    const [wikiAnswerEditsByRequirementId, setWikiAnswerEditsByRequirementId] = useState({});
     const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
+    const [wikiAnswerSavingRequirementId, setWikiAnswerSavingRequirementId] = useState(null);
     const [wikiAnswerCopyStatus, setWikiAnswerCopyStatus] = useState(null);
     const [wikiAnswerError, setWikiAnswerError] = useState(null);
-    // Right column tab switcher: 'answer_draft' (existing, default) or 'wiki_answer' (Fase 9,
-    // fully separate answer engine — never shares state with the answer-draft tab).
-    const [rightPanelTab, setRightPanelTab] = useState('answer_draft');
-    const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
-    const [answerDraftMissingKnowledgeDetailsExpanded, setAnswerDraftMissingKnowledgeDetailsExpanded] = useState(false);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
     const [promptEditorOpenRequirementId, setPromptEditorOpenRequirementId] = useState(null);
-    const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
-    const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
-    const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
     const [selectedEvidence, setSelectedEvidence] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
@@ -2069,16 +2060,10 @@ export default function AiShow({
     const assignedUserOptions = Array.isArray(assignedUserOptionsProp) ? assignedUserOptionsProp : [];
     const assignableUsers = Array.isArray(assignableUsersProp) ? assignableUsersProp : [];
     const documentRows = Array.isArray(documents) ? documents : [];
-    const answerBasisItems = Array.isArray(answerBasisItemsProp) ? answerBasisItemsProp : [];
     const requirementExtractionBanner = getRequirementExtractionBannerData(documentRows);
     const extractedRequirementRows = requirementRows.filter(
         (requirement) => String(requirement?.source_type ?? '').trim() !== 'manual',
     );
-    const answerBasisItemsById = answerBasisItems.reduce((accumulator, item) => {
-        accumulator[String(item.id)] = item;
-
-        return accumulator;
-    }, {});
     const documentNeedsRefresh = hasActiveDocumentProcessing(documentRows);
     const editingRequirement = editingRequirementId !== null
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
@@ -2128,9 +2113,8 @@ export default function AiShow({
         || workingRequirementId !== null
         || refreshingAssessments
         || refreshingEvidence
-        || answerDraftGeneratingRequirementId !== null
-        || answerDraftSavingRequirementId !== null
-        || answerBasisSelectionSavingRequirementId !== null
+        || wikiAnswerGeneratingRequirementId !== null
+        || wikiAnswerSavingRequirementId !== null
         || rejectingAllRequirements
         || updatingEvidenceId !== null
         || manualRequirementForm.processing
@@ -2148,45 +2132,25 @@ export default function AiShow({
         setRequirementRows(Array.isArray(requirements) ? requirements : []);
     }, [requirements]);
 
+    // Reconciles the local Wiki-answer edit buffer with server state on every requirementRows
+    // update (e.g. after a page reload, or another action refreshes rows) — never clobbers an
+    // unsaved hand-edit (isDirty), mirrors the equivalent pattern the legacy answer-draft flow used.
     useEffect(() => {
-        setAnswerDraftsByRequirementId((currentState) => {
+        setWikiAnswerEditsByRequirementId((currentState) => {
             const nextState = { ...currentState };
 
             requirementRows.forEach((requirement) => {
                 const requirementKey = String(requirement.id);
-                const serverDraftState = buildRequirementAnswerDraftState(requirement);
-                const currentDraftState = nextState[requirementKey];
+                const serverText = normalizeWikiAnswerText(requirement.wiki_answer?.text ?? '');
+                const currentEdit = nextState[requirementKey];
 
-                if (currentDraftState === undefined) {
-                    nextState[requirementKey] = serverDraftState;
-                    return;
-                }
-
-                if (!currentDraftState.isDirty) {
-                    nextState[requirementKey] = {
-                        ...currentDraftState,
-                        text: serverDraftState.text,
-                        persistedText: serverDraftState.persistedText,
-                        generatedAt: serverDraftState.generatedAt,
-                        knowledgeGrounding: serverDraftState.knowledgeGrounding ?? currentDraftState.knowledgeGrounding ?? null,
-                        retrievalSources: currentDraftState.retrievalSources ?? serverDraftState.retrievalSources ?? [],
-                        isDirty: false,
-                    };
+                if (currentEdit === undefined || !currentEdit.isDirty) {
+                    nextState[requirementKey] = { text: serverText, isDirty: false };
                 }
             });
 
             return nextState;
         });
-    }, [requirementRows]);
-
-    useEffect(() => {
-        const nextSelections = {};
-
-        requirementRows.forEach((requirement) => {
-            nextSelections[String(requirement.id)] = buildRequirementAnswerBasisSelectionState(requirement);
-        });
-
-        setAnswerBasisSelectionsByRequirementId(nextSelections);
     }, [requirementRows]);
 
     useEffect(() => {
@@ -2296,34 +2260,22 @@ export default function AiShow({
         ? requirementRows.find((requirement) => String(requirement.id) === String(activeRequirementId)) ?? null
         : null;
     const activeRequirementKey = activeRequirement !== null ? String(activeRequirement.id) : null;
-    const activeRequirementServerDraft = activeRequirement !== null
-        ? buildRequirementAnswerDraftState(activeRequirement)
-        : null;
-    const activeRequirementLocalDraft = activeRequirementKey !== null
-        ? answerDraftsByRequirementId[activeRequirementKey] ?? null
-        : null;
-    const activeRequirementDraft = activeRequirement !== null
-        ? (activeRequirementLocalDraft?.isDirty
-            ? activeRequirementLocalDraft
-            : activeRequirementServerDraft ?? activeRequirementLocalDraft)
-        : null;
-    const activeRequirementBlockedMissingKnowledge = activeRequirementDraft?.generationState === 'blocked_missing_knowledge';
-    const activeRequirementPartialDraft = activeRequirementDraft?.generationState === 'partial';
-    const activeRequirementHasDraft = activeRequirementDraft !== null
-        && !activeRequirementBlockedMissingKnowledge
-        && (
-            activeRequirementDraft.isDirty
-            || activeRequirementDraft.generatedAt !== null
-            || normalizeAnswerDraftText(activeRequirementDraft.persistedText).trim() !== ''
-            || normalizeAnswerDraftText(activeRequirementDraft.text).trim() !== ''
-        );
     const activeRequirementDisplayIdentifier = activeRequirement?.current_requirement_identifier
         ?? activeRequirement?.requirement_identifier
         ?? '—';
     // Derived directly from requirementRows (never a separate local state map) so switching the
     // active requirement always shows that requirement's own Wiki answer — no stale carry-over.
     const activeRequirementWikiAnswer = activeRequirement?.wiki_answer ?? null;
-    const activeRequirementWikiAnswerText = normalizeWikiAnswerText(activeRequirementWikiAnswer?.text ?? '');
+    const activeRequirementWikiAnswerServerText = normalizeWikiAnswerText(activeRequirementWikiAnswer?.text ?? '');
+    const activeRequirementWikiAnswerLocalEdit = activeRequirementKey !== null
+        ? wikiAnswerEditsByRequirementId[activeRequirementKey] ?? null
+        : null;
+    // The operative, editable answer text: the local hand-edit when dirty, otherwise the server
+    // value — same pattern the legacy answer-draft flow used for its editable textarea.
+    const activeRequirementWikiAnswerText = activeRequirementWikiAnswerLocalEdit?.isDirty
+        ? activeRequirementWikiAnswerLocalEdit.text
+        : activeRequirementWikiAnswerServerText;
+    const activeRequirementWikiAnswerIsDirty = activeRequirementWikiAnswerLocalEdit?.isDirty ?? false;
     const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
     const activeRequirementWikiAnswerStaleContext = activeRequirementWikiAnswer?.stale_context ?? null;
     const activeRequirementWikiAnswerStaleSubjectName = (() => {
@@ -2396,42 +2348,6 @@ export default function AiShow({
         mixed: 'bg-violet-50 text-violet-700 ring-violet-200',
     };
     const activeRequirementWikiAnswerHasText = activeRequirementWikiAnswerText.trim() !== '';
-    const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
-    const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
-    const activeRequirementMissingKnowledgeSummary = typeof activeRequirementMissingKnowledge?.missing_knowledge_summary === 'string'
-        ? activeRequirementMissingKnowledge.missing_knowledge_summary.trim()
-        : '';
-    const activeRequirementMissingKnowledgeReasoning = typeof activeRequirementMissingKnowledge?.reasoning_summary === 'string'
-        ? activeRequirementMissingKnowledge.reasoning_summary.trim()
-        : '';
-    const activeRequirementMissingKnowledgeExplanation = typeof activeRequirementMissingKnowledge?.message === 'string'
-        ? activeRequirementMissingKnowledge.message.trim()
-        : '';
-    const activeRequirementMissingKnowledgeRecommendedDocumentTitle = typeof activeRequirementMissingKnowledge?.recommended_document_title === 'string'
-        ? activeRequirementMissingKnowledge.recommended_document_title.trim()
-        : '';
-    const activeRequirementMissingKnowledgeSuggestedFilename = typeof activeRequirementMissingKnowledge?.suggested_filename === 'string'
-        ? activeRequirementMissingKnowledge.suggested_filename.trim()
-        : '';
-    const activeRequirementMissingKnowledgeHasDetails = activeRequirementMissingKnowledge !== null
-        && (
-            activeRequirementMissingKnowledgeSummary !== ''
-            || activeRequirementMissingKnowledgeReasoning !== ''
-            || (activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0
-            || (activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0
-            || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0
-        );
-    const activeRequirementAnswerBasisItemIds = activeRequirementKey !== null
-        ? answerBasisSelectionsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerBasisSelectionState(activeRequirement)
-        : [];
-    const activeRequirementSelectedAnswerBasisItems = activeRequirementAnswerBasisItemIds
-        .map((answerBasisItemId) => answerBasisItemsById[String(answerBasisItemId)])
-        .filter(Boolean);
-    const activeRequirementRetrievalSources = Array.isArray(activeRequirementDraft?.retrievalSources)
-        ? activeRequirementDraft.retrievalSources
-        : [];
-    const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
-    const activeRequirementImageRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
     const responsiblePickerRequirement = responsiblePickerRequirementId !== null
         ? requirementRows.find((requirement) => String(requirement.id) === String(responsiblePickerRequirementId)) ?? null
         : null;
@@ -2477,19 +2393,7 @@ export default function AiShow({
     });
 
     useEffect(() => {
-        setAnswerDraftCopyStatus(null);
-    }, [activeRequirementKey]);
-
-    useEffect(() => {
         setWikiAnswerCopyStatus(null);
-    }, [activeRequirementKey]);
-
-    useEffect(() => {
-        setAnswerDraftReaderExpanded(false);
-    }, [activeRequirementKey]);
-
-    useEffect(() => {
-        setAnswerDraftMissingKnowledgeDetailsExpanded(false);
     }, [activeRequirementKey]);
 
     useEffect(() => {
@@ -2693,117 +2597,47 @@ export default function AiShow({
         });
     };
 
-    const requestAnswerDraftGeneration = async (requirement, { force = false } = {}) => {
+    // Enterprise Wiki answer engine is the sole operational answer generator in "I arbeid"
+    // (AI-to-Wiki consolidation). Generates/regenerates requirement.wiki_answer — the operative,
+    // editable answer — using only approved Wiki content plus the case's ai_instructions and this
+    // requirement's own one-off prompt.
+    const requestWikiAnswerGeneration = async (requirement) => {
         if (!canUseAiOffer) {
-            setAnswerDraftError(tai.ai_access_unavailable_message);
+            setWikiAnswerError({ requirementId: requirement?.id ?? null, message: tai.ai_access_unavailable_message });
             return;
         }
 
-        if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
+        if (!requirement || !requirement.wiki_answer_generate_url || requirement.approval_status === 'rejected') {
+            return;
+        }
+
+        if (wikiAnswerGeneratingRequirementId !== null || wikiAnswerSavingRequirementId !== null) {
             return;
         }
 
         const requirementKey = String(requirement.id);
-        const selectedAnswerBasisItemIds = answerBasisSelectionsByRequirementId[requirementKey]
-            ?? buildRequirementAnswerBasisSelectionState(requirement);
         const userAnswerPrompt = normalizeAnswerDraftText(answerDraftPromptsByRequirementId[requirementKey] ?? '');
 
-        setActiveRequirementId(String(requirement.id));
-        setAnswerDraftError(null);
-        setAnswerBasisSelectionError(null);
-
-        if (!requirement.answer_draft_generate_url) {
-            setAnswerDraftError(tai.answer_draft_cannot_generate);
-            return;
-        }
-
-        if (
-            answerDraftGeneratingRequirementId !== null
-            || answerDraftSavingRequirementId !== null
-            || answerBasisSelectionSavingRequirementId !== null
-        ) {
-            return;
-        }
-
-        setAnswerDraftGeneratingRequirementId(requirement.id);
-
-        try {
-            const response = await window.axios.post(requirement.answer_draft_generate_url, {
-                answer_basis_item_ids: selectedAnswerBasisItemIds,
-                force,
-                user_answer_prompt: userAnswerPrompt,
-            }, { timeout: 320000 });
-            const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
-            const normalizedText = normalizeAnswerDraftText(answerDraft.text);
-            const knowledgeGrounding = normalizeKnowledgeGroundingPayload(response?.data?.knowledge_grounding ?? null);
-            const responseAnswerBasisItemIds = normalizeAnswerBasisItemIds(
-                response?.data?.answer_basis_item_ids ?? selectedAnswerBasisItemIds,
-            );
-            const retrievalSources = normalizeRetrievalSourcesPayload(response?.data?.retrieval_sources ?? []);
-
-            setAnswerBasisSelectionsByRequirementId((currentState) => ({
-                ...currentState,
-                [requirementKey]: responseAnswerBasisItemIds,
-            }));
-
-            setAnswerDraftsByRequirementId((currentState) => ({
-                ...currentState,
-                [requirementKey]: {
-                    text: normalizedText,
-                    persistedText: normalizedText,
-                    generatedAt: answerDraft.generated_at,
-                    knowledgeGrounding,
-                    generationState: answerDraft.generation_state ?? (normalizedText !== '' || answerDraft.generated_at !== null ? 'generated' : null),
-                    missingKnowledge: answerDraft.missing_knowledge ?? null,
-                    retrievalSources,
-                    isDirty: false,
-                },
-            }));
-
-            setRequirementRows((currentRows) =>
-                currentRows.map((row) => {
-                    if (row.id !== requirement.id) {
-                        return row;
-                    }
-                    const rowUpdates = {};
-                    if (Object.prototype.hasOwnProperty.call(response.data, 'answer_draft')) {
-                        rowUpdates.answer_draft = response.data.answer_draft;
-                    }
-                    if (Object.prototype.hasOwnProperty.call(response.data, 'knowledge_sources_sent_to_ai')) {
-                        rowUpdates.knowledge_sources_sent_to_ai = response.data.knowledge_sources_sent_to_ai ?? [];
-                    }
-                    return { ...row, ...rowUpdates };
-                })
-            );
-        } catch (error) {
-            setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke generere svarutkast.'));
-        } finally {
-            setAnswerDraftGeneratingRequirementId(null);
-        }
-    };
-
-    // Entirely separate from requestAnswerDraftGeneration above: a different endpoint, a
-    // different persisted answer (requirement.wiki_answer, not answer_draft), and no shared
-    // state — generating a Wiki answer never touches the existing answer-draft state or flow.
-    const requestWikiAnswerGeneration = async (requirement) => {
-        if (!requirement || !requirement.wiki_answer_generate_url) {
-            return;
-        }
-
-        if (wikiAnswerGeneratingRequirementId !== null) {
-            return;
-        }
-
+        setActiveRequirementId(requirementKey);
         setWikiAnswerError(null);
         setWikiAnswerGeneratingRequirementId(requirement.id);
 
         try {
-            const response = await window.axios.post(requirement.wiki_answer_generate_url, {}, { timeout: 120000 });
+            const response = await window.axios.post(requirement.wiki_answer_generate_url, {
+                user_answer_prompt: userAnswerPrompt,
+            }, { timeout: 120000 });
             const wikiAnswer = response?.data?.wiki_answer ?? null;
 
             setRequirementRows((currentRows) =>
                 currentRows.map((row) => (row.id === requirement.id ? { ...row, wiki_answer: wikiAnswer } : row))
             );
+
+            // A fresh generation replaces any unsaved hand-edit for this requirement.
+            setWikiAnswerEditsByRequirementId((currentState) => {
+                const nextState = { ...currentState };
+                delete nextState[requirementKey];
+                return nextState;
+            });
         } catch (error) {
             setWikiAnswerError({
                 requirementId: requirement.id,
@@ -2816,17 +2650,16 @@ export default function AiShow({
 
     const openRequirementAnswerWorkspace = (requirement) => {
         if (!canUseAiOffer) {
-            setAnswerDraftError(tai.ai_access_unavailable_message);
+            setWikiAnswerError({ requirementId: requirement?.id ?? null, message: tai.ai_access_unavailable_message });
             return;
         }
 
-        if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
+        if (!requirement || requirement.approval_status === 'rejected') {
             return;
         }
 
         setActiveRequirementId(String(requirement.id));
-        setAnswerDraftError(null);
-        setAnswerBasisSelectionError(null);
+        setWikiAnswerError(null);
     };
 
     const openEvidenceSource = (evidence) => {
@@ -2841,82 +2674,20 @@ export default function AiShow({
         setSelectedEvidence(null);
     };
 
-    const syncRequirementAnswerBasisSelection = async (requirement, nextAnswerBasisItemIds) => {
-        if (
-            !requirement
-            || !requirement.answer_draft_generate_url
-            || requirement.approval_status === 'rejected'
-            || !requirement.answer_basis_selection_sync_url
-        ) {
-            return;
-        }
-
-        if (
-            answerDraftGeneratingRequirementId !== null
-            || answerDraftSavingRequirementId !== null
-            || answerBasisSelectionSavingRequirementId !== null
-        ) {
-            return;
-        }
-
-        const requirementKey = String(requirement.id);
-        const normalizedItemIds = normalizeAnswerBasisItemIds(nextAnswerBasisItemIds);
-
-        setAnswerBasisSelectionSavingRequirementId(requirement.id);
-        setAnswerBasisSelectionError(null);
-
-        try {
-            const response = await window.axios.patch(requirement.answer_basis_selection_sync_url, {
-                answer_basis_item_ids: normalizedItemIds,
-            });
-            const responseItemIds = normalizeAnswerBasisItemIds(
-                response?.data?.answer_basis_item_ids ?? normalizedItemIds,
-            );
-
-            setAnswerBasisSelectionsByRequirementId((currentState) => ({
-                ...currentState,
-                [requirementKey]: responseItemIds,
-            }));
-        } catch (error) {
-            setAnswerBasisSelectionError(extractAxiosErrorMessage(error, 'Kunne ikke lagre kilder.'));
-        } finally {
-            setAnswerBasisSelectionSavingRequirementId(null);
-        }
-    };
-
-    const toggleActiveRequirementAnswerBasisItem = (answerBasisItemId) => {
-        if (activeRequirement === null) {
-            return;
-        }
-
-        const currentSelectedIds = activeRequirementAnswerBasisItemIds;
-        const nextSelectedIds = currentSelectedIds.includes(answerBasisItemId)
-            ? currentSelectedIds.filter((currentId) => currentId !== answerBasisItemId)
-            : [...currentSelectedIds, answerBasisItemId];
-
-        void syncRequirementAnswerBasisSelection(activeRequirement, nextSelectedIds);
-    };
-
-    const updateActiveAnswerDraftText = (text) => {
+    const updateActiveWikiAnswerText = (text) => {
         if (activeRequirementKey === null) {
             return;
         }
 
-        const normalizedText = normalizeAnswerDraftText(text);
+        const normalizedText = normalizeWikiAnswerText(text);
 
-        setAnswerDraftsByRequirementId((currentState) => {
-            const existingDraft = currentState[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement);
-
-            return {
-                ...currentState,
-                [activeRequirementKey]: {
-                    ...existingDraft,
-                    text: normalizedText,
-                    generationState: existingDraft.generationState ?? (normalizedText !== '' ? 'generated' : null),
-                    isDirty: normalizedText !== existingDraft.persistedText,
-                },
-            };
-        });
+        setWikiAnswerEditsByRequirementId((currentState) => ({
+            ...currentState,
+            [activeRequirementKey]: {
+                text: normalizedText,
+                isDirty: normalizedText !== activeRequirementWikiAnswerServerText,
+            },
+        }));
     };
 
     /**
@@ -2932,11 +2703,8 @@ export default function AiShow({
 
         const requirementKey = String(requirement.id);
 
-        if (requirement.answer_draft_generate_url) {
-            setActiveRequirementId(requirementKey);
-            setAnswerDraftError(null);
-            setAnswerBasisSelectionError(null);
-        }
+        setActiveRequirementId(requirementKey);
+        setWikiAnswerError(null);
 
         setPromptEditorOpenRequirementId((currentState) => (
             currentState === requirementKey ? null : requirementKey
@@ -2980,40 +2748,6 @@ export default function AiShow({
         };
     }, [selectedEvidence]);
 
-    const copyActiveAnswerDraftContent = async () => {
-        if (activeRequirement === null || activeRequirementDraft === null) {
-            return;
-        }
-
-        const payload = buildAnswerDraftClipboardPayload(activeRequirementDraft.text, activeRequirementRetrievalSources);
-
-        if (payload.html === '' && payload.text === '') {
-            setAnswerDraftCopyStatus('empty');
-            return;
-        }
-
-        setAnswerDraftCopyStatus(null);
-
-        try {
-            if (payload.html !== '') {
-                const copiedHtml = await writeHtmlClipboardPayload(payload.html, payload.text);
-
-                if (!copiedHtml) {
-                    throw new Error('Could not copy rich content.');
-                }
-            } else if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(payload.text);
-            } else if (copyHtmlSelectionToClipboard(escapeClipboardHtml(payload.text).replace(/\n/g, '<br />'))) {
-            } else {
-                throw new Error('Clipboard API is not available.');
-            }
-
-            setAnswerDraftCopyStatus('copied');
-        } catch (error) {
-            setAnswerDraftCopyStatus('failed');
-        }
-    };
-
     const copyActiveWikiAnswerContent = async () => {
         if (activeRequirement === null || activeRequirementWikiAnswer === null) {
             return;
@@ -3041,56 +2775,51 @@ export default function AiShow({
         }
     };
 
-    const saveActiveAnswerDraft = async () => {
-        if (activeRequirement === null || activeRequirementDraft === null) {
+    const saveActiveWikiAnswerText = async () => {
+        if (activeRequirement === null || activeRequirementWikiAnswer === null) {
             return;
         }
 
-        if (!activeRequirement.answer_draft_save_url) {
-            setAnswerDraftError(tai.answer_draft_cannot_save);
+        if (!activeRequirement.wiki_answer_update_url) {
+            setWikiAnswerError({ requirementId: activeRequirement.id, message: tai.wiki_answer_cannot_save });
             return;
         }
 
-        if (answerDraftGeneratingRequirementId !== null || answerDraftSavingRequirementId !== null) {
+        if (wikiAnswerGeneratingRequirementId !== null || wikiAnswerSavingRequirementId !== null) {
             return;
         }
 
-        const normalizedText = normalizeAnswerDraftText(activeRequirementDraft.text).trim();
+        const normalizedText = normalizeWikiAnswerText(activeRequirementWikiAnswerText).trim();
 
         if (normalizedText === '') {
-            setAnswerDraftError(tai.answer_draft_cannot_be_empty);
+            setWikiAnswerError({ requirementId: activeRequirement.id, message: tai.wiki_answer_cannot_be_empty });
             return;
         }
 
-        setAnswerDraftSavingRequirementId(activeRequirement.id);
-        setAnswerDraftError(null);
+        setWikiAnswerSavingRequirementId(activeRequirement.id);
+        setWikiAnswerError(null);
 
         try {
-            const response = await window.axios.patch(activeRequirement.answer_draft_save_url, {
-                answer_draft_text: normalizedText,
+            const response = await window.axios.patch(activeRequirement.wiki_answer_update_url, {
+                answer_text: normalizedText,
             });
-            const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
-            const savedText = normalizeAnswerDraftText(answerDraft.text);
-            const currentKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
-            const currentRetrievalSources = activeRequirementDraft?.retrievalSources ?? [];
+            const wikiAnswer = response?.data?.wiki_answer ?? null;
 
-            setAnswerDraftsByRequirementId((currentState) => ({
+            setRequirementRows((currentRows) =>
+                currentRows.map((row) => (row.id === activeRequirement.id ? { ...row, wiki_answer: wikiAnswer } : row))
+            );
+
+            setWikiAnswerEditsByRequirementId((currentState) => ({
                 ...currentState,
-                [activeRequirementKey]: {
-                    text: savedText,
-                    persistedText: savedText,
-                    generatedAt: answerDraft.generated_at,
-                    knowledgeGrounding: currentKnowledgeGrounding,
-                    generationState: answerDraft.generation_state ?? 'generated',
-                    missingKnowledge: activeRequirementDraft?.missingKnowledge ?? null,
-                    retrievalSources: currentRetrievalSources,
-                    isDirty: false,
-                },
+                [activeRequirementKey]: { text: normalizedText, isDirty: false },
             }));
         } catch (error) {
-            setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke lagre svarutkast.'));
+            setWikiAnswerError({
+                requirementId: activeRequirement.id,
+                message: extractAxiosErrorMessage(error, 'Kunne ikke lagre Wiki-svar.'),
+            });
         } finally {
-            setAnswerDraftSavingRequirementId(null);
+            setWikiAnswerSavingRequirementId(null);
         }
     };
 
@@ -3863,13 +3592,7 @@ export default function AiShow({
                                     const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
                                     const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
                                     const canOpenAnswerWorkspace = canUseAiOffer
-                                        && Boolean(requirement.answer_draft_generate_url)
                                         && approvalStatus !== 'rejected';
-                                    const requirementDraftState = answerDraftsByRequirementId[String(requirement.id)] ?? buildRequirementAnswerDraftState(requirement);
-                                    const hasExistingAnswerDraft = (
-                                        requirementDraftState.generatedAt !== null
-                                        || normalizeAnswerDraftText(requirementDraftState.text).trim() !== ''
-                                    );
                                     const requirementKey = String(requirement.id);
                                     const requirementUserPrompt = answerDraftPromptsByRequirementId[requirementKey] ?? '';
                                     const requirementPromptEditorOpen = promptEditorOpenRequirementId === requirementKey;
@@ -3984,7 +3707,7 @@ export default function AiShow({
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => {
-                                                                        void requestAnswerDraftGeneration(requirement);
+                                                                        void requestWikiAnswerGeneration(requirement);
                                                                     }}
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
@@ -4066,14 +3789,14 @@ export default function AiShow({
                                                             onChange={(event) => updateRequirementUserPrompt(requirement, event.target.value)}
                                                             maxLength={5000}
                                                             rows={4}
-                                                            disabled={answerDraftGeneratingRequirementId === requirement.id}
+                                                            disabled={wikiAnswerGeneratingRequirementId === requirement.id}
                                                             className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             placeholder={tai.example_prompt_placeholder}
                                                         />
                                                         <div className="mt-3 flex justify-end">
                                                             <button
                                                                 type="button"
-                                                                onClick={() => { void requestAnswerDraftGeneration(requirement); }}
+                                                                onClick={() => { void requestWikiAnswerGeneration(requirement); }}
                                                                 disabled={requirementUpdatesLocked}
                                                                 className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
@@ -4081,152 +3804,6 @@ export default function AiShow({
                                                             </button>
                                                         </div>
                                                     </div>
-                                                ) : null}
-
-                                                {activeRequirement ? (
-                                                    showAdvancedAI ? (
-                                                        <div className="space-y-4 border-t border-slate-200/80 pt-4">
-                                                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                    {tai.sources_section_title}
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        void requestAnswerDraftGeneration(activeRequirement, { force: true });
-                                                                    }}
-                                                                    disabled={
-                                                                        !activeRequirement.answer_draft_generate_url
-                                                                        || answerDraftGeneratingRequirementId === activeRequirement.id
-                                                                        || answerDraftSavingRequirementId === activeRequirement.id
-                                                                        || answerBasisSelectionSavingRequirementId === activeRequirement.id
-                                                                    }
-                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                >
-                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? tai.generating : tai.regenerate}
-                                                                </button>
-                                                            </div>
-
-                                                            {answerBasisSelectionError ? (
-                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
-                                                                    {answerBasisSelectionError}
-                                                                </div>
-                                                            ) : null}
-
-                                                            {activeRequirementSelectedAnswerBasisItems.length > 0 ? (
-                                                                <div className="space-y-2">
-                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                        {tai.selected_sources}
-                                                                    </div>
-                                                                    <div className="space-y-2">
-                                                                        {activeRequirementSelectedAnswerBasisItems.map((answerBasisItem) => {
-                                                                            const isSelected = activeRequirementAnswerBasisItemIds.includes(answerBasisItem.id);
-                                                                            const isToggling = answerBasisSelectionSavingRequirementId === activeRequirement.id;
-
-                                                                            return (
-                                                                                <div
-                                                                                    key={answerBasisItem.id}
-                                                                                    className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3"
-                                                                                >
-                                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                                                                        <div className="space-y-1">
-                                                                                            <div className="font-medium text-slate-950">
-                                                                                                {answerBasisItem.title}
-                                                                                            </div>
-                                                                                            <div className="flex flex-wrap gap-2 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                                                <span>{answerBasisItem.answer_basis_type_label}</span>
-                                                                                                {answerBasisItem.original_filename ? (
-                                                                                                    <span>{answerBasisItem.original_filename}</span>
-                                                                                                ) : null}
-                                                                                            </div>
-                                                                                        </div>
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
-                                                                                            disabled={isToggling || !isSelected}
-                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                                        >
-                                                                                            {tai.remove_button}
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
-                                                                    {tai.no_selected_sources}
-                                                                </div>
-                                                            )}
-
-                                                            <div className="space-y-2">
-                                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                    {tai.choose_sources}
-                                                                </div>
-
-                                                                {answerBasisItems.length === 0 ? (
-                                                                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
-                                                                        {tai.no_available_sources}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="space-y-2">
-                                                                        {answerBasisItems.map((answerBasisItem) => {
-                                                                            const isSelected = activeRequirementAnswerBasisItemIds.includes(answerBasisItem.id);
-                                                                            const isToggling = answerBasisSelectionSavingRequirementId === activeRequirement.id;
-
-                                                                            return (
-                                                                                <div
-                                                                                    key={answerBasisItem.id}
-                                                                                    className={`rounded-2xl border px-4 py-3 ${
-                                                                                        isSelected
-                                                                                            ? 'border-violet-200 bg-violet-50/50'
-                                                                                            : 'border-slate-200 bg-white'
-                                                                                    }`}
-                                                                                >
-                                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                                                                        <div className="min-w-0 space-y-1">
-                                                                                            <div className="flex flex-wrap items-center gap-2">
-                                                                                                <div className="font-medium text-slate-950">
-                                                                                                    {answerBasisItem.title}
-                                                                                                </div>
-                                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                                    {answerBasisItem.answer_basis_type_label}
-                                                                                                </span>
-                                                                                            </div>
-                                                                                            {answerBasisItem.original_filename ? (
-                                                                                                <div className="text-base text-slate-600">
-                                                                                                    {answerBasisItem.original_filename}
-                                                                                                </div>
-                                                                                            ) : null}
-                                                                                            <p className="max-w-4xl text-base leading-6 text-slate-600">
-                                                                                                {formatKnowledgeSnippet(answerBasisItem.body_text, 160)}
-                                                                                            </p>
-                                                                                        </div>
-
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
-                                                                                            disabled={isToggling}
-                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                                                                                isSelected
-                                                                                                    ? 'border border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50'
-                                                                                                    : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
-                                                                                            }`}
-                                                                                        >
-                                                                                            {isSelected ? tai.remove_button : tai.add_button}
-                                                                                        </button>
-                                                                                    </div>
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        null
-                                                    )
                                                 ) : null}
 
                                                 {hasOriginalDifference ? (
@@ -4663,43 +4240,14 @@ export default function AiShow({
                                 </p>
                             </div>
 
-                            <div className="flex gap-2 border-b border-slate-200 pb-2" role="tablist">
-                                <button
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={rightPanelTab === 'answer_draft'}
-                                    onClick={() => setRightPanelTab('answer_draft')}
-                                    className={`rounded-full px-3 py-1.5 text-base font-semibold transition ${
-                                        rightPanelTab === 'answer_draft'
-                                            ? 'bg-violet-600 text-white'
-                                            : 'text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                >
-                                    {tai.answer_draft_tab_label}
-                                </button>
-                                <button
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={rightPanelTab === 'wiki_answer'}
-                                    onClick={() => setRightPanelTab('wiki_answer')}
-                                    className={`rounded-full px-3 py-1.5 text-base font-semibold transition ${
-                                        rightPanelTab === 'wiki_answer'
-                                            ? 'bg-violet-600 text-white'
-                                            : 'text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                >
-                                    {tai.wiki_answer_tab_label}
-                                </button>
-                            </div>
-
-                            {rightPanelTab === 'answer_draft' && (!activeRequirement ? (
+                            {!activeRequirement ? (
                                 canUseAiOffer ? (
                                     <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                         <div className="text-lg font-semibold text-slate-900">
-                                            {tai.no_active_answer_draft_title}
+                                            {tai.wiki_answer_select_requirement_title}
                                         </div>
                                         <p className="mt-2 text-base text-slate-600">
-                                            {tai.no_active_answer_draft_description}
+                                            {tai.wiki_answer_select_requirement_description}
                                         </p>
                                     </div>
                                 ) : (
@@ -4708,468 +4256,318 @@ export default function AiShow({
                             ) : !canUseAiOffer ? (
                                 <AiAccessNotice aiText={tai} billingHref={billingHref} />
                             ) : (
-                                <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-2 ${
-                                    activeRequirementBlockedMissingKnowledge
-                                        ? 'border-amber-200 bg-amber-50/50'
-                                        : 'border-violet-200 bg-violet-50/40'
-                                }`}>
+                                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2">
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
-                                            {tai.answer_draft_for_requirement} {activeRequirementDisplayIdentifier}
+                                            {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
                                         </div>
-
-                                        <div className="flex flex-wrap items-center gap-2 pr-3">
-                                            {activeRequirementHasDraft && !activeRequirementBlockedMissingKnowledge ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
-                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
-                                                >
-                                                    {answerDraftReaderExpanded ? tai.normal_reader : tai.larger_reader}
-                                                </button>
-                                            ) : null}
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => { void requestWikiAnswerGeneration(activeRequirement); }}
+                                            disabled={
+                                                !activeRequirement.wiki_answer_generate_url
+                                                || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                || wikiAnswerSavingRequirementId === activeRequirement.id
+                                            }
+                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                ? tai.generating_wiki_answer
+                                                : (activeRequirementWikiAnswer?.coverage_status ? tai.wiki_answer_regenerate : tai.generate_wiki_answer)}
+                                        </button>
                                     </div>
 
-                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? (
+                                    {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
                                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
-                                            {tai.generating_answer_draft}
+                                            {tai.generating_wiki_answer}
                                         </div>
                                     ) : null}
 
-                                    {answerDraftError ? (
+                                    {wikiAnswerError?.requirementId === activeRequirement.id ? (
                                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
-                                            {answerDraftError}
+                                            {wikiAnswerError.message}
                                         </div>
                                     ) : null}
 
-                                    {activeRequirementBlockedMissingKnowledge ? (
-                                        <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-base leading-6 text-slate-700">
-                                            <div className="flex flex-wrap items-start gap-3">
-                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-amber-700">
-                                                    {tai.coverage_status_missing}
-                                                </span>
-                                                <div className="min-w-0 flex-1 text-base font-semibold text-slate-950">
-                                                    {tai.requirement_blocked_message}
-                                                </div>
-                                            </div>
-
-                                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-4 text-base leading-6 text-slate-700">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                                    {tai.assessment_next_step_label}
-                                                </div>
-                                                <p className="mt-2 text-base leading-6 text-slate-700">
-                                                    {tai.blocked_knowledge_intro}
-                                                </p>
-
-                                                {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' || activeRequirementMissingKnowledgeSuggestedFilename !== '' ? (
-                                                    <div className="mt-3 space-y-2 rounded-2xl border border-amber-200 bg-white px-4 py-3 text-base leading-6 text-slate-700">
-                                                        {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' ? (
-                                                            <div>
-                                                                <span className="font-semibold text-slate-900">{tai.recommended_document_label}</span>{' '}
-                                                                {activeRequirementMissingKnowledgeRecommendedDocumentTitle}
+                                    {!activeRequirementWikiAnswer?.coverage_status ? (
+                                        <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-base leading-6 text-slate-600">
+                                            {tai.wiki_answer_not_generated_yet}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <section
+                                                data-testid="wiki-answer-expert-draft"
+                                                className="rounded-2xl border border-violet-200 bg-white px-4 py-4 shadow-sm"
+                                            >
+                                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-base font-semibold uppercase tracking-[0.1em] text-violet-600">
+                                                            {tai.wiki_answer_expert_draft_title}
+                                                        </div>
+                                                        {activeRequirementWikiAnswer.generated_at ? (
+                                                            <div className="mt-1 text-base text-slate-600">
+                                                                {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
+                                                                    day: '2-digit',
+                                                                    month: 'short',
+                                                                    year: 'numeric',
+                                                                    hour: '2-digit',
+                                                                    minute: '2-digit',
+                                                                }).format(new Date(activeRequirementWikiAnswer.generated_at))}
                                                             </div>
                                                         ) : null}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void copyActiveWikiAnswerContent()}
+                                                        disabled={!activeRequirementWikiAnswerHasText}
+                                                        className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
+                                                    </button>
+                                                </div>
 
-                                                        {activeRequirementMissingKnowledgeSuggestedFilename !== '' ? (
-                                                            <div>
-                                                                <span className="font-semibold text-slate-900">{tai.suggested_filename_label}</span>{' '}
-                                                                {activeRequirementMissingKnowledgeSuggestedFilename}
-                                                            </div>
+                                                <div className="mt-4 flex flex-col gap-2">
+                                                    <textarea
+                                                        aria-label={`${tai.wiki_answer_for_requirement} ${activeRequirementDisplayIdentifier}`}
+                                                        value={activeRequirementWikiAnswerText}
+                                                        onChange={(event) => updateActiveWikiAnswerText(event.target.value)}
+                                                        rows={14}
+                                                        disabled={
+                                                            wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                            || wikiAnswerSavingRequirementId === activeRequirement.id
+                                                        }
+                                                        className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        placeholder={tai.answer_draft_placeholder}
+                                                    />
+                                                </div>
+
+                                                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                                    <div className="text-base text-slate-600">
+                                                        {activeRequirementWikiAnswerIsDirty ? tai.unsaved_changes : ''}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void saveActiveWikiAnswerText()}
+                                                        disabled={
+                                                            !activeRequirementWikiAnswerHasText
+                                                            || !activeRequirement.wiki_answer_update_url
+                                                            || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                            || wikiAnswerSavingRequirementId === activeRequirement.id
+                                                        }
+                                                        className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {wikiAnswerSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
+                                                    </button>
+                                                </div>
+                                            </section>
+
+                                            <section
+                                                data-testid="wiki-answer-documentation"
+                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                            >
+                                                <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
+                                                    {tai.wiki_answer_documentation_and_compliance_title}
+                                                </div>
+                                                {activeRequirementWikiAnswerIsStale ? (
+                                                    <div
+                                                        data-testid="wiki-answer-stale-warning"
+                                                        className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800"
+                                                    >
+                                                        <div className="font-semibold">
+                                                            {tai.wiki_answer_stale_title}
+                                                        </div>
+                                                        <p className="mt-1">
+                                                            {tai.wiki_answer_stale_message}
+                                                        </p>
+                                                        {activeRequirementWikiAnswerStaleSubjectName !== '' ? (
+                                                            <p className="mt-1 text-base text-amber-800">
+                                                                {activeRequirementWikiAnswerStaleSubjectPrefix} {activeRequirementWikiAnswerStaleSubjectName}
+                                                            </p>
                                                         ) : null}
                                                     </div>
                                                 ) : null}
-
-                                                <p className="mt-3 text-base leading-6 text-slate-600">
-                                                    {tai.document_processed_hint}
-                                                </p>
-                                            </div>
-
-                                            {activeRequirementMissingKnowledgeHasDetails ? (
-                                                <div className="mt-4">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setAnswerDraftMissingKnowledgeDetailsExpanded((currentState) => !currentState)}
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
-                                                        aria-expanded={answerDraftMissingKnowledgeDetailsExpanded}
-                                                    >
-                                                        {answerDraftMissingKnowledgeDetailsExpanded
-                                                            ? tai.blocked_knowledge_details_hide
-                                                            : tai.blocked_knowledge_details_show}
-                                                    </button>
-
-                                                    {answerDraftMissingKnowledgeDetailsExpanded ? (
-                                                        <div className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
-                                                            {activeRequirementMissingKnowledgeExplanation !== ''
-                                                                && activeRequirementMissingKnowledgeExplanation !== tai.requirement_blocked_message ? (
-                                                                <p className="text-base leading-6 text-slate-700">
-                                                                    {activeRequirementMissingKnowledgeExplanation}
-                                                                </p>
-                                                            ) : null}
-
-                                                            {activeRequirementMissingKnowledgeSummary !== '' ? (
-                                                                <p className="text-base leading-6 text-slate-700">
-                                                                    {activeRequirementMissingKnowledgeSummary}
-                                                                </p>
-                                                            ) : activeRequirementMissingKnowledgeReasoning !== '' ? (
-                                                                <p className="text-base leading-6 text-slate-700">
-                                                                    {activeRequirementMissingKnowledgeReasoning}
-                                                                </p>
-                                                            ) : null}
-
-                                                            {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
-                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                        {tai.directly_supported_label}
-                                                                    </div>
-                                                                    <ul className="space-y-2">
-                                                                        {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
-                                                                            <li key={`${point}-${index}`} className="flex gap-2">
-                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                                                                                <span className="space-y-1">
-                                                                                    <span className="block font-medium text-slate-900">
-                                                                                        {point?.requirement_point ?? '—'}
-                                                                                    </span>
-                                                                                    {point?.support_summary ? (
-                                                                                        <span className="block text-slate-700">
-                                                                                            {point.support_summary}
-                                                                                        </span>
-                                                                                    ) : null}
-                                                                                    {(() => {
-                                                                                        const evidenceLabel = point?.evidence_reference
-                                                                                            ?? point?.evidence_quote
-                                                                                            ?? point?.source?.source_label
-                                                                                            ?? null;
-
-                                                                                        if (evidenceLabel === null) {
-                                                                                            return null;
-                                                                                        }
-
-                                                                                        if (point?.source?.open_url) {
-                                                                                            return (
-                                                                                                <button
-                                                                                                    type="button"
-                                                                                                    onClick={() => openEvidenceSource(point)}
-                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-left text-base font-medium leading-6 text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                                                                                                    aria-label={`${tai.evidence_title} ${evidenceLabel}`}
-                                                                                                >
-                                                                                                    {tai.evidence_title}: {evidenceLabel}
-                                                                                                </button>
-                                                                                            );
-                                                                                        }
-
-                                                                                        return (
-                                                                                            <span className="block text-base text-slate-600">
-                                                                                                {tai.evidence_title}: {evidenceLabel}
-                                                                                            </span>
-                                                                                        );
-                                                                                    })()}
-                                                                                </span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            ) : null}
-
-                                                            {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-amber-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
-                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                                                        {tai.related_insufficient_label}
-                                                                    </div>
-                                                                    <p className="text-base leading-6 text-slate-600">
-                                                                        {tai.blocked_related_knowledge}
-                                                                    </p>
-                                                                    <ul className="space-y-2">
-                                                                        {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
-                                                                            <li key={`${point}-${index}`} className="flex gap-2">
-                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                                                                                <span>{point}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            ) : null}
-
-                                                            {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-rose-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
-                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                        {tai.unsupported_points_label}
-                                                                    </div>
-                                                                    <ul className="space-y-2">
-                                                                        {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
-                                                                            <li key={`${point}-${index}`} className="flex gap-2">
-                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
-                                                                                <span>{point}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    ) : activeRequirementHasDraft ? (
-                                        <div className="flex flex-col gap-5">
-                                            {activeRequirementPartialDraft ? (
-                                                <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-slate-700">
-                                                    <div className="flex flex-wrap items-start gap-2">
-                                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-amber-700">
-                                                            {tai.coverage_status_partial ?? 'Delvis dekket'}
-                                                        </span>
-                                                        <span className="min-w-0 flex-1 text-base leading-7 text-slate-950">
-                                                            {tai.answer_draft_partial_coverage_warning ?? 'Svarutkastet er basert på delvis kunnskapsgrunnlag. Kontroller hva som er dokumentert og hva som bør etterprøves.'}
-                                                        </span>
-                                                    </div>
-
-                                                    {activeRequirementMissingKnowledge !== null ? (
-                                                        <div className="mt-4 space-y-3">
-                                                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 px-4 py-3">
-                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                    {tai.answer_draft_partial_covered_heading ?? 'Dette er dekket'}
-                                                                </div>
-                                                                {(activeRequirementMissingKnowledge.directly_supported_points?.length ?? 0) > 0 ? (
-                                                                    <ul className="mt-2 space-y-1.5">
-                                                                        {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
-                                                                            <li key={`covered-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
-                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-                                                                                <span>{point?.requirement_point ?? '—'}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                ) : (
-                                                                    <p className="mt-2 text-base leading-7 text-slate-600">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
-                                                                )}
-                                                            </div>
-
-                                                            <div className="rounded-2xl border border-rose-100 bg-rose-50/40 px-4 py-3">
-                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                    {tai.answer_draft_partial_missing_heading ?? 'Dette mangler'}
-                                                                </div>
-                                                                {(activeRequirementMissingKnowledge.unsupported_points?.length ?? 0) > 0 ? (
-                                                                    <ul className="mt-2 space-y-1.5">
-                                                                        {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
-                                                                            <li key={`missing-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
-                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400" />
-                                                                                <span>{point}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                ) : (
-                                                                    <p className="mt-2 text-base leading-7 text-slate-600">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
-                                                                )}
-                                                            </div>
-
-                                                            {(activeRequirementMissingKnowledge.related_but_insufficient_points?.length ?? 0) > 0 ? (
-                                                                <div className="rounded-2xl border border-amber-200 bg-amber-50/40 px-4 py-3">
-                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                                                        {tai.answer_draft_partial_manual_review_heading ?? 'Bør etterprøves'}
-                                                                    </div>
-                                                                    <ul className="mt-2 space-y-1.5">
-                                                                        {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
-                                                                            <li key={`review-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
-                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-                                                                                <span>{point}</span>
-                                                                            </li>
-                                                                        ))}
-                                                                    </ul>
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            ) : null}
-                                            <div className="flex flex-col gap-2">
-                                                <textarea
-                                                    aria-label={`${tai.answer_draft_for_requirement} ${activeRequirementDisplayIdentifier}`}
-                                                    value={activeRequirementDraft?.text ?? ''}
-                                                    onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
-                                                    rows={16}
-                                                    disabled={
-                                                        answerDraftGeneratingRequirementId === activeRequirement.id
-                                                        || answerDraftSavingRequirementId === activeRequirement.id
-                                                    }
-                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
-                                                    placeholder={tai.answer_draft_placeholder}
-                                                />
-                                            </div>
-
-                                            {activeRequirementImageRetrievalSources.length > 0 ? (
-                                                <div className="flex flex-col gap-3">
-                                                    {activeRequirementImageRetrievalSources.map((source, index) => {
-                                                        const imageUrl = resolveClipboardImageUrl(source);
-
-                                                        if (imageUrl === '') {
-                                                            return null;
-                                                        }
-
-                                                        return (
-                                                            <img
-                                                                key={source.id ?? source.chunk_id ?? `answer-image-${index}`}
-                                                                src={imageUrl}
-                                                                alt=""
-                                                                className="max-w-full rounded-2xl border border-slate-200 bg-white shadow-sm"
-                                                            />
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : null}
-
-                                            {activeRequirementTableRetrievalSources.length > 0 ? (
-                                                <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
-                                                    <div className="flex flex-col gap-1">
-                                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                            {tai.table_evidence_overline}
-                                                        </div>
-                                                        <p className="text-base leading-6 text-slate-600">
-                                                            {tai.table_evidence_description}
-                                                        </p>
-                                                    </div>
-
-                                                    <div className="flex flex-col gap-3">
-                                                        {activeRequirementTableRetrievalSources.map((source) => {
-                                                            const sourceTitle = String(source?.title ?? '').trim()
-                                                                || String(source?.heading_path ?? '').trim()
-                                                                || String(source?.document_title ?? source?.knowledge_item_title ?? '').trim()
-                                                                || tai.table_evidence_label;
-                                                            const sourceDocumentTitle = String(source?.document_title ?? source?.knowledge_item_title ?? '').trim();
-                                                            const summaryForRetrieval = String(source?.summary_for_retrieval ?? '').trim();
-                                                            const tableText = String(source?.table_text ?? '').trim();
-                                                            const hasRenderableTableJson = Array.isArray(source?.table_json?.rows)
-                                                                && source.table_json.rows.length > 0;
-
-                                                            return (
-                                                                <div key={source.id ?? source.chunk_id} className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm">
-                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                                                        <div className="space-y-1">
-                                                                            <div className="text-base font-semibold text-slate-950">
-                                                                                {sourceTitle}
-                                                                            </div>
-                                                                            {sourceDocumentTitle !== '' ? (
-                                                                                <div className="text-base text-slate-600">
-                                                                                    {sourceDocumentTitle}
-                                                                                </div>
-                                                                            ) : null}
-                                                                        </div>
-
-                                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                            {tai.table_evidence_label}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    {summaryForRetrieval !== '' ? (
-                                                                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700">
-                                                                            {summaryForRetrieval}
-                                                                        </div>
-                                                                    ) : null}
-
-                                                                    {source.table_html ? (
-                                                                        <div className="mt-4 overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
-                                                                            <div
-                                                                                className="min-w-max"
-                                                                                dangerouslySetInnerHTML={{ __html: source.table_html }}
-                                                                            />
-                                                                        </div>
-                                                                    ) : hasRenderableTableJson ? (
-                                                                        <div className="mt-4">
-                                                                            <StructuredTablePreview tableJson={source.table_json} />
-                                                                        </div>
-                                                                    ) : tableText !== '' ? (
-                                                                        <pre className="mt-4 whitespace-pre-wrap text-base leading-6 text-slate-700">
-                                                                            {tableText}
-                                                                        </pre>
-                                                                    ) : (
-                                                                        <p className="mt-4 text-base leading-6 text-slate-600">
-                                                                            {tai.table_no_view}
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            ) : null}
-
-                                            {activeRequirementKnowledgeGrounding ? (
-                                                <div className="mt-4 flex items-center justify-end gap-2">
-                                                    <InfoHint size="sm" align="left" label="Vis forklaring for Kunnskapsgrunnlag" text={tai.hint_knowledge_grounding} />
-                                                    <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
-                                                        {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
+                                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
+                                                        {activeRequirementWikiAnswerCoverageLabels[activeRequirementWikiAnswer.coverage_status] ?? activeRequirementWikiAnswer.coverage_status_label}
                                                     </span>
-                                                </div>
-                                            ) : null}
-
-                                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                                <div className="text-base text-slate-600">
-                                                    {activeRequirementDraft?.generatedAt ? (
-                                                        <>
-                                                            {tai.generated}{' '}
-                                                            {new Intl.DateTimeFormat(locale, {
+                                                    {activeRequirementWikiAnswer.generated_at ? (
+                                                        <span className="text-base text-slate-600">
+                                                            {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
                                                                 day: '2-digit',
                                                                 month: 'short',
                                                                 year: 'numeric',
                                                                 hour: '2-digit',
                                                                 minute: '2-digit',
-                                                            }).format(new Date(activeRequirementDraft.generatedAt))}
-                                                        </>
-                                                    ) : (
-                                                        tai.answer_draft_not_generated
-                                                    )}
-                                                    {activeRequirementDraft?.isDirty ? ` ${tai.unsaved_changes}` : ''}
-                                                </div>
-
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    {answerDraftCopyStatus === 'failed' ? (
-                                                        <span className="text-base font-semibold text-rose-700">
-                                                            {tai.copy_failed}
+                                                            }).format(new Date(activeRequirementWikiAnswer.generated_at))}
                                                         </span>
                                                     ) : null}
-
-                                                    {answerDraftCopyStatus === 'empty' ? (
-                                                        <span className="text-base font-semibold text-slate-600">
-                                                            {tai.copy_empty}
-                                                        </span>
-                                                    ) : null}
-
-                                                    <button
-                                                        type="button"
-                                                        onClick={copyActiveAnswerDraftContent}
-                                                        disabled={
-                                                            !activeRequirementDraft
-                                                            || answerDraftGeneratingRequirementId === activeRequirement.id
-                                                            || answerDraftSavingRequirementId === activeRequirement.id
-                                                        }
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {answerDraftCopyStatus === 'copied' ? tai.copied : tai.copy_to_word}
-                                                    </button>
-
-                                                    <button
-                                                    type="button"
-                                                    onClick={saveActiveAnswerDraft}
-                                                    disabled={
-                                                        !activeRequirementDraft
-                                                        || normalizeAnswerDraftText(activeRequirementDraft.text).trim() === ''
-                                                        || !activeRequirement.answer_draft_save_url
-                                                        || answerDraftGeneratingRequirementId === activeRequirement.id
-                                                        || answerDraftSavingRequirementId === activeRequirement.id
-                                                    }
-                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                >
-                                                    {answerDraftSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
-                                                    </button>
                                                 </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="flex min-h-0 flex-1 flex-col justify-start rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
-                                            <div className="text-base font-semibold text-slate-900">
-                                                {tai.no_answer_draft_title}
-                                            </div>
-                                            <p className="mt-2 text-base leading-6 text-slate-600">
-                                                {tai.use_prompt_again_hint}
-                                            </p>
+
+                                                {activeRequirementWikiAnswer.alignment_summary ? (
+                                                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                        <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
+                                                            {tai.wiki_answer_alignment_title}
+                                                        </div>
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            {activeRequirementWikiAnswer.alignment_summary.aligned > 0 ? (
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.aligned}`}>
+                                                                    {activeRequirementWikiAnswer.alignment_summary.aligned} {tai.wiki_answer_alignment_aligned_chip}
+                                                                </span>
+                                                            ) : null}
+                                                            {activeRequirementWikiAnswer.alignment_summary.partially_aligned > 0 ? (
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.partially_aligned}`}>
+                                                                    {activeRequirementWikiAnswer.alignment_summary.partially_aligned} {tai.wiki_answer_alignment_partially_aligned_chip}
+                                                                </span>
+                                                            ) : null}
+                                                            {activeRequirementWikiAnswer.alignment_summary.best_practice > 0 ? (
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.best_practice}`}>
+                                                                    {activeRequirementWikiAnswer.alignment_summary.best_practice} {tai.wiki_answer_alignment_best_practice_chip}
+                                                                </span>
+                                                            ) : null}
+                                                            {activeRequirementWikiAnswer.alignment_summary.possible_conflict > 0 ? (
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.possible_conflict}`}>
+                                                                    {activeRequirementWikiAnswer.alignment_summary.possible_conflict} {tai.wiki_answer_alignment_possible_conflict_chip}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="mt-2 text-base text-slate-600">
+                                                            {activeRequirementWikiAnswer.has_possible_conflict
+                                                                ? tai.wiki_answer_alignment_conflict_note
+                                                                : tai.wiki_answer_alignment_no_conflict_note}
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+
+                                                {activeRequirementWikiAnswer.missing_summary ? (
+                                                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
+                                                        <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {activeRequirementWikiAnswer.missing_summary}
+                                                    </div>
+                                                ) : null}
+
+                                                {activeRequirementWikiAnswer.has_source_based_support === false ? (
+                                                    <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-base leading-6 text-sky-800">
+                                                        {tai.wiki_answer_no_source_based_support_message}
+                                                    </div>
+                                                ) : null}
+
+                                                {Array.isArray(activeRequirementWikiAnswer.sections) && activeRequirementWikiAnswer.sections.length > 0 ? (
+                                                    <div className="mt-4 space-y-3">
+                                                        {activeRequirementWikiAnswer.sections.map((section, sectionIndex) => {
+                                                            const hasAlignmentDetails = Boolean(section.alignment_status) && (
+                                                                (Array.isArray(section.supporting_page_titles) && section.supporting_page_titles.length > 0)
+                                                                || (Array.isArray(section.uncovered_points) && section.uncovered_points.length > 0)
+                                                                || Boolean(section.conflict_summary)
+                                                                || Boolean(section.review_note)
+                                                            );
+
+                                                            return (
+                                                                <div key={`wiki-answer-section-${sectionIndex}`} className="space-y-1.5 rounded-2xl border border-slate-100 bg-white/80 p-3">
+                                                                    {section.heading ? (
+                                                                        <div className="text-base font-semibold text-slate-700">{section.heading}</div>
+                                                                    ) : null}
+                                                                    <div className="whitespace-pre-line text-base leading-7 text-slate-800">
+                                                                        {section.text}
+                                                                    </div>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        {section.alignment_status ? (
+                                                                            <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName[section.alignment_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}>
+                                                                                {wikiAnswerAlignmentStatusLabels[section.alignment_status] ?? section.alignment_status}
+                                                                            </span>
+                                                                        ) : null}
+                                                                        {section.provenance_type ? (
+                                                                            <span
+                                                                                className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerProvenanceClassName[section.provenance_type] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}
+                                                                                title={tai.wiki_answer_provenance_hint}
+                                                                            >
+                                                                                {wikiAnswerProvenanceLabels[section.provenance_type] ?? section.provenance_type}
+                                                                            </span>
+                                                                        ) : null}
+                                                                        {Array.isArray(section.page_titles) && section.page_titles.length > 0 ? (
+                                                                            <span className="text-base text-violet-700">
+                                                                                {section.page_titles.join(' · ')}
+                                                                            </span>
+                                                                        ) : null}
+                                                                        {section.revised ? (
+                                                                            <span className="text-base text-slate-600">{tai.wiki_answer_alignment_revised_note}</span>
+                                                                        ) : null}
+                                                                    </div>
+                                                                    {hasAlignmentDetails ? (
+                                                                        <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-700">
+                                                                            <summary className="cursor-pointer select-none font-medium text-slate-600">
+                                                                                {tai.wiki_answer_alignment_details_toggle}
+                                                                            </summary>
+                                                                            <div className="mt-2 space-y-1.5">
+                                                                                {Array.isArray(section.supporting_page_titles) && section.supporting_page_titles.length > 0 ? (
+                                                                                    <div>
+                                                                                        <span className="font-semibold">{tai.wiki_answer_alignment_supporting_pages_label}:</span> {section.supporting_page_titles.join(' · ')}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                                {Array.isArray(section.uncovered_points) && section.uncovered_points.length > 0 ? (
+                                                                                    <div>
+                                                                                        <span className="font-semibold">{tai.wiki_answer_alignment_uncovered_label}:</span> {section.uncovered_points.join(' ')}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                                {section.conflict_summary ? (
+                                                                                    <div className="text-rose-700">
+                                                                                        <span className="font-semibold">{tai.wiki_answer_alignment_conflict_label}:</span> {section.conflict_summary}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                                {section.review_note ? (
+                                                                                    <div>
+                                                                                        <span className="font-semibold">{tai.wiki_answer_alignment_review_note_label}:</span> {section.review_note}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                            </div>
+                                                                        </details>
+                                                                    ) : null}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : null}
+                                            </section>
+
+                                            <section
+                                                data-testid="wiki-answer-sources"
+                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                            >
+                                                <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
+                                                    {tai.wiki_answer_sources_title}
+                                                </div>
+                                                {activeRequirementWikiAnswerSources.length > 0 ? (
+                                                    <ul className="mt-3 space-y-1.5">
+                                                        {activeRequirementWikiAnswerSources.map((source) => (
+                                                            <li
+                                                                key={`wiki-source-${source.enterprise_wiki_page_id ?? source.page_id ?? source.id}`}
+                                                                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-700"
+                                                            >
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <span>{source.page_title ?? source.page_slug ?? '—'}</span>
+                                                                    {source.has_source_based_claims ? (
+                                                                        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1.5 text-base font-medium leading-6 text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                                                                            {tai.wiki_answer_source_based_claims_badge}
+                                                                        </span>
+                                                                    ) : null}
+                                                                    {source.has_best_practice_claims ? (
+                                                                        <span className="inline-flex rounded-full bg-sky-50 px-2.5 py-1.5 text-base font-medium leading-6 text-sky-700 ring-1 ring-inset ring-sky-200">
+                                                                            {tai.wiki_answer_best_practice_claims_badge}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                                {source.discovered_from_title ? (
+                                                                    <div className="text-base text-slate-600">
+                                                                        {tai.wiki_answer_discovered_from_prefix} {source.discovered_from_title}
+                                                                    </div>
+                                                                ) : null}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-600">
+                                                        {tai.wiki_answer_none_message}
+                                                    </div>
+                                                )}
+                                            </section>
                                         </div>
                                     )}
                                     {(activeRequirement?.knowledge_sources_sent_to_ai?.length ?? 0) > 0 ? (
@@ -5229,316 +4627,6 @@ export default function AiShow({
                                         </div>
                                     ) : null}
                                 </div>
-                            ))}
-
-                            {rightPanelTab === 'wiki_answer' && (
-                                !activeRequirement ? (
-                                    canUseAiOffer ? (
-                                        <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
-                                            <div className="text-lg font-semibold text-slate-900">
-                                                {tai.wiki_answer_select_requirement_title}
-                                            </div>
-                                            <p className="mt-2 text-base text-slate-600">
-                                                {tai.wiki_answer_select_requirement_description}
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <AiAccessNotice aiText={tai} billingHref={billingHref} />
-                                    )
-                                ) : !canUseAiOffer ? (
-                                    <AiAccessNotice aiText={tai} billingHref={billingHref} />
-                                ) : (
-                                    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2">
-                                        <div className="flex flex-wrap items-center justify-between gap-3">
-                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
-                                                {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => { void requestWikiAnswerGeneration(activeRequirement); }}
-                                                disabled={
-                                                    !activeRequirement.wiki_answer_generate_url
-                                                    || wikiAnswerGeneratingRequirementId === activeRequirement.id
-                                                }
-                                                className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                {wikiAnswerGeneratingRequirementId === activeRequirement.id
-                                                    ? tai.generating_wiki_answer
-                                                    : (activeRequirementWikiAnswer?.coverage_status ? tai.wiki_answer_regenerate : tai.generate_wiki_answer)}
-                                            </button>
-                                        </div>
-
-                                        {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
-                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
-                                                {tai.generating_wiki_answer}
-                                            </div>
-                                        ) : null}
-
-                                        {wikiAnswerError?.requirementId === activeRequirement.id ? (
-                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
-                                                {wikiAnswerError.message}
-                                            </div>
-                                        ) : null}
-
-                                        {!activeRequirementWikiAnswer?.coverage_status ? (
-                                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-base leading-6 text-slate-600">
-                                                {tai.wiki_answer_not_generated_yet}
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-4">
-                                                <section
-                                                    data-testid="wiki-answer-expert-draft"
-                                                    className="rounded-2xl border border-violet-200 bg-white px-4 py-4 shadow-sm"
-                                                >
-                                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                                        <div>
-                                                            <div className="text-base font-semibold uppercase tracking-[0.1em] text-violet-600">
-                                                                {tai.wiki_answer_expert_draft_title}
-                                                            </div>
-                                                            {activeRequirementWikiAnswer.generated_at ? (
-                                                                <div className="mt-1 text-base text-slate-600">
-                                                                    {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
-                                                                        day: '2-digit',
-                                                                        month: 'short',
-                                                                        year: 'numeric',
-                                                                        hour: '2-digit',
-                                                                        minute: '2-digit',
-                                                                    }).format(new Date(activeRequirementWikiAnswer.generated_at))}
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => void copyActiveWikiAnswerContent()}
-                                                            disabled={!activeRequirementWikiAnswerHasText}
-                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
-                                                        </button>
-                                                    </div>
-
-                                                    {activeRequirementWikiAnswerHasText ? (
-                                                        <div className="mt-4 whitespace-pre-line text-base leading-7 text-slate-800">
-                                                            {activeRequirementWikiAnswerText}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-base leading-6 text-slate-600">
-                                                            {tai.wiki_answer_none_message}
-                                                        </div>
-                                                    )}
-                                                </section>
-
-                                                <section
-                                                    data-testid="wiki-answer-documentation"
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                                                >
-                                                    <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
-                                                        {tai.wiki_answer_documentation_and_compliance_title}
-                                                    </div>
-                                                    {activeRequirementWikiAnswerIsStale ? (
-                                                        <div
-                                                            data-testid="wiki-answer-stale-warning"
-                                                            className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800"
-                                                        >
-                                                            <div className="font-semibold">
-                                                                {tai.wiki_answer_stale_title}
-                                                            </div>
-                                                            <p className="mt-1">
-                                                                {tai.wiki_answer_stale_message}
-                                                            </p>
-                                                            {activeRequirementWikiAnswerStaleSubjectName !== '' ? (
-                                                                <p className="mt-1 text-base text-amber-800">
-                                                                    {activeRequirementWikiAnswerStaleSubjectPrefix} {activeRequirementWikiAnswerStaleSubjectName}
-                                                                </p>
-                                                            ) : null}
-                                                        </div>
-                                                    ) : null}
-                                                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
-                                                            {activeRequirementWikiAnswerCoverageLabels[activeRequirementWikiAnswer.coverage_status] ?? activeRequirementWikiAnswer.coverage_status_label}
-                                                        </span>
-                                                        {activeRequirementWikiAnswer.generated_at ? (
-                                                            <span className="text-base text-slate-600">
-                                                                {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
-                                                                    day: '2-digit',
-                                                                    month: 'short',
-                                                                    year: 'numeric',
-                                                                    hour: '2-digit',
-                                                                    minute: '2-digit',
-                                                                }).format(new Date(activeRequirementWikiAnswer.generated_at))}
-                                                            </span>
-                                                        ) : null}
-                                                    </div>
-
-                                                    {activeRequirementWikiAnswer.alignment_summary ? (
-                                                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                            <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
-                                                                {tai.wiki_answer_alignment_title}
-                                                            </div>
-                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                                {activeRequirementWikiAnswer.alignment_summary.aligned > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.aligned}`}>
-                                                                        {activeRequirementWikiAnswer.alignment_summary.aligned} {tai.wiki_answer_alignment_aligned_chip}
-                                                                    </span>
-                                                                ) : null}
-                                                                {activeRequirementWikiAnswer.alignment_summary.partially_aligned > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.partially_aligned}`}>
-                                                                        {activeRequirementWikiAnswer.alignment_summary.partially_aligned} {tai.wiki_answer_alignment_partially_aligned_chip}
-                                                                    </span>
-                                                                ) : null}
-                                                                {activeRequirementWikiAnswer.alignment_summary.best_practice > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.best_practice}`}>
-                                                                        {activeRequirementWikiAnswer.alignment_summary.best_practice} {tai.wiki_answer_alignment_best_practice_chip}
-                                                                    </span>
-                                                                ) : null}
-                                                                {activeRequirementWikiAnswer.alignment_summary.possible_conflict > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.possible_conflict}`}>
-                                                                        {activeRequirementWikiAnswer.alignment_summary.possible_conflict} {tai.wiki_answer_alignment_possible_conflict_chip}
-                                                                    </span>
-                                                                ) : null}
-                                                            </div>
-                                                            <div className="mt-2 text-base text-slate-600">
-                                                                {activeRequirementWikiAnswer.has_possible_conflict
-                                                                    ? tai.wiki_answer_alignment_conflict_note
-                                                                    : tai.wiki_answer_alignment_no_conflict_note}
-                                                            </div>
-                                                        </div>
-                                                    ) : null}
-
-                                                    {activeRequirementWikiAnswer.missing_summary ? (
-                                                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
-                                                            <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {activeRequirementWikiAnswer.missing_summary}
-                                                        </div>
-                                                    ) : null}
-
-                                                    {activeRequirementWikiAnswer.has_source_based_support === false ? (
-                                                        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-base leading-6 text-sky-800">
-                                                            {tai.wiki_answer_no_source_based_support_message}
-                                                        </div>
-                                                    ) : null}
-
-                                                    {Array.isArray(activeRequirementWikiAnswer.sections) && activeRequirementWikiAnswer.sections.length > 0 ? (
-                                                        <div className="mt-4 space-y-3">
-                                                            {activeRequirementWikiAnswer.sections.map((section, sectionIndex) => {
-                                                                const hasAlignmentDetails = Boolean(section.alignment_status) && (
-                                                                    (Array.isArray(section.supporting_page_titles) && section.supporting_page_titles.length > 0)
-                                                                    || (Array.isArray(section.uncovered_points) && section.uncovered_points.length > 0)
-                                                                    || Boolean(section.conflict_summary)
-                                                                    || Boolean(section.review_note)
-                                                                );
-
-                                                                return (
-                                                                    <div key={`wiki-answer-section-${sectionIndex}`} className="space-y-1.5 rounded-2xl border border-slate-100 bg-white/80 p-3">
-                                                                        {section.heading ? (
-                                                                            <div className="text-base font-semibold text-slate-700">{section.heading}</div>
-                                                                        ) : null}
-                                                                        <div className="whitespace-pre-line text-base leading-7 text-slate-800">
-                                                                            {section.text}
-                                                                        </div>
-                                                                        <div className="flex flex-wrap items-center gap-2">
-                                                                            {section.alignment_status ? (
-                                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName[section.alignment_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}>
-                                                                                    {wikiAnswerAlignmentStatusLabels[section.alignment_status] ?? section.alignment_status}
-                                                                                </span>
-                                                                            ) : null}
-                                                                            {section.provenance_type ? (
-                                                                                <span
-                                                                                    className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerProvenanceClassName[section.provenance_type] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}
-                                                                                    title={tai.wiki_answer_provenance_hint}
-                                                                                >
-                                                                                    {wikiAnswerProvenanceLabels[section.provenance_type] ?? section.provenance_type}
-                                                                                </span>
-                                                                            ) : null}
-                                                                            {Array.isArray(section.page_titles) && section.page_titles.length > 0 ? (
-                                                                                <span className="text-base text-violet-700">
-                                                                                    {section.page_titles.join(' · ')}
-                                                                                </span>
-                                                                            ) : null}
-                                                                            {section.revised ? (
-                                                                                <span className="text-base text-slate-600">{tai.wiki_answer_alignment_revised_note}</span>
-                                                                            ) : null}
-                                                                        </div>
-                                                                        {hasAlignmentDetails ? (
-                                                                            <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-700">
-                                                                                <summary className="cursor-pointer select-none font-medium text-slate-600">
-                                                                                    {tai.wiki_answer_alignment_details_toggle}
-                                                                                </summary>
-                                                                                <div className="mt-2 space-y-1.5">
-                                                                                    {Array.isArray(section.supporting_page_titles) && section.supporting_page_titles.length > 0 ? (
-                                                                                        <div>
-                                                                                            <span className="font-semibold">{tai.wiki_answer_alignment_supporting_pages_label}:</span> {section.supporting_page_titles.join(' · ')}
-                                                                                        </div>
-                                                                                    ) : null}
-                                                                                    {Array.isArray(section.uncovered_points) && section.uncovered_points.length > 0 ? (
-                                                                                        <div>
-                                                                                            <span className="font-semibold">{tai.wiki_answer_alignment_uncovered_label}:</span> {section.uncovered_points.join(' ')}
-                                                                                        </div>
-                                                                                    ) : null}
-                                                                                    {section.conflict_summary ? (
-                                                                                        <div className="text-rose-700">
-                                                                                            <span className="font-semibold">{tai.wiki_answer_alignment_conflict_label}:</span> {section.conflict_summary}
-                                                                                        </div>
-                                                                                    ) : null}
-                                                                                    {section.review_note ? (
-                                                                                        <div>
-                                                                                            <span className="font-semibold">{tai.wiki_answer_alignment_review_note_label}:</span> {section.review_note}
-                                                                                        </div>
-                                                                                    ) : null}
-                                                                                </div>
-                                                                            </details>
-                                                                        ) : null}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    ) : null}
-                                                </section>
-
-                                                <section
-                                                    data-testid="wiki-answer-sources"
-                                                    className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                                                >
-                                                    <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
-                                                        {tai.wiki_answer_sources_title}
-                                                    </div>
-                                                    {activeRequirementWikiAnswerSources.length > 0 ? (
-                                                        <ul className="mt-3 space-y-1.5">
-                                                            {activeRequirementWikiAnswerSources.map((source) => (
-                                                                <li
-                                                                    key={`wiki-source-${source.enterprise_wiki_page_id ?? source.page_id ?? source.id}`}
-                                                                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-700"
-                                                                >
-                                                                    <div className="flex flex-wrap items-center gap-2">
-                                                                        <span>{source.page_title ?? source.page_slug ?? '—'}</span>
-                                                                        {source.has_source_based_claims ? (
-                                                                            <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1.5 text-base font-medium leading-6 text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                                                                                {tai.wiki_answer_source_based_claims_badge}
-                                                                            </span>
-                                                                        ) : null}
-                                                                        {source.has_best_practice_claims ? (
-                                                                            <span className="inline-flex rounded-full bg-sky-50 px-2.5 py-1.5 text-base font-medium leading-6 text-sky-700 ring-1 ring-inset ring-sky-200">
-                                                                                {tai.wiki_answer_best_practice_claims_badge}
-                                                                            </span>
-                                                                        ) : null}
-                                                                    </div>
-                                                                    {source.discovered_from_title ? (
-                                                                        <div className="text-base text-slate-600">
-                                                                            {tai.wiki_answer_discovered_from_prefix} {source.discovered_from_title}
-                                                                        </div>
-                                                                    ) : null}
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    ) : (
-                                                        <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-600">
-                                                            {tai.wiki_answer_none_message}
-                                                        </div>
-                                                    )}
-                                                </section>
-                                            </div>
-                                        )}
-                                    </div>
-                                )
                             )}
                         </div>
                     </section>
