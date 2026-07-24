@@ -227,6 +227,8 @@ Route::prefix('app')
             ->name('ai.requirements.answer-draft.update');
         Route::post('/ai/{savedNotice}/requirements/{requirement}/wiki-answer', [AiController::class, 'generateRequirementWikiAnswer'])
             ->name('ai.requirements.wiki-answer.generate');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/wiki-answer', [AiController::class, 'updateRequirementWikiAnswer'])
+            ->name('ai.requirements.wiki-answer.update');
         Route::post('/ai/{savedNotice}/evidence/refresh', [AiController::class, 'refreshEvidence'])
             ->name('ai.evidence.refresh');
         Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])

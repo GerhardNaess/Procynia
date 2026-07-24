@@ -120,6 +120,108 @@ class RequirementWikiAnswerServiceTest extends TestCase
         app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
     }
 
+    /**
+     * AI-to-Wiki consolidation (Wiki-answer-as-sole-engine): generate()'s optional
+     * $requirementUserPrompt parameter (feature parity with the legacy answer-draft flow's
+     * user_answer_prompt) must reach RequirementWikiAnswerAiClient::generateAnswer() unchanged, as
+     * its final positional argument, applied after $caseInstructions.
+     */
+    public function test_requirement_user_prompt_is_forwarded_to_the_answer_ai_client(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn ($identifier, $text, $pages, $languageCode, $caseInstructions, $requirementUserPrompt) => $caseInstructions === 'Skriv formelt.'
+                && $requirementUserPrompt === 'Fokuser spesielt på ansvarsfordeling.')
+            ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate(
+            $requirement,
+            $customer->id,
+            'no',
+            null,
+            'Skriv formelt.',
+            'Fokuser spesielt på ansvarsfordeling.',
+        );
+    }
+
+    public function test_no_requirement_user_prompt_forwards_null_to_the_answer_ai_client(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn ($identifier, $text, $pages, $languageCode, $caseInstructions, $requirementUserPrompt) => $requirementUserPrompt === null)
+            ->andReturn(['answer_sections' => [$this->section('S1', 'Svaret.', [$page->id])]]));
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+    }
+
+    /**
+     * AI-to-Wiki consolidation: updateAnswerText() lets a user hand-edit an already-generated Wiki
+     * answer in place — mirrors RequirementAnswerDraftService::updateAnswerDraft().
+     */
+    public function test_update_answer_text_persists_an_edit_to_an_existing_wiki_answer(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Opprinnelig svar.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $updated = app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.');
+
+        $this->assertSame('Redigert svar.', $updated->answer_text);
+        $this->assertSame(
+            'Redigert svar.',
+            SavedNoticeAiRequirementWikiAnswer::query()->where('saved_notice_ai_requirement_id', $requirement->id)->firstOrFail()->answer_text,
+        );
+    }
+
+    public function test_update_answer_text_throws_when_no_wiki_answer_exists_yet(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+
+        $this->expectException(RuntimeException::class);
+
+        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, 'Redigert svar.');
+    }
+
+    public function test_update_answer_text_throws_when_the_text_is_blank(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv Problem Management.');
+        $page = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold.');
+
+        $this->mockResearchService($this->fakeResearchContext($requirement, [$this->fakePage($page->id, 'Problem Management')]));
+        $this->mockAnswerClient([$this->section('S1', 'Opprinnelig svar.', [$page->id])]);
+        $this->mockAlignmentClient([$this->assessment('S1', 'aligned', [$page->id])]);
+
+        app(RequirementWikiAnswerService::class)->generate($requirement, $customer->id, 'no');
+
+        $this->expectException(RuntimeException::class);
+
+        app(RequirementWikiAnswerService::class)->updateAnswerText($requirement, '   ');
+    }
+
     public function test_old_answers_without_the_new_fields_can_still_be_loaded(): void
     {
         $customer = $this->createWikiCustomer();

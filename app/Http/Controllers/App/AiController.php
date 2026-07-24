@@ -649,9 +649,9 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Export all requirements with saved answer drafts as a Word (.docx) document.
+     * Purpose: Export all requirements with a generated Wiki answer as a Word (.docx) document.
      * Inputs: The current request and the route-bound saved notice.
-     * Returns: A streamed .docx download response, or 422 if no drafts exist.
+     * Returns: A streamed .docx download response, or 422 if no Wiki answers exist.
      * Side effects: None.
      */
     public function exportRequirementsToDocx(
@@ -662,8 +662,10 @@ class AiController extends Controller
         $this->assertAiAccess($record);
 
         $requirements = $record->aiRequirements()
-            ->whereNotNull('answer_draft_text')
-            ->where('answer_draft_text', '!=', '')
+            ->whereHas('wikiAnswer', function ($query): void {
+                $query->whereNotNull('answer_text')->where('answer_text', '!=', '');
+            })
+            ->with('wikiAnswer')
             ->orderBy('requirement_identifier')
             ->get();
 
@@ -1250,6 +1252,11 @@ class AiController extends Controller
             ->whereKey($requirement->id)
             ->firstOrFail();
 
+        $validated = $request->validate([
+            'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
+        ]);
+        $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
+
         $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $record->customer()->firstOrFail(),
             $request->user(),
@@ -1269,6 +1276,7 @@ class AiController extends Controller
                 $languageCode,
                 $request->user()?->id,
                 $record->ai_instructions,
+                $userAnswerPrompt,
             );
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][WIKI_ANSWER] Wiki answer generation failed.', [
@@ -1287,6 +1295,35 @@ class AiController extends Controller
             $this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement),
             ['warning' => $usageWarning],
         ));
+    }
+
+    /**
+     * Purpose: Persist a hand-edit of one visible requirement's already-generated Wiki answer text.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted Wiki-answer payload.
+     * Side effects: Updates the requirement's saved_notice_ai_requirement_wiki_answers row.
+     */
+    public function updateRequirementWikiAnswer(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'answer_text' => ['required', 'string', 'max:20000'],
+        ]);
+
+        $wikiAnswer = $this->requirementWikiAnswerService->updateAnswerText(
+            $ownedRequirement,
+            (string) $validated['answer_text'],
+        );
+
+        return response()->json($this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement));
     }
 
     /**
@@ -1909,6 +1946,10 @@ class AiController extends Controller
                 ]),
                 'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
                 'wiki_answer_generate_url' => route('app.ai.requirements.wiki-answer.generate', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
+                'wiki_answer_update_url' => route('app.ai.requirements.wiki-answer.update', [
                     'savedNotice' => $requirement->saved_notice_id,
                     'requirement' => $requirement->id,
                 ]),

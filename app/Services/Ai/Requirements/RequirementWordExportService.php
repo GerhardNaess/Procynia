@@ -19,7 +19,7 @@ class RequirementWordExportService
      */
     public function build(SavedNotice $savedNotice, Collection $requirements): string
     {
-        $phpWord = new PhpWord();
+        $phpWord = new PhpWord;
         $phpWord->setDefaultFontName('Calibri');
         $phpWord->setDefaultFontSize(11);
 
@@ -49,7 +49,7 @@ class RequirementWordExportService
             $section->addTitle($headingText, 2);
 
             $section->addText(
-                'Kravtype: ' . $this->requirementTypeLabel((string) ($requirement->requirement_type ?? '')),
+                'Kravtype: '.$this->requirementTypeLabel((string) ($requirement->requirement_type ?? '')),
                 ['bold' => false],
             );
 
@@ -59,10 +59,10 @@ class RequirementWordExportService
 
             $section->addTextBreak(1);
             $section->addText('Svarutkast:', ['bold' => true]);
-            $this->addMultilineText($section, (string) ($requirement->answer_draft_text ?? ''));
+            $this->addMultilineText($section, (string) ($requirement->wikiAnswer?->answer_text ?? ''));
 
-            $sources = is_array($requirement->answer_draft_retrieval_sources)
-                ? $requirement->answer_draft_retrieval_sources
+            $sources = is_array($requirement->wikiAnswer?->sources)
+                ? $requirement->wikiAnswer->sources
                 : [];
 
             if ($sources !== []) {
@@ -89,22 +89,17 @@ class RequirementWordExportService
 
     private function sourceLabel(array $source): string
     {
-        $chunkType = (string) ($source['chunk_type'] ?? 'semantic');
-        $title = (string) ($source['knowledge_item_title'] ?? 'Ukjent kilde');
-        $headingPath = (string) ($source['heading_path'] ?? $source['section_path'] ?? '');
-        $suffix = $headingPath !== '' ? ' – ' . $headingPath : '';
+        $title = (string) ($source['page_title'] ?? 'Ukjent kilde');
+        $hasSourceBasedClaims = (bool) ($source['has_source_based_claims'] ?? false);
+        $hasBestPracticeClaims = (bool) ($source['has_best_practice_claims'] ?? false);
 
-        if ($chunkType === 'table') {
-            return 'Kilde inneholder tabell: ' . $title . $suffix;
-        }
+        $suffix = match (true) {
+            $hasSourceBasedClaims && $hasBestPracticeClaims => ' (dokumentert og faglig beste praksis)',
+            $hasBestPracticeClaims => ' (faglig beste praksis)',
+            default => '',
+        };
 
-        if ($chunkType === 'image') {
-            $caption = (string) ($source['image_caption'] ?? $source['image_alt_text'] ?? '');
-            $captionSuffix = $caption !== '' ? ' – ' . $caption : '';
-            return 'Kilde inneholder grafikk: ' . $title . $captionSuffix . $suffix;
-        }
-
-        return $title . $suffix;
+        return 'Wiki-side: '.$title.$suffix;
     }
 
     private function requirementTypeLabel(string $type): string
