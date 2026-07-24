@@ -10,6 +10,7 @@ import {
     RUN_TIMELINE_STEPS,
     matchesFindingsLocalFilter,
     getRunTimelineState,
+    getEscalationCopy,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -305,11 +306,12 @@ function RunTimeline({ run, tw }) {
     );
 }
 
-function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false }) {
+function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false, onOpenFindings = null }) {
     if (!run) return null;
 
     const activity = getIngestActivityCopy(run, tw);
     const isActive = isActiveWikiRun(run);
+    const isEscalated = run.status === 'escalated';
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
     const progressLabel = formatRelativeProgress(progressAt, locale);
     const lastProgressLabel = progressLabel
@@ -331,42 +333,75 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
         }
     }
 
+    // Escalated runs already show "Eskalert" as the row's main status badge — repeating the same
+    // word here as a second (and, for the plain-text detail line, third) chip left the user with
+    // no explanation of why. Route this one status straight to a real, data-backed explanation
+    // instead of re-rendering the activity pill/detail pair used by every other status.
+    const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
+
     return (
         <div className="mt-2 space-y-1.5" aria-live={isActive ? 'polite' : 'off'}>
-            <div className="flex flex-wrap items-center gap-2">
-                {activity?.tone === 'active' ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
-                        <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
-                        {activity.label}
-                    </span>
-                ) : (
-                    <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                            activity?.tone === 'done'
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : activity?.tone === 'error'
-                                    ? 'bg-rose-50 text-rose-700'
-                                    : activity?.tone === 'warning'
-                                        ? 'bg-amber-50 text-amber-700'
-                                        : activity?.tone === 'decision'
-                                            ? 'bg-violet-50 text-violet-700'
-                                            : 'bg-slate-100 text-slate-500'
-                        }`}
-                    >
-                        {activity?.label ?? run.status}
-                    </span>
-                )}
-                {seemsStalled && (
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                        {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
-                    </span>
-                )}
-            </div>
+            {!isEscalated && (
+                <div className="flex flex-wrap items-center gap-2">
+                    {activity?.tone === 'active' ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                            <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
+                            {activity.label}
+                        </span>
+                    ) : (
+                        <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                                activity?.tone === 'done'
+                                    ? 'bg-emerald-50 text-emerald-700'
+                                    : activity?.tone === 'error'
+                                        ? 'bg-rose-50 text-rose-700'
+                                        : activity?.tone === 'warning'
+                                            ? 'bg-amber-50 text-amber-700'
+                                            : activity?.tone === 'decision'
+                                                ? 'bg-violet-50 text-violet-700'
+                                                : 'bg-slate-100 text-slate-500'
+                            }`}
+                        >
+                            {activity?.label ?? run.status}
+                        </span>
+                    )}
+                    {seemsStalled && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                            {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
+                        </span>
+                    )}
+                </div>
+            )}
 
-            <p className="text-[11px] leading-4 text-slate-500">
-                {activity?.detail ?? run.status}
-                {activity?.waiting ? ` · ${activity.waiting}` : ''}
-            </p>
+            {isEscalated ? (
+                <div className="max-w-sm space-y-1">
+                    <p className="text-base font-medium leading-6 text-amber-800">
+                        {escalation.primaryReason}
+                    </p>
+                    {escalation.secondaryReason && (
+                        <p className="text-base leading-6 text-slate-600">
+                            {escalation.secondaryReason}
+                        </p>
+                    )}
+                    <p className={`text-base leading-6 ${escalation.blockingCount > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
+                        {escalation.blockingSummary}
+                    </p>
+                    {escalation.blockingCount > 0 && onOpenFindings && (
+                        <button
+                            type="button"
+                            onClick={() => onOpenFindings(run)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-base font-semibold leading-6 text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                        >
+                            {tw.ingest_activity_escalated_action ?? 'Åpne funn'}
+                        </button>
+                    )}
+                </div>
+            ) : (
+                <p className="text-[11px] leading-4 text-slate-500">
+                    {activity?.detail ?? run.status}
+                    {activity?.waiting ? ` · ${activity.waiting}` : ''}
+                </p>
+            )}
 
             {seemsStalled && (
                 <p className="text-[11px] leading-4 text-amber-700">
@@ -2386,10 +2421,19 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
-                                                <span className={`${BADGE} ${statusCls}`}>
+                                                <span
+                                                    className={`${BADGE} ${statusCls}`}
+                                                    title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
+                                                >
                                                     {ingestStatusLabel(run.status, run.qa_status)}
                                                 </span>
-                                                <RunActivityBlock run={run} tw={tw} locale={locale} showTimeline />
+                                                <RunActivityBlock
+                                                    run={run}
+                                                    tw={tw}
+                                                    locale={locale}
+                                                    showTimeline
+                                                    onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
+                                                />
                                             </td>
                                             <td className="px-4 py-3">
                                                 {run.maintainer_decision_status === 'applied' ? (
@@ -2437,7 +2481,16 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                         onClick={() => togglePanel(run, 'findings', true)}
                                                         aria-expanded={activePanel === 'findings'}
                                                         aria-controls={panelId}
-                                                        aria-label={(tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
+                                                        aria-label={(run.findings_open_blocking_count ?? 0) > 0
+                                                            ? (tw.runs_findings_toggle_open_with_blocking ?? 'Vis :count kvalitetsfunn, hvorav :blocking blokkerende')
+                                                                .replace(':count', run.lint_count)
+                                                                .replace(':blocking', run.findings_open_blocking_count)
+                                                            : (tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
+                                                        title={(run.findings_open_blocking_count ?? 0) > 0
+                                                            ? (tw.runs_findings_count_tooltip_blocking ?? ':total funn totalt, :blocking av dem blokkerer fullføring')
+                                                                .replace(':total', run.lint_count)
+                                                                .replace(':blocking', run.findings_open_blocking_count)
+                                                            : undefined}
                                                         className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
                                                     >
                                                         {run.lint_count}

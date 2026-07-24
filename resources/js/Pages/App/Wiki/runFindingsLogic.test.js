@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState } from './runFindingsLogic.js';
+import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy } from './runFindingsLogic.js';
 
 describe('matchesFindingsLocalFilter', () => {
     test('"open" matches every open status a finding can carry, from every source', () => {
@@ -90,5 +90,93 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
 
         assert.equal(getRunTimelineState(run, pagesIndex), 'active');
         assert.equal(getRunTimelineState(run, pagesIndex + 1), 'empty');
+    });
+});
+
+describe('getEscalationCopy — explains an escalated run instead of repeating the word "Eskalert"', () => {
+    // Cause 1: claim-integrity repair path — EnterpriseWikiDocumentFlowService::
+    // escalateRunForClaimIntegrityRepair() stores a specific, human-readable reason on the run
+    // itself. This is the exact combination found on the real run this fix was built from
+    // (source document "Masterdata ITIL.docx", run id 39): status=escalated, qa_status=passed via
+    // 15 automatic maintenance-cycle retries that updated qa_status without ever reconciling the
+    // run's own `status` column back (see EnterpriseWikiMaintenanceCycleService::processRun()) —
+    // 3 of the run's 25 total findings are still open and blocking.
+    test('claim-integrity cause: error_message becomes the primary reason, the status/qa_status drift becomes a distinct secondary line, and the blocking count is reported against the true total', () => {
+        const run = {
+            error_message: 'Wiki-siden ble stanset fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget. Automatisk reparasjon vil bli forsøkt.',
+            findings_explanation: 'Kjøringen har 3 åpne blokkerende funn, men står som bestått. Statusen må synkroniseres.',
+            findings_open_blocking_count: 3,
+            lint_count: 25,
+        };
+
+        const copy = getEscalationCopy(run, {});
+
+        assert.equal(copy.primaryReason, run.error_message);
+        assert.equal(copy.secondaryReason, run.findings_explanation);
+        assert.equal(copy.blockingCount, 3);
+        assert.match(copy.blockingSummary, /3/);
+        assert.match(copy.blockingSummary, /25/);
+    });
+
+    // Cause 2: no stored error_message (the plain escalateRun() path clears it) — the QA
+    // consistency check (EnterpriseWikiRunFindingsService::buildExplanation()) is the only
+    // available explanation, and becomes the primary reason on its own (no secondary line, since
+    // there is nothing else to add).
+    test('QA-only cause: findings_explanation alone becomes the primary reason, with no secondary line', () => {
+        const run = {
+            error_message: null,
+            findings_explanation: 'Ingen åpne blokkerende funn lenger, men kjøringens status er ikke oppdatert ennå.',
+            findings_open_blocking_count: 0,
+            lint_count: 4,
+        };
+
+        const copy = getEscalationCopy(run, {});
+
+        assert.equal(copy.primaryReason, run.findings_explanation);
+        assert.equal(copy.secondaryReason, null);
+        assert.equal(copy.blockingCount, 0);
+    });
+
+    // Cause 3: both fields happen to hold the identical string — never show the same sentence
+    // twice, matching the whole point of this fix (the row already showed "Eskalert" three times).
+    test('identical error_message and findings_explanation never duplicate into two lines', () => {
+        const run = {
+            error_message: 'Samme forklaring.',
+            findings_explanation: 'Samme forklaring.',
+            findings_open_blocking_count: 1,
+            lint_count: 1,
+        };
+
+        const copy = getEscalationCopy(run, {});
+
+        assert.equal(copy.primaryReason, 'Samme forklaring.');
+        assert.equal(copy.secondaryReason, null);
+    });
+
+    // Cause 4: neither field is populated (should not normally happen given buildSummary() always
+    // computes an explanation, but must never crash or fabricate a reason) — falls back to the
+    // same word the status badge already shows, from translations, or its hard-coded default.
+    test('no data available falls back to the plain "Eskalert" word, never a guessed reason', () => {
+        const run = { error_message: null, findings_explanation: null, findings_open_blocking_count: 0, lint_count: 0 };
+
+        assert.equal(getEscalationCopy(run, {}).primaryReason, 'Eskalert');
+        assert.equal(getEscalationCopy(run, { ingest_activity_escalated: 'Escalated' }).primaryReason, 'Escalated');
+    });
+
+    test('blockingSummary uses the non-blocking translation and blockingCount is 0 when nothing blocks', () => {
+        const run = { error_message: null, findings_explanation: 'x', findings_open_blocking_count: 0, lint_count: 21 };
+
+        const copy = getEscalationCopy(run, { ingest_activity_escalated_not_blocking: 'Ikke blokkerende.' });
+
+        assert.equal(copy.blockingCount, 0);
+        assert.equal(copy.blockingSummary, 'Ikke blokkerende.');
+    });
+
+    test('blockingSummary substitutes :count and :total from the provided translation template', () => {
+        const run = { error_message: 'x', findings_explanation: null, findings_open_blocking_count: 2, lint_count: 9 };
+
+        const copy = getEscalationCopy(run, { ingest_activity_escalated_blocking: ':count of :total blocks completion' });
+
+        assert.equal(copy.blockingSummary, '2 of 9 blocks completion');
     });
 });

@@ -4182,6 +4182,68 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Runs tab — findings_explanation (clarifying an escalated row instead of
+    // repeating the word "Eskalert" with no context — see runFindingsLogic.js
+    // getEscalationCopy() on the frontend for how this field is consumed)
+    // =========================================================================
+
+    public function test_runs_tab_row_for_escalated_run_includes_error_message_and_a_matching_findings_explanation(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_ESCALATED);
+        $errorMessage = 'Wiki-siden ble stanset fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget. Automatisk reparasjon vil bli forsøkt.';
+        $run->update([
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            'error_message' => $errorMessage,
+        ]);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Masterdata ITIL');
+        $version = $this->createVersion($page, true);
+        $this->createRunPage($run, $page, $version, EnterpriseWikiIngestRunPage::ACTION_CREATED);
+        $this->createRunLintFinding($customer, $run, $page, $version, EnterpriseWikiLintFinding::SEVERITY_ERROR, EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run, $errorMessage): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null
+                && $found['status'] === 'escalated'
+                && $found['error_message'] === $errorMessage
+                // The system's own consistency check: qa_status=passed but an open blocking
+                // finding exists — must say so plainly, matching
+                // EnterpriseWikiRunFindingsService::buildExplanation()'s inconsistent-passed branch.
+                && str_contains($found['findings_explanation'], 'synkroniseres')
+                && $found['findings_open_blocking_count'] === 1
+                && $found['lint_count'] === 1;
+        });
+    }
+
+    public function test_runs_tab_row_for_non_escalated_run_still_gets_a_findings_explanation_but_status_is_unaffected(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null
+                && $found['status'] === 'completed'
+                && $found['error_message'] === null
+                && $found['findings_open_blocking_count'] === 0
+                && $found['findings_explanation'] !== null;
+        });
+    }
+
+    // =========================================================================
     // Runs tab — can_cancel flag
     // =========================================================================
 
@@ -4911,7 +4973,7 @@ class WikiControllerTest extends TestCase
 
         $response->assertOk();
         $this->assertSame(
-            __('procynia.wiki.runs_findings_explanation_inconsistent_passed'),
+            trans_choice('procynia.wiki.runs_findings_explanation_inconsistent_passed', 1, ['count' => 1]),
             $response->json('summary.explanation'),
         );
     }

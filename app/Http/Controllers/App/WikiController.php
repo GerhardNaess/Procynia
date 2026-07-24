@@ -805,6 +805,7 @@ class WikiController extends Controller
                     'lint_count' => $summary['total'],
                     'findings_open_blocking_count' => $summary['open_blocking'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
+                    'findings_explanation' => $summary['explanation'] ?? null,
                     'created_at' => $run->created_at,
                     'started_at' => $run->started_at,
                     'finished_at' => $run->finished_at,

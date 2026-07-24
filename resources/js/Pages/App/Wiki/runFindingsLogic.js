@@ -106,3 +106,39 @@ export function getRunTimelineState(run, stepIndex) {
 
     return 'empty';
 }
+
+/**
+ * A run's `status` badge already says "Eskalert" — historically RunActivityBlock's activity pill
+ * and detail line both repeated that exact word for the escalated case (label === detail === the
+ * literal Norwegian word for "escalated"), giving the row up to 3 identical chips with zero
+ * explanation of why. This derives one real explanation instead, using data that is already
+ * computed on every run row:
+ *
+ *   - run.error_message: the specific technical reason the run was escalated in the first place
+ *     (only set by EnterpriseWikiDocumentFlowService::escalateRunForClaimIntegrityRepair(); plain
+ *     escalateRun() calls clear it), e.g. "unverifiable content found against the source material".
+ *   - run.findings_explanation: EnterpriseWikiRunFindingsService::buildExplanation()'s live
+ *     comparison of qa_status against the actual open-blocking-findings count — this is what
+ *     catches (and plainly states) the maintenance-cycle drift where qa_status has since moved to
+ *     "passed" via automatic retries without the run's own `status` ever being reconciled back from
+ *     "escalated" (see EnterpriseWikiMaintenanceCycleService::processRun()).
+ *
+ * Both can be present and say different things (the original cause vs. the current inconsistency);
+ * both are shown when that happens. Neither is guessed — a run with neither ends up on the same
+ * generic fallback word the badge already shows, never a fabricated reason.
+ */
+export function getEscalationCopy(run, tw = {}) {
+    const blockingCount = run?.findings_open_blocking_count ?? 0;
+    const totalCount = run?.lint_count ?? 0;
+    const primaryReason = run?.error_message || run?.findings_explanation || (tw.ingest_activity_escalated ?? 'Eskalert');
+    const secondaryReason = (run?.error_message && run?.findings_explanation && run.findings_explanation !== primaryReason)
+        ? run.findings_explanation
+        : null;
+    const blockingSummary = blockingCount > 0
+        ? (tw.ingest_activity_escalated_blocking ?? ':count av :total funn er fortsatt åpne og blokkerer fullføring.')
+            .replace(':count', blockingCount)
+            .replace(':total', totalCount)
+        : (tw.ingest_activity_escalated_not_blocking ?? 'Ingen åpne blokkerende funn lenger. Eskaleringen stopper ikke videre arbeid, men statusen bør oppdateres.');
+
+    return { primaryReason, secondaryReason, blockingSummary, blockingCount };
+}

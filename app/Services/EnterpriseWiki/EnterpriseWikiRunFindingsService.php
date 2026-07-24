@@ -642,7 +642,7 @@ class EnterpriseWikiRunFindingsService
     {
         if ($openBlockingCount > 0) {
             if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
-                return __('procynia.wiki.runs_findings_explanation_inconsistent_passed');
+                return trans_choice('procynia.wiki.runs_findings_explanation_inconsistent_passed', $openBlockingCount, ['count' => $openBlockingCount]);
             }
 
             return trans_choice('procynia.wiki.runs_findings_explanation_has_blocking', $openBlockingCount, ['count' => $openBlockingCount]);
