@@ -419,7 +419,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                 key={item.key}
                                                 href={item.href}
                                                 className={classNames(
-                                                    'rounded-xl px-3 py-2 text-sm font-medium transition',
+                                                    'rounded-xl px-3 py-2 text-base font-medium transition',
                                                     isActive
                                                         ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
@@ -476,7 +476,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                             {userInitial}
                                         </span>
                                         <div className="min-w-0">
-                                            <div className="truncate text-sm font-semibold text-slate-900">{userName}</div>
+                                            <div className="truncate text-base font-semibold text-slate-900">{userName}</div>
                                         </div>
                                         <svg
                                             className={classNames(
@@ -500,10 +500,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     {isUserMenuOpen ? (
                                         <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                                             <div className="space-y-1 border-b border-slate-200 px-4 py-4">
-                                                <div className="text-sm font-semibold text-slate-950">{userName}</div>
-                                                <div className="break-words text-sm text-slate-500">{userEmail}</div>
+                                                <div className="text-base font-semibold text-slate-950">{userName}</div>
+                                                <div className="break-words text-sm text-slate-600">{userEmail}</div>
                                                 {userBidRoleLabel ? (
-                                                    <div className="pt-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
+                                                    <div className="pt-1 text-sm font-medium uppercase tracking-[0.12em] text-slate-600">
                                                         {userBidRoleLabel}
                                                     </div>
                                                 ) : null}
@@ -512,7 +512,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                 <button
                                                     type="button"
                                                     onClick={logout}
-                                                    className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                                                    className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
                                                 >
                                                     <span>{translations.common.logout}</span>
                                                     <svg className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -552,7 +552,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     {secondaryNavigation.map((item) => {
                                         const isActive = activeSecondaryKey === item.key;
                                         const classes = classNames(
-                                            'rounded-xl px-3 py-2 text-sm font-medium transition',
+                                            'rounded-xl px-3 py-2 text-base font-medium transition',
                                             isActive
                                                 ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
@@ -562,7 +562,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                             return (
                                                 <span
                                                     key={item.key}
-                                                    className={classNames('rounded-xl px-3 py-2 text-sm font-medium cursor-default text-slate-400 select-none')}
+                                                    className={classNames('rounded-xl px-3 py-2 text-base font-medium cursor-default text-slate-500 select-none')}
                                                     aria-current={isActive ? 'page' : undefined}
                                                     aria-disabled="true"
                                                     title={aiCaseNavigationHint || undefined}
@@ -588,7 +588,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     })}
                                 </nav>
                                 {aiCaseNavigationHint !== '' ? (
-                                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                                    <p className="mt-2 text-sm leading-6 text-slate-600">
                                         {aiCaseNavigationHint}
                                     </p>
                                 ) : null}
@@ -599,12 +599,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                 <main className="mx-auto max-w-[1600px] px-4 py-7 sm:px-6 lg:px-8">
                     {flash?.success && showSuccess ? (
-                        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-sm text-emerald-800 shadow-lg">
+                        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-3 text-base text-emerald-800 shadow-lg">
                             {flash.success}
                         </div>
                     ) : null}
                     {flash?.error ? (
-                        <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
+                        <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-800 shadow-sm">
                             {flash.error}
                         </div>
                     ) : null}
@@ -619,7 +619,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 </main>
 
                 <footer className="bg-transparent">
-                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-xs text-slate-400 sm:px-6 lg:px-8">
+                    <div className="mx-auto max-w-[1600px] px-4 py-8 text-center text-sm text-slate-500 sm:px-6 lg:px-8">
                         {translations.frontend.customer_footer}
                     </div>
                 </footer>

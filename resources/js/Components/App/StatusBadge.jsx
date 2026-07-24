@@ -15,7 +15,7 @@ const TONE_CLASSES = {
 export default function StatusBadge({ tone = 'slate', className, children }) {
     const toneClasses = TONE_CLASSES[tone] ?? TONE_CLASSES.slate;
     return (
-        <span className={['inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset', toneClasses, className].filter(Boolean).join(' ')}>
+        <span className={['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset', toneClasses, className].filter(Boolean).join(' ')}>
             {children}
         </span>
     );

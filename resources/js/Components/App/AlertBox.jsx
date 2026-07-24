@@ -8,7 +8,7 @@ const TONE_CLASSES = {
 export default function AlertBox({ tone = 'amber', title, className, children }) {
     const toneClasses = TONE_CLASSES[tone] ?? TONE_CLASSES.amber;
     return (
-        <div className={['rounded-2xl border px-4 py-3 text-sm leading-6', toneClasses, className].filter(Boolean).join(' ')}>
+        <div className={['rounded-2xl border px-4 py-3 text-base leading-6', toneClasses, className].filter(Boolean).join(' ')}>
             {title ? <div className="font-semibold">{title}</div> : null}
             {children}
         </div>

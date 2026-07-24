@@ -55,7 +55,7 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
             >
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                        <div className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
                             Hjelp
                         </div>
                         <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-950">
@@ -76,13 +76,13 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
 
                 <div className="flex-1 space-y-6 px-6 py-6">
                     {intro ? (
-                        <p className="text-sm leading-6 text-slate-500">{intro}</p>
+                        <p className="text-base leading-7 text-slate-600">{intro}</p>
                     ) : null}
 
                     {sections.map((section, sectionIndex) => (
                         <div key={sectionIndex} className="space-y-2.5">
                             {section.title ? (
-                                <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {section.title}
                                 </h3>
                             ) : null}
@@ -93,11 +93,11 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
                                     className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3"
                                 >
                                     {item.title ? (
-                                        <div className="mb-1 text-sm font-semibold text-slate-700">
+                                        <div className="mb-1 text-base font-semibold text-slate-700">
                                             {item.title}
                                         </div>
                                     ) : null}
-                                    <p className="text-sm leading-5 text-slate-500">{item.text}</p>
+                                    <p className="text-base leading-6 text-slate-600">{item.text}</p>
                                 </div>
                             ))}
                         </div>

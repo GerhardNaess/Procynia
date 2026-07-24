@@ -90,7 +90,7 @@ export default function NotificationBell({
                 </svg>
 
                 {unreadCount > 0 ? (
-                    <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white shadow-sm">
+                    <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white shadow-sm">
                         {badgeLabel}
                     </span>
                 ) : null}
@@ -104,14 +104,14 @@ export default function NotificationBell({
                     <div className="border-b border-slate-200 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <div className="text-sm font-semibold text-slate-950">Varsler</div>
-                                <div className="text-xs text-slate-500">Siste varsler for deg</div>
+                                <div className="text-base font-semibold text-slate-950">Varsler</div>
+                                <div className="text-sm text-slate-600">Siste varsler for deg</div>
                             </div>
                             <button
                                 type="button"
                                 onClick={onMarkAllRead}
                                 disabled={!hasUnreadItems}
-                                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
+                                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-400"
                             >
                                 Marker alle som lest
                             </button>
@@ -121,8 +121,8 @@ export default function NotificationBell({
                     <div className="max-h-[70vh] overflow-y-auto p-2">
                         {items.length === 0 ? (
                             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
-                                <div className="text-sm font-semibold text-slate-900">Ingen varsler ennå</div>
-                                <p className="mt-1 text-sm text-slate-500">
+                                <div className="text-base font-semibold text-slate-900">Ingen varsler ennå</div>
+                                <p className="mt-1 text-base leading-6 text-slate-600">
                                     Her vil nye varsler vises når noe krever oppmerksomhet.
                                 </p>
                             </div>
@@ -151,23 +151,23 @@ export default function NotificationBell({
                                                         )}
                                                         aria-hidden="true"
                                                     />
-                                                    <span className="min-w-0 flex-1 text-sm font-semibold text-slate-950">
+                                                    <span className="min-w-0 flex-1 text-base font-semibold text-slate-950">
                                                         {notification.title}
                                                     </span>
                                                     {!notification.is_read ? (
-                                                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
                                                             Ulest
                                                         </span>
                                                     ) : null}
                                                 </div>
-                                                <p className="mt-1 text-sm leading-6 text-slate-600">
+                                                <p className="mt-1 text-base leading-6 text-slate-600">
                                                     {notification.message}
                                                 </p>
                                             </div>
 
                                             <span
                                                 className={classNames(
-                                                    'inline-flex shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset',
+                                                    'inline-flex shrink-0 rounded-full px-2.5 py-1 text-sm font-semibold ring-1 ring-inset',
                                                     severityToneClassName(notification.severity),
                                                 )}
                                             >
@@ -175,7 +175,7 @@ export default function NotificationBell({
                                             </span>
                                         </div>
 
-                                        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+                                        <div className="mt-3 flex items-center justify-between gap-3 text-sm text-slate-600">
                                             <div className="min-w-0 truncate">
                                                 {notification.saved_notice?.title ? notificationContextLabel(notification) : notification.event_type ?? 'Varsel'}
                                             </div>
