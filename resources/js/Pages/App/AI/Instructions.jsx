@@ -54,7 +54,7 @@ export default function AiInstructions({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">
                         <div className="space-y-1">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 AI instrukser
                             </div>
                             <div className="flex items-center gap-3">
@@ -104,7 +104,7 @@ export default function AiInstructions({
 
                         <form onSubmit={submit} className="space-y-4">
                             <label className="block space-y-1">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     Instruksjoner
                                 </span>
                                 <textarea
@@ -112,11 +112,11 @@ export default function AiInstructions({
                                     onChange={(event) => form.setData('ai_instructions', event.target.value)}
                                     rows={16}
                                     disabled={form.processing || !aiInstructionsUpdateUrl}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                     placeholder="Skriv faste regler for tone, stil, terminologi og kapitalisering."
                                 />
                                 {errorMessage ? (
-                                    <p className="text-sm text-rose-600">{errorMessage}</p>
+                                    <p className="text-base leading-6 text-rose-700">{errorMessage}</p>
                                 ) : null}
                             </label>
 
@@ -124,7 +124,7 @@ export default function AiInstructions({
                                 <button
                                     type="submit"
                                     disabled={!aiInstructionsUpdateUrl || form.processing}
-                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {form.processing ? 'Lagrer...' : 'Lagre endring'}
                                 </button>

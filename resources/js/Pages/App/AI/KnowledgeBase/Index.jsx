@@ -11,7 +11,7 @@ const DOCUMENT_STATUS_CLASS = {
     pending_review: 'bg-amber-100 text-amber-800 ring-amber-200',
     active: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     expired: 'bg-orange-100 text-orange-700 ring-orange-200',
-    archived: 'bg-slate-100 text-slate-400 ring-slate-200',
+    archived: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
 
 function classNames(...values) {
@@ -209,7 +209,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">{tk.delete_title}</h2>
-                        <p className="text-sm leading-6 text-slate-500">
+                        <p className="text-base leading-6 text-slate-600">
                             {tk.delete_body}
                         </p>
                     </div>
@@ -217,7 +217,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -225,10 +225,10 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
 
                 <div className="space-y-3 px-6 py-6">
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.12em] text-slate-600">
                             {tk.delete_document_label}
                         </div>
-                        <div className="mt-1 text-sm font-medium text-slate-950">
+                        <div className="mt-1 text-base font-medium text-slate-950">
                             {item.original_filename}
                         </div>
                     </div>
@@ -264,7 +264,7 @@ function PaginationButton({ children, disabled = false, onClick, direction = 'ne
             type="button"
             disabled={disabled}
             onClick={onClick}
-            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-400"
         >
             {direction === 'prev' ? <ChevronIcon className="mr-1 h-4 w-4 rotate-180" /> : null}
             {children}
@@ -370,7 +370,7 @@ export default function KnowledgeBaseIndex({
         archived: tk.filter_archived,
     };
     const REVIEW_STATE_CLASS = {
-        not_set: 'bg-slate-100 text-slate-400 ring-slate-200',
+        not_set: 'bg-slate-100 text-slate-600 ring-slate-200',
         ok: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
         due_soon: 'bg-amber-100 text-amber-800 ring-amber-200',
         overdue: 'bg-rose-100 text-rose-700 ring-rose-200',
@@ -503,7 +503,7 @@ export default function KnowledgeBaseIndex({
                 <section className="space-y-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 {tk.title}
                             </div>
                             <div className="flex items-center gap-3">
@@ -640,7 +640,7 @@ export default function KnowledgeBaseIndex({
                                     value={searchQuery}
                                     onChange={(event) => setSearchQuery(event.target.value)}
                                     placeholder={tk.search_placeholder}
-                                    className="h-[54px] w-full border-0 bg-transparent pl-12 pr-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
+                                    className="h-[54px] w-full border-0 bg-transparent pl-12 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:ring-0"
                                 />
                             </label>
 
@@ -664,11 +664,11 @@ export default function KnowledgeBaseIndex({
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                             <div className="grid gap-4 xl:grid-cols-4">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_category ?? tk.filter_document_type}</span>
+                                    <span className="text-base font-medium text-slate-700">{tk.filter_document_category ?? tk.filter_document_type}</span>
                                     <select
                                         value={documentCategoryFilter}
                                         onChange={(event) => setDocumentCategoryFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {DOCUMENT_CATEGORY_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -679,11 +679,11 @@ export default function KnowledgeBaseIndex({
                                 </label>
 
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_topic ?? 'Tema'}</span>
+                                    <span className="text-base font-medium text-slate-700">{tk.filter_document_topic ?? 'Tema'}</span>
                                     <select
                                         value={documentTopicFilter}
                                         onChange={(event) => setDocumentTopicFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {DOCUMENT_TOPIC_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -694,11 +694,11 @@ export default function KnowledgeBaseIndex({
                                 </label>
 
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.status}</span>
+                                    <span className="text-base font-medium text-slate-700">{tk.status}</span>
                                     <select
                                         value={statusFilter}
                                         onChange={(event) => setStatusFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {DOCUMENT_STATUS_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -709,11 +709,11 @@ export default function KnowledgeBaseIndex({
                                 </label>
 
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{ownershipLabelText}</span>
+                                    <span className="text-base font-medium text-slate-700">{ownershipLabelText}</span>
                                     <select
                                         value={ownershipFilter}
                                         onChange={(event) => setOwnershipFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {DOCUMENT_OWNERSHIP_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -724,11 +724,11 @@ export default function KnowledgeBaseIndex({
                                 </label>
 
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.col_owner}</span>
+                                    <span className="text-base font-medium text-slate-700">{tk.col_owner}</span>
                                     <select
                                         value={ownerFilter}
                                         onChange={(event) => setOwnerFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {DOCUMENT_OWNER_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -739,11 +739,11 @@ export default function KnowledgeBaseIndex({
                                 </label>
 
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.review_date_label ?? 'Revisjon'}</span>
+                                    <span className="text-base font-medium text-slate-700">{tk.review_date_label ?? 'Revisjon'}</span>
                                     <select
                                         value={reviewStateFilter}
                                         onChange={(event) => setReviewStateFilter(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
                                         {REVIEW_STATE_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
@@ -773,7 +773,7 @@ export default function KnowledgeBaseIndex({
                             <div className="text-lg font-semibold text-slate-900">
                                 {tk.no_results_title}
                             </div>
-                            <p className="mt-2 text-sm text-slate-500">
+                            <p className="mt-2 text-base text-slate-600">
                                 {tk.no_results_subtitle}
                             </p>
                         </div>
@@ -782,31 +782,31 @@ export default function KnowledgeBaseIndex({
                             <table className="min-w-full divide-y divide-slate-200">
                                 <thead className="bg-slate-50/80">
                                     <tr>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_document}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_type}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.status}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_ai_usage ?? 'AI-bruk'}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.chunks}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_updated}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {ownershipLabelText}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_owner}
                                         </th>
-                                        <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                             {tk.col_action}
                                         </th>
                                     </tr>
@@ -842,7 +842,7 @@ export default function KnowledgeBaseIndex({
                                                             <div className="font-medium text-slate-950">
                                                                 {item.original_filename}
                                                             </div>
-                                                            <div className="text-base leading-6 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-600">
                                                                 {subtitle}
                                                             </div>
                                                         </div>
@@ -850,11 +850,11 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-500">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                                             {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
                                                         {documentTopicDisplayLabel !== '' ? (
-                                                            <div className="text-base leading-6 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-600">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}
                                                             </div>
                                                         ) : null}
@@ -885,7 +885,7 @@ export default function KnowledgeBaseIndex({
                                                         </span>
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-base text-slate-500">
+                                                <td className="px-4 py-3.5 text-base text-slate-600">
                                                     {formatChunkRatio(item, commonText.not_available)}
                                                 </td>
                                                 <td className="px-4 py-3.5">
@@ -916,12 +916,12 @@ export default function KnowledgeBaseIndex({
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium text-slate-500">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium text-slate-600">
                                                                 {ownerDisplayName}
                                                             </span>
                                                         )}
                                                         {uploadedByName !== '' ? (
-                                                            <div className="text-base leading-6 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-600">
                                                                 {uploadedByLabelText}: {uploadedByName}
                                                             </div>
                                                         ) : null}
@@ -954,7 +954,7 @@ export default function KnowledgeBaseIndex({
                     )}
 
                     <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-sm text-slate-500">
+                        <div className="text-base text-slate-600">
                             {filteredItems.length === 0
                                 ? `${tk.showing} 0 ${tk.documents}`
                                 : `${tk.showing} ${pageStart}–${pageEnd} ${tk.of} ${filteredItems.length === 1 ? `1 ${tk.document}` : `${filteredItems.length} ${tk.documents}`}`}

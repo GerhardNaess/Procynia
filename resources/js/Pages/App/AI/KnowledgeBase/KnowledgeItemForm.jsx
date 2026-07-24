@@ -167,7 +167,7 @@ export default function KnowledgeItemForm({
                 ))}
             </select>
             {ownershipHelpText ? (
-                <p className="text-base leading-5 text-slate-500">
+                <p className="text-base leading-5 text-slate-600">
                     {ownershipHelpText}
                 </p>
             ) : null}
@@ -263,7 +263,7 @@ export default function KnowledgeItemForm({
         <div className="space-y-2">
             <span className="text-base font-medium text-slate-700">{documentTopicLabel}</span>
             {selectedCategoryId === null ? (
-                <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-400">
+                <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-600">
                     {selectDocumentCategoryFirstText}
                 </div>
             ) : selectedCategoryHasNoTopics ? (
@@ -323,7 +323,7 @@ export default function KnowledgeItemForm({
                                         <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-base font-medium text-white transition hover:bg-violet-700">
                                             Velg fil
                                         </span>
-                                        <span className="min-w-0 flex-1 text-base text-slate-500">
+                                        <span className="min-w-0 flex-1 text-base text-slate-600">
                                             {selectedDocumentLabel}
                                         </span>
                                     </label>
@@ -335,7 +335,7 @@ export default function KnowledgeItemForm({
                                         className="sr-only"
                                     />
                                 </div>
-                                <p className="text-base leading-5 text-slate-500">
+                                <p className="text-base leading-5 text-slate-600">
                                     Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
                                 </p>
                                 {form.errors.document && !form.errors.duplicate_file ? <p className="text-base text-rose-600">{form.errors.document}</p> : null}
@@ -407,25 +407,25 @@ export default function KnowledgeItemForm({
 
                         <div className="grid gap-3 text-base text-slate-600 sm:grid-cols-2">
                             <div>
-                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     Lastet opp
                                 </div>
                                 <div>{formatDateTime(knowledgeItem.uploaded_at)}</div>
                             </div>
                             <div>
-                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     Størrelse
                                 </div>
                                 <div>{formatFileSize(knowledgeItem.file_size_bytes)}</div>
                             </div>
                             <div>
-                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     Lastet opp av
                                 </div>
                                 <div>{knowledgeItem.uploaded_by ?? '—'}</div>
                             </div>
                             <div>
-                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     Utdrag
                                 </div>
                                 <div className="whitespace-pre-wrap break-words leading-6">
@@ -449,7 +449,7 @@ export default function KnowledgeItemForm({
                             </p>
                         ) : null}
 
-                        <p className="text-base text-slate-500">
+                        <p className="text-base text-slate-600">
                             For å endre innholdet, last opp et nytt dokument.
                         </p>
                     </section>

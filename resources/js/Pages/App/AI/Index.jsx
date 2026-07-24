@@ -51,7 +51,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                         {tai.overview ?? 'Oversikt'}
                     </div>
                     <div className="flex items-center gap-3">
@@ -92,7 +92,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                             ]}
                         />
                     </div>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         {tai.index_subtitle ?? 'Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.'}
                     </p>
                 </section>
@@ -105,7 +105,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                         {billingHref ? (
                             <a
                                 href={billingHref}
-                                className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                                className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-base font-semibold text-amber-900 transition hover:bg-amber-100"
                             >
                                 {tai.ai_access_billing_cta ?? 'Gå til Abonnement'}
                             </a>
@@ -116,13 +116,13 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                 <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 {tai.cases_nav ?? 'Saker'}
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
                                 {tai.cases_ready_title ?? 'Saker klare for arbeid med AI-assistanse'}
                             </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                            <p className="max-w-3xl text-base leading-6 text-slate-600">
                                 {tai.cases_ready_subtitle ?? 'Disse sakene har nok struktur til at arbeid kan skje videre i saken.'}
                             </p>
                         </div>
@@ -133,22 +133,22 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                     <table className="min-w-full divide-y divide-slate-200">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_case ?? 'Sak'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_responsible ?? 'Ansvarlig'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_phase ?? 'Fase'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_ai_status ?? 'AI-status'}
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_updated ?? 'Oppdatert'}
                                                 </th>
-                                                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     {tai.col_action ?? 'Handling'}
                                                 </th>
                                             </tr>
@@ -169,16 +169,16 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                                     {analysisCase.title}
                                                                 </div>
                                                                 {analysisCase.reference ? (
-                                                                    <div className="text-xs text-slate-400">
+                                                                    <div className="text-base text-slate-600">
                                                                         {tai.ref_prefix ?? 'Ref.'} {analysisCase.reference}
                                                                     </div>
                                                                 ) : null}
                                                             </div>
                                                         </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                                        <td className="px-5 py-4 text-base text-slate-600">
                                                             {analysisCase.owner_name}
                                                         </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                                        <td className="px-5 py-4 text-base text-slate-600">
                                                             {analysisCase.stage_label}
                                                         </td>
                                                         <td className="px-5 py-4">
@@ -186,13 +186,13 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                                 {aiStatusLabel}
                                                             </StatusBadge>
                                                         </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                                        <td className="px-5 py-4 text-base text-slate-600">
                                                             {updatedAtLabel}
                                                         </td>
                                                         <td className="px-5 py-4 text-right">
                                                             <Link
                                                                 href={analysisCase.action_url}
-                                                                className="inline-flex rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
                                                                 {tai.open_case ?? 'Åpne sak'}
                                                             </Link>

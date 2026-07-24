@@ -35,12 +35,12 @@ function DuplicateFileDialog({ type, td = {}, onClose }) {
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">{title}</h2>
-                        <p className="text-sm leading-6 text-slate-500">{body}</p>
+                        <p className="text-base leading-6 text-slate-600">{body}</p>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -50,7 +50,7 @@ function DuplicateFileDialog({ type, td = {}, onClose }) {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             {td.close ?? 'Lukk'}
                         </button>
@@ -106,13 +106,13 @@ export default function KnowledgeBaseCreate({
             <div className="space-y-7">
                 <section className="space-y-4">
                     <div className="space-y-2">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             Kunnskapsbase
                         </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             Kunnskapsbase
                         </h1>
-                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        <p className="max-w-3xl text-base leading-7 text-slate-600">
                             Last opp dokumenter som senere kan brukes som grunnlag for AI-forslag til besvarelse.
                         </p>
                     </div>

@@ -37,13 +37,13 @@ export default function KnowledgeBaseEdit({
             <div className="space-y-7">
                 <section className="space-y-4">
                     <div className="space-y-2">
-                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             Kunnskapsbase
                         </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             Rediger metadata for kunnskapsdokument
                         </h1>
-                        <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        <p className="max-w-3xl text-base leading-7 text-slate-600">
                             Oppdater tilhørighet, dokumenteier, dokumentkategori eller status. For å endre innholdet må du laste opp et nytt dokument.
                         </p>
                     </div>

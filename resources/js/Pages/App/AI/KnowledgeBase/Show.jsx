@@ -9,7 +9,7 @@ const DOCUMENT_STATUS_CLASS = {
     pending_review: 'bg-amber-100 text-amber-800 ring-amber-200',
     active: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     expired: 'bg-orange-100 text-orange-700 ring-orange-200',
-    archived: 'bg-slate-100 text-slate-400 ring-slate-200',
+    archived: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
 
 const CHUNK_REVIEW_STATUS_CLASS = {
@@ -611,7 +611,7 @@ function getApprovalStatusClasses(status) {
     }
 
     if (status === 'superseded') {
-        return 'border-slate-200 bg-slate-50 text-slate-500';
+        return 'border-slate-200 bg-slate-50 text-slate-600';
     }
 
     return 'border-slate-200 bg-slate-50 text-slate-600';
@@ -1253,7 +1253,7 @@ export default function KnowledgeBaseShow({
                                 </div>
 
                                 <div className="space-y-3">
-                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                         {tks.breadcrumb}
                                     </div>
                                     <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-slate-950">
@@ -1281,7 +1281,7 @@ export default function KnowledgeBaseShow({
                                             {chunkCountText}
                                         </span>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-base text-slate-500">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-base text-slate-600">
                                         <span>
                                             {tks.last_updated}: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
                                         </span>
@@ -1326,7 +1326,7 @@ export default function KnowledgeBaseShow({
                     <article className="h-full sm:col-span-2 xl:col-span-2 rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <form onSubmit={submitSummary} className="flex h-full flex-col">
                             <div className="flex items-center justify-between gap-3">
-                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                     {tks.doc_summary}
                                 </div>
                                 {summaryHasOverflow ? (
@@ -1344,7 +1344,7 @@ export default function KnowledgeBaseShow({
                             />
 
                             <div className="mt-3 flex items-end justify-between gap-3">
-                                <p className="max-w-[15rem] text-base leading-5 text-slate-500">
+                                <p className="max-w-[15rem] text-base leading-5 text-slate-600">
                                     {tks.summary_hint}
                                 </p>
                                 <button
@@ -1359,7 +1359,7 @@ export default function KnowledgeBaseShow({
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             {tks.status_progress}
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-3">
@@ -1379,7 +1379,7 @@ export default function KnowledgeBaseShow({
                                 style={{ width: `${progressPercent}%` }}
                             />
                         </div>
-                        <p className="mt-2 text-base text-slate-500">
+                        <p className="mt-2 text-base text-slate-600">
                             {totalChunksCount > 0
                                 ? formatTemplate(tks.extraction_progress, { percent: progressPercent })
                                 : tks.extraction_incomplete}
@@ -1387,38 +1387,38 @@ export default function KnowledgeBaseShow({
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             {tks.doc_info}
                         </div>
                         <dl className="mt-3 space-y-3 text-base">
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_type}</dt>
+                                <dt className="text-slate-600">{tks.doc_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : '—'}</dd>
                             </div>
                             {documentTopicDisplayLabel !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">Tema</dt>
+                                    <dt className="text-slate-600">Tema</dt>
                                     <dd className="text-right font-medium text-slate-950">{documentTopicDisplayLabel}</dd>
                                 </div>
                             ) : null}
                             {ownershipLabel !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">Tilhørighet</dt>
+                                    <dt className="text-slate-600">Tilhørighet</dt>
                                     <dd className="text-right font-medium text-slate-950">{ownershipLabel}</dd>
                                 </div>
                             ) : null}
                             {owningSavedNoticeTitle !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">Sak</dt>
+                                    <dt className="text-slate-600">Sak</dt>
                                     <dd className="text-right font-medium text-slate-950">{owningSavedNoticeTitle}</dd>
                                 </div>
                             ) : null}
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_activity}</dt>
+                                <dt className="text-slate-600">{tks.doc_activity}</dt>
                                 <dd className="text-right font-medium text-slate-950">{activeLabel}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</dt>
+                                <dt className="text-slate-600">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</dt>
                                 <dd className="text-right font-medium text-slate-950">
                                     {knowledgeItem?.ai_usage_enabled !== false
                                         ? (knowledgeText.ai_usage_yes ?? 'Ja')
@@ -1426,35 +1426,35 @@ export default function KnowledgeBaseShow({
                                 </dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{knowledgeText.document_status_label ?? 'Livsløpstatus'}</dt>
+                                <dt className="text-slate-600">{knowledgeText.document_status_label ?? 'Livsløpstatus'}</dt>
                                 <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_status_label ?? documentStatusMeta.label}</dd>
                             </div>
                             {knowledgeItem?.review_due_at ? (
                                 <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">{knowledgeText.review_due_at_label ?? 'Neste gjennomgang'}</dt>
+                                    <dt className="text-slate-600">{knowledgeText.review_due_at_label ?? 'Neste gjennomgang'}</dt>
                                     <dd className="text-right font-medium text-slate-950">{formatDateOnly(knowledgeItem.review_due_at, locale)}</dd>
                                 </div>
                             ) : null}
                             {knowledgeItem?.last_reviewed_at ? (
                                 <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">{knowledgeText.last_reviewed_at_label ?? 'Sist gjennomgått'}</dt>
+                                    <dt className="text-slate-600">{knowledgeText.last_reviewed_at_label ?? 'Sist gjennomgått'}</dt>
                                     <dd className="text-right font-medium text-slate-950">{formatDateOnly(knowledgeItem.last_reviewed_at, locale)}</dd>
                                 </div>
                             ) : null}
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_file_size}</dt>
+                                <dt className="text-slate-600">{tks.doc_file_size}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_file_type}</dt>
+                                <dt className="text-slate-600">{tks.doc_file_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatFileTypeLabel(knowledgeItem?.mime_type, knowledgeShowLabels)}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{knowledgeShowLabels.documentOwnerLabel}</dt>
+                                <dt className="text-slate-600">{knowledgeShowLabels.documentOwnerLabel}</dt>
                                 <dd className="text-right font-medium text-slate-950">{ownerDisplayName}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_last_updated}</dt>
+                                <dt className="text-slate-600">{tks.doc_last_updated}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
                             </div>
                         </dl>
@@ -1463,13 +1463,13 @@ export default function KnowledgeBaseShow({
 
                 {versionEntries.length > 0 ? (
                     <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             {knowledgeShowLabels.aiStatusTitle}
                         </div>
 
                         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-6">
                             <div className="min-w-0 flex-1 space-y-1">
-                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                     {knowledgeShowLabels.aiStatusActiveVersion}
                                 </div>
                                 {currentVersion ? (
@@ -1477,19 +1477,19 @@ export default function KnowledgeBaseShow({
                                         <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-base font-semibold text-violet-700">
                                             {knowledgeShowLabels.versionLabel} {currentVersion.version_no}
                                         </span>
-                                        <span className={`text-base ${isDocumentAiActive ? 'text-emerald-700' : 'text-slate-500'}`}>
+                                        <span className={`text-base ${isDocumentAiActive ? 'text-emerald-700' : 'text-slate-600'}`}>
                                             {isDocumentAiActive
                                                 ? knowledgeShowLabels.aiStatusActiveUsed
                                                 : knowledgeShowLabels.aiStatusActiveNotUsed}
                                         </span>
                                     </div>
                                 ) : (
-                                    <p className="text-base text-slate-500">{knowledgeShowLabels.aiStatusNoActive}</p>
+                                    <p className="text-base text-slate-600">{knowledgeShowLabels.aiStatusNoActive}</p>
                                 )}
                             </div>
 
                             <div className="min-w-0 flex-1 space-y-1">
-                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                     {knowledgeShowLabels.aiStatusPendingVersions}
                                 </div>
                                 {pendingVersions.length > 0 ? (
@@ -1507,7 +1507,7 @@ export default function KnowledgeBaseShow({
                                         </p>
                                     </div>
                                 ) : (
-                                    <p className="text-base text-slate-400">{knowledgeShowLabels.aiStatusNoPending}</p>
+                                    <p className="text-base text-slate-600">{knowledgeShowLabels.aiStatusNoPending}</p>
                                 )}
                             </div>
                         </div>
@@ -1592,7 +1592,7 @@ export default function KnowledgeBaseShow({
                                     <div className="text-lg font-semibold text-slate-900">
                                         {tks.no_chunks_empty_title}
                                     </div>
-                                    <p className="mt-2 text-base text-slate-500">
+                                    <p className="mt-2 text-base text-slate-600">
                                         {tks.no_chunks_empty_hint}
                                     </p>
                                 </div>
@@ -1601,14 +1601,14 @@ export default function KnowledgeBaseShow({
                                     <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 xl:flex xl:max-h-[calc(100vh-14rem)] xl:flex-col xl:overflow-hidden">
                                         <div className="flex items-center justify-between gap-3 xl:shrink-0">
                                             <div>
-                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                     {tks.chunks_list_heading}
                                                 </div>
-                                                <div className="mt-1 text-base text-slate-500">
+                                                <div className="mt-1 text-base text-slate-600">
                                                     {tks.chunks_list_hint}
                                                 </div>
                                             </div>
-                                            <div className="text-base font-medium text-slate-500">
+                                            <div className="text-base font-medium text-slate-600">
                                                 {chunkSearchQuery
                                                     ? `${filteredChunks.length} av ${chunks.length} ${tks.meta_chunks}`
                                                     : `${chunks.length} ${tks.meta_chunks}`}
@@ -1617,7 +1617,7 @@ export default function KnowledgeBaseShow({
 
                                         <div className="mt-4 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
                                             {filteredChunks.length === 0 && chunkSearchQuery ? (
-                                                <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-base text-slate-500">
+                                                <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-base text-slate-600">
                                                     {formatTemplate(tks.no_chunks_match, { query: chunkSearchQuery })}
                                                 </div>
                                             ) : null}
@@ -1699,7 +1699,7 @@ export default function KnowledgeBaseShow({
                                             <div className="space-y-5">
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                             {tks.selected_chunk_heading}
                                                         </div>
                                                         <div className="flex shrink-0 gap-1.5">
@@ -1772,7 +1772,7 @@ export default function KnowledgeBaseShow({
                                                 </div>
 
                                                 <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
-                                                    <div className="flex flex-wrap items-center gap-2 text-base font-medium text-slate-500">
+                                                    <div className="flex flex-wrap items-center gap-2 text-base font-medium text-slate-600">
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
                                                             {getChunkRangeLabel(selectedChunk)}
                                                         </span>
@@ -1795,7 +1795,7 @@ export default function KnowledgeBaseShow({
 
                                                     {selectedChunk.chunk_type === 'image' ? (
                                                         <div className="mt-4 max-h-[32rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                 {tks.graphic_section}
                                                             </div>
                                                             {selectedChunk.image_url && selectedChunkImageCanPreview ? (
@@ -1807,7 +1807,7 @@ export default function KnowledgeBaseShow({
                                                                     />
                                                                 </div>
                                                             ) : (
-                                                                <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-base text-slate-500">
+                                                                <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-base text-slate-600">
                                                                     {selectedChunk.image_url && !selectedChunkImageCanPreview
                                                                         ? tks.graphic_not_previewable
                                                                         : tks.no_preview}
@@ -1816,7 +1816,7 @@ export default function KnowledgeBaseShow({
 
                                                             <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.graphic_caption}
                                                                     </div>
                                                                     <div className="mt-2 text-base leading-6 text-slate-700">
@@ -1824,7 +1824,7 @@ export default function KnowledgeBaseShow({
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.graphic_alt_text}
                                                                     </div>
                                                                     <div className="mt-2 text-base leading-6 text-slate-700">
@@ -1832,7 +1832,7 @@ export default function KnowledgeBaseShow({
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.graphic_ocr}
                                                                     </div>
                                                                     <div className="mt-2 text-base leading-6 text-slate-700">
@@ -1840,7 +1840,7 @@ export default function KnowledgeBaseShow({
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.graphic_description_label}
                                                                     </div>
                                                                     <div className="mt-2 text-base leading-6 text-slate-700">
@@ -1850,7 +1850,7 @@ export default function KnowledgeBaseShow({
                                                             </div>
 
                                                             <div className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.searchable_text}
                                                                 </div>
                                                                 <pre className="mt-2 whitespace-pre-wrap text-base leading-6 text-slate-700">
@@ -1860,7 +1860,7 @@ export default function KnowledgeBaseShow({
 
                                                             {selectedChunk.image_metadata ? (
                                                                 <details className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                    <summary className="cursor-pointer text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <summary className="cursor-pointer text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.graphic_metadata}
                                                                     </summary>
                                                                     <pre className="mt-3 whitespace-pre-wrap break-words text-base leading-5 text-slate-600">
@@ -1871,7 +1871,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
                                                     ) : selectedChunk.chunk_type === 'table' ? (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                 {tks.table_section}
                                                             </div>
                                                             {selectedChunk.table_complexity === 'complex' ? (
@@ -1920,10 +1920,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                 {tks.chunk_content_heading}
                                                             </div>
-                                                            <p className="mt-1 text-base text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-600">
                                                                 {tks.chunk_content_hint}
                                                             </p>
                                                         </div>
@@ -1944,7 +1944,7 @@ export default function KnowledgeBaseShow({
                                                             {selectedChunk.chunk_type === 'image' ? (
                                                                 <div className="grid gap-4 sm:grid-cols-2">
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.replace_graphic}
                                                                         </span>
                                                                         <input
@@ -1958,7 +1958,7 @@ export default function KnowledgeBaseShow({
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                             {tks.graphic_caption_label}
                                                                         </span>
                                                                         <input
@@ -1969,7 +1969,7 @@ export default function KnowledgeBaseShow({
                                                                         />
                                                                     </label>
                                                                     <label className="space-y-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                             {tks.alt_text_label}
                                                                         </span>
                                                                         <input
@@ -1980,7 +1980,7 @@ export default function KnowledgeBaseShow({
                                                                         />
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                             {tks.ocr_text_label}
                                                                         </span>
                                                                         <textarea
@@ -1994,7 +1994,7 @@ export default function KnowledgeBaseShow({
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                             {tks.graphic_description_edit_label}
                                                                         </span>
                                                                         <textarea
@@ -2008,7 +2008,7 @@ export default function KnowledgeBaseShow({
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                             {tks.searchable_text_edit_label}
                                                                         </span>
                                                                         <textarea
@@ -2024,7 +2024,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             ) : selectedChunk.chunk_type === 'table' ? (
                                                                 <label className="block space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.table_text_label}
                                                                     </span>
                                                                     <textarea
@@ -2039,7 +2039,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
                                                             ) : (
                                                                 <label className="block space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.text_content_label}
                                                                     </span>
                                                                     <textarea
@@ -2077,10 +2077,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                 {tks.product_metadata_heading}
                                                             </div>
-                                                            <p className="mt-1 text-base text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-600">
                                                                 {tks.product_metadata_hint}
                                                             </p>
                                                         </div>
@@ -2125,7 +2125,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             ) : null}
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.chunk_title_label}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2133,7 +2133,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.ai_summary_label}
                                                                 </div>
                                                                 <div className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-base leading-6 text-slate-700">
@@ -2141,7 +2141,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.service_product_tag}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2149,7 +2149,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.theme_tag}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2157,7 +2157,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.topic_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2165,7 +2165,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.sub_topic_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2173,7 +2173,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                     {tks.keywords_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-base font-medium text-slate-950">
@@ -2185,7 +2185,7 @@ export default function KnowledgeBaseShow({
                                                         <form onSubmit={submitChunkMetadata} className="mt-4 space-y-4">
                                                             <div className="grid gap-4 sm:grid-cols-2">
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.chunk_title_label}
                                                                     </span>
                                                                     <input
@@ -2198,7 +2198,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.ai_summary_label}
                                                                     </span>
                                                                     <textarea
@@ -2211,7 +2211,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.service_product_tag}
                                                                     </span>
                                                                     <input
@@ -2224,7 +2224,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.theme_tag}
                                                                     </span>
                                                                     <input
@@ -2237,7 +2237,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.topic_placeholder}
                                                                     </span>
                                                                     <input
@@ -2250,7 +2250,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.sub_topic_placeholder}
                                                                     </span>
                                                                     <input
@@ -2263,7 +2263,7 @@ export default function KnowledgeBaseShow({
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {tks.keywords_placeholder}
                                                                     </span>
                                                                     <input
@@ -2273,7 +2273,7 @@ export default function KnowledgeBaseShow({
                                                                         placeholder={tks.keywords_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
-                                                                    <p className="text-base text-slate-500">
+                                                                    <p className="text-base text-slate-600">
                                                                         {tks.keywords_json_hint}
                                                                     </p>
                                                                 </label>
@@ -2285,10 +2285,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                 {tks.system_data_heading}
                                                             </div>
-                                                            <p className="mt-1 text-base text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-600">
                                                                 {tks.system_data_hint}
                                                             </p>
                                                         </div>
@@ -2306,7 +2306,7 @@ export default function KnowledgeBaseShow({
                                                         <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                                                             {selectedChunkSystemMetadata.map((item) => (
                                                                 <div key={item.label} className="rounded-[18px] border border-slate-200 bg-white p-4">
-                                                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                                                         {item.label}
                                                                     </dt>
                                                                     <dd className="mt-2 break-words text-base font-medium text-slate-950">
@@ -2319,7 +2319,7 @@ export default function KnowledgeBaseShow({
                                                 </div>
 
                                                 <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div className="text-base text-slate-500">
+                                                    <div className="text-base text-slate-600">
                                                             {selectedChunkIndex >= 0 && chunks.length > 0
                                                                 ? formatTemplate(knowledgeShowLabels.chunkCounterLabel, { current: selectedChunkIndex + 1, total: chunks.length })
                                                                 : knowledgeShowLabels.chunkLabel}
@@ -2342,7 +2342,7 @@ export default function KnowledgeBaseShow({
                                                 <div className="text-lg font-semibold text-slate-900">
                                                     {tks.no_chunk_selected}
                                                 </div>
-                                                <p className="mt-2 text-base text-slate-500">
+                                                <p className="mt-2 text-base text-slate-600">
                                                     {tks.no_chunk_selected_hint}
                                                 </p>
                                             </div>
@@ -2357,37 +2357,37 @@ export default function KnowledgeBaseShow({
                         <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5">
                             <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_type}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_type}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_status}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_status}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{documentStatusMeta.label}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_activity}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_activity}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{activeLabel}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_file_size}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_file_size}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_mime}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_mime}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{knowledgeItem?.mime_type ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{knowledgeShowLabels.documentOwnerLabel}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{knowledgeShowLabels.documentOwnerLabel}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{ownerDisplayName}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_chunks}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_chunks}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">
                                         {totalChunksCount > 0 ? `${readyChunksCount} av ${totalChunksCount}` : tks.no_chunks}
                                     </dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_last_updated}</dt>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">{tks.meta_last_updated}</dt>
                                     <dd className="mt-2 text-base font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
                                 </div>
                             </dl>
@@ -2399,10 +2399,10 @@ export default function KnowledgeBaseShow({
                             <section className="space-y-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                             {knowledgeShowLabels.versionsSection}
                                         </div>
-                                        <p className="mt-1 text-base text-slate-500">
+                                        <p className="mt-1 text-base text-slate-600">
                                             {knowledgeShowLabels.versionsSectionDescription}
                                         </p>
                                         <p className="mt-1 text-base text-amber-700">
@@ -2445,7 +2445,7 @@ export default function KnowledgeBaseShow({
                                                 className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-50 file:px-3 file:py-1 file:text-base file:font-semibold file:text-violet-700 hover:file:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                 disabled={replaceFileForm.processing}
                                             />
-                                            <p className="text-base text-slate-500">
+                                            <p className="text-base text-slate-600">
                                                 {knowledgeShowLabels.uploadNewVersionAllowedTypes}
                                             </p>
                                             {replaceFileForm.errors.file && !replaceFileForm.errors.duplicate_file ? (
@@ -2509,7 +2509,7 @@ export default function KnowledgeBaseShow({
 
                                                     <dl className="grid gap-x-6 gap-y-2 text-base text-slate-600 sm:grid-cols-2">
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionFilename}
                                                             </dt>
                                                             <dd className="truncate font-medium text-slate-900" title={version.original_filename}>
@@ -2518,7 +2518,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionFiletype}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2527,7 +2527,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionFilesize}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2536,7 +2536,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionChunksCount}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2545,7 +2545,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionExtractionStatus}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2554,7 +2554,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 {knowledgeShowLabels.versionUploadedAt}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2564,7 +2564,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.uploaded_by_name ? (
                                                             <div className="space-y-0.5 sm:col-span-2">
-                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                     {knowledgeShowLabels.versionUploadedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2586,7 +2586,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'approved' && version.approved_by_name ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                     {knowledgeShowLabels.versionApprovedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2597,7 +2597,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'approved' && version.approved_at ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                     {knowledgeShowLabels.versionApprovedAt}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2608,7 +2608,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'rejected' && version.rejected_by_name ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                     {knowledgeShowLabels.versionRejectedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2619,7 +2619,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'rejected' && version.rejected_at ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                     {knowledgeShowLabels.versionRejectedAt}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2642,7 +2642,7 @@ export default function KnowledgeBaseShow({
                                                 </div>
 
                                                 <div className="flex shrink-0 flex-col items-end gap-2">
-                                                    <span className="text-base font-medium text-slate-400">
+                                                    <span className="text-base font-medium text-slate-600">
                                                         #{version.version_no}
                                                     </span>
                                                     {version.approve_url ? (
@@ -2672,7 +2672,7 @@ export default function KnowledgeBaseShow({
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-500">
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-600">
                                         {knowledgeShowLabels.versionEmptyState}
                                     </div>
                                 )}
@@ -2681,10 +2681,10 @@ export default function KnowledgeBaseShow({
                             <section className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                             Revisjoner
                                         </div>
-                                        <p className="mt-1 text-base text-slate-500">
+                                        <p className="mt-1 text-base text-slate-600">
                                             Read-only historikk for lagrede dokumentendringer.
                                         </p>
                                     </div>
@@ -2709,7 +2709,7 @@ export default function KnowledgeBaseShow({
 
                                                     <dl className="grid gap-x-6 gap-y-2 text-base text-slate-600 sm:grid-cols-2">
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 Endringstype
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2717,7 +2717,7 @@ export default function KnowledgeBaseShow({
                                                             </dd>
                                                         </div>
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 Tidspunkt
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2725,7 +2725,7 @@ export default function KnowledgeBaseShow({
                                                             </dd>
                                                         </div>
                                                         <div className="space-y-0.5 sm:col-span-2">
-                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                                                 Bruker
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2735,14 +2735,14 @@ export default function KnowledgeBaseShow({
                                                     </dl>
                                                 </div>
 
-                                                <div className="text-base font-medium text-slate-500">
+                                                <div className="text-base font-medium text-slate-600">
                                                     #{revision.revision_no}
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-500">
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-600">
                                         Ingen revisjoner registrert ennå.
                                     </div>
                                 )}
@@ -2750,10 +2750,10 @@ export default function KnowledgeBaseShow({
 
                             <section className="space-y-3">
                                 <div>
-                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                         Prosesshistorikk
                                     </div>
-                                    <p className="mt-1 text-base text-slate-500">
+                                    <p className="mt-1 text-base text-slate-600">
                                         Opplasting, lagring og ekstraksjon for dokumentet.
                                     </p>
                                 </div>
@@ -2777,7 +2777,7 @@ export default function KnowledgeBaseShow({
                                                     </div>
                                                 </div>
 
-                                                <div className="text-base font-medium text-slate-500">
+                                                <div className="text-base font-medium text-slate-600">
                                                     {entry.time}
                                                 </div>
                                             </div>
@@ -2809,7 +2809,7 @@ export default function KnowledgeBaseShow({
                                     ? (td.same_document_title ?? 'Filen finnes allerede som versjon')
                                     : (td.other_document_title ?? 'Filen finnes allerede i Kunnskapsbase')}
                             </h2>
-                            <p className="text-base leading-6 text-slate-500">
+                            <p className="text-base leading-6 text-slate-600">
                                 {duplicateDialogType === 'same_document'
                                     ? (td.same_document_body ?? 'Denne filen finnes allerede som en versjon av dette dokumentet. Velg en annen fil dersom du vil opprette en ny dokumentversjon.')
                                     : (td.other_document_body ?? 'Denne filen finnes allerede som et annet kunnskapsdokument. Åpne det eksisterende dokumentet dersom du vil se eller oppdatere det.')}
@@ -2818,7 +2818,7 @@ export default function KnowledgeBaseShow({
                         <button
                             type="button"
                             onClick={() => setDuplicateDialogType(null)}
-                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                         >
                             ×
                         </button>
@@ -2860,7 +2860,7 @@ export default function KnowledgeBaseShow({
                                 type="button"
                                 onClick={closeRejectDialog}
                                 disabled={rejectingVersionId !== null}
-                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 ×
                             </button>
@@ -2870,7 +2870,7 @@ export default function KnowledgeBaseShow({
                                 {knowledgeShowLabels.versionRejectReasonLabel}
                             </label>
                             <textarea
-                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 placeholder-slate-500 focus:border-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                                 rows={4}
                                 placeholder={knowledgeShowLabels.versionRejectReasonPlaceholder}
                                 value={rejectReasonInput}

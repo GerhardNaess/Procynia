@@ -689,14 +689,14 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
             <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
-                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">
+                        <div className="text-base font-semibold uppercase tracking-[0.16em] text-violet-700">
                             {aiText.evidence_title}
                         </div>
                         <h2 className="text-xl font-semibold text-slate-950">
                             {evidence.requirement_point ?? '—'}
                         </h2>
                         {evidence.support_summary ? (
-                            <p className="text-sm leading-6 text-slate-500">
+                            <p className="text-base leading-6 text-slate-600">
                                 {evidence.support_summary}
                             </p>
                         ) : null}
@@ -705,7 +705,7 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                         aria-label={aiText.evidence_modal_close}
                     >
                         ×
@@ -715,10 +715,10 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
                 <div className="grid gap-4 overflow-y-auto px-6 py-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
                     <div className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
                         <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {aiText.evidence_source_title}
                             </div>
-                            <div className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+                            <div className="mt-2 space-y-2 text-base leading-6 text-slate-700">
                                 <div>
                                     <span className="font-semibold text-slate-900">{aiText.evidence_document_label}</span>{' '}
                                     {source?.document_title ?? '—'}
@@ -747,10 +747,10 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
                         </section>
 
                         <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {aiText.evidence_excerpt_title}
                             </div>
-                            <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                            <div className="mt-3 whitespace-pre-wrap text-base leading-7 text-slate-700">
                                 {contentPreview}
                             </div>
                         </section>
@@ -758,10 +758,10 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
 
                     <aside className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
                         <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {aiText.evidence_line_title}
                             </div>
-                            <div className="mt-2 text-sm leading-6 text-slate-700">
+                            <div className="mt-2 text-base leading-6 text-slate-700">
                                 {evidence.evidence_reference ? (
                                     <div className="font-medium text-slate-900">
                                         {evidence.evidence_reference}
@@ -773,7 +773,7 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
                                     </div>
                                 ) : null}
                                 {source?.source_label ? (
-                                    <div className="mt-3 text-xs text-slate-500">
+                                    <div className="mt-3 text-base text-slate-600">
                                         {source.source_label}
                                     </div>
                                 ) : null}
@@ -787,7 +787,7 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             {aiText.evidence_close}
                         </button>
@@ -800,7 +800,7 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
 
 function AiAccessNotice({ aiText = {}, billingHref = '' }) {
     return (
-        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
+        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-4 text-base leading-6 text-amber-900">
             <div className="font-semibold">
                 {aiText.ai_access_unavailable_title}
             </div>
@@ -810,7 +810,7 @@ function AiAccessNotice({ aiText = {}, billingHref = '' }) {
             {billingHref ? (
                 <a
                     href={billingHref}
-                    className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                    className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-base font-semibold text-amber-900 transition hover:bg-amber-100"
                 >
                     {aiText.ai_access_billing_cta}
                 </a>
@@ -1564,7 +1564,7 @@ function StructuredTablePreview({ tableJson }) {
 
     return (
         <div className="overflow-x-auto rounded-[14px] border border-slate-200">
-            <table className="min-w-full border-collapse text-sm">
+            <table className="min-w-full border-collapse text-base">
                 <tbody>
                     {titleRow ? renderRow(titleRow, titleRowIndex, false) : null}
                     {bodyRows.map((row, index) => {
@@ -3210,7 +3210,7 @@ export default function AiShow({
             <div className="space-y-7">
                 <section className="space-y-4">
                     <div className="space-y-3">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                             {tai.case_workspace_overline ?? 'Saksdokumenter og AI'}
                         </div>
                         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -3219,25 +3219,25 @@ export default function AiShow({
                                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                         {caseData?.title ?? tai.ai_case_title}
                                     </h1>
-                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
+                                    <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${aiStatusMeta.className}`}>
                                         {aiStatusMeta.label}
                                     </span>
                                     <InfoHint size="sm" label="Vis forklaring for AI-status" text={tai.hint_ai_status} />
                                 </div>
-                                <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                                <p className="max-w-3xl text-base leading-7 text-slate-600">
                                     {tai.case_workspace_intro ?? 'Arbeidsflaten gjelder dokumenter, krav og AI-arbeid for denne konkrete saken.'}
                                 </p>
                             </div>
                             {savedNoticeShowUrl ? (
                                 <Link
                                     href={savedNoticeShowUrl}
-                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {tai.case_workspace_back_to_case ?? 'Tilbake til saken'}
                                 </Link>
                             ) : null}
                         </div>
-                        <div className="flex flex-wrap gap-2 text-sm text-slate-500">
+                        <div className="flex flex-wrap gap-2 text-base text-slate-600">
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
                                 {tai.case_reference_prefix} {caseData?.reference ?? '—'}
                             </span>
@@ -3257,7 +3257,7 @@ export default function AiShow({
                                 <a
                                     href={exportDocxUrl}
                                     title={tai.export_word_title ?? 'Last ned alle svarutkast som Word-dokument'}
-                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {tai.export_word ?? 'Last ned Word'}
                                 </a>
@@ -3327,26 +3327,26 @@ export default function AiShow({
                                         {requirementExtractionBannerTitle}
                                     </h2>
                                     {activeRequirementExtractionStatusMeta ? (
-                                        <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${activeRequirementExtractionStatusMeta.className}`}>
+                                        <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${activeRequirementExtractionStatusMeta.className}`}>
                                             {activeRequirementExtractionStatusMeta.label}
                                         </span>
                                     ) : null}
                                 </div>
-                                <p className="text-sm leading-6 text-slate-600">
+                                <p className="text-base leading-6 text-slate-600">
                                     {requirementExtractionBannerDescription}
                                 </p>
                                 {requirementExtractionCandidateText ? (
-                                    <p className="text-sm font-medium text-slate-700">
+                                    <p className="text-base font-medium text-slate-700">
                                         {requirementExtractionCandidateText}
                                     </p>
                                 ) : null}
                                 {activeRequirementExtractionDocumentTitle ? (
-                                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                                    <p className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                         {tai.requirement_extraction_document_prefix} {activeRequirementExtractionDocumentTitle}
                                     </p>
                                 ) : null}
                                 {requirementExtractionBanner.state === 'failed' ? (
-                                    <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm leading-6 text-rose-700">
+                                    <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-base leading-6 text-rose-700">
                                         {requirementExtractionBanner.message !== ''
                                             ? requirementExtractionBanner.message
                                             : tai.requirement_extraction_failed_fallback}
@@ -3360,7 +3360,7 @@ export default function AiShow({
                 <section className="mb-5 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 {tai.documents_section_overline}
                             </div>
                             <h2 className="text-xl font-semibold tracking-tight text-slate-950">
@@ -3385,7 +3385,7 @@ export default function AiShow({
                                             htmlFor="ai-documents"
                                             className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-4"
                                         >
-                                            <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700">
+                                            <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-violet-700">
                                                 {tai.choose_files}
                                             </span>
                                             <span className="min-w-0 flex-1 text-base text-slate-700">
@@ -3399,7 +3399,7 @@ export default function AiShow({
                                                 || !documentsUploadUrl
                                                 || documentUploadForm.data.documents.length === 0
                                             }
-                                            className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
                                         </button>
@@ -3413,16 +3413,16 @@ export default function AiShow({
                                             className="sr-only"
                                         />
                                     </div>
-                                    <p className="text-sm leading-6 text-slate-600">
+                                    <p className="text-base leading-6 text-slate-600">
                                         {tai.allowed_file_types}
                                     </p>
                                     {documentError ? (
-                                        <p className="text-sm text-rose-600">{documentError}</p>
+                                        <p className="text-base text-rose-700">{documentError}</p>
                                     ) : null}
                                 </div>
                             </form>
                         ) : (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-base leading-6 text-amber-900">
                                 {tai.ai_access_unavailable_message}
                             </div>
                         )}
@@ -3430,17 +3430,17 @@ export default function AiShow({
                         <div className="rounded-[18px] border border-slate-200 bg-slate-50/40">
                             <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">
                                 <div className="flex items-center gap-3">
-                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                    <h3 className="text-base font-semibold tracking-tight text-slate-950">
                                         {isEnglish ? 'Uploaded case documents' : 'Opplastede saksdokumenter'}
                                     </h3>
-                                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                    <span className="text-base font-medium uppercase tracking-[0.14em] text-slate-600">
                                         {documentRows.length}
                                     </span>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={() => setCaseDocumentsCollapsed((v) => !v)}
-                                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {caseDocumentsCollapsed ? tai.show_documents_section ?? 'Vis dokumenter' : tai.hide_documents_section ?? 'Skjul dokumentliste'}
                                 </button>
@@ -3465,31 +3465,31 @@ export default function AiShow({
                                                 <div className="flex flex-wrap items-start justify-between gap-4">
                                                     <div className="min-w-0 space-y-2">
                                                         <div className="flex flex-wrap items-center gap-2">
-                                                            <span className="min-w-0 truncate text-sm font-semibold text-slate-950">
+                                                            <span className="min-w-0 truncate text-base font-semibold text-slate-950">
                                                                 {document.original_filename ?? (isEnglish ? 'Untitled document' : 'Uten filnavn')}
                                                             </span>
                                                         </div>
 
-                                                        <div className="grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                                                        <div className="grid gap-2 text-base text-slate-600 sm:grid-cols-2">
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {documentListTexts.documentStatusLabel}
                                                                 </span>
-                                                                <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${documentStatusMeta.className}`}>
+                                                                <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${documentStatusMeta.className}`}>
                                                                     {documentStatusMeta.label}
                                                                 </span>
                                                             </div>
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {documentListTexts.requirementStatusLabel}
                                                                 </span>
-                                                                <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${requirementStatusMeta.className}`}>
+                                                                <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${requirementStatusMeta.className}`}>
                                                                     {requirementStatusMeta.label}
                                                                 </span>
                                                             </div>
                                                         </div>
 
-                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-base text-slate-600">
                                                             {document.uploaded_by ? (
                                                                 <span>
                                                                     {isEnglish ? 'Uploaded by' : 'Lastet opp av'} {document.uploaded_by}
@@ -3503,7 +3503,7 @@ export default function AiShow({
                                                         </div>
 
                                                         {progressLabel ? (
-                                                            <p className="text-sm leading-6 text-slate-600">
+                                                            <p className="text-base leading-6 text-slate-600">
                                                                 {progressLabel}
                                                             </p>
                                                         ) : null}
@@ -3512,7 +3512,7 @@ export default function AiShow({
                                                     {document.preview_url ? (
                                                         <a
                                                             href={document.preview_url}
-                                                            className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                            className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                         >
                                                             {isEnglish ? 'Preview' : 'Forhåndsvis'}
                                                         </a>
@@ -3529,7 +3529,7 @@ export default function AiShow({
                                             ? 'No case documents have been uploaded yet.'
                                             : 'Ingen saksdokumenter er lastet opp ennå.'}
                                     </div>
-                                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                                    <p className="mt-2 text-base leading-6 text-slate-600">
                                         {isEnglish
                                             ? 'Upload tender documents, requirement documents or other files related to this specific case.'
                                             : 'Last opp konkurransegrunnlag, kravdokumenter eller andre dokumenter som gjelder denne konkrete saken.'}
@@ -3546,16 +3546,16 @@ export default function AiShow({
                     <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
-                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                     {tai.requirements_section_overline}
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
                                     {tai.requirements_section_title}
                                 </h2>
-                                <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                                <p className="max-w-3xl text-base leading-6 text-slate-600">
                                     {tai.requirements_section_description}
                                 </p>
-                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                     {requirementCountLabel} {tai.requirements_total_suffix}
                                 </span>
                             </div>
@@ -3566,7 +3566,7 @@ export default function AiShow({
                                     onClick={() => setShowManualRequirementForm((value) => !value)}
                                     disabled={requirementUpdatesLocked && !showManualRequirementForm}
                                     aria-expanded={showManualRequirementForm}
-                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {showManualRequirementForm ? tai.hide_requirement_form : tai.show_requirement_form}
                                 </button>
@@ -3574,7 +3574,7 @@ export default function AiShow({
                                 <button
                                     type="button"
                                     onClick={() => setShowAdvancedAI((value) => !value)}
-                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
                                     {showAdvancedAI ? tai.hide_advanced : tai.advanced}
                                 </button>
@@ -3585,7 +3585,7 @@ export default function AiShow({
                                             type="button"
                                             onClick={refreshEvidence}
                                             disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
-                                            className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {refreshingEvidence ? tai.refreshing : tai.refresh_sources}
                                         </button>
@@ -3594,7 +3594,7 @@ export default function AiShow({
                                             type="button"
                                             onClick={refreshAssessments}
                                             disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
-                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {refreshingAssessments ? tai.analyzing : tai.analyze_requirements}
                                         </button>
@@ -3603,7 +3603,7 @@ export default function AiShow({
 
                                 {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
                                     showBulkRejectConfirm ? (
-                                        <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs">
+                                        <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base">
                                             <p className="font-semibold text-rose-800">{tai.reject_all_confirm_title}</p>
                                             <p className="text-rose-700">{tai.reject_all_confirm_message}</p>
                                             <div className="flex flex-wrap gap-2">
@@ -3632,7 +3632,7 @@ export default function AiShow({
                                             type="button"
                                             onClick={() => setShowBulkRejectConfirm(true)}
                                             disabled={requirementUpdatesLocked || rejectingAllRequirements}
-                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {rejectingAllRequirements ? tai.rejecting_all : tai.reject_all_requirements}
                                         </button>
@@ -3644,13 +3644,13 @@ export default function AiShow({
 
                         <div className="mt-4 flex flex-wrap items-end justify-between gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 px-4 py-3">
                             <label className="block min-w-[16rem] flex-1 space-y-1">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {tai.responsible}
                                 </span>
                                 <select
                                     value={selectedResponsibleUserFilterValue}
                                     onChange={(event) => setSelectedResponsibleUserFilter(event.target.value)}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                                 >
                                     <option value="all">{tai.all_requirements}</option>
                                     <option value="unassigned">{tai.unassigned_requirements}</option>
@@ -3662,7 +3662,7 @@ export default function AiShow({
                                 </select>
                             </label>
 
-                            <div className="text-sm font-medium text-slate-500">
+                            <div className="text-base font-medium text-slate-600">
                                 {formatLocalizedTemplate(tai.showing_requirements, {
                                     visible: visibleRequirementRows.length,
                                     total: requirementRows.length,
@@ -3674,20 +3674,20 @@ export default function AiShow({
                             <form onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="space-y-1">
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-violet-600">
+                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-violet-700">
                                         {tai.manual_requirement_overline}
                                     </div>
-                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                    <h3 className="text-base font-semibold tracking-tight text-slate-950">
                                         {tai.manual_requirement_title}
                                     </h3>
-                                    <p className="text-xs leading-5 text-slate-500">
+                                    <p className="text-base leading-6 text-slate-600">
                                         {tai.manual_requirement_description}
                                     </p>
                                 </div>
                                 <button
                                     type="submit"
                                     disabled={manualRequirementForm.processing || !requirementsStoreUrl || requirementUpdatesLocked}
-                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {manualRequirementForm.processing ? tai.saving : tai.manual_requirement_submit}
                                 </button>
@@ -3695,7 +3695,7 @@ export default function AiShow({
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <label className="block space-y-1">
-                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                         {tai.requirement_id_label}
                                     </span>
                                     <input
@@ -3703,16 +3703,16 @@ export default function AiShow({
                                         value={manualRequirementForm.data.requirement_identifier}
                                         onChange={(event) => manualRequirementForm.setData('requirement_identifier', event.target.value)}
                                         disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         placeholder={tai.requirement_id_placeholder}
                                     />
                                     {manualRequirementForm.errors.requirement_identifier ? (
-                                        <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_identifier}</p>
+                                        <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_identifier}</p>
                                     ) : null}
                                 </label>
 
                                 <label className="block space-y-1">
-                                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    <span className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                         {tai.requirement_type_label}
                                         <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
                                     </span>
@@ -3720,7 +3720,7 @@ export default function AiShow({
                                         value={manualRequirementForm.data.requirement_type}
                                         onChange={(event) => manualRequirementForm.setData('requirement_type', event.target.value)}
                                         disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                     >
                                         {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
                                             <option key={value} value={value}>
@@ -3729,13 +3729,13 @@ export default function AiShow({
                                         ))}
                                     </select>
                                     {manualRequirementForm.errors.requirement_type ? (
-                                        <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_type}</p>
+                                        <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_type}</p>
                                     ) : null}
                                 </label>
                             </div>
 
                             <label className="block space-y-1">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                     {tai.requirement_text_label}
                                 </span>
                                 <textarea
@@ -3743,16 +3743,16 @@ export default function AiShow({
                                     onChange={(event) => manualRequirementForm.setData('requirement_text', event.target.value)}
                                     rows={4}
                                     disabled={manualRequirementForm.processing || requirementUpdatesLocked}
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                     placeholder={tai.requirement_text_placeholder}
                                 />
                                 {manualRequirementForm.errors.requirement_text ? (
-                                    <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_text}</p>
+                                    <p className="text-base text-rose-700">{manualRequirementForm.errors.requirement_text}</p>
                                 ) : null}
                             </label>
 
                             {manualRequirementError ? (
-                                <p className="text-sm text-rose-600">{manualRequirementError}</p>
+                                <p className="text-base text-rose-700">{manualRequirementError}</p>
                             ) : null}
                         </form>
                         ) : null}
@@ -3762,7 +3762,7 @@ export default function AiShow({
                                 <div className="text-lg font-semibold text-slate-900">
                                     {tai.requirements_empty_title}
                                 </div>
-                                <p className="mt-2 text-sm text-slate-500">
+                                <p className="mt-2 text-base text-slate-600">
                                     {tai.requirements_empty_hint}
                                 </p>
                             </div>
@@ -3926,7 +3926,7 @@ export default function AiShow({
                                                     <div className="min-w-0 flex-1 space-y-2">
                                                         <div className="flex flex-wrap items-center gap-2">
                                                             {currentRequirementIdentifier !== '—' || sourceRowTypeCode ? (
-                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                     {[
                                                                         currentRequirementIdentifier !== '—' ? currentRequirementIdentifier : null,
                                                                         sourceRowTypeCode,
@@ -3935,14 +3935,14 @@ export default function AiShow({
                                                             ) : null}
                                                         </div>
                                                         {sourceSectionTitle || sourceLocatorLabel ? (
-                                                            <div className="text-xs font-medium text-slate-500">
+                                                            <div className="text-base font-medium text-slate-600">
                                                                 {[sourceSectionTitle, sourceLocatorLabel].filter(Boolean).join(' · ')}
                                                             </div>
                                                         ) : null}
                                                         <div className="text-base font-semibold leading-7 text-slate-950 break-words">
                                                             {currentRequirementText}
                                                         </div>
-                                                        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                        <div className="flex flex-wrap items-center gap-2 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                             <span>
                                                                 {isApprovedRequirement ? tai.workstream_approved : tai.workstream_pending}
                                                             </span>
@@ -3952,10 +3952,10 @@ export default function AiShow({
                                                         </div>
                                                         {hasWikiAnswer ? (
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700">
+                                                                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-base font-semibold leading-6 text-violet-700">
                                                                     {tai.wiki_answer_ready_badge}
                                                                 </span>
-                                                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${wikiAnswerCoverageClassName}`}>
+                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerCoverageClassName}`}>
                                                                     {wikiAnswerCoverageLabels[wikiAnswer.coverage_status] ?? wikiAnswer.coverage_status_label}
                                                                 </span>
                                                             </div>
@@ -3973,7 +3973,7 @@ export default function AiShow({
                                                                     aria-expanded={requirementPromptEditorOpen}
                                                                     aria-controls={`requirement-prompt-${requirement.id}`}
                                                                     title={tai.open_prompt_for_requirement}
-                                                                    className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                    className={`inline-flex rounded-full border px-3 py-1.5 text-base font-semibold leading-6 transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                         requirementPromptEditorOpen || requirementHasUserPrompt
                                                                             ? 'border-violet-300 bg-violet-50 text-violet-700'
                                                                             : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'
@@ -3989,17 +3989,17 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
                                                                     title={tai.generate_draft_for_requirement}
-                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1.5 text-base font-semibold leading-6 text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {tai.create_answer}
                                                                 </button>
                                                             </>
                                                         ) : approvalStatus === 'rejected' ? (
-                                                            <span className="inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
+                                                            <span className="inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
                                                                 {tai.requirement_approval_rejected}
                                                             </span>
                                                         ) : (
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
+                                                            <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${sourceTypeMeta.className}`}>
                                                                 {requirement.source_type_label ?? sourceTypeMeta.label}
                                                             </span>
                                                         )}
@@ -4009,17 +4009,17 @@ export default function AiShow({
                                                 <div className="flex flex-wrap gap-2">
                                                     {isApprovedRequirement ? (
                                                         <>
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${workStatusMeta.className}`}>
+                                                            <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${workStatusMeta.className}`}>
                                                                 {requirement.work_status_label ?? workStatusMeta.label}
                                                             </span>
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-600">
                                                                 {tai.assigned_prefix} {assignedUserLabel}
                                                             </span>
                                                         </>
                                                     ) : null}
                                                 </div>
 
-                                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                                <div className="flex flex-wrap items-center gap-2 text-base text-slate-600">
                                                     {(() => {
                                                         const sourceDocument = resolveRequirementSourceDocument(requirement);
                                                         const sourceDocumentUrl = requirement?.source_document_preview_url ?? sourceDocument?.preview_url ?? null;
@@ -4041,7 +4041,7 @@ export default function AiShow({
                                                             <button
                                                                 type="button"
                                                                 disabled
-                                                                className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-400 opacity-60"
+                                                                className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-medium leading-6 text-slate-600 opacity-60"
                                                             >
                                                                 {tai.preview_source_prefix} {sourceDocumentLabel}
                                                             </button>
@@ -4052,12 +4052,12 @@ export default function AiShow({
                                                 {requirementPromptEditorOpen ? (
                                                     <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-4">
                                                         <label
-                                                            className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700"
+                                                            className="block text-base font-semibold uppercase tracking-[0.12em] text-violet-700"
                                                             htmlFor={`requirement-prompt-${requirement.id}`}
                                                         >
                                                             {tai.requirement_prompt_title}
                                                         </label>
-                                                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                                                        <p className="mt-1 text-base leading-6 text-slate-600">
                                                             {tai.prompt_instruction_hint}
                                                         </p>
                                                         <textarea
@@ -4067,7 +4067,7 @@ export default function AiShow({
                                                             maxLength={5000}
                                                             rows={4}
                                                             disabled={answerDraftGeneratingRequirementId === requirement.id}
-                                                            className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             placeholder={tai.example_prompt_placeholder}
                                                         />
                                                         <div className="mt-3 flex justify-end">
@@ -4075,7 +4075,7 @@ export default function AiShow({
                                                                 type="button"
                                                                 onClick={() => { void requestAnswerDraftGeneration(requirement); }}
                                                                 disabled={requirementUpdatesLocked}
-                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {tai.create_answer}
                                                             </button>
@@ -4087,7 +4087,7 @@ export default function AiShow({
                                                     showAdvancedAI ? (
                                                         <div className="space-y-4 border-t border-slate-200/80 pt-4">
                                                             <div className="flex flex-wrap items-center justify-between gap-3">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.sources_section_title}
                                                                 </div>
                                                                 <button
@@ -4101,21 +4101,21 @@ export default function AiShow({
                                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                                         || answerBasisSelectionSavingRequirementId === activeRequirement.id
                                                                     }
-                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? tai.generating : tai.regenerate}
                                                                 </button>
                                                             </div>
 
                                                             {answerBasisSelectionError ? (
-                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
                                                                     {answerBasisSelectionError}
                                                                 </div>
                                                             ) : null}
 
                                                             {activeRequirementSelectedAnswerBasisItems.length > 0 ? (
                                                                 <div className="space-y-2">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         {tai.selected_sources}
                                                                     </div>
                                                                     <div className="space-y-2">
@@ -4133,7 +4133,7 @@ export default function AiShow({
                                                                                             <div className="font-medium text-slate-950">
                                                                                                 {answerBasisItem.title}
                                                                                             </div>
-                                                                                            <div className="flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                            <div className="flex flex-wrap gap-2 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                                 <span>{answerBasisItem.answer_basis_type_label}</span>
                                                                                                 {answerBasisItem.original_filename ? (
                                                                                                     <span>{answerBasisItem.original_filename}</span>
@@ -4144,7 +4144,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
                                                                                             disabled={isToggling || !isSelected}
-                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                                                         >
                                                                                             {tai.remove_button}
                                                                                         </button>
@@ -4155,18 +4155,18 @@ export default function AiShow({
                                                                     </div>
                                                                 </div>
                                                             ) : (
-                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                                                     {tai.no_selected_sources}
                                                                 </div>
                                                             )}
 
                                                             <div className="space-y-2">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.choose_sources}
                                                                 </div>
 
                                                                 {answerBasisItems.length === 0 ? (
-                                                                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                                                         {tai.no_available_sources}
                                                                     </div>
                                                                 ) : (
@@ -4190,16 +4190,16 @@ export default function AiShow({
                                                                                                 <div className="font-medium text-slate-950">
                                                                                                     {answerBasisItem.title}
                                                                                                 </div>
-                                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                                     {answerBasisItem.answer_basis_type_label}
                                                                                                 </span>
                                                                                             </div>
                                                                                             {answerBasisItem.original_filename ? (
-                                                                                                <div className="text-sm text-slate-500">
+                                                                                                <div className="text-base text-slate-600">
                                                                                                     {answerBasisItem.original_filename}
                                                                                                 </div>
                                                                                             ) : null}
-                                                                                            <p className="max-w-4xl text-sm leading-6 text-slate-600">
+                                                                                            <p className="max-w-4xl text-base leading-6 text-slate-600">
                                                                                                 {formatKnowledgeSnippet(answerBasisItem.body_text, 160)}
                                                                                             </p>
                                                                                         </div>
@@ -4208,7 +4208,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
                                                                                             disabled={isToggling}
-                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                                                 isSelected
                                                                                                     ? 'border border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50'
                                                                                                     : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
@@ -4231,10 +4231,10 @@ export default function AiShow({
 
                                                 {hasOriginalDifference ? (
                                                     <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3">
-                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">
                                                             {tai.original_proposal}
                                                         </div>
-                                                        <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                        <p className="mt-2 text-base leading-6 text-slate-700">
                                                             {originalRequirementText ?? '—'}
                                                         </p>
                                                     </div>
@@ -4244,7 +4244,7 @@ export default function AiShow({
                                                     <form onSubmit={submitRequirementEdit} className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
                                                         <div className="grid gap-4 md:grid-cols-2">
                                                             <label className="block space-y-1">
-                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.requirement_id_label}
                                                                 </span>
                                                                 <input
@@ -4252,15 +4252,15 @@ export default function AiShow({
                                                                     value={requirementEditForm.data.requirement_identifier}
                                                                     onChange={(event) => requirementEditForm.setData('requirement_identifier', event.target.value)}
                                                                     disabled={requirementEditForm.processing}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 />
                                                                 {requirementEditForm.errors.requirement_identifier ? (
-                                                                    <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_identifier}</p>
+                                                                    <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_identifier}</p>
                                                                 ) : null}
                                                             </label>
 
                                                             <label className="block space-y-1">
-                                                                <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <span className="flex items-center gap-1.5 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.requirement_type_label}
                                                                     <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
                                                                 </span>
@@ -4268,7 +4268,7 @@ export default function AiShow({
                                                                     value={requirementEditForm.data.requirement_type}
                                                                     onChange={(event) => requirementEditForm.setData('requirement_type', event.target.value)}
                                                                     disabled={requirementEditForm.processing}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
                                                                         <option key={value} value={value}>
@@ -4277,13 +4277,13 @@ export default function AiShow({
                                                                     ))}
                                                                 </select>
                                                                 {requirementEditForm.errors.requirement_type ? (
-                                                                    <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_type}</p>
+                                                                    <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_type}</p>
                                                                 ) : null}
                                                             </label>
                                                         </div>
 
                                                         <label className="block space-y-1">
-                                                            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                 {tai.requirement_text_label}
                                                             </span>
                                                             <textarea
@@ -4291,22 +4291,22 @@ export default function AiShow({
                                                                 onChange={(event) => requirementEditForm.setData('requirement_text', event.target.value)}
                                                                 rows={4}
                                                                 disabled={requirementEditForm.processing}
-                                                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             />
                                                             {requirementEditForm.errors.requirement_text ? (
-                                                                <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_text}</p>
+                                                                <p className="text-base text-rose-700">{requirementEditForm.errors.requirement_text}</p>
                                                             ) : null}
                                                         </label>
 
                                                         {requirementEditError ? (
-                                                            <p className="text-sm text-rose-600">{requirementEditError}</p>
+                                                            <p className="text-base text-rose-700">{requirementEditError}</p>
                                                         ) : null}
 
                                                         <div className="flex flex-wrap gap-2">
                                                             <button
                                                                 type="submit"
                                                                 disabled={requirementEditForm.processing}
-                                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {requirementEditForm.processing ? tai.saving : tai.save_requirement_changes}
                                                             </button>
@@ -4314,7 +4314,7 @@ export default function AiShow({
                                                                 type="button"
                                                                 onClick={cancelEditingRequirement}
                                                                 disabled={requirementEditForm.processing}
-                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {tai.cancel}
                                                             </button>
@@ -4325,15 +4325,15 @@ export default function AiShow({
                                                 {showAdvancedAI ? (
                                                     <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                         <div className="flex flex-wrap items-center justify-between gap-3">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                 {tai.assessment_overline}
                                                             </div>
                                                             {hasAssessment && assessmentCompleted ? (
-                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-emerald-700">
                                                                     {tai.review_completed_at_prefix} {assessmentDateLabel}
                                                                 </span>
                                                             ) : hasAssessment && assessmentFailed ? (
-                                                                <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-rose-700">
                                                                     {tai.assessment_failed_label}
                                                                 </span>
                                                             ) : null}
@@ -4344,7 +4344,7 @@ export default function AiShow({
                                                                 assessmentCompleted ? (
                                                                     <div className="space-y-3">
                                                                         <div className="flex flex-wrap gap-2">
-                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
+                                                                            <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${
                                                                                 ASSESSMENT_STATUS_META[assessment.assessment_status]?.className
                                                                                     ?? ASSESSMENT_STATUS_META.completed.className
                                                                             }`}>
@@ -4352,7 +4352,7 @@ export default function AiShow({
                                                                             </span>
                                                                             {assessment.coverage_status ? (
                                                                                 <span className="inline-flex items-center gap-1">
-                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${
                                                                                         COVERAGE_STATUS_META[assessment.coverage_status]?.className
                                                                                             ?? COVERAGE_STATUS_META.missing.className
                                                                                     }`}>
@@ -4363,7 +4363,7 @@ export default function AiShow({
                                                                             ) : null}
                                                                             {assessment.risk_level ? (
                                                                                 <span className="inline-flex items-center gap-1">
-                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${
                                                                                         RISK_LEVEL_META[assessment.risk_level]?.className
                                                                                             ?? RISK_LEVEL_META.high.className
                                                                                     }`}>
@@ -4376,54 +4376,54 @@ export default function AiShow({
 
                                                                         <div className="grid gap-3 md:grid-cols-2">
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {tai.assessment_summary_label}
                                                                                 </div>
-                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                <p className="mt-2 text-base leading-6 text-slate-700">
                                                                                     {assessment.requirement_summary ?? '—'}
                                                                                 </p>
                                                                             </div>
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {tai.assessment_reasoning_label}
                                                                                 </div>
-                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                <p className="mt-2 text-base leading-6 text-slate-700">
                                                                                     {assessment.coverage_rationale ?? '—'}
                                                                                 </p>
                                                                             </div>
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {tai.assessment_missing_basis_label}
                                                                                 </div>
-                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                <p className="mt-2 text-base leading-6 text-slate-700">
                                                                                     {assessment.missing_information ?? '—'}
                                                                                 </p>
                                                                             </div>
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {tai.assessment_next_step_label}
                                                                                 </div>
-                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                <p className="mt-2 text-base leading-6 text-slate-700">
                                                                                     {assessment.recommended_next_step ?? '—'}
                                                                                 </p>
                                                                             </div>
                                                                         </div>
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                                    <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-base leading-6 text-rose-700">
                                                                         {tai.assessment_failed_message}
                                                                     </div>
                                                                 )
                                                             ) : (
-                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                                                     {tai.assessment_not_generated_message}
                                                                 </div>
                                                             )
                                                         ) : (
-                                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                                                 {tai.assessment_visible_when_approved}
                                                             </div>
                                                         )}
@@ -4433,11 +4433,11 @@ export default function AiShow({
                                                 {showEvidenceSection ? (
                                                     <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                         <div className="flex flex-wrap items-center justify-between gap-3">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                 {tai.sources_section_title}
                                                             </div>
                                                             {isApprovedRequirement ? (
-                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-emerald-700">
                                                                     {tai.persisted_badge}
                                                                 </span>
                                                             ) : null}
@@ -4467,35 +4467,35 @@ export default function AiShow({
                                                                                 <div className="font-medium text-slate-950">
                                                                                     {evidence.knowledge_item?.original_filename ?? tai.unknown_document_title}
                                                                                 </div>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                     {evidence.knowledge_item?.document_type_label ?? evidence.knowledge_item?.document_type ?? '—'}
                                                                                 </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                     {evidence.match_type_label ?? evidence.match_type}
                                                                                 </span>
                                                                                 {evidence.is_primary ? (
-                                                                                    <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                                                    <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-violet-700">
                                                                                         {tai.evidence_primary_label}
                                                                                     </span>
                                                                                 ) : null}
                                                                             </div>
 
                                                                             <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                                                <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ring-1 ring-inset ${evidenceStatusMeta.className}`}>
+                                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 ring-1 ring-inset ${evidenceStatusMeta.className}`}>
                                                                                     {evidence.selection_status_label ?? evidenceStatusMeta.label}
                                                                                 </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                     {tai.evidence_rank_label} {Number(evidence.match_rank ?? 0)}
                                                                                 </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                     {tai.evidence_score_label} {Number(evidence.match_score ?? 0)}
                                                                                 </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                                     {evidenceChunkLabel}
                                                                                 </span>
                                                                             </div>
 
-                                                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                                            <p className="mt-2 text-base leading-6 text-slate-600">
                                                                                 {formatKnowledgeSnippet(evidence.knowledge_chunk?.content)}
                                                                             </p>
 
@@ -4509,7 +4509,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => updateEvidenceSelectionStatus(evidence, action.value)}
                                                                                             disabled={requirementUpdatesLocked || evidenceUpdating || isCurrentStatus}
-                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
+                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
                                                                                         >
                                                                                             {action.label}
                                                                                         </button>
@@ -4521,7 +4521,7 @@ export default function AiShow({
                                                                 })}
                                                             </div>
                                                         ) : (
-                                                            <p className="text-sm text-slate-500">
+                                                            <p className="text-base text-slate-600">
                                                                 {tai.no_sources_yet}
                                                             </p>
                                                         )}
@@ -4540,7 +4540,7 @@ export default function AiShow({
                                                                     }));
                                                                 }}
                                                                 aria-expanded={requirementDetailsExpanded}
-                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {requirementDetailsExpanded ? tai.requirement_details_less : tai.requirement_details_more}
                                                             </button>
@@ -4550,14 +4550,14 @@ export default function AiShow({
                                                     {isApprovedRequirement && requirementDetailsExpanded ? (
                                                         <div className="grid w-full gap-3 md:grid-cols-2">
                                                             <label className="block space-y-1">
-                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.work_status_label}
                                                                 </span>
                                                                 <select
                                                                     value={workStatus}
                                                                     onChange={(event) => updateRequirementWork(requirement, event.target.value, assignedUserId)}
                                                                     disabled={requirementUpdatesLocked}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {WORK_STATUS_OPTIONS.map((option) => (
                                                                         <option key={option.value} value={option.value}>
@@ -4567,14 +4567,14 @@ export default function AiShow({
                                                                 </select>
                                                             </label>
                                                             <label className="block space-y-1">
-                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <span className="block text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {tai.assigned_to_label}
                                                                 </span>
                                                                 <select
                                                                     value={assignedUserId}
                                                                     onChange={(event) => updateRequirementWork(requirement, workStatus, event.target.value)}
                                                                     disabled={requirementUpdatesLocked}
-                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     <option value="">{tai.unassigned}</option>
                                                                     {assignedUserOptions.map((option) => (
@@ -4592,13 +4592,13 @@ export default function AiShow({
                                                             type="button"
                                                             onClick={() => startEditingRequirement(requirement)}
                                                             disabled={requirementUpdatesLocked && !isEditingThisRequirement}
-                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {tai.edit_requirement}
                                                         </button>
 
                                                         {confirmRejectRequirementId === requirement.id ? (
-                                                            <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs">
+                                                            <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base">
                                                                 <p className="font-semibold text-rose-800">{tai.reject_confirm_title}</p>
                                                                 <p className="text-rose-700">{tai.reject_confirm_message}</p>
                                                                 <div className="flex flex-wrap gap-2">
@@ -4634,7 +4634,7 @@ export default function AiShow({
                                                                     updateRequirementReviewStatus(requirement, action.value);
                                                                 }}
                                                                 disabled={requirementUpdatesLocked}
-                                                                className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
+                                                                className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
                                                             >
                                                                 {action.label}
                                                             </button>
@@ -4652,13 +4652,13 @@ export default function AiShow({
                     <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
-                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                     {tai.answer_draft_overline}
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
                                     {tai.answer_draft_title}
                                 </h2>
-                                <p className="text-sm leading-6 text-slate-500">
+                                <p className="text-base leading-6 text-slate-600">
                                     {tai.answer_draft_description}
                                 </p>
                             </div>
@@ -4669,10 +4669,10 @@ export default function AiShow({
                                     role="tab"
                                     aria-selected={rightPanelTab === 'answer_draft'}
                                     onClick={() => setRightPanelTab('answer_draft')}
-                                    className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                                    className={`rounded-full px-3 py-1.5 text-base font-semibold transition ${
                                         rightPanelTab === 'answer_draft'
                                             ? 'bg-violet-600 text-white'
-                                            : 'text-slate-500 hover:bg-slate-100'
+                                            : 'text-slate-600 hover:bg-slate-100'
                                     }`}
                                 >
                                     {tai.answer_draft_tab_label}
@@ -4682,10 +4682,10 @@ export default function AiShow({
                                     role="tab"
                                     aria-selected={rightPanelTab === 'wiki_answer'}
                                     onClick={() => setRightPanelTab('wiki_answer')}
-                                    className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                                    className={`rounded-full px-3 py-1.5 text-base font-semibold transition ${
                                         rightPanelTab === 'wiki_answer'
                                             ? 'bg-violet-600 text-white'
-                                            : 'text-slate-500 hover:bg-slate-100'
+                                            : 'text-slate-600 hover:bg-slate-100'
                                     }`}
                                 >
                                     {tai.wiki_answer_tab_label}
@@ -4698,7 +4698,7 @@ export default function AiShow({
                                         <div className="text-lg font-semibold text-slate-900">
                                             {tai.no_active_answer_draft_title}
                                         </div>
-                                        <p className="mt-2 text-sm text-slate-500">
+                                        <p className="mt-2 text-base text-slate-600">
                                             {tai.no_active_answer_draft_description}
                                         </p>
                                     </div>
@@ -4714,7 +4714,7 @@ export default function AiShow({
                                         : 'border-violet-200 bg-violet-50/40'
                                 }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
+                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             {tai.answer_draft_for_requirement} {activeRequirementDisplayIdentifier}
                                         </div>
 
@@ -4723,7 +4723,7 @@ export default function AiShow({
                                                 <button
                                                     type="button"
                                                     onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
-                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
                                                 >
                                                     {answerDraftReaderExpanded ? tai.normal_reader : tai.larger_reader}
                                                 </button>
@@ -4732,38 +4732,38 @@ export default function AiShow({
                                     </div>
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
-                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
                                             {tai.generating_answer_draft}
                                         </div>
                                     ) : null}
 
                                     {answerDraftError ? (
-                                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
                                             {answerDraftError}
                                         </div>
                                     ) : null}
 
                                     {activeRequirementBlockedMissingKnowledge ? (
-                                        <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                        <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-base leading-6 text-slate-700">
                                             <div className="flex flex-wrap items-start gap-3">
-                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-amber-700">
                                                     {tai.coverage_status_missing}
                                                 </span>
-                                                <div className="min-w-0 flex-1 text-sm font-semibold text-slate-950">
+                                                <div className="min-w-0 flex-1 text-base font-semibold text-slate-950">
                                                     {tai.requirement_blocked_message}
                                                 </div>
                                             </div>
 
-                                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-4 text-sm leading-6 text-slate-700">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-4 text-base leading-6 text-slate-700">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
                                                     {tai.assessment_next_step_label}
                                                 </div>
-                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                <p className="mt-2 text-base leading-6 text-slate-700">
                                                     {tai.blocked_knowledge_intro}
                                                 </p>
 
                                                 {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' || activeRequirementMissingKnowledgeSuggestedFilename !== '' ? (
-                                                    <div className="mt-3 space-y-2 rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm leading-6 text-slate-700">
+                                                    <div className="mt-3 space-y-2 rounded-2xl border border-amber-200 bg-white px-4 py-3 text-base leading-6 text-slate-700">
                                                         {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' ? (
                                                             <div>
                                                                 <span className="font-semibold text-slate-900">{tai.recommended_document_label}</span>{' '}
@@ -4780,7 +4780,7 @@ export default function AiShow({
                                                     </div>
                                                 ) : null}
 
-                                                <p className="mt-3 text-sm leading-6 text-slate-600">
+                                                <p className="mt-3 text-base leading-6 text-slate-600">
                                                     {tai.document_processed_hint}
                                                 </p>
                                             </div>
@@ -4790,7 +4790,7 @@ export default function AiShow({
                                                     <button
                                                         type="button"
                                                         onClick={() => setAnswerDraftMissingKnowledgeDetailsExpanded((currentState) => !currentState)}
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
                                                         aria-expanded={answerDraftMissingKnowledgeDetailsExpanded}
                                                     >
                                                         {answerDraftMissingKnowledgeDetailsExpanded
@@ -4802,24 +4802,24 @@ export default function AiShow({
                                                         <div className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
                                                             {activeRequirementMissingKnowledgeExplanation !== ''
                                                                 && activeRequirementMissingKnowledgeExplanation !== tai.requirement_blocked_message ? (
-                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                <p className="text-base leading-6 text-slate-700">
                                                                     {activeRequirementMissingKnowledgeExplanation}
                                                                 </p>
                                                             ) : null}
 
                                                             {activeRequirementMissingKnowledgeSummary !== '' ? (
-                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                <p className="text-base leading-6 text-slate-700">
                                                                     {activeRequirementMissingKnowledgeSummary}
                                                                 </p>
                                                             ) : activeRequirementMissingKnowledgeReasoning !== '' ? (
-                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                <p className="text-base leading-6 text-slate-700">
                                                                     {activeRequirementMissingKnowledgeReasoning}
                                                                 </p>
                                                             ) : null}
 
                                                             {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-emerald-700">
                                                                         {tai.directly_supported_label}
                                                                     </div>
                                                                     <ul className="space-y-2">
@@ -4850,7 +4850,7 @@ export default function AiShow({
                                                                                                 <button
                                                                                                     type="button"
                                                                                                     onClick={() => openEvidenceSource(point)}
-                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-sm font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-left text-base font-medium leading-6 text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                                                                     aria-label={`${tai.evidence_title} ${evidenceLabel}`}
                                                                                                 >
                                                                                                     {tai.evidence_title}: {evidenceLabel}
@@ -4859,7 +4859,7 @@ export default function AiShow({
                                                                                         }
 
                                                                                         return (
-                                                                                            <span className="block text-xs text-slate-500">
+                                                                                            <span className="block text-base text-slate-600">
                                                                                                 {tai.evidence_title}: {evidenceLabel}
                                                                                             </span>
                                                                                         );
@@ -4872,11 +4872,11 @@ export default function AiShow({
                                                             ) : null}
 
                                                             {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-amber-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                                <div className="space-y-2 rounded-2xl border border-amber-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
                                                                         {tai.related_insufficient_label}
                                                                     </div>
-                                                                    <p className="text-sm leading-6 text-slate-600">
+                                                                    <p className="text-base leading-6 text-slate-600">
                                                                         {tai.blocked_related_knowledge}
                                                                     </p>
                                                                     <ul className="space-y-2">
@@ -4891,8 +4891,8 @@ export default function AiShow({
                                                             ) : null}
 
                                                             {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
-                                                                <div className="space-y-2 rounded-2xl border border-rose-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                <div className="space-y-2 rounded-2xl border border-rose-100 bg-white px-4 py-4 text-base leading-6 text-slate-700">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-rose-700">
                                                                         {tai.unsupported_points_label}
                                                                     </div>
                                                                     <ul className="space-y-2">
@@ -4915,7 +4915,7 @@ export default function AiShow({
                                             {activeRequirementPartialDraft ? (
                                                 <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-slate-700">
                                                     <div className="flex flex-wrap items-start gap-2">
-                                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-amber-700">
                                                             {tai.coverage_status_partial ?? 'Delvis dekket'}
                                                         </span>
                                                         <span className="min-w-0 flex-1 text-base leading-7 text-slate-950">
@@ -4926,7 +4926,7 @@ export default function AiShow({
                                                     {activeRequirementMissingKnowledge !== null ? (
                                                         <div className="mt-4 space-y-3">
                                                             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 px-4 py-3">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-emerald-700">
                                                                     {tai.answer_draft_partial_covered_heading ?? 'Dette er dekket'}
                                                                 </div>
                                                                 {(activeRequirementMissingKnowledge.directly_supported_points?.length ?? 0) > 0 ? (
@@ -4939,12 +4939,12 @@ export default function AiShow({
                                                                         ))}
                                                                     </ul>
                                                                 ) : (
-                                                                    <p className="mt-2 text-[15px] leading-7 text-slate-500">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
+                                                                    <p className="mt-2 text-base leading-7 text-slate-600">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
                                                                 )}
                                                             </div>
 
                                                             <div className="rounded-2xl border border-rose-100 bg-rose-50/40 px-4 py-3">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-rose-700">
                                                                     {tai.answer_draft_partial_missing_heading ?? 'Dette mangler'}
                                                                 </div>
                                                                 {(activeRequirementMissingKnowledge.unsupported_points?.length ?? 0) > 0 ? (
@@ -4957,13 +4957,13 @@ export default function AiShow({
                                                                         ))}
                                                                     </ul>
                                                                 ) : (
-                                                                    <p className="mt-2 text-[15px] leading-7 text-slate-500">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
+                                                                    <p className="mt-2 text-base leading-7 text-slate-600">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
                                                                 )}
                                                             </div>
 
                                                             {(activeRequirementMissingKnowledge.related_but_insufficient_points?.length ?? 0) > 0 ? (
                                                                 <div className="rounded-2xl border border-amber-200 bg-amber-50/40 px-4 py-3">
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-700">
                                                                         {tai.answer_draft_partial_manual_review_heading ?? 'Bør etterprøves'}
                                                                     </div>
                                                                     <ul className="mt-2 space-y-1.5">
@@ -4990,7 +4990,7 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
+                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
                                                     placeholder={tai.answer_draft_placeholder}
                                                 />
                                             </div>
@@ -5019,10 +5019,10 @@ export default function AiShow({
                                             {activeRequirementTableRetrievalSources.length > 0 ? (
                                                 <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
                                                     <div className="flex flex-col gap-1">
-                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                        <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">
                                                             {tai.table_evidence_overline}
                                                         </div>
-                                                        <p className="text-sm leading-6 text-slate-600">
+                                                        <p className="text-base leading-6 text-slate-600">
                                                             {tai.table_evidence_description}
                                                         </p>
                                                     </div>
@@ -5043,23 +5043,23 @@ export default function AiShow({
                                                                 <div key={source.id ?? source.chunk_id} className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm">
                                                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                                                         <div className="space-y-1">
-                                                                            <div className="text-sm font-semibold text-slate-950">
+                                                                            <div className="text-base font-semibold text-slate-950">
                                                                                 {sourceTitle}
                                                                             </div>
                                                                             {sourceDocumentTitle !== '' ? (
-                                                                                <div className="text-xs text-slate-500">
+                                                                                <div className="text-base text-slate-600">
                                                                                     {sourceDocumentTitle}
                                                                                 </div>
                                                                             ) : null}
                                                                         </div>
 
-                                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
                                                                             {tai.table_evidence_label}
                                                                         </span>
                                                                     </div>
 
                                                                     {summaryForRetrieval !== '' ? (
-                                                                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                                                                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700">
                                                                             {summaryForRetrieval}
                                                                         </div>
                                                                     ) : null}
@@ -5076,11 +5076,11 @@ export default function AiShow({
                                                                             <StructuredTablePreview tableJson={source.table_json} />
                                                                         </div>
                                                                     ) : tableText !== '' ? (
-                                                                        <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                        <pre className="mt-4 whitespace-pre-wrap text-base leading-6 text-slate-700">
                                                                             {tableText}
                                                                         </pre>
                                                                     ) : (
-                                                                        <p className="mt-4 text-sm leading-6 text-slate-500">
+                                                                        <p className="mt-4 text-base leading-6 text-slate-600">
                                                                             {tai.table_no_view}
                                                                         </p>
                                                                     )}
@@ -5094,14 +5094,14 @@ export default function AiShow({
                                             {activeRequirementKnowledgeGrounding ? (
                                                 <div className="mt-4 flex items-center justify-end gap-2">
                                                     <InfoHint size="sm" align="left" label="Vis forklaring for Kunnskapsgrunnlag" text={tai.hint_knowledge_grounding} />
-                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
+                                                    <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
                                                         {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
                                                     </span>
                                                 </div>
                                             ) : null}
 
                                             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                                <div className="text-xs text-slate-500">
+                                                <div className="text-base text-slate-600">
                                                     {activeRequirementDraft?.generatedAt ? (
                                                         <>
                                                             {tai.generated}{' '}
@@ -5121,13 +5121,13 @@ export default function AiShow({
 
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     {answerDraftCopyStatus === 'failed' ? (
-                                                        <span className="text-xs font-semibold text-rose-600">
+                                                        <span className="text-base font-semibold text-rose-700">
                                                             {tai.copy_failed}
                                                         </span>
                                                     ) : null}
 
                                                     {answerDraftCopyStatus === 'empty' ? (
-                                                        <span className="text-xs font-semibold text-slate-500">
+                                                        <span className="text-base font-semibold text-slate-600">
                                                             {tai.copy_empty}
                                                         </span>
                                                     ) : null}
@@ -5140,7 +5140,7 @@ export default function AiShow({
                                                             || answerDraftGeneratingRequirementId === activeRequirement.id
                                                             || answerDraftSavingRequirementId === activeRequirement.id
                                                         }
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         {answerDraftCopyStatus === 'copied' ? tai.copied : tai.copy_to_word}
                                                     </button>
@@ -5155,7 +5155,7 @@ export default function AiShow({
                                                         || answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {answerDraftSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
                                                     </button>
@@ -5164,20 +5164,20 @@ export default function AiShow({
                                         </div>
                                     ) : (
                                         <div className="flex min-h-0 flex-1 flex-col justify-start rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
-                                            <div className="text-sm font-semibold text-slate-900">
+                                            <div className="text-base font-semibold text-slate-900">
                                                 {tai.no_answer_draft_title}
                                             </div>
-                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                            <p className="mt-2 text-base leading-6 text-slate-600">
                                                 {tai.use_prompt_again_hint}
                                             </p>
                                         </div>
                                     )}
                                     {(activeRequirement?.knowledge_sources_sent_to_ai?.length ?? 0) > 0 ? (
                                         <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                 {tai.sources_sent_to_ai_title ?? 'Kilder sendt til AI'}
                                             </div>
-                                            <p className="text-sm leading-6 text-slate-700">
+                                            <p className="text-base leading-6 text-slate-700">
                                                 {tai.sources_sent_to_ai_help ?? 'Disse kunnskapskildene ble sendt til AI som grunnlag for svaret.'}
                                             </p>
                                             <div className="space-y-1.5">
@@ -5187,32 +5187,32 @@ export default function AiShow({
                                                             {source.knowledge_item_show_url ? (
                                                                 <Link
                                                                     href={source.knowledge_item_show_url}
-                                                                    className="text-sm font-semibold text-slate-900 hover:text-violet-700 hover:underline"
+                                                                    className="text-base font-semibold text-slate-900 hover:text-violet-700 hover:underline"
                                                                 >
                                                                     {source.original_filename ?? '—'}
                                                                 </Link>
                                                             ) : (
-                                                                <span className="text-sm font-semibold text-slate-900">
+                                                                <span className="text-base font-semibold text-slate-900">
                                                                     {source.original_filename ?? '—'}
                                                                 </span>
                                                             )}
                                                             {source.knowledge_item_version_no != null ? (
-                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500">
+                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                                                     v{source.knowledge_item_version_no}
                                                                 </span>
                                                             ) : null}
                                                             {source.document_type_label ? (
-                                                                <span className="inline-flex items-center rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700">
+                                                                <span className="inline-flex items-center rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-base font-medium text-violet-700">
                                                                     {source.document_type_label}
                                                                 </span>
                                                             ) : null}
                                                             {source.version_is_current_now === false ? (
-                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-base font-medium text-amber-800">
                                                                     {tai.sources_sent_to_ai_outdated_version ?? 'Tidligere dokumentversjon'}
                                                                 </span>
                                                             ) : null}
                                                         </div>
-                                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-600">
+                                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-base text-slate-600">
                                                             {source.chunk_index != null ? (
                                                                 <span>{tai.sources_sent_to_ai_excerpt_label ?? 'Utdrag'} {source.chunk_index + 1}</span>
                                                             ) : null}
@@ -5238,7 +5238,7 @@ export default function AiShow({
                                             <div className="text-lg font-semibold text-slate-900">
                                                 {tai.wiki_answer_select_requirement_title}
                                             </div>
-                                            <p className="mt-2 text-sm text-slate-500">
+                                            <p className="mt-2 text-base text-slate-600">
                                                 {tai.wiki_answer_select_requirement_description}
                                             </p>
                                         </div>
@@ -5250,7 +5250,7 @@ export default function AiShow({
                                 ) : (
                                     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border border-violet-200 bg-violet-50/40 p-4 pr-2">
                                         <div className="flex flex-wrap items-center justify-between gap-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-violet-600">
                                                 {tai.wiki_answer_for_requirement} {activeRequirementDisplayIdentifier}
                                             </div>
                                             <button
@@ -5260,7 +5260,7 @@ export default function AiShow({
                                                     !activeRequirement.wiki_answer_generate_url
                                                     || wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                 }
-                                                className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
                                                 {wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                     ? tai.generating_wiki_answer
@@ -5269,19 +5269,19 @@ export default function AiShow({
                                         </div>
 
                                         {wikiAnswerGeneratingRequirementId === activeRequirement.id ? (
-                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
                                                 {tai.generating_wiki_answer}
                                             </div>
                                         ) : null}
 
                                         {wikiAnswerError?.requirementId === activeRequirement.id ? (
-                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700">
                                                 {wikiAnswerError.message}
                                             </div>
                                         ) : null}
 
                                         {!activeRequirementWikiAnswer?.coverage_status ? (
-                                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-sm leading-6 text-slate-500">
+                                            <div className="rounded-2xl border border-dashed border-violet-200 bg-white px-4 py-6 text-base leading-6 text-slate-600">
                                                 {tai.wiki_answer_not_generated_yet}
                                             </div>
                                         ) : (
@@ -5292,11 +5292,11 @@ export default function AiShow({
                                                 >
                                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                                         <div>
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-600">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.1em] text-violet-600">
                                                                 {tai.wiki_answer_expert_draft_title}
                                                             </div>
                                                             {activeRequirementWikiAnswer.generated_at ? (
-                                                                <div className="mt-1 text-xs text-slate-400">
+                                                                <div className="mt-1 text-base text-slate-600">
                                                                     {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
                                                                         day: '2-digit',
                                                                         month: 'short',
@@ -5311,18 +5311,18 @@ export default function AiShow({
                                                             type="button"
                                                             onClick={() => void copyActiveWikiAnswerContent()}
                                                             disabled={!activeRequirementWikiAnswerHasText}
-                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
                                                         </button>
                                                     </div>
 
                                                     {activeRequirementWikiAnswerHasText ? (
-                                                        <div className="mt-4 whitespace-pre-line text-sm leading-7 text-slate-800">
+                                                        <div className="mt-4 whitespace-pre-line text-base leading-7 text-slate-800">
                                                             {activeRequirementWikiAnswerText}
                                                         </div>
                                                     ) : (
-                                                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-500">
+                                                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-base leading-6 text-slate-600">
                                                             {tai.wiki_answer_none_message}
                                                         </div>
                                                     )}
@@ -5332,13 +5332,13 @@ export default function AiShow({
                                                     data-testid="wiki-answer-documentation"
                                                     className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                                 >
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                    <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                         {tai.wiki_answer_documentation_and_compliance_title}
                                                     </div>
                                                     {activeRequirementWikiAnswerIsStale ? (
                                                         <div
                                                             data-testid="wiki-answer-stale-warning"
-                                                            className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"
+                                                            className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800"
                                                         >
                                                             <div className="font-semibold">
                                                                 {tai.wiki_answer_stale_title}
@@ -5347,18 +5347,18 @@ export default function AiShow({
                                                                 {tai.wiki_answer_stale_message}
                                                             </p>
                                                             {activeRequirementWikiAnswerStaleSubjectName !== '' ? (
-                                                                <p className="mt-1 text-xs text-amber-700">
+                                                                <p className="mt-1 text-base text-amber-800">
                                                                     {activeRequirementWikiAnswerStaleSubjectPrefix} {activeRequirementWikiAnswerStaleSubjectName}
                                                                 </p>
                                                             ) : null}
                                                         </div>
                                                     ) : null}
                                                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
+                                                        <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${activeRequirementWikiAnswerCoverageClassName}`}>
                                                             {activeRequirementWikiAnswerCoverageLabels[activeRequirementWikiAnswer.coverage_status] ?? activeRequirementWikiAnswer.coverage_status_label}
                                                         </span>
                                                         {activeRequirementWikiAnswer.generated_at ? (
-                                                            <span className="text-xs text-slate-400">
+                                                            <span className="text-base text-slate-600">
                                                                 {tai.wiki_answer_generated_at_prefix} {new Intl.DateTimeFormat(locale, {
                                                                     day: '2-digit',
                                                                     month: 'short',
@@ -5372,32 +5372,32 @@ export default function AiShow({
 
                                                     {activeRequirementWikiAnswer.alignment_summary ? (
                                                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                            <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                                 {tai.wiki_answer_alignment_title}
                                                             </div>
                                                             <div className="mt-2 flex flex-wrap items-center gap-2">
                                                                 {activeRequirementWikiAnswer.alignment_summary.aligned > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.aligned}`}>
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.aligned}`}>
                                                                         {activeRequirementWikiAnswer.alignment_summary.aligned} {tai.wiki_answer_alignment_aligned_chip}
                                                                     </span>
                                                                 ) : null}
                                                                 {activeRequirementWikiAnswer.alignment_summary.partially_aligned > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.partially_aligned}`}>
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.partially_aligned}`}>
                                                                         {activeRequirementWikiAnswer.alignment_summary.partially_aligned} {tai.wiki_answer_alignment_partially_aligned_chip}
                                                                     </span>
                                                                 ) : null}
                                                                 {activeRequirementWikiAnswer.alignment_summary.best_practice > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.best_practice}`}>
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.best_practice}`}>
                                                                         {activeRequirementWikiAnswer.alignment_summary.best_practice} {tai.wiki_answer_alignment_best_practice_chip}
                                                                     </span>
                                                                 ) : null}
                                                                 {activeRequirementWikiAnswer.alignment_summary.possible_conflict > 0 ? (
-                                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.possible_conflict}`}>
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName.possible_conflict}`}>
                                                                         {activeRequirementWikiAnswer.alignment_summary.possible_conflict} {tai.wiki_answer_alignment_possible_conflict_chip}
                                                                     </span>
                                                                 ) : null}
                                                             </div>
-                                                            <div className="mt-2 text-xs text-slate-500">
+                                                            <div className="mt-2 text-base text-slate-600">
                                                                 {activeRequirementWikiAnswer.has_possible_conflict
                                                                     ? tai.wiki_answer_alignment_conflict_note
                                                                     : tai.wiki_answer_alignment_no_conflict_note}
@@ -5406,13 +5406,13 @@ export default function AiShow({
                                                     ) : null}
 
                                                     {activeRequirementWikiAnswer.missing_summary ? (
-                                                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                                        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base leading-6 text-amber-800">
                                                             <span className="font-semibold">{tai.wiki_answer_missing_prefix}</span> {activeRequirementWikiAnswer.missing_summary}
                                                         </div>
                                                     ) : null}
 
                                                     {activeRequirementWikiAnswer.has_source_based_support === false ? (
-                                                        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-800">
+                                                        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-base leading-6 text-sky-800">
                                                             {tai.wiki_answer_no_source_based_support_message}
                                                         </div>
                                                     ) : null}
@@ -5430,37 +5430,37 @@ export default function AiShow({
                                                                 return (
                                                                     <div key={`wiki-answer-section-${sectionIndex}`} className="space-y-1.5 rounded-2xl border border-slate-100 bg-white/80 p-3">
                                                                         {section.heading ? (
-                                                                            <div className="text-sm font-semibold text-slate-700">{section.heading}</div>
+                                                                            <div className="text-base font-semibold text-slate-700">{section.heading}</div>
                                                                         ) : null}
-                                                                        <div className="whitespace-pre-line text-sm leading-7 text-slate-800">
+                                                                        <div className="whitespace-pre-line text-base leading-7 text-slate-800">
                                                                             {section.text}
                                                                         </div>
                                                                         <div className="flex flex-wrap items-center gap-2">
                                                                             {section.alignment_status ? (
-                                                                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName[section.alignment_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}>
+                                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerAlignmentStatusClassName[section.alignment_status] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}>
                                                                                     {wikiAnswerAlignmentStatusLabels[section.alignment_status] ?? section.alignment_status}
                                                                                 </span>
                                                                             ) : null}
                                                                             {section.provenance_type ? (
                                                                                 <span
-                                                                                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${wikiAnswerProvenanceClassName[section.provenance_type] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}
+                                                                                    className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-medium leading-6 ring-1 ring-inset ${wikiAnswerProvenanceClassName[section.provenance_type] ?? 'bg-slate-100 text-slate-600 ring-slate-200'}`}
                                                                                     title={tai.wiki_answer_provenance_hint}
                                                                                 >
                                                                                     {wikiAnswerProvenanceLabels[section.provenance_type] ?? section.provenance_type}
                                                                                 </span>
                                                                             ) : null}
                                                                             {Array.isArray(section.page_titles) && section.page_titles.length > 0 ? (
-                                                                                <span className="text-xs text-violet-600">
+                                                                                <span className="text-base text-violet-700">
                                                                                     {section.page_titles.join(' · ')}
                                                                                 </span>
                                                                             ) : null}
                                                                             {section.revised ? (
-                                                                                <span className="text-[11px] text-slate-400">{tai.wiki_answer_alignment_revised_note}</span>
+                                                                                <span className="text-base text-slate-600">{tai.wiki_answer_alignment_revised_note}</span>
                                                                             ) : null}
                                                                         </div>
                                                                         {hasAlignmentDetails ? (
-                                                                            <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                                                                                <summary className="cursor-pointer select-none font-medium text-slate-500">
+                                                                            <details className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-base leading-6 text-slate-700">
+                                                                                <summary className="cursor-pointer select-none font-medium text-slate-600">
                                                                                     {tai.wiki_answer_alignment_details_toggle}
                                                                                 </summary>
                                                                                 <div className="mt-2 space-y-1.5">
@@ -5498,7 +5498,7 @@ export default function AiShow({
                                                     data-testid="wiki-answer-sources"
                                                     className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                                 >
-                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                                                    <div className="text-base font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                         {tai.wiki_answer_sources_title}
                                                     </div>
                                                     {activeRequirementWikiAnswerSources.length > 0 ? (
@@ -5506,23 +5506,23 @@ export default function AiShow({
                                                             {activeRequirementWikiAnswerSources.map((source) => (
                                                                 <li
                                                                     key={`wiki-source-${source.enterprise_wiki_page_id ?? source.page_id ?? source.id}`}
-                                                                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                                                                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-700"
                                                                 >
                                                                     <div className="flex flex-wrap items-center gap-2">
                                                                         <span>{source.page_title ?? source.page_slug ?? '—'}</span>
                                                                         {source.has_source_based_claims ? (
-                                                                            <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                                                                            <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1.5 text-base font-medium leading-6 text-emerald-700 ring-1 ring-inset ring-emerald-200">
                                                                                 {tai.wiki_answer_source_based_claims_badge}
                                                                             </span>
                                                                         ) : null}
                                                                         {source.has_best_practice_claims ? (
-                                                                            <span className="inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200">
+                                                                            <span className="inline-flex rounded-full bg-sky-50 px-2.5 py-1.5 text-base font-medium leading-6 text-sky-700 ring-1 ring-inset ring-sky-200">
                                                                                 {tai.wiki_answer_best_practice_claims_badge}
                                                                             </span>
                                                                         ) : null}
                                                                     </div>
                                                                     {source.discovered_from_title ? (
-                                                                        <div className="text-xs text-slate-400">
+                                                                        <div className="text-base text-slate-600">
                                                                             {tai.wiki_answer_discovered_from_prefix} {source.discovered_from_title}
                                                                         </div>
                                                                     ) : null}
@@ -5530,7 +5530,7 @@ export default function AiShow({
                                                             ))}
                                                         </ul>
                                                     ) : (
-                                                        <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                                                        <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-600">
                                                             {tai.wiki_answer_none_message}
                                                         </div>
                                                     )}
@@ -5556,27 +5556,27 @@ export default function AiShow({
                         >
                             <div className="flex items-start justify-between gap-4">
                                 <div className="space-y-1">
-                                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-500">
+                                    <div className="text-base font-semibold uppercase tracking-[0.16em] text-violet-700">
                                         {tai.choose_responsible_user}
                                     </div>
                                     <h3 className="text-lg font-semibold tracking-tight text-slate-950">
                                         {responsiblePickerRequirement.current_requirement_text ?? responsiblePickerRequirement.requirement_text ?? tai.set_responsible}
                                     </h3>
-                                    <p className="text-sm text-slate-500">
+                                    <p className="text-base text-slate-600">
                                         {responsiblePickerRequirement.current_requirement_identifier ?? responsiblePickerRequirement.requirement_identifier ?? '—'}
                                     </p>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={closeResponsiblePicker}
-                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     ×
                                     </button>
                                 </div>
 
                             <div className="mt-5 space-y-3">
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950">
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-950">
                                     {responsiblePickerSummary}
                                 </div>
 
@@ -5587,7 +5587,7 @@ export default function AiShow({
                                         value={responsibleUserSearch}
                                         onChange={(event) => setResponsibleUserSearch(event.target.value)}
                                         placeholder={tai.responsible_user_search_placeholder}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
                                     />
                                 </label>
 
@@ -5599,7 +5599,7 @@ export default function AiShow({
                                             type="button"
                                             onClick={() => void updateRequirementAssignedUser(responsiblePickerRequirement, null)}
                                             disabled={responsibleSavingRequirementId === responsiblePickerRequirement.id}
-                                            className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                            className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-base font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                 isNoResponsibleSelected
                                                     ? 'border-violet-300 bg-violet-50 text-violet-800'
                                                     : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700'
@@ -5609,12 +5609,12 @@ export default function AiShow({
                                                 <div className="font-semibold">
                                                     {tai.no_responsible_user}
                                                 </div>
-                                            <div className="text-xs text-slate-500">
+                                            <div className="text-base text-slate-600">
                                                 {tai.remove_responsible}
                                             </div>
                                         </div>
                                             {isNoResponsibleSelected ? (
-                                                <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white">
+                                                <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1.5 text-base font-semibold leading-6 text-white">
                                                     {tai.selected}
                                                 </span>
                                             ) : null}
@@ -5635,7 +5635,7 @@ export default function AiShow({
                                                         type="button"
                                                         onClick={() => void updateRequirementAssignedUser(responsiblePickerRequirement, user.id)}
                                                         disabled={responsibleSavingRequirementId === responsiblePickerRequirement.id}
-                                                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-base transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                             isSelectedResponsibleUser
                                                                 ? 'border-violet-300 bg-violet-50 text-violet-800'
                                                                 : 'border-slate-200 bg-white text-slate-700 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700'
@@ -5645,12 +5645,12 @@ export default function AiShow({
                                                             <div className="font-semibold text-slate-950">
                                                                 {user.name}
                                                             </div>
-                                                            <div className="truncate text-xs text-slate-500">
+                                                            <div className="truncate text-base text-slate-600">
                                                                 {user.email}
                                                             </div>
                                                         </div>
                                                         {isSelectedResponsibleUser ? (
-                                                            <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white">
+                                                            <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1.5 text-base font-semibold leading-6 text-white">
                                                                 {tai.selected_responsible_user}
                                                             </span>
                                                         ) : null}
@@ -5658,21 +5658,21 @@ export default function AiShow({
                                                 );
                                             })
                                         ) : (
-                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-600">
                                                 {responsibleUserSearch.trim() !== ''
                                                     ? tai.no_users_found
                                                     : tai.no_responsible_user}
                                             </div>
                                         )
                                     ) : (
-                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base text-slate-600">
                                             {tai.no_responsible_user}
                                         </div>
                                     )}
                                 </div>
 
                                 {responsibleUpdateError ? (
-                                    <p className="text-sm text-rose-600">
+                                    <p className="text-base text-rose-700">
                                         {responsibleUpdateError}
                                     </p>
                                 ) : null}

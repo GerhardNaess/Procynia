@@ -351,7 +351,7 @@ export default function KnowledgeBaseAiUsage({
                 <section className="space-y-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-2">
-                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 {tk.ai_usage_nav_label ?? 'Bruk i AI'}
                             </div>
                             <div className="flex flex-wrap items-center gap-3">
@@ -365,7 +365,7 @@ export default function KnowledgeBaseAiUsage({
                                     sections={helpSections}
                                 />
                             </div>
-                            <p className="max-w-2xl text-[15px] leading-7 text-slate-500">
+                            <p className="max-w-2xl text-base leading-7 text-slate-600">
                                 {subtitle}
                             </p>
                         </div>
@@ -415,7 +415,7 @@ function SummaryCard({ label, value }) {
     return (
         <div className="rounded-[18px] border border-slate-200 bg-white px-5 py-5 shadow-[0_4px_12px_rgba(15,23,42,0.03)]">
             <div className="text-3xl font-bold text-slate-950">{Number(value ?? 0).toLocaleString()}</div>
-            <div className="mt-1 text-sm font-medium text-slate-500">{label}</div>
+            <div className="mt-1 text-base font-medium text-slate-600">{label}</div>
         </div>
     );
 }
@@ -498,9 +498,9 @@ function ChunkUsageSection({
                         ) : null}
                     </div>
                     {selectedDocument ? (
-                        <p className="text-base text-slate-500">{selectedDocumentTitle || '–'}</p>
+                        <p className="text-base text-slate-600">{selectedDocumentTitle || '–'}</p>
                     ) : (
-                        <p className="text-base text-slate-500">{emptyLabel}</p>
+                        <p className="text-base text-slate-600">{emptyLabel}</p>
                     )}
                 </div>
             </div>
@@ -514,7 +514,7 @@ function ChunkUsageSection({
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Søk på seksjon, heading, tema eller dokument…"
-                            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+                            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
                         />
                     </label>
                     <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-700 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100">
@@ -535,15 +535,15 @@ function ChunkUsageSection({
             )}
 
             {rows.length === 0 ? (
-                <div className="px-6 py-10 text-center text-base text-slate-500">{emptyLabel}</div>
+                <div className="px-6 py-10 text-center text-base text-slate-600">{emptyLabel}</div>
             ) : filteredRows.length === 0 ? (
-                <div className="px-6 py-10 text-center text-base text-slate-500">Ingen resultater matcher filteret.</div>
+                <div className="px-6 py-10 text-center text-base text-slate-600">Ingen resultater matcher filteret.</div>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50/80">
                             <tr>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_document ?? 'Dokument'}
                                         field="document"
@@ -551,7 +551,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_chunk ?? 'Utdrag'}
                                         field="chunk"
@@ -559,7 +559,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_type ?? 'Type'}
                                         field="type"
@@ -567,7 +567,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_section ?? 'Seksjon'}
                                         field="section"
@@ -575,7 +575,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_heading ?? 'Heading'}
                                         field="heading"
@@ -583,7 +583,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_topic ?? 'Tema'}
                                         field="topic"
@@ -591,7 +591,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_version ?? 'Versjon'}
                                         field="version"
@@ -599,7 +599,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_version_status ?? 'Versjonsstatus'}
                                         field="version_status"
@@ -607,7 +607,7 @@ function ChunkUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_sent_to_ai ?? 'Sendt til AI'}
                                         field="sent_to_ai"
@@ -616,7 +616,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_cases ?? 'Saker'}
                                         field="cases"
@@ -625,7 +625,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_requirements ?? 'Krav'}
                                         field="requirements"
@@ -634,7 +634,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_primary ?? 'Primærkilder'}
                                         field="primary"
@@ -643,7 +643,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_score ?? 'Snitt score'}
                                         field="score"
@@ -652,7 +652,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_max_score ?? 'Maks score'}
                                         field="max_score"
@@ -661,7 +661,7 @@ function ChunkUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_chunk_table_col_last_used ?? 'Sist brukt'}
                                         field="last_used"
@@ -696,7 +696,7 @@ function ChunkUsageSection({
                                     ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                     : versionStatus === false
                                         ? 'border-orange-200 bg-orange-50 text-orange-700'
-                                        : 'border-slate-200 bg-slate-50 text-slate-500';
+                                        : 'border-slate-200 bg-slate-50 text-slate-600';
                                 const avgMatchScore = row?.avg_match_score != null ? Number(row.avg_match_score) : '–';
                                 const maxMatchScore = row?.max_match_score != null ? Number(row.max_match_score) : '–';
 
@@ -719,35 +719,35 @@ function ChunkUsageSection({
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-base text-slate-700">
                                             {chunkIndex ? `${chunkRowLabel} ${chunkIndex}` : '–'}
                                         </td>
                                         <td className="px-4 py-3.5">
-                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-500">
+                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                                 {chunkType || '–'}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-base text-slate-700">
                                             {sectionTitle || '–'}
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-base text-slate-700">
                                             {headingPath ? (
                                                 <span className="block max-w-[18rem] truncate" title={headingPath}>
                                                     {headingPath}
                                                 </span>
                                             ) : '–'}
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-base text-slate-700">
                                             {topic || subTopic ? (
                                                 <div className="space-y-0.5">
                                                     {topic ? <div>{topic}</div> : null}
-                                                    {subTopic ? <div className="text-base text-slate-500">{subTopic}</div> : null}
+                                                    {subTopic ? <div className="text-base text-slate-600">{subTopic}</div> : null}
                                                 </div>
                                             ) : (
                                                 '–'
                                             )}
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-base text-slate-700">
                                             {versionNo}
                                         </td>
                                         <td className="px-4 py-3.5">
@@ -755,25 +755,25 @@ function ChunkUsageSection({
                                                 {versionStatusLabel}
                                             </span>
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm font-medium text-slate-900">
+                                        <td className="px-4 py-3.5 text-right text-base font-medium text-slate-900">
                                             {Number(row?.evidence_count ?? 0)}
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-right text-base text-slate-700">
                                             {Number(row?.case_count ?? 0)}
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-right text-base text-slate-700">
                                             {Number(row?.requirement_count ?? 0)}
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-right text-base text-slate-700">
                                             {Number(row?.primary_count ?? 0)}
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-right text-base text-slate-700">
                                             {avgMatchScore}
                                         </td>
-                                        <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+                                        <td className="px-4 py-3.5 text-right text-base text-slate-700">
                                             {maxMatchScore}
                                         </td>
-                                        <td className="px-4 py-3.5 text-sm text-slate-500">
+                                        <td className="px-4 py-3.5 text-base text-slate-600">
                                             {formatDate(row?.last_used_at, locale)}
                                         </td>
                                     </tr>
@@ -827,7 +827,7 @@ function DocumentUsageSection({
             <div className="border-b border-slate-200 px-5 py-4">
                 <div className="flex flex-col gap-1.5">
                     <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-                    <p className="text-base text-slate-500">{hint}</p>
+                    <p className="text-base text-slate-600">{hint}</p>
                 </div>
             </div>
 
@@ -840,7 +840,7 @@ function DocumentUsageSection({
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Søk på dokumentnavn…"
-                            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
+                            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-4 text-base text-slate-900 outline-none placeholder:text-slate-500 focus:border-violet-300 focus:ring-2 focus:ring-violet-100"
                         />
                     </label>
                     <select value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-700 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100">
@@ -864,16 +864,16 @@ function DocumentUsageSection({
             {rows.length === 0 ? (
                 <div className="px-6 py-10 text-center">
                     <div className="text-base font-medium text-slate-700">{emptyTitle ?? emptyLabel}</div>
-                    <p className="mt-2 text-base text-slate-500">{emptyNote ?? ''}</p>
+                    <p className="mt-2 text-base text-slate-600">{emptyNote ?? ''}</p>
                 </div>
             ) : filteredRows.length === 0 ? (
-                <div className="px-6 py-10 text-center text-base text-slate-500">Ingen resultater matcher filteret.</div>
+                <div className="px-6 py-10 text-center text-base text-slate-600">Ingen resultater matcher filteret.</div>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-slate-200">
                         <thead className="bg-slate-50/80">
                             <tr>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_document ?? 'Dokument'}
                                         field="name"
@@ -881,7 +881,7 @@ function DocumentUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_category ?? 'Kategori'}
                                         field="category"
@@ -889,7 +889,7 @@ function DocumentUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_version ?? 'Versjon'}
                                         field="version"
@@ -897,7 +897,7 @@ function DocumentUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_approval ?? 'Godkjenning'}
                                         field="approval"
@@ -905,7 +905,7 @@ function DocumentUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_cases ?? 'Saker'}
                                         field="cases"
@@ -914,7 +914,7 @@ function DocumentUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_requirements ?? 'Krav'}
                                         field="requirements"
@@ -923,7 +923,7 @@ function DocumentUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_sent_to_ai ?? 'Sendt til AI'}
                                         field="sent_to_ai"
@@ -932,7 +932,7 @@ function DocumentUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_primary ?? 'Primærkilder'}
                                         field="primary"
@@ -941,7 +941,7 @@ function DocumentUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_score ?? 'Snitt score'}
                                         field="score"
@@ -950,7 +950,7 @@ function DocumentUsageSection({
                                         align="right"
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_last_used ?? 'Sist brukt'}
                                         field="last_used"
@@ -958,7 +958,7 @@ function DocumentUsageSection({
                                         onSort={onSort}
                                     />
                                 </th>
-                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
+                                <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                                     <SortableTableHeader
                                         label={tk.ai_usage_doc_table_col_superseded ?? 'Eldre versjon brukt'}
                                         field="superseded"
@@ -1006,7 +1006,7 @@ function DocumentUsageRow({
 
     const approvalStatus = String(row?.current_version_approval_status ?? '').trim();
     const approvalLabel = tk[`ai_usage_approval_${approvalStatus}`] ?? approvalStatus;
-    const approvalClass = APPROVAL_STATUS_CLASSES[approvalStatus] ?? 'border-slate-200 bg-slate-50 text-slate-500';
+    const approvalClass = APPROVAL_STATUS_CLASSES[approvalStatus] ?? 'border-slate-200 bg-slate-50 text-slate-600';
 
     const supersededCount = Number(row?.evidence_on_superseded_version_count ?? 0);
     const hasSuperseded = supersededCount > 0;
@@ -1046,11 +1046,11 @@ function DocumentUsageRow({
                 </div>
             </td>
             <td className="px-4 py-3.5">
-                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-500">
+                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-600">
                     {String(row?.document_type ?? '–').trim()}
                 </span>
             </td>
-            <td className="px-4 py-3.5 text-sm text-slate-700">
+            <td className="px-4 py-3.5 text-base text-slate-700">
                 {versionLabel}
             </td>
             <td className="px-4 py-3.5">
@@ -1059,25 +1059,25 @@ function DocumentUsageRow({
                         {approvalLabel}
                     </span>
                 ) : (
-                    <span className="text-sm text-slate-400">–</span>
+                    <span className="text-base text-slate-600">–</span>
                 )}
             </td>
-            <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+            <td className="px-4 py-3.5 text-right text-base text-slate-700">
                 {Number(row?.case_count ?? 0)}
             </td>
-            <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+            <td className="px-4 py-3.5 text-right text-base text-slate-700">
                 {Number(row?.requirement_count ?? 0)}
             </td>
-            <td className="px-4 py-3.5 text-right text-sm font-medium text-slate-900">
+            <td className="px-4 py-3.5 text-right text-base font-medium text-slate-900">
                 {Number(row?.evidence_count ?? 0)}
             </td>
-            <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+            <td className="px-4 py-3.5 text-right text-base text-slate-700">
                 {Number(row?.primary_count ?? 0)}
             </td>
-            <td className="px-4 py-3.5 text-right text-sm text-slate-700">
+            <td className="px-4 py-3.5 text-right text-base text-slate-700">
                 {row?.avg_match_score != null ? Number(row.avg_match_score) : '–'}
             </td>
-            <td className="px-4 py-3.5 text-sm text-slate-500">
+            <td className="px-4 py-3.5 text-base text-slate-600">
                 {formatDate(row?.last_used_at, locale)}
             </td>
             <td className="px-4 py-3.5">
@@ -1086,7 +1086,7 @@ function DocumentUsageRow({
                         {tk.ai_usage_superseded_yes ?? 'Eldre versjon'}
                     </span>
                 ) : (
-                    <span className="text-sm text-slate-400">
+                    <span className="text-base text-slate-600">
                         {tk.ai_usage_superseded_no ?? 'Nei'}
                     </span>
                 )}

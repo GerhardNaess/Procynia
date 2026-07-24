@@ -23,22 +23,22 @@ function formatDateTime(value, locale) {
 
 function formatStatusBadgeClass(status) {
     if (status === 'completed') {
-        return 'inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-emerald-100 text-emerald-700 ring-emerald-200';
+        return 'inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-emerald-100 text-emerald-700 ring-emerald-200';
     }
 
     if (status === 'pending_review') {
-        return 'inline-flex min-w-[118px] items-center justify-center rounded-xl px-4 py-2 text-center text-xs font-semibold leading-tight ring-1 ring-inset bg-amber-100 text-amber-800 ring-amber-200 whitespace-nowrap';
+        return 'inline-flex min-w-[118px] items-center justify-center rounded-xl px-4 py-2 text-center text-base font-semibold leading-6 ring-1 ring-inset bg-amber-100 text-amber-800 ring-amber-200 whitespace-nowrap';
     }
 
     if (status === 'failed') {
-        return 'inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-rose-100 text-rose-700 ring-rose-200';
+        return 'inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-rose-100 text-rose-700 ring-rose-200';
     }
 
     if (status === 'analyzing' || status === 'parsing') {
-        return 'inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-sky-100 text-sky-700 ring-sky-200';
+        return 'inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-sky-100 text-sky-700 ring-sky-200';
     }
 
-    return 'inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-slate-100 text-slate-700 ring-slate-200';
+    return 'inline-flex items-center justify-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-slate-100 text-slate-700 ring-slate-200';
 }
 
 function normalizeText(value) {
@@ -71,14 +71,14 @@ function SuggestionEditModal({ suggestion, typeOptions, form, onClose, onSubmit 
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">Rediger og godkjenn forslag</h2>
-                        <p className="text-sm leading-6 text-slate-500">
+                        <p className="text-base leading-6 text-slate-600">
                             Juster canonical_name, synonymer eller beskrivelse før du godkjenner.
                         </p>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -87,11 +87,11 @@ function SuggestionEditModal({ suggestion, typeOptions, form, onClose, onSubmit 
                 <form onSubmit={onSubmit} className="space-y-5 px-6 py-6">
                     <div className="grid gap-4 sm:grid-cols-2">
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Type</span>
+                            <span className="text-base font-medium text-slate-700">Type</span>
                             <select
                                 value={form.data.suggested_type}
                                 onChange={(event) => form.setData('suggested_type', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 {typeOptions.map((option) => (
                                     <option key={option.value} value={option.value}>
@@ -99,69 +99,69 @@ function SuggestionEditModal({ suggestion, typeOptions, form, onClose, onSubmit 
                                     </option>
                                 ))}
                             </select>
-                            {form.errors.suggested_type ? <p className="text-sm text-rose-600">{form.errors.suggested_type}</p> : null}
+                            {form.errors.suggested_type ? <p className="text-base text-rose-700">{form.errors.suggested_type}</p> : null}
                         </label>
 
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Canonical name</span>
+                            <span className="text-base font-medium text-slate-700">Canonical name</span>
                             <input
                                 value={form.data.suggested_canonical_name}
                                 onChange={(event) => form.setData('suggested_canonical_name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                 placeholder="Governance"
                             />
-                            {form.errors.suggested_canonical_name ? <p className="text-sm text-rose-600">{form.errors.suggested_canonical_name}</p> : null}
+                            {form.errors.suggested_canonical_name ? <p className="text-base text-rose-700">{form.errors.suggested_canonical_name}</p> : null}
                         </label>
                     </div>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Synonymer</span>
+                        <span className="text-base font-medium text-slate-700">Synonymer</span>
                         <textarea
                             value={form.data.suggested_synonyms}
                             onChange={(event) => form.setData('suggested_synonyms', event.target.value)}
                             rows={4}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             placeholder="samhandling, styring, møtefora"
                         />
-                        {form.errors.suggested_synonyms ? <p className="text-sm text-rose-600">{form.errors.suggested_synonyms}</p> : null}
+                        {form.errors.suggested_synonyms ? <p className="text-base text-rose-700">{form.errors.suggested_synonyms}</p> : null}
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Beskrivelse</span>
+                        <span className="text-base font-medium text-slate-700">Beskrivelse</span>
                         <textarea
                             value={form.data.suggested_description}
                             onChange={(event) => form.setData('suggested_description', event.target.value)}
                             rows={4}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             placeholder="Kort forklaring av begrepet."
                         />
-                        {form.errors.suggested_description ? <p className="text-sm text-rose-600">{form.errors.suggested_description}</p> : null}
+                        {form.errors.suggested_description ? <p className="text-base text-rose-700">{form.errors.suggested_description}</p> : null}
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Begrunnelse</span>
+                        <span className="text-base font-medium text-slate-700">Begrunnelse</span>
                         <textarea
                             value={form.data.reason}
                             onChange={(event) => form.setData('reason', event.target.value)}
                             rows={3}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             placeholder="Hvorfor bør dette begrepet inn i vokabularet?"
                         />
-                        {form.errors.reason ? <p className="text-sm text-rose-600">{form.errors.reason}</p> : null}
+                        {form.errors.reason ? <p className="text-base text-rose-700">{form.errors.reason}</p> : null}
                     </label>
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             Avbryt
                         </button>
                         <button
                             type="submit"
                             disabled={form.processing}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {form.processing ? 'Lagrer...' : 'Lagre og godkjenn'}
                         </button>
@@ -190,14 +190,14 @@ function ApprovedTermEditModal({ term, typeOptions, form, onClose, onSubmit }) {
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <h2 className="text-xl font-semibold text-slate-950">Rediger godkjent begrep</h2>
-                        <p className="text-sm leading-6 text-slate-500">
+                        <p className="text-base leading-6 text-slate-600">
                             Oppdater canonical_name, synonymer, type eller beskrivelse.
                         </p>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                     >
                         ×
                     </button>
@@ -206,11 +206,11 @@ function ApprovedTermEditModal({ term, typeOptions, form, onClose, onSubmit }) {
                 <form onSubmit={onSubmit} className="space-y-5 px-6 py-6">
                     <div className="grid gap-4 sm:grid-cols-2">
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Type</span>
+                            <span className="text-base font-medium text-slate-700">Type</span>
                             <select
                                 value={form.data.type}
                                 onChange={(event) => form.setData('type', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             >
                                 {typeOptions.map((option) => (
                                     <option key={option.value} value={option.value}>
@@ -218,57 +218,57 @@ function ApprovedTermEditModal({ term, typeOptions, form, onClose, onSubmit }) {
                                     </option>
                                 ))}
                             </select>
-                            {form.errors.type ? <p className="text-sm text-rose-600">{form.errors.type}</p> : null}
+                            {form.errors.type ? <p className="text-base text-rose-700">{form.errors.type}</p> : null}
                         </label>
 
                         <label className="space-y-2">
-                            <span className="text-sm font-medium text-slate-700">Canonical name</span>
+                            <span className="text-base font-medium text-slate-700">Canonical name</span>
                             <input
                                 value={form.data.canonical_name}
                                 onChange={(event) => form.setData('canonical_name', event.target.value)}
-                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                 placeholder="Governance"
                             />
-                            {form.errors.canonical_name ? <p className="text-sm text-rose-600">{form.errors.canonical_name}</p> : null}
+                            {form.errors.canonical_name ? <p className="text-base text-rose-700">{form.errors.canonical_name}</p> : null}
                         </label>
                     </div>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Synonymer</span>
+                        <span className="text-base font-medium text-slate-700">Synonymer</span>
                         <textarea
                             value={form.data.synonyms}
                             onChange={(event) => form.setData('synonyms', event.target.value)}
                             rows={4}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             placeholder="samhandling, styring, møtefora"
                         />
-                        {form.errors.synonyms ? <p className="text-sm text-rose-600">{form.errors.synonyms}</p> : null}
+                        {form.errors.synonyms ? <p className="text-base text-rose-700">{form.errors.synonyms}</p> : null}
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Beskrivelse</span>
+                        <span className="text-base font-medium text-slate-700">Beskrivelse</span>
                         <textarea
                             value={form.data.description}
                             onChange={(event) => form.setData('description', event.target.value)}
                             rows={4}
-                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             placeholder="Kort forklaring av begrepet."
                         />
-                        {form.errors.description ? <p className="text-sm text-rose-600">{form.errors.description}</p> : null}
+                        {form.errors.description ? <p className="text-base text-rose-700">{form.errors.description}</p> : null}
                     </label>
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             Avbryt
                         </button>
                         <button
                             type="submit"
                             disabled={form.processing}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {form.processing ? 'Lagrer...' : 'Lagre endringer'}
                         </button>
@@ -447,7 +447,7 @@ export default function KnowledgeVocabularyIndex({
 
             <div className="space-y-7">
                 <section className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                         Standardvokabular
                     </div>
                     <div className="flex items-center gap-3">
@@ -529,17 +529,17 @@ export default function KnowledgeVocabularyIndex({
                             ]}
                         />
                     </div>
-                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         Bygg og vedlikehold kundens godkjente vokabular for metadata, synonymer og begreper.
                     </p>
-                    <p className="max-w-3xl text-sm leading-6 text-slate-600">
+                    <p className="max-w-3xl text-base leading-6 text-slate-600">
                         AI foreslår. Du godkjenner. Bare godkjente verdier brukes som autoritativt vokabular.
                     </p>
                     <div className="mt-1 max-w-3xl rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-1">
-                        <p className="text-sm leading-6 text-slate-700">
+                        <p className="text-base leading-6 text-slate-700">
                             {tai.vocabulary_metadata_notice ?? 'Godkjent vokabular brukes når Procynia normaliserer metadata for kunnskapsdokumenter. Det hjelper AI-en å finne riktig kunnskap selv om dokumentene bruker ulike ord for samme begrep.'}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-base leading-6 text-slate-600">
                             {tai.vocabulary_metadata_notice_note ?? 'Merk: Nytt vokabular påvirker først og fremst nye eller reanalyserte kunnskapsdokumenter.'}
                         </p>
                     </div>
@@ -548,13 +548,13 @@ export default function KnowledgeVocabularyIndex({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-6">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 Ny vokabularanalyse
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
                                 Start analyse av representative dokumenter
                             </h2>
-                            <p className="text-sm leading-6 text-slate-500 whitespace-nowrap">
+                            <p className="text-base leading-6 text-slate-600">
                                 Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt standardvokabular. Dokumentet forsvinner dersom kunnskapsdokumentet slettes.
                             </p>
                         </div>
@@ -564,23 +564,23 @@ export default function KnowledgeVocabularyIndex({
                                 <button
                                     type="button"
                                     onClick={selectAllDocuments}
-                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     Velg alle
                                 </button>
                                 <button
                                     type="button"
                                     onClick={clearDocuments}
-                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     Tøm
                                 </button>
-                                <div className="inline-flex items-center rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
+                                <div className="inline-flex items-center rounded-full bg-slate-100 px-4 py-2 text-base font-medium text-slate-600">
                                     Valgt: {selectedDocumentCount}
                                 </div>
                             </div>
 
-                            {batchErrorMessage ? <p className="text-sm text-rose-600">{batchErrorMessage}</p> : null}
+                            {batchErrorMessage ? <p className="text-base text-rose-700">{batchErrorMessage}</p> : null}
 
                             <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
                                 {sourceDocuments.map((document) => {
@@ -609,15 +609,15 @@ export default function KnowledgeVocabularyIndex({
                                                     <div className="font-semibold text-slate-950">
                                                         {document.original_filename}
                                                     </div>
-                                                    <div className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                                                    <div className="text-base uppercase tracking-[0.12em] text-slate-600">
                                                         {document.document_type_label} · {document.chunk_count} chunks
                                                     </div>
                                                 </div>
                                             </div>
-                                            <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-500">
+                                            <p className="mt-3 line-clamp-4 text-base leading-6 text-slate-600">
                                                 {document.summary || 'Ingen sammendrag er lagret ennå.'}
                                             </p>
-                                            <div className="mt-4 text-xs text-slate-400">
+                                            <div className="mt-4 text-base text-slate-600">
                                                 Oppdatert {formatDateTime(document.updated_at, locale)}
                                             </div>
                                         </label>
@@ -626,7 +626,7 @@ export default function KnowledgeVocabularyIndex({
                             </div>
 
                             {sourceDocuments.length === 0 ? (
-                                <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500">
+                                <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-base text-slate-600">
                                     Ingen representative dokumenter er klare ennå.
                                 </div>
                             ) : null}
@@ -635,7 +635,7 @@ export default function KnowledgeVocabularyIndex({
                                 <button
                                     type="submit"
                                     disabled={batchForm.processing || selectedDocumentCount === 0}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {batchForm.processing ? 'Starter...' : 'Start analyse'}
                                 </button>
@@ -647,13 +647,13 @@ export default function KnowledgeVocabularyIndex({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-6">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 Godkjent vokabular
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
                                 Autoritativ katalog per type
                             </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                            <p className="max-w-3xl text-base leading-6 text-slate-600">
                                 Kun godkjente verdier er autoritative. Synonymer vises sammen med kanonisk term.
                             </p>
                         </div>
@@ -669,14 +669,14 @@ export default function KnowledgeVocabularyIndex({
                                         <summary className="cursor-pointer list-none px-5 py-4">
                                             <div className="flex flex-wrap items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="text-sm font-semibold text-slate-950">
+                                                    <div className="text-base font-semibold text-slate-950">
                                                         {group.label}
                                                     </div>
-                                                    <div className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                                                    <div className="text-base uppercase tracking-[0.12em] text-slate-600">
                                                         {group.count} godkjente begreper
                                                     </div>
                                                 </div>
-                                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Klikk for å vise
                                                 </div>
                                             </div>
@@ -688,19 +688,19 @@ export default function KnowledgeVocabularyIndex({
                                                     <table className="min-w-full divide-y divide-slate-200">
                                                         <thead className="bg-slate-50">
                                                             <tr>
-                                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Canonical
                                                                 </th>
-                                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Synonymer
                                                                 </th>
-                                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Beskrivelse
                                                                 </th>
-                                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Status
                                                                 </th>
-                                                                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <th className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     Handlinger
                                                                 </th>
                                                             </tr>
@@ -711,14 +711,14 @@ export default function KnowledgeVocabularyIndex({
                                                                     <td className="px-5 py-4 font-semibold text-slate-950">
                                                                         {term.canonical_name}
                                                                     </td>
-                                                                    <td className="px-5 py-4 text-sm text-slate-600">
+                                                                    <td className="px-5 py-4 text-base text-slate-600">
                                                                         {formatSynonyms(term.synonyms)}
                                                                     </td>
-                                                                    <td className="px-5 py-4 text-sm text-slate-600">
+                                                                    <td className="px-5 py-4 text-base text-slate-600">
                                                                         {term.description || '—'}
                                                                     </td>
                                                                     <td className="px-5 py-4">
-                                                                        <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-emerald-700">
                                                                             Godkjent
                                                                         </span>
                                                                     </td>
@@ -736,7 +736,7 @@ export default function KnowledgeVocabularyIndex({
                                                                                         preserveState: true,
                                                                                     });
                                                                                 }}
-                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                                             >
                                                                                 <svg
                                                                                     aria-hidden="true"
@@ -759,7 +759,7 @@ export default function KnowledgeVocabularyIndex({
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => setEditingTerm(term)}
-                                                                                className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                                className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                             >
                                                                                 Rediger
                                                                             </button>
@@ -776,7 +776,7 @@ export default function KnowledgeVocabularyIndex({
                                 ))}
                             </div>
                         ) : (
-                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500">
+                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-base text-slate-600">
                                 Ingen godkjente vokabulartermer er registrert ennå.
                             </div>
                         )}
@@ -786,13 +786,13 @@ export default function KnowledgeVocabularyIndex({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-6">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 Forslagskø
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
                                 Pending forslag fra AI og validering
                             </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                            <p className="max-w-3xl text-base leading-6 text-slate-600">
                                 Godkjenn, rediger, slå sammen eller avvis forslag før de blir en del av det autoritative vokabularet.
                             </p>
                         </div>
@@ -803,16 +803,16 @@ export default function KnowledgeVocabularyIndex({
                                     <table className="min-w-full divide-y divide-slate-200">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Forslag
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Detaljer
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Kilde
                                                 </th>
-                                                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Handlinger
                                                 </th>
                                             </tr>
@@ -833,7 +833,7 @@ export default function KnowledgeVocabularyIndex({
                                                                 <div className="font-semibold text-slate-950">
                                                                     {suggestion.suggested_canonical_name || suggestion.suggested_term}
                                                                 </div>
-                                                                <div className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                                                                <div className="text-base uppercase tracking-[0.12em] text-slate-600">
                                                                     {suggestion.suggested_type_label ?? suggestion.suggested_type}
                                                                 </div>
                                                                 {suggestion.suggested_synonyms?.length > 0 ? (
@@ -841,33 +841,33 @@ export default function KnowledgeVocabularyIndex({
                                                                         {suggestion.suggested_synonyms.map((synonym) => (
                                                                             <span
                                                                                 key={`${suggestion.id}-${synonym}`}
-                                                                                className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                                                                                className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-medium leading-6 text-slate-600"
                                                                             >
                                                                                 {synonym}
                                                                             </span>
                                                                         ))}
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="text-sm text-slate-500">Ingen synonymer oppgitt.</div>
+                                                                    <div className="text-base text-slate-600">Ingen synonymer oppgitt.</div>
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                                        <td className="px-5 py-4 text-base text-slate-600">
                                                             <div className="space-y-2">
                                                                 <div>
-                                                                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <span className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Beskrivelse
                                                                     </span>
                                                                     <div>{suggestion.suggested_description || '—'}</div>
                                                                 </div>
                                                                 <div>
-                                                                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <span className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Begrunnelse
                                                                     </span>
                                                                     <div>{suggestion.reason || '—'}</div>
                                                                 </div>
                                                                 <div>
-                                                                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <span className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Confidence
                                                                     </span>
                                                                     <div>
@@ -876,20 +876,20 @@ export default function KnowledgeVocabularyIndex({
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
+                                                        <td className="px-5 py-4 text-base text-slate-600">
                                                             <div className="space-y-2">
                                                                 <div>
-                                                                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <span className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Batch
                                                                     </span>
                                                                     <div>{suggestion.source_label ?? suggestion.batch_label}</div>
                                                                 </div>
                                                                 {suggestion.related_existing_term_label ? (
-                                                                    <div className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                                                                    <div className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-base font-semibold text-violet-700">
                                                                         Sammen med: {suggestion.related_existing_term_label}
                                                                     </div>
                                                                 ) : (
-                                                                    <div className="text-xs text-slate-400">Ny term</div>
+                                                                    <div className="text-base text-slate-600">Ny term</div>
                                                                 )}
                                                             </div>
                                                         </td>
@@ -902,14 +902,14 @@ export default function KnowledgeVocabularyIndex({
                                                                             preserveScroll: true,
                                                                             preserveState: true,
                                                                         })}
-                                                                        className="inline-flex rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                                                                        className="inline-flex rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
                                                                     >
                                                                         Godkjenn
                                                                     </button>
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => setEditingSuggestion(suggestion)}
-                                                                        className="inline-flex rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                        className="inline-flex rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                                     >
                                                                         Rediger og godkjenn
                                                                     </button>
@@ -919,14 +919,14 @@ export default function KnowledgeVocabularyIndex({
                                                                             preserveScroll: true,
                                                                             preserveState: true,
                                                                         })}
-                                                                        className="inline-flex rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                        className="inline-flex rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                                     >
                                                                         Avvis
                                                                     </button>
                                                                 </div>
 
                                                                 <div className="space-y-2 rounded-[18px] border border-slate-200 bg-slate-50 p-3">
-                                                                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                         Slå sammen
                                                                     </div>
                                                                     <div className="flex flex-col gap-2 sm:flex-row">
@@ -936,7 +936,7 @@ export default function KnowledgeVocabularyIndex({
                                                                                 ...currentTargets,
                                                                                 [suggestion.id]: Number(event.target.value),
                                                                             }))}
-                                                                            className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         >
                                                                             {mergeOptions.length > 0 ? (
                                                                                 mergeOptions.map((term) => (
@@ -957,7 +957,7 @@ export default function KnowledgeVocabularyIndex({
                                                                                 preserveScroll: true,
                                                                                 preserveState: true,
                                                                             })}
-                                                                            className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                            className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                                         >
                                                                             Slå sammen
                                                                         </button>
@@ -973,7 +973,7 @@ export default function KnowledgeVocabularyIndex({
                                 </div>
                             </div>
                         ) : (
-                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500">
+                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-base text-slate-600">
                                 Ingen forslag ligger i køen ennå.
                             </div>
                         )}
@@ -983,7 +983,7 @@ export default function KnowledgeVocabularyIndex({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-4">
                         <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
                                 Batchhistorikk
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
@@ -997,22 +997,22 @@ export default function KnowledgeVocabularyIndex({
                                     <table className="min-w-full divide-y divide-slate-200">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Batch
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Status
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Kilder
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Oppsummering
                                                 </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-left text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Oppdatert
                                                 </th>
-                                                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-5 py-3 text-right text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                     Handlinger
                                                 </th>
                                             </tr>
@@ -1024,7 +1024,7 @@ export default function KnowledgeVocabularyIndex({
                                                         <div className="font-semibold text-slate-950">
                                                             Batch #{batch.id}
                                                         </div>
-                                                        <div className="text-xs text-slate-400">
+                                                        <div className="text-base text-slate-600">
                                                             Opprettet av {batch.created_by ?? '—'}
                                                         </div>
                                                     </td>
@@ -1033,18 +1033,18 @@ export default function KnowledgeVocabularyIndex({
                                                             {batch.status_label}
                                                         </span>
                                                     </td>
-                                                    <td className="px-5 py-4 text-sm text-slate-600">
+                                                    <td className="px-5 py-4 text-base text-slate-600">
                                                         <div className="space-y-1">
-                                                            <div className="text-xs uppercase tracking-[0.12em] text-slate-400">
+                                                            <div className="text-base uppercase tracking-[0.12em] text-slate-600">
                                                                 {batch.source_document_count} dokumenter
                                                             </div>
                                                             <div>{(batch.source_documents ?? []).join(', ') || '—'}</div>
                                                         </div>
                                                     </td>
-                                                    <td className="px-5 py-4 text-sm text-slate-600">
+                                                    <td className="px-5 py-4 text-base text-slate-600">
                                                         {batch.summary || batch.error_message || '—'}
                                                     </td>
-                                                    <td className="px-5 py-4 text-sm text-slate-600">
+                                                    <td className="px-5 py-4 text-base text-slate-600">
                                                         {formatDateTime(batch.updated_at, locale)}
                                                     </td>
                                                     <td className="px-5 py-4 text-right">
@@ -1061,12 +1061,12 @@ export default function KnowledgeVocabularyIndex({
                                                                         preserveState: true,
                                                                     });
                                                                 }}
-                                                                className="inline-flex rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                className="inline-flex rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                             >
                                                                 Slett
                                                             </button>
                                                         ) : (
-                                                            <span className="text-sm text-slate-300">—</span>
+                                                            <span className="text-base text-slate-600">—</span>
                                                         )}
                                                     </td>
                                                 </tr>
@@ -1076,7 +1076,7 @@ export default function KnowledgeVocabularyIndex({
                                 </div>
                             </div>
                         ) : (
-                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-sm text-slate-500">
+                            <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-base text-slate-600">
                                 Ingen batcher er registrert ennå.
                             </div>
                         )}
@@ -1101,7 +1101,7 @@ export default function KnowledgeVocabularyIndex({
             />
 
             {editErrorMessage ? (
-                <div className="fixed bottom-6 right-6 z-50 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 shadow-lg">
+                <div className="fixed bottom-6 right-6 z-50 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-700 shadow-lg">
                     {editErrorMessage}
                 </div>
             ) : null}
