@@ -1457,23 +1457,11 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                     </button>
                 )}
 
-                <div className="ml-auto flex items-center gap-3">
-                    {meta.total > 0 && (
-                        <span className="text-sm text-slate-400">
-                            {meta.total} {tw.pages_total_label ?? 'sider totalt'}
-                        </span>
-                    )}
-
-                    <Link
-                        href="/app/wiki/graph"
-                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                    >
-                        <svg className="h-3.5 w-3.5 text-violet-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path d="M13 4.5a2.5 2.5 0 1 1 .702 1.737L6.97 9.604a2.518 2.518 0 0 1 0 .792l6.733 3.367a2.5 2.5 0 1 1-.671 1.341l-6.733-3.367a2.5 2.5 0 1 1 0-3.474l6.733-3.367A2.5 2.5 0 0 1 13 4.5Z" />
-                        </svg>
-                        {tw.tab_graph ?? 'Grafvisning'}
-                    </Link>
-                </div>
+                {meta.total > 0 && (
+                    <span className="ml-auto text-sm text-slate-400">
+                        {meta.total} {tw.pages_total_label ?? 'sider totalt'}
+                    </span>
+                )}
             </div>
 
             {pages.length === 0 ? (

@@ -212,6 +212,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
                 { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
                 { key: 'wiki-quality', label: tw.tab_quality ?? 'Kvalitet', href: buildHref('/app/wiki', { tab: 'quality' }) },
+                { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
             ];
         }
 
@@ -282,6 +283,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         if (activeMainArea === 'wiki') {
             if (pathname === '/app/wiki') {
                 return `wiki-${wikiTab}`;
+            }
+
+            if (pathname.startsWith('/app/wiki/graph')) {
+                return 'wiki-graph';
             }
 
             return 'wiki-pages';
