@@ -2442,7 +2442,7 @@ class AiControllerTest extends TestCase
         $this->assertCount(0, app(RequirementLoader::class)->loadApprovedForCase($savedNotice->id));
     }
 
-    public function test_ai_case_view_refreshes_and_displays_persisted_evidence_for_confirmed_requirements_only(): void
+    public function test_ai_evidence_refresh_is_deprecated_and_performs_no_knowledge_base_retrieval(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4007', 'Evidence target', [
@@ -2474,14 +2474,6 @@ class AiControllerTest extends TestCase
             'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
             'assigned_user_id' => null,
         ]);
-        $pendingRequirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
-            'requirement_text' => 'Vi trenger erfaring med metode og cv i leveransen.',
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
-        ]);
-        $rejectedRequirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
-            'requirement_text' => 'Vi trenger erfaring med metode og cv i leveransen.',
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
-        ]);
 
         $cvKnowledge = $this->createKnowledgeItem($context['customer'], [
             'title' => 'CV profile',
@@ -2490,326 +2482,32 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
         $this->syncKnowledgeItemChunks($cvKnowledge);
-        $cvChunk = $cvKnowledge->chunks()->firstOrFail();
 
-        $referenceKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Reference profile',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
-            'content' => 'erfaring referanser',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($referenceKnowledge);
-
-        $methodKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Method profile',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_METHOD,
-            'content' => 'metode prosess',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($methodKnowledge);
-
-        $companyKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Company profile',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_COMPANY,
-            'content' => 'leveranser erfaring',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($companyKnowledge);
-
-        $boilerplateKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Boilerplate profile',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_BOILERPLATE,
-            'content' => 'leveranser standard',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($boilerplateKnowledge);
-
-        $otherKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Other profile',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'metode standard',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($otherKnowledge);
-
-        $inactiveKnowledge = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Inactive knowledge',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
-            'content' => 'erfaring referanser',
-            'is_active' => false,
-            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, // document_status is authoritative filter
-        ]);
-        $this->syncKnowledgeItemChunks($inactiveKnowledge);
-
-        $foreignContext = $this->customerAdminContext('Foreign Knowledge AS');
-        $foreignKnowledge = $this->createKnowledgeItem($foreignContext['customer'], [
-            'title' => 'Foreign knowledge',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
-            'content' => 'erfaring referanser',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($foreignKnowledge);
-
-        SavedNoticeAiEvidence::query()->create([
-            'saved_notice_ai_requirement_id' => $confirmedRequirement->id,
-            'knowledge_item_id' => $cvKnowledge->id,
-            'knowledge_item_chunk_id' => $cvChunk->id,
-            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_MANUAL_ADD,
-            'match_score' => 10,
-            'match_rank' => 1,
-            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
-            'is_primary' => true,
-            'created_by_user_id' => $context['user']->id,
-        ]);
-
-        $this->bindEmbeddingService(function (string $text): array {
-            $embeddingVector = $this->deterministicEmbeddingVector();
-
-            return [
-                'ok' => true,
-                'embedding' => $embeddingVector,
-                'model' => 'text-embedding-3-small',
-                'usage' => [],
-                'error_type' => null,
-                'error_message' => null,
-                'upstream_status' => 200,
-                'request_id' => 'test-request-id',
-                'response_body_excerpt' => null,
-            ];
-        });
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        // The embedding service must never be called by the deprecated endpoint.
+        $embeddingService = Mockery::mock(EmbeddingService::class);
+        $embeddingService->shouldNotReceive('tryEmbedText');
+        $this->app->instance(EmbeddingService::class, $embeddingService);
 
         $response = $this->actingAs($context['user'])
-            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $response->assertOk();
-        $page = $this->inertiaPageFromResponse($response);
-        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
-        $confirmedEvidence = collect(data_get($requirements->get($confirmedRequirement->id), 'evidence', []));
-        $pendingEvidence = collect(data_get($requirements->get($pendingRequirement->id), 'evidence', []));
-        $rejectedEvidence = collect(data_get($requirements->get($rejectedRequirement->id), 'evidence', []));
-
-        $this->assertNotEmpty(data_get($page, 'props.evidence_refresh_url'));
-        $this->assertSame(3, $requirements->count());
-        $this->assertSame(5, $confirmedEvidence->count());
-        $this->assertSame(SavedNoticeAiEvidence::MATCH_TYPE_MANUAL_ADD, $confirmedEvidence->first()['match_type']);
-        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $confirmedEvidence->first()['selection_status']);
-        $this->assertTrue($confirmedEvidence->first()['is_primary']);
-        $this->assertSame(1, $confirmedEvidence->filter(static function (array $evidence) use ($cvChunk): bool {
-            return (int) data_get($evidence, 'knowledge_chunk.id') === $cvChunk->id;
-        })->count());
-        $this->assertTrue($confirmedEvidence->every(static function (array $evidence): bool {
-            return filled($evidence['id'])
-                && filled($evidence['selection_status'])
-                && filled($evidence['match_type'])
-                && array_key_exists('knowledge_item', $evidence)
-                && array_key_exists('knowledge_chunk', $evidence)
-                && filled(data_get($evidence, 'knowledge_item.id'))
-                && filled(data_get($evidence, 'knowledge_item.original_filename'))
-                && filled(data_get($evidence, 'knowledge_chunk.content'));
-        }));
-        $this->assertFalse($confirmedEvidence->contains(fn (array $evidence): bool => data_get($evidence, 'knowledge_item.original_filename') === 'Foreign knowledge'));
-        $this->assertFalse($confirmedEvidence->contains(fn (array $evidence): bool => data_get($evidence, 'knowledge_item.original_filename') === 'Inactive knowledge'));
-        $this->assertSame([], $pendingEvidence->all());
-        $this->assertSame([], $rejectedEvidence->all());
-    }
-
-    public function test_ai_case_view_refreshes_evidence_using_hybrid_reranking_when_embeddings_are_available(): void
-    {
-        $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4012', 'Hybrid evidence target', [
-            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-        ]);
-        $this->touchSavedNotice($savedNotice, '2026-04-06 15:20:00');
-
-        $document = $this->createAiDocument($savedNotice, [
-            'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'hybrid-evidence.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/hybrid-evidence.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 3072,
-            'extracted_text' => 'Hybrid evidence source text.',
-            'text_extracted_at' => '2026-04-06 15:21:00',
-        ]);
-        $requirementChunk = $document->chunks()->create([
-            'chunk_index' => 0,
-            'content' => 'erfaring metode',
-            'char_start' => 0,
-            'char_end' => 15,
-            'word_count' => 2,
-        ]);
-        $requirement = $this->createAiRequirement($savedNotice, $document, $requirementChunk, [
-            'requirement_text' => 'erfaring metode',
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
-        ]);
-
-        $knowledgeA = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Hybrid A',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'erfaring metode',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeA);
-        $knowledgeAChunk = $knowledgeA->chunks()->firstOrFail();
-        $knowledgeAChunk->forceFill([
-            'embedding_vector' => [1.0, 0.0],
-            'embedding_model' => 'text-embedding-3-small',
-            'embedding_generated_at' => '2026-04-06 15:22:00',
-            'embedding_error' => null,
-        ])->save();
-        $this->touchKnowledgeItem($knowledgeA, '2026-04-06 15:22:00');
-
-        $knowledgeB = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Hybrid B',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'erfaring metode',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeB);
-        $knowledgeBChunk = $knowledgeB->chunks()->firstOrFail();
-        $knowledgeBChunk->forceFill([
-            'embedding_vector' => [0.0, 1.0],
-            'embedding_model' => 'text-embedding-3-small',
-            'embedding_generated_at' => '2026-04-06 15:23:00',
-            'embedding_error' => null,
-        ])->save();
-        $this->touchKnowledgeItem($knowledgeB, '2026-04-06 15:23:00');
-
-        $knowledgeC = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Hybrid C',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'erfaring metode',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeC);
-        $knowledgeCChunk = $knowledgeC->chunks()->firstOrFail();
-        $this->touchKnowledgeItem($knowledgeC, '2026-04-06 15:24:00');
-
-        $this->bindEmbeddingService(function (string $text): array {
-            return [
-                'ok' => true,
-                'embedding' => [1.0, 0.0],
-                'model' => 'text-embedding-3-small',
-                'usage' => [],
-                'error_type' => null,
-                'error_message' => null,
-                'upstream_status' => 200,
-                'request_id' => 'test-request-id',
-                'response_body_excerpt' => null,
-            ];
-        });
-
-        $this->actingAs($context['user'])
             ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]));
 
-        $response = $this->actingAs($context['user'])
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('error');
+
+        $this->assertSame(0, SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $confirmedRequirement->id)
+            ->count());
+
+        $pageResponse = $this->actingAs($context['user'])
             ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
-        $response->assertOk();
-        $page = $this->inertiaPageFromResponse($response);
-        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
-        $evidence = collect(data_get($requirements->get($requirement->id), 'evidence', []));
-
-        $this->assertSame(['Hybrid A', 'Hybrid B', 'Hybrid C'], $evidence->pluck('knowledge_item.original_filename')->all());
-        $this->assertSame([$knowledgeAChunk->id, $knowledgeBChunk->id, $knowledgeCChunk->id], $evidence->pluck('knowledge_chunk.id')->all());
-        $this->assertSame([1, 2, 3], $evidence->pluck('match_rank')->all());
-        $this->assertSame(2, $evidence->first()['match_score']);
+        $pageResponse->assertOk();
+        $page = $this->inertiaPageFromResponse($pageResponse);
+        $this->assertNull(data_get($page, 'props.evidence_refresh_url'));
     }
 
-    public function test_ai_case_view_refreshes_evidence_with_base_matcher_fallback_when_requirement_embedding_fails(): void
-    {
-        $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4013', 'Fallback evidence target', [
-            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-        ]);
-        $this->touchSavedNotice($savedNotice, '2026-04-06 15:30:00');
-
-        $document = $this->createAiDocument($savedNotice, [
-            'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'fallback-evidence.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/fallback-evidence.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 3072,
-            'extracted_text' => 'Fallback evidence source text.',
-            'text_extracted_at' => '2026-04-06 15:31:00',
-        ]);
-        $requirementChunk = $document->chunks()->create([
-            'chunk_index' => 0,
-            'content' => 'erfaring metode',
-            'char_start' => 0,
-            'char_end' => 15,
-            'word_count' => 2,
-        ]);
-        $requirement = $this->createAiRequirement($savedNotice, $document, $requirementChunk, [
-            'requirement_text' => 'erfaring metode',
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
-        ]);
-
-        $knowledgeOldest = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Fallback Oldest',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'erfaring metode',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeOldest);
-        $knowledgeOldestChunk = $knowledgeOldest->chunks()->firstOrFail();
-        $this->touchKnowledgeItem($knowledgeOldest, '2026-04-06 15:32:00');
-
-        $knowledgeNewest = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Fallback Newest',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'erfaring metode',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeNewest);
-        $knowledgeNewestChunk = $knowledgeNewest->chunks()->firstOrFail();
-        $this->touchKnowledgeItem($knowledgeNewest, '2026-04-06 15:33:00');
-
-        $this->bindEmbeddingService(function (string $text): array {
-            return [
-                'ok' => false,
-                'embedding' => null,
-                'model' => 'text-embedding-3-small',
-                'usage' => [],
-                'error_type' => 'upstream_unavailable',
-                'error_message' => 'OpenAI embedding request failed with HTTP status [503].',
-                'upstream_status' => 503,
-                'request_id' => 'test-request-id',
-                'response_body_excerpt' => '{"error":"upstream unavailable"}',
-            ];
-        });
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $response = $this->actingAs($context['user'])
-            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $response->assertOk();
-        $page = $this->inertiaPageFromResponse($response);
-        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
-        $evidence = collect(data_get($requirements->get($requirement->id), 'evidence', []));
-
-        $this->assertSame(['Fallback Newest', 'Fallback Oldest'], $evidence->pluck('knowledge_item.original_filename')->all());
-        $this->assertSame([$knowledgeNewestChunk->id, $knowledgeOldestChunk->id], $evidence->pluck('knowledge_chunk.id')->all());
-        $this->assertSame([1, 2], $evidence->pluck('match_rank')->all());
-        $this->assertSame(2, $evidence->first()['match_score']);
-    }
-
-    public function test_ai_evidence_selection_status_can_be_updated_for_confirmed_requirements_and_primary_selection_is_unique(): void
+    public function test_ai_evidence_selection_status_update_is_deprecated_and_leaves_existing_evidence_unchanged(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4008', 'Evidence selection target', [
@@ -2847,15 +2545,7 @@ class AiControllerTest extends TestCase
         $this->syncKnowledgeItemChunks($knowledgeOne);
         $chunkOne = $knowledgeOne->chunks()->firstOrFail();
 
-        $knowledgeTwo = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Selection knowledge two',
-            'content_type' => KnowledgeItem::CONTENT_TYPE_METHOD,
-            'content' => 'Dokumentasjon må vedlegges.',
-            'is_active' => true,
-        ]);
-        $this->syncKnowledgeItemChunks($knowledgeTwo);
-        $chunkTwo = $knowledgeTwo->chunks()->firstOrFail();
-
+        // Historical evidence row, created before the manual-curation flow was deprecated.
         $evidenceOne = SavedNoticeAiEvidence::query()->create([
             'saved_notice_ai_requirement_id' => $requirement->id,
             'knowledge_item_id' => $knowledgeOne->id,
@@ -2867,74 +2557,88 @@ class AiControllerTest extends TestCase
             'is_primary' => false,
             'created_by_user_id' => null,
         ]);
-        $evidenceTwo = SavedNoticeAiEvidence::query()->create([
-            'saved_notice_ai_requirement_id' => $requirement->id,
-            'knowledge_item_id' => $knowledgeTwo->id,
-            'knowledge_item_chunk_id' => $chunkTwo->id,
-            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
-            'match_score' => 4,
-            'match_rank' => 2,
-            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
-            'is_primary' => false,
-            'created_by_user_id' => null,
-        ]);
 
         $selectionStatusUrlOne = route('app.ai.evidence.selection-status.update', [
             'savedNotice' => $savedNotice->id,
             'evidence' => $evidenceOne->id,
         ]);
-        $selectionStatusUrlTwo = route('app.ai.evidence.selection-status.update', [
-            'savedNotice' => $savedNotice->id,
-            'evidence' => $evidenceTwo->id,
-        ]);
 
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->patch($selectionStatusUrlTwo, [
-                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
-            ])
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $evidenceTwo->refresh();
-        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceTwo->selection_status);
-        $this->assertTrue($evidenceTwo->is_primary);
-
-        $this->actingAs($context['user'])
+        $response = $this->actingAs($context['user'])
             ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
             ->patch($selectionStatusUrlOne, [
                 'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
-            ])
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+            ]);
 
-        $evidenceOne->refresh();
-        $evidenceTwo->refresh();
-
-        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceOne->selection_status);
-        $this->assertTrue($evidenceOne->is_primary);
-        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceTwo->selection_status);
-        $this->assertFalse($evidenceTwo->is_primary);
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->patch($selectionStatusUrlOne, [
-                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_REJECTED,
-            ])
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $evidenceOne->refresh();
-        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_REJECTED, $evidenceOne->selection_status);
-        $this->assertFalse($evidenceOne->is_primary);
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->patch($selectionStatusUrlOne, [
-                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
-            ])
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('error');
 
         $evidenceOne->refresh();
         $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED, $evidenceOne->selection_status);
         $this->assertFalse($evidenceOne->is_primary);
+    }
+
+    public function test_ai_evidence_selection_status_update_still_enforces_customer_scoped_ownership(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4009', 'Evidence ownership target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 14:25:00');
+
+        $foreignContext = $this->customerAdminContext('Foreign Evidence AS');
+        $foreignSavedNotice = $this->createSavedNotice($foreignContext['customer']->id, 'AI-4010', 'Foreign evidence target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($foreignSavedNotice, '2026-04-06 14:26:00');
+
+        $foreignDocument = $this->createAiDocument($foreignSavedNotice, [
+            'uploaded_by_user_id' => $foreignContext['user']->id,
+            'original_filename' => 'foreign-evidence.docx',
+            'stored_path' => 'saved-notices/'.$foreignSavedNotice->id.'/ai-documents/foreign-evidence.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 3072,
+            'extracted_text' => 'Foreign requirement source text.',
+            'text_extracted_at' => '2026-04-06 14:27:00',
+        ]);
+        $foreignChunk = $foreignDocument->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Foreign krav.',
+            'char_start' => 0,
+            'char_end' => 12,
+            'word_count' => 2,
+        ]);
+        $foreignRequirement = $this->createAiRequirement($foreignSavedNotice, $foreignDocument, $foreignChunk, [
+            'requirement_text' => 'Foreign krav.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+        $foreignKnowledge = $this->createKnowledgeItem($foreignContext['customer'], [
+            'title' => 'Foreign knowledge',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Foreign krav.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($foreignKnowledge);
+        $foreignKnowledgeChunk = $foreignKnowledge->chunks()->firstOrFail();
+        $foreignEvidence = SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $foreignRequirement->id,
+            'knowledge_item_id' => $foreignKnowledge->id,
+            'knowledge_item_chunk_id' => $foreignKnowledgeChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 5,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => null,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->patch(route('app.ai.evidence.selection-status.update', [
+                'savedNotice' => $savedNotice->id,
+                'evidence' => $foreignEvidence->id,
+            ]), [
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            ])
+            ->assertNotFound();
     }
 
     public function test_ai_requirement_work_status_can_be_updated_for_confirmed_requirements_and_assignment_is_persisted(): void
@@ -5413,181 +5117,5 @@ class AiControllerTest extends TestCase
             $sources->contains(fn (array $s): bool => $s['knowledge_item_id'] === $knowledgeItemB->id),
             'Customer B knowledge item must not appear in Customer A\'s sources payload.'
         );
-    }
-
-    public function test_evidence_row_stores_knowledge_item_version_id(): void
-    {
-        $context = $this->customerAdminContext();
-
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-VER-001', 'Version evidence test', [
-            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-        ]);
-
-        $document = $this->createAiDocument($savedNotice, [
-            'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'version-evidence.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/version-evidence.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
-            'extracted_text' => 'erfaring metode versjonspeker.',
-            'text_extracted_at' => '2026-06-22 10:00:00',
-        ]);
-
-        $sourceChunk = $document->chunks()->create([
-            'chunk_index' => 0,
-            'content' => 'erfaring metode versjonspeker.',
-            'char_start' => 0,
-            'char_end' => 30,
-            'word_count' => 4,
-        ]);
-
-        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
-            'requirement_text' => 'erfaring metode versjonspeker.',
-            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
-            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
-        ]);
-
-        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Versjonert kunnskapsbase',
-            'content' => 'erfaring metode versjonspeker.',
-            'is_active' => true,
-        ]);
-
-        $version = KnowledgeItemVersion::query()
-            ->where('knowledge_item_id', $knowledgeItem->id)
-            ->where('version_no', 1)
-            ->firstOrFail();
-
-        $knowledgeItem->chunks()->create([
-            'knowledge_item_version_id' => $version->id,
-            'chunk_index' => 0,
-            'content' => 'erfaring metode versjonspeker.',
-            'start_offset' => 0,
-            'end_offset' => 30,
-            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
-        ]);
-
-        $this->bindEmbeddingService(fn () => [
-            'ok' => false,
-            'embedding' => null,
-            'model' => 'text-embedding-3-small',
-            'usage' => [],
-            'error_type' => 'upstream_unavailable',
-            'error_message' => 'Embedding request failed.',
-            'upstream_status' => 503,
-            'request_id' => 'test-request-id',
-            'response_body_excerpt' => null,
-        ]);
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $evidence = SavedNoticeAiEvidence::query()
-            ->where('saved_notice_ai_requirement_id', $requirement->id)
-            ->where('knowledge_item_id', $knowledgeItem->id)
-            ->first();
-
-        $this->assertNotNull($evidence, 'Expected evidence row for knowledge item.');
-        $this->assertSame($version->id, (int) $evidence->knowledge_item_version_id);
-    }
-
-    public function test_evidence_row_version_id_is_stable_without_refresh(): void
-    {
-        $context = $this->customerAdminContext();
-
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-VER-002', 'Version stability test', [
-            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-        ]);
-
-        $document = $this->createAiDocument($savedNotice, [
-            'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'version-stability.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/version-stability.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
-            'extracted_text' => 'erfaring metode stabilitet.',
-            'text_extracted_at' => '2026-06-22 10:05:00',
-        ]);
-
-        $sourceChunk = $document->chunks()->create([
-            'chunk_index' => 0,
-            'content' => 'erfaring metode stabilitet.',
-            'char_start' => 0,
-            'char_end' => 26,
-            'word_count' => 4,
-        ]);
-
-        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
-            'requirement_text' => 'erfaring metode stabilitet.',
-            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
-            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
-            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
-        ]);
-
-        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
-            'title' => 'Stabilitetstest dokument',
-            'content' => 'erfaring metode stabilitet.',
-            'is_active' => true,
-        ]);
-
-        $versionOne = KnowledgeItemVersion::query()
-            ->where('knowledge_item_id', $knowledgeItem->id)
-            ->where('version_no', 1)
-            ->firstOrFail();
-
-        $knowledgeItem->chunks()->create([
-            'knowledge_item_version_id' => $versionOne->id,
-            'chunk_index' => 0,
-            'content' => 'erfaring metode stabilitet.',
-            'start_offset' => 0,
-            'end_offset' => 26,
-            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
-        ]);
-
-        $this->bindEmbeddingService(fn () => [
-            'ok' => false,
-            'embedding' => null,
-            'model' => 'text-embedding-3-small',
-            'usage' => [],
-            'error_type' => 'upstream_unavailable',
-            'error_message' => 'Embedding request failed.',
-            'upstream_status' => 503,
-            'request_id' => 'test-request-id',
-            'response_body_excerpt' => null,
-        ]);
-
-        $this->actingAs($context['user'])
-            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
-            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $evidenceBefore = SavedNoticeAiEvidence::query()
-            ->where('saved_notice_ai_requirement_id', $requirement->id)
-            ->where('knowledge_item_id', $knowledgeItem->id)
-            ->firstOrFail();
-
-        $this->assertSame($versionOne->id, (int) $evidenceBefore->knowledge_item_version_id);
-
-        // Simulate a new current version — do NOT refresh evidence.
-        $versionOne->update(['is_current' => false]);
-        KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 2,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stabilitetstest-v2.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
-
-        $evidenceAfter = SavedNoticeAiEvidence::query()
-            ->where('saved_notice_ai_requirement_id', $requirement->id)
-            ->where('knowledge_item_id', $knowledgeItem->id)
-            ->firstOrFail();
-
-        $this->assertSame($versionOne->id, (int) $evidenceAfter->knowledge_item_version_id,
-            'Evidence row should still point to version 1 when no refresh has been triggered.');
     }
 }

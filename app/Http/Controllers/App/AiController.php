@@ -173,7 +173,6 @@ class AiController extends Controller
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
             'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
-            'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
             'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
@@ -1444,12 +1443,37 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Rebuild persisted evidence rows for every confirmed requirement in the visible AI case.
+     * Purpose: Legacy Knowledge Base evidence-curation endpoint — DEPRECATED (AI-to-Wiki
+     * consolidation, final active-consumer removal). "Oppdater kilder" curated Knowledge Base chunk
+     * matches that fed the old KB-grounded answer-draft/assessment engines; both of those are already
+     * Wiki-only, so the curated evidence produced here no longer reaches any AI generation flow — it
+     * only fed the also-deprecated "Bruk i AI" usage report. No active flow needs manual source
+     * curation over Wiki content (Wiki-answer and Wiki-assessment already do automatic research), so
+     * this endpoint performs no Knowledge Base retrieval, no embedding call, and no
+     * SavedNoticeAiEvidence write. It only performs its existing authorization/customer-resolution
+     * side effects, then returns a controlled redirect back with an explanatory flash — never a 500.
+     * Original logic preserved verbatim as legacyRefreshEvidence() (unused, undeleted).
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        return back()->with('error', 'Kildeoppdatering fra Kunnskapsbase er avviklet. Wiki-svar og Wiki-vurdering henter kilder automatisk.');
+    }
+
+    /**
+     * Purpose: The evidence-refresh logic refreshEvidence() used to run before Wiki became the sole
+     * active knowledge source — kept, unused by any route, purely so the underlying capability is not
+     * deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after refreshing the evidence rows.
      * Side effects: Deletes stale auto-suggested evidence rows and recreates deterministic matches.
      */
-    public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
+    private function legacyRefreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
@@ -1542,12 +1566,43 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Update the selection state for one persisted evidence row.
+     * Purpose: Legacy Knowledge Base evidence-curation endpoint — DEPRECATED alongside
+     * refreshEvidence() (see its docblock for the full reasoning). Manual selection/rejection of
+     * Knowledge Base evidence rows no longer reaches any active AI generation flow, so this endpoint
+     * performs no evidence write. It only performs its existing authorization/ownership-resolution
+     * side effects, then returns a controlled redirect back — never a 500. Original logic preserved
+     * verbatim as legacyUpdateEvidenceSelectionStatus() (unused, undeleted).
+     * Inputs: The current request, route-bound saved notice, and route-bound evidence row.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: None beyond authorization/ownership-resolution.
+     */
+    public function updateEvidenceSelectionStatus(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiEvidence $evidence,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        SavedNoticeAiEvidence::query()
+            ->whereKey($evidence->id)
+            ->whereHas('requirement', static function ($query) use ($record): void {
+                $query->where('saved_notice_id', $record->id);
+            })
+            ->firstOrFail();
+
+        return back()->with('error', 'Kildeutvelgelse fra Kunnskapsbase er avviklet.');
+    }
+
+    /**
+     * Purpose: The evidence-selection logic updateEvidenceSelectionStatus() used to run before Wiki
+     * became the sole active knowledge source — kept, unused by any route, purely so the underlying
+     * capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound evidence row.
      * Returns: A redirect back to the AI case view after updating the evidence state.
      * Side effects: Updates the evidence selection status and primary marker in the database.
      */
-    public function updateEvidenceSelectionStatus(
+    private function legacyUpdateEvidenceSelectionStatus(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiEvidence $evidence,
@@ -2019,7 +2074,6 @@ class AiController extends Controller
                     'requirement' => $requirement->id,
                 ]),
                 'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
-                'evidence' => $this->aiRequirementEvidencePayload($requirement),
                 'knowledge_sources_sent_to_ai' => $this->aiRequirementKnowledgeSourcesPayload($requirement),
             ],
         );

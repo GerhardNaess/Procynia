@@ -281,39 +281,6 @@ const WORK_STATUS_OPTIONS = [
     { value: 'done', label: 'Ferdig' },
 ];
 
-const EVIDENCE_SELECTION_STATUS_META = {
-    suggested: {
-        label: 'Forslag',
-        className: 'bg-violet-100 text-violet-700 ring-violet-200',
-    },
-    selected: {
-        label: 'Valgt',
-        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-    },
-    rejected: {
-        label: 'Avvist',
-        className: 'bg-rose-100 text-rose-700 ring-rose-200',
-    },
-};
-
-const EVIDENCE_SELECTION_ACTIONS = [
-    {
-        label: 'Sett til forslag',
-        value: 'suggested',
-        className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
-    },
-    {
-        label: 'Velg',
-        value: 'selected',
-        className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
-    },
-    {
-        label: 'Avvis',
-        value: 'rejected',
-        className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
-    },
-];
-
 const ASSESSMENT_STATUS_META = {
     completed: {
         label: 'Fullført',
@@ -388,20 +355,6 @@ const KNOWLEDGE_GROUNDING_JUDGE_META = {
         className: 'bg-slate-100 text-slate-700 ring-slate-200',
     },
 };
-
-function formatKnowledgeSnippet(value, maxLength = 200) {
-    const normalizedValue = String(value ?? '').replace(/\s+/g, ' ').trim();
-
-    if (normalizedValue === '') {
-        return '—';
-    }
-
-    if (normalizedValue.length <= maxLength) {
-        return normalizedValue;
-    }
-
-    return `${normalizedValue.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
-}
 
 function normalizeAnswerDraftPayload(answerDraft) {
     return {
@@ -1693,7 +1646,6 @@ export default function AiShow({
     requirements_store_url: requirementsStoreUrl = '',
     requirements_reject_all_url: requirementsRejectAllUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
-    evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
     export_docx_url: exportDocxUrl = '',
@@ -1861,39 +1813,6 @@ export default function AiShow({
         },
     };
 
-    const EVIDENCE_SELECTION_STATUS_META = {
-        suggested: {
-            label: tai.evidence_selection_suggested,
-            className: 'bg-violet-100 text-violet-700 ring-violet-200',
-        },
-        selected: {
-            label: tai.evidence_selection_selected,
-            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-        },
-        rejected: {
-            label: tai.evidence_selection_rejected,
-            className: 'bg-rose-100 text-rose-700 ring-rose-200',
-        },
-    };
-
-    const EVIDENCE_SELECTION_ACTIONS = [
-        {
-            label: tai.evidence_selection_action_suggested,
-            value: 'suggested',
-            className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
-        },
-        {
-            label: tai.evidence_selection_action_select,
-            value: 'selected',
-            className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
-        },
-        {
-            label: tai.evidence_selection_action_reject,
-            value: 'rejected',
-            className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
-        },
-    ];
-
     const ASSESSMENT_STATUS_META = {
         completed: {
             label: tai.assessment_status_completed,
@@ -1978,11 +1897,9 @@ export default function AiShow({
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
-    const [refreshingEvidence, setRefreshingEvidence] = useState(false);
     const [rejectingAllRequirements, setRejectingAllRequirements] = useState(false);
     const [showBulkRejectConfirm, setShowBulkRejectConfirm] = useState(false);
     const [confirmRejectRequirementId, setConfirmRejectRequirementId] = useState(null);
-    const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
     const [responsiblePickerRequirementId, setResponsiblePickerRequirementId] = useState(null);
     const [responsibleSavingRequirementId, setResponsibleSavingRequirementId] = useState(null);
@@ -2112,11 +2029,9 @@ export default function AiShow({
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
         || refreshingAssessments
-        || refreshingEvidence
         || wikiAnswerGeneratingRequirementId !== null
         || wikiAnswerSavingRequirementId !== null
         || rejectingAllRequirements
-        || updatingEvidenceId !== null
         || manualRequirementForm.processing
         || requirementEditForm.processing
         || editingRequirementId !== null;
@@ -2867,52 +2782,6 @@ export default function AiShow({
     };
 
     /**
-     * Purpose: Persist the selected state for one evidence row.
-     * Inputs: The evidence row and the next selection status.
-     * Returns: None.
-     * Side effects: Sends a PATCH request that updates the evidence selection state on the server.
-     */
-    const updateEvidenceSelectionStatus = (evidence, selectionStatus) => {
-        if (!evidence.selection_status_update_url || requirementUpdatesLocked) {
-            return;
-        }
-
-        setUpdatingEvidenceId(evidence.id);
-
-        router.patch(evidence.selection_status_update_url, {
-            selection_status: selectionStatus,
-        }, {
-            preserveScroll: true,
-            preserveState: true,
-            onFinish: () => {
-                setUpdatingEvidenceId(null);
-            },
-        });
-    };
-
-    /**
-     * Purpose: Rebuild persisted evidence rows for the visible AI case.
-     * Inputs: None.
-     * Returns: None.
-     * Side effects: Sends a POST request that regenerates deterministic evidence rows on the server.
-     */
-    const refreshEvidence = () => {
-        if (!canUseAiOffer || !evidenceRefreshUrl || requirementUpdatesLocked) {
-            return;
-        }
-
-        setRefreshingEvidence(true);
-
-        router.post(evidenceRefreshUrl, {}, {
-            preserveScroll: true,
-            preserveState: true,
-            onFinish: () => {
-                setRefreshingEvidence(false);
-            },
-        });
-    };
-
-    /**
      * Purpose: Rebuild persisted assessment rows for the visible AI case.
      * Inputs: None.
      * Returns: None.
@@ -3312,15 +3181,6 @@ export default function AiShow({
                                     <>
                                         <button
                                             type="button"
-                                            onClick={refreshEvidence}
-                                            disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
-                                            className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {refreshingEvidence ? tai.refreshing : tai.refresh_sources}
-                                        </button>
-
-                                        <button
-                                            type="button"
                                             onClick={refreshAssessments}
                                             disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
                                             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-base font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
@@ -3579,7 +3439,6 @@ export default function AiShow({
                                     const hasAssessment = assessment !== null;
                                     const assessmentCompleted = assessment?.assessment_status === 'completed';
                                     const assessmentFailed = assessment?.assessment_status === 'failed';
-                                    const evidenceRows = Array.isArray(requirement.evidence) ? requirement.evidence : [];
                                     const assessmentDateLabel = assessment?.assessed_at
                                         ? new Intl.DateTimeFormat(locale, {
                                             day: '2-digit',
@@ -3589,7 +3448,6 @@ export default function AiShow({
                                             minute: '2-digit',
                                         }).format(new Date(assessment.assessed_at))
                                         : '—';
-                                    const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
                                     const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
                                     const canOpenAnswerWorkspace = canUseAiOffer
                                         && approvalStatus !== 'rejected';
@@ -4026,104 +3884,6 @@ export default function AiShow({
                                                             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-600">
                                                                 {tai.assessment_visible_when_approved}
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                ) : null}
-
-                                                {showEvidenceSection ? (
-                                                    <div className="space-y-3 border-t border-slate-200/80 pt-4">
-                                                        <div className="flex flex-wrap items-center justify-between gap-3">
-                                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                {tai.sources_section_title}
-                                                            </div>
-                                                            {isApprovedRequirement ? (
-                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-emerald-700">
-                                                                    {tai.persisted_badge}
-                                                                </span>
-                                                            ) : null}
-                                                        </div>
-
-                                                        {evidenceRows.length > 0 ? (
-                                                            <div className="space-y-2">
-                                                                {evidenceRows.map((evidence) => {
-                                                                    const evidenceStatusMeta = EVIDENCE_SELECTION_STATUS_META[evidence.selection_status] ?? EVIDENCE_SELECTION_STATUS_META.suggested;
-                                                                    const evidenceChunkLabel = typeof evidence.knowledge_chunk?.chunk_index === 'number'
-                                                                        ? `${tai.evidence_text_chunk_label} ${Number(evidence.knowledge_chunk.chunk_index) + 1}`
-                                                                        : `${tai.evidence_text_chunk_label} —`;
-                                                                    const evidenceUpdating = updatingEvidenceId === evidence.id;
-
-                                                                    return (
-                                                                        <div
-                                                                            key={evidence.id}
-                                                                            className={`rounded-2xl border p-3 shadow-sm ${
-                                                                                evidence.selection_status === 'selected'
-                                                                                    ? 'border-emerald-200 bg-emerald-50/40'
-                                                                                    : evidence.selection_status === 'rejected'
-                                                                                        ? 'border-rose-200 bg-rose-50/40'
-                                                                                        : 'border-slate-200 bg-white'
-                                                                            }`}
-                                                                        >
-                                                                            <div className="flex flex-wrap items-center gap-2">
-                                                                                <div className="font-medium text-slate-950">
-                                                                                    {evidence.knowledge_item?.original_filename ?? tai.unknown_document_title}
-                                                                                </div>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                    {evidence.knowledge_item?.document_type_label ?? evidence.knowledge_item?.document_type ?? '—'}
-                                                                                </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                    {evidence.match_type_label ?? evidence.match_type}
-                                                                                </span>
-                                                                                {evidence.is_primary ? (
-                                                                                    <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-violet-700">
-                                                                                        {tai.evidence_primary_label}
-                                                                                    </span>
-                                                                                ) : null}
-                                                                            </div>
-
-                                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                                                <span className={`inline-flex rounded-full px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 ring-1 ring-inset ${evidenceStatusMeta.className}`}>
-                                                                                    {evidence.selection_status_label ?? evidenceStatusMeta.label}
-                                                                                </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                    {tai.evidence_rank_label} {Number(evidence.match_rank ?? 0)}
-                                                                                </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                    {tai.evidence_score_label} {Number(evidence.match_score ?? 0)}
-                                                                                </span>
-                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base font-semibold uppercase tracking-[0.12em] leading-6 text-slate-600">
-                                                                                    {evidenceChunkLabel}
-                                                                                </span>
-                                                                            </div>
-
-                                                                            <p className="mt-2 text-base leading-6 text-slate-600">
-                                                                                {formatKnowledgeSnippet(evidence.knowledge_chunk?.content)}
-                                                                            </p>
-
-                                                                            <div className="mt-3 flex flex-wrap gap-2">
-                                                                                {EVIDENCE_SELECTION_ACTIONS.map((action) => {
-                                                                                    const isCurrentStatus = evidence.selection_status === action.value;
-
-                                                                                    return (
-                                                                                        <button
-                                                                                            key={action.value}
-                                                                                            type="button"
-                                                                                            onClick={() => updateEvidenceSelectionStatus(evidence, action.value)}
-                                                                                            disabled={requirementUpdatesLocked || evidenceUpdating || isCurrentStatus}
-                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
-                                                                                        >
-                                                                                            {action.label}
-                                                                                        </button>
-                                                                                    );
-                                                                                })}
-                                                                            </div>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        ) : (
-                                                            <p className="text-base text-slate-600">
-                                                                {tai.no_sources_yet}
-                                                            </p>
                                                         )}
                                                     </div>
                                                 ) : null}
