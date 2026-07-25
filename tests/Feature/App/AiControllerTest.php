@@ -5032,6 +5032,10 @@ class AiControllerTest extends TestCase
         ], $kiOverrides));
 
         // Every knowledge item needs a current version so retrieval guards can use version fields.
+        // extracted_text must be set here: KnowledgeItem::resolvedExtractedText() (used by
+        // textForKnowledgeProcessing(), which chunking reads) resolves from currentVersion.extracted_text
+        // only — never from the KnowledgeItem's own extracted_text/content columns. Omitting it here
+        // silently produces zero chunks from syncKnowledgeItemChunks(), not a chunking failure.
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $item->id,
             'customer_id' => $customer->id,
@@ -5040,6 +5044,7 @@ class AiControllerTest extends TestCase
             'original_filename' => $originalFilename,
             'storage_path' => $storagePath,
             'extraction_status' => $extractionStatus,
+            'extracted_text' => $extractedText,
         ]);
 
         return $item;
@@ -5631,7 +5636,7 @@ class AiControllerTest extends TestCase
         $this->assertSame($knowledgeItem->id, $source['knowledge_item_id']);
         $this->assertSame($version->id, $source['knowledge_item_version_id']);
         $this->assertSame(1, $source['knowledge_item_version_no']);
-        $this->assertSame($knowledgeItem->original_filename, $source['original_filename']);
+        $this->assertSame($knowledgeItem->resolvedOriginalFilename(), $source['original_filename']);
         $this->assertSame($chunk->id, $source['chunk_id']);
         $this->assertSame(5, $source['match_score']);
         $this->assertSame(1, $source['match_rank']);
