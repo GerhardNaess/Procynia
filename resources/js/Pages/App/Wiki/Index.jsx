@@ -1333,51 +1333,6 @@ function LintHealthBar({ health, tw }) {
 
 // ─── Tab bar ────────────────────────────────────────────────────────────────
 
-function TabBar({ activeTab, lintHealth, tw }) {
-    const tabs = [
-        { key: 'pages', label: tw.tab_pages ?? 'Wiki-sider', href: '/app/wiki?tab=pages' },
-        { key: 'sources', label: tw.tab_sources ?? 'Kildedokumenter', href: '/app/wiki?tab=sources' },
-        { key: 'runs', label: tw.tab_runs ?? 'Kjøringer', href: '/app/wiki?tab=runs' },
-        { key: 'quality', label: tw.tab_quality ?? 'Kvalitet', href: '/app/wiki?tab=quality', badge: lintHealth.total > 0 ? lintHealth.total : null },
-    ];
-
-    return (
-        <div className="flex items-center gap-1 border-b border-slate-200">
-            {tabs.map((tab) => {
-                const isActive = activeTab === tab.key;
-                return (
-                    <Link
-                        key={tab.key}
-                        href={tab.href}
-                        className={[
-                            'relative flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold transition',
-                            isActive
-                                ? 'text-violet-700 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-violet-600'
-                                : 'text-slate-500 hover:text-slate-800',
-                        ].join(' ')}
-                    >
-                        {tab.label}
-                        {tab.badge != null && (
-                            <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${lintHealth.error > 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {tab.badge}
-                            </span>
-                        )}
-                    </Link>
-                );
-            })}
-            <Link
-                href="/app/wiki/graph"
-                className="ml-auto flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-slate-500 transition hover:text-slate-800"
-            >
-                <svg className="h-3.5 w-3.5 text-violet-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path d="M13 4.5a2.5 2.5 0 1 1 .702 1.737L6.97 9.604a2.518 2.518 0 0 1 0 .792l6.733 3.367a2.5 2.5 0 1 1-.671 1.341l-6.733-3.367a2.5 2.5 0 1 1 0-3.474l6.733-3.367A2.5 2.5 0 0 1 13 4.5Z" />
-                </svg>
-                {tw.tab_graph ?? 'Grafvisning'}
-            </Link>
-        </div>
-    );
-}
-
 // ─── Pages tab ───────────────────────────────────────────────────────────────
 
 const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
@@ -1502,11 +1457,23 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                     </button>
                 )}
 
-                {meta.total > 0 && (
-                    <span className="ml-auto text-sm text-slate-400">
-                        {meta.total} {tw.pages_total_label ?? 'sider totalt'}
-                    </span>
-                )}
+                <div className="ml-auto flex items-center gap-3">
+                    {meta.total > 0 && (
+                        <span className="text-sm text-slate-400">
+                            {meta.total} {tw.pages_total_label ?? 'sider totalt'}
+                        </span>
+                    )}
+
+                    <Link
+                        href="/app/wiki/graph"
+                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                    >
+                        <svg className="h-3.5 w-3.5 text-violet-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M13 4.5a2.5 2.5 0 1 1 .702 1.737L6.97 9.604a2.518 2.518 0 0 1 0 .792l6.733 3.367a2.5 2.5 0 1 1-.671 1.341l-6.733-3.367a2.5 2.5 0 1 1 0-3.474l6.733-3.367A2.5 2.5 0 0 1 13 4.5Z" />
+                        </svg>
+                        {tw.tab_graph ?? 'Grafvisning'}
+                    </Link>
+                </div>
             </div>
 
             {pages.length === 0 ? (
@@ -3337,8 +3304,6 @@ export default function WikiIndex({
                         </p>
                     </div>
                 </section>
-
-                <TabBar activeTab={activeTab} lintHealth={lintHealth} tw={tw} />
 
                 {activeTab === 'pages' && (
                     <PagesTab

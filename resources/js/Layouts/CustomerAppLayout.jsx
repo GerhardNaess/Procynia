@@ -55,6 +55,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const navigation = translations?.navigation ?? {};
+    const tw = translations?.wiki ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -71,6 +72,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const { pathname, searchParams } = splitUrl(currentUrl);
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
+    const wikiTab = searchParams.get('tab') ?? 'pages';
     const currentAiCaseId = page.props.case?.id ?? null;
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)
@@ -204,6 +206,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ];
         }
 
+        if (activeMainArea === 'wiki') {
+            return [
+                { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
+                { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
+                { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
+                { key: 'wiki-quality', label: tw.tab_quality ?? 'Kvalitet', href: buildHref('/app/wiki', { tab: 'quality' }) },
+            ];
+        }
+
         if (activeMainArea === 'environment') {
             const items = [];
             if (environmentHref) {
@@ -266,6 +277,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 return 'go-no-go-templates';
             }
             return 'env-settings';
+        }
+
+        if (activeMainArea === 'wiki') {
+            if (pathname === '/app/wiki') {
+                return `wiki-${wikiTab}`;
+            }
+
+            return 'wiki-pages';
         }
 
         return null;
@@ -552,14 +571,24 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                                         if (item.isAnchor) {
                                             return (
-                                                <a key={item.key} href={item.href} className={classes}>
+                                                <a
+                                                    key={item.key}
+                                                    href={item.href}
+                                                    className={classes}
+                                                    aria-current={isActive ? 'page' : undefined}
+                                                >
                                                     {item.label}
                                                 </a>
                                             );
                                         }
 
                                         return (
-                                            <Link key={item.key} href={item.href} className={classes}>
+                                            <Link
+                                                key={item.key}
+                                                href={item.href}
+                                                className={classes}
+                                                aria-current={isActive ? 'page' : undefined}
+                                            >
                                                 {item.label}
                                             </Link>
                                         );
