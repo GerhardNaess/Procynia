@@ -1,15 +1,22 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
 
+const ALIGN_BASE_TRANSFORM = {
+    left: '',
+    right: '',
+    center: 'translateX(-50%)',
+};
+
 /**
  * Small circular "i" button that reveals a tooltip explaining a field, section,
  * or concept inline. Manages its own open/closed state — no external state wiring needed.
  *
- * Supports hover, focus, click, and Escape. Multiple instances on the same page
- * are independent of each other.
+ * Supports hover, focus, click, Escape, and click-outside. Multiple instances on the
+ * same page are independent of each other. The panel keeps itself inside the viewport
+ * horizontally regardless of `align`, so it never clips at a screen edge.
  *
  * Usage (plain text):
  *   <InfoHint label="Vis forklaring for Bid Manager" text="Bid Manager er ansvarlig for..." />
@@ -25,7 +32,9 @@ function classNames(...values) {
  * @param {React.ReactNode}  [children] Tooltip content when rich markup is needed.
  * @param {'sm'|'md'}        [size='md']          'sm' = h-4 w-4 for tight headers; 'md' = h-6 w-6 standard.
  * @param {'light'|'dark'}   [variant='light']    'light' = white tooltip; 'dark' = slate-950 tooltip.
- * @param {'right'|'center'|'left'} [align='right'] Tooltip alignment relative to the button.
+ * @param {'right'|'center'|'left'} [align='right'] Preferred tooltip alignment relative to the
+ *                                                   button — used as the starting position; the panel
+ *                                                   is nudged back on screen if that would clip.
  */
 export default function InfoHint({
     label,
@@ -39,7 +48,9 @@ export default function InfoHint({
     const rawId = useId();
     // useId returns strings like ":r0:" — strip colons for a valid HTML id
     const tooltipId = `infohint-${rawId.replace(/:/g, '')}`;
+    const containerRef = useRef(null);
     const buttonRef = useRef(null);
+    const tooltipRef = useRef(null);
 
     const content = text ?? children;
 
@@ -58,6 +69,60 @@ export default function InfoHint({
         return () => document.removeEventListener('keydown', onKeyDown);
     }, [isOpen]);
 
+    // Close on a click anywhere outside the hint (covers input that doesn't blur the
+    // trigger, e.g. a click landing on a non-focusable ancestor).
+    useEffect(() => {
+        if (!isOpen) return undefined;
+
+        function onDocumentMouseDown(event) {
+            if (!containerRef.current?.contains(event.target)) {
+                setIsOpen(false);
+            }
+        }
+
+        document.addEventListener('mousedown', onDocumentMouseDown);
+        return () => document.removeEventListener('mousedown', onDocumentMouseDown);
+    }, [isOpen]);
+
+    // Keep the panel inside the viewport horizontally, regardless of the requested
+    // `align` — a page can render this hint anywhere (near the left edge, right edge,
+    // inside a narrow card), so a single static alignment class would clip.
+    const recalculatePosition = useCallback(() => {
+        const el = tooltipRef.current;
+        if (!el) return;
+
+        const baseTransform = ALIGN_BASE_TRANSFORM[align] ?? '';
+        el.style.transform = baseTransform;
+
+        const rect = el.getBoundingClientRect();
+        const margin = 8;
+        const viewportWidth = window.innerWidth;
+        let shift = 0;
+
+        if (rect.left < margin) {
+            shift = margin - rect.left;
+        } else if (rect.right > viewportWidth - margin) {
+            shift = (viewportWidth - margin) - rect.right;
+        }
+
+        if (shift !== 0) {
+            el.style.transform = `${baseTransform} translateX(${shift}px)`.trim();
+        }
+    }, [align]);
+
+    useLayoutEffect(() => {
+        if (!isOpen) return undefined;
+
+        recalculatePosition();
+        window.addEventListener('resize', recalculatePosition);
+        window.addEventListener('scroll', recalculatePosition, true);
+
+        return () => {
+            window.removeEventListener('resize', recalculatePosition);
+            window.removeEventListener('scroll', recalculatePosition, true);
+        };
+    }, [isOpen, recalculatePosition]);
+
     if (!content) {
         return null;
     }
@@ -70,16 +135,17 @@ export default function InfoHint({
 
     const tooltipColorClass = variant === 'dark'
         ? 'border-slate-800 bg-slate-950 text-white'
-        : 'border-slate-200 bg-white text-slate-600';
+        : 'border-slate-200 bg-white text-slate-700';
 
     const tooltipAlignClass = align === 'left'
         ? 'left-0'
         : align === 'center'
-            ? 'left-1/2 -translate-x-1/2'
+            ? 'left-1/2'
             : 'right-0';
 
     return (
         <span
+            ref={containerRef}
             className="relative inline-flex shrink-0"
             onMouseEnter={() => setIsOpen(true)}
             onMouseLeave={() => setIsOpen(false)}
@@ -109,6 +175,7 @@ export default function InfoHint({
 
             {isOpen && (
                 <div
+                    ref={tooltipRef}
                     id={tooltipId}
                     role="tooltip"
                     className={classNames(
