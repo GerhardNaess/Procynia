@@ -133,7 +133,7 @@ function InfoCenterTabHelpButton({ infoKey, label, openHelpKey, setOpenHelpKey }
                 <div
                     id={`${infoKey}-tooltip`}
                     role="tooltip"
-                    className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-[0_20px_40px_rgba(15,23,42,0.12)]"
+                    className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-4 text-base leading-6 text-slate-700 shadow-[0_20px_40px_rgba(15,23,42,0.12)]"
                 >
                     {helpText}
                 </div>
