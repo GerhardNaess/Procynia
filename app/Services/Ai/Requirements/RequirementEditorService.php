@@ -330,6 +330,7 @@ class RequirementEditorService
 
             $beforeSnapshot = RequirementSnapshotData::fromRequirement($requirement)->toArray();
             $changedFields = [];
+            $rawApprovalStatusNeedsUpdate = $requirement->getRawOriginal('approval_status') !== $normalizedApprovalStatus;
 
             if ($requirement->review_status !== $normalizedReviewStatus) {
                 $changedFields[] = 'review_status';
@@ -338,7 +339,7 @@ class RequirementEditorService
                 ]);
             }
 
-            if ($requirement->approval_status !== $normalizedApprovalStatus) {
+            if ($rawApprovalStatusNeedsUpdate) {
                 $changedFields[] = 'approval_status';
                 $requirement->forceFill([
                     'approval_status' => $normalizedApprovalStatus,
