@@ -1142,6 +1142,8 @@ return [
         'assessment_failed_message' => 'Vurdering feilet for dette kravet. Kjør analyse på nytt for å forsøke igjen.',
         'assessment_not_generated_message' => 'Vurdering er ikke generert ennå. Bruk "Analyser krav" for å vurdere dette kravet.',
         'assessment_visible_when_approved' => 'Vurdering vises når kravet er godkjent.',
+        'assessment_possible_conflict_badge' => 'Mulig konflikt',
+        'assessment_wiki_sources_label' => 'Wiki-kilder brukt i vurderingen',
         'table_evidence_overline' => 'Brukt tabellgrunnlag',
         'table_evidence_description' => 'Tabellen under er brukt som grunnlag for svarutkastet.',
         'table_evidence_label' => 'Tabellgrunnlag',

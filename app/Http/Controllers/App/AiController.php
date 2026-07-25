@@ -33,13 +33,13 @@ use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
+use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
 use App\Services\InfoCenter\RequirementResponsibilityTaskService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
-use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
@@ -104,6 +104,7 @@ class AiController extends Controller
         private readonly AiUsageGuard $aiUsageGuard,
         private readonly RequirementWordExportService $requirementWordExportService,
         private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
+        private readonly RequirementWikiAssessmentService $requirementWikiAssessmentService,
     ) {}
 
     /**
@@ -1489,7 +1490,9 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Rebuild persisted assessment rows for every confirmed requirement in the visible AI case.
+     * Purpose: Rebuild persisted assessment rows for every confirmed requirement in the visible AI
+     *          case, using Enterprise Wiki knowledge (AI-to-Wiki consolidation — the Knowledge Base
+     *          is no longer read here; see RequirementWikiAssessmentService).
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after refreshing the assessment rows.
      * Side effects: Upserts one assessment row per confirmed requirement.
@@ -1513,13 +1516,18 @@ class AiController extends Controller
             }
         }
 
-        $requirementAssessmentService = app(RequirementAssessmentService::class);
-
+        $languageCode = $this->customerContext->resolveLanguageCode();
         $failedCount = 0;
 
         foreach ($confirmedRequirements as $requirement) {
             try {
-                $requirementAssessmentService->assessRequirement($requirement, $userId, $record->ai_instructions);
+                $this->requirementWikiAssessmentService->assessRequirement(
+                    $requirement,
+                    (int) $record->customer_id,
+                    $languageCode,
+                    $userId,
+                    $record->ai_instructions,
+                );
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
                 $failedCount++;
@@ -1606,7 +1614,9 @@ class AiController extends Controller
                 'coverage_rationale' => null,
                 'missing_information' => null,
                 'recommended_next_step' => null,
-                'source_evidence_snapshot' => [],
+                'has_possible_conflict' => null,
+                'engine_version' => null,
+                'wiki_sources_snapshot' => [],
                 'assessed_at' => null,
                 'assessed_by_user_id' => $userId,
             ],
@@ -2069,6 +2079,8 @@ class AiController extends Controller
             'coverage_rationale' => $assessment->coverage_rationale,
             'missing_information' => $assessment->missing_information,
             'recommended_next_step' => $assessment->recommended_next_step,
+            'has_possible_conflict' => $assessment->has_possible_conflict,
+            'wiki_sources' => is_array($assessment->wiki_sources_snapshot) ? $assessment->wiki_sources_snapshot : [],
             'assessed_at' => optional($assessment->assessed_at)?->toIso8601String(),
         ];
     }

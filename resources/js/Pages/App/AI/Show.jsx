@@ -3949,6 +3949,11 @@ export default function AiShow({
                                                                                     <InfoHint size="sm" label="Vis forklaring for Risikonivå" text={tai.hint_risk_level} />
                                                                                 </span>
                                                                             ) : null}
+                                                                            {assessment.has_possible_conflict ? (
+                                                                                <span className="inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
+                                                                                    {tai.assessment_possible_conflict_badge}
+                                                                                </span>
+                                                                            ) : null}
                                                                         </div>
 
                                                                         <div className="grid gap-3 md:grid-cols-2">
@@ -3988,6 +3993,24 @@ export default function AiShow({
                                                                                 </p>
                                                                             </div>
                                                                         </div>
+
+                                                                        {Array.isArray(assessment.wiki_sources) && assessment.wiki_sources.length > 0 ? (
+                                                                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                                                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    {tai.assessment_wiki_sources_label}
+                                                                                </div>
+                                                                                <ul className="mt-2 flex flex-wrap gap-2">
+                                                                                    {assessment.wiki_sources.map((source) => (
+                                                                                        <li
+                                                                                            key={`assessment-source-${source.enterprise_wiki_page_id}`}
+                                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-base text-slate-700"
+                                                                                        >
+                                                                                            {source.page_title ?? source.page_slug ?? '—'}
+                                                                                        </li>
+                                                                                    ))}
+                                                                                </ul>
+                                                                            </div>
+                                                                        ) : null}
                                                                     </div>
                                                                 ) : (
                                                                     <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-base leading-6 text-rose-700">

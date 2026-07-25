@@ -1142,6 +1142,8 @@ return [
         'assessment_failed_message' => 'Assessment failed for this requirement. Run analysis again to try once more.',
         'assessment_not_generated_message' => 'Assessment has not been generated yet. Use "Analyze requirements" to assess this requirement.',
         'assessment_visible_when_approved' => 'Assessment appears when the requirement is approved.',
+        'assessment_possible_conflict_badge' => 'Possible conflict',
+        'assessment_wiki_sources_label' => 'Wiki sources used in the assessment',
         'table_evidence_overline' => 'Table evidence used',
         'table_evidence_description' => 'The table below was used as grounding for the answer draft.',
         'table_evidence_label' => 'Table evidence',

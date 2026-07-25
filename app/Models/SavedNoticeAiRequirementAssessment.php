@@ -66,7 +66,9 @@ class SavedNoticeAiRequirementAssessment extends Model
         'coverage_rationale',
         'missing_information',
         'recommended_next_step',
-        'source_evidence_snapshot',
+        'wiki_sources_snapshot',
+        'has_possible_conflict',
+        'engine_version',
         'assessed_at',
         'assessed_by_user_id',
     ];
@@ -74,7 +76,8 @@ class SavedNoticeAiRequirementAssessment extends Model
     protected function casts(): array
     {
         return [
-            'source_evidence_snapshot' => 'array',
+            'wiki_sources_snapshot' => 'array',
+            'has_possible_conflict' => 'boolean',
             'assessed_at' => 'datetime',
             'assessed_by_user_id' => 'integer',
         ];
