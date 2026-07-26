@@ -55,6 +55,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const navigation = translations?.navigation ?? {};
+    const tw = translations?.wiki ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -71,6 +72,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const { pathname, searchParams } = splitUrl(currentUrl);
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
+    const wikiTab = searchParams.get('tab') ?? 'pages';
     const currentAiCaseId = page.props.case?.id ?? null;
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)
@@ -94,7 +96,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : rememberedAiCaseId !== null
             ? `/app/ai/${rememberedAiCaseId}/instructions`
             : null;
-    const aiUsageHref = '/app/ai/knowledge-base/ai-usage';
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.can_manage_customer_billing ? '/app/billing' : null;
@@ -166,8 +167,8 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'procurements', label: navigation.notices, href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
-        { key: 'ai', label: navigation.ai, href: '/app/ai' },
         { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
+        { key: 'ai', label: navigation.ai, href: '/app/ai' },
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
@@ -180,9 +181,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'ai-overview', label: navigation.overview, href: '/app/ai' },
                 { key: 'ai-work', label: navigation.worklist, href: aiWorkHref },
                 { key: 'ai-instructions', label: navigation.ai_instructions, href: aiInstructionsHref },
-                { key: 'knowledge-vocabulary', label: navigation.company_vocabulary, href: '/app/ai/knowledge-vocabulary' },
-                { key: 'knowledge-docs', label: navigation.knowledge_documents, href: '/app/ai/knowledge-base' },
-                { key: 'knowledge-ai-usage', label: translations.knowledge_base?.ai_usage_nav_label ?? 'Bruk i AI', href: aiUsageHref },
             ];
         }
 
@@ -205,6 +203,16 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     label: withMenuCount(navigation.history, worklist?.history_count),
                     href: buildHref('/app/notices', { mode: 'history' }),
                 },
+            ];
+        }
+
+        if (activeMainArea === 'wiki') {
+            return [
+                { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
+                { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
+                { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
+                { key: 'wiki-quality', label: tw.tab_quality ?? 'Kvalitet', href: buildHref('/app/wiki', { tab: 'quality' }) },
+                { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
             ];
         }
 
@@ -270,6 +278,18 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 return 'go-no-go-templates';
             }
             return 'env-settings';
+        }
+
+        if (activeMainArea === 'wiki') {
+            if (pathname === '/app/wiki') {
+                return `wiki-${wikiTab}`;
+            }
+
+            if (pathname.startsWith('/app/wiki/graph')) {
+                return 'wiki-graph';
+            }
+
+            return 'wiki-pages';
         }
 
         return null;
@@ -556,14 +576,24 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                                         if (item.isAnchor) {
                                             return (
-                                                <a key={item.key} href={item.href} className={classes}>
+                                                <a
+                                                    key={item.key}
+                                                    href={item.href}
+                                                    className={classes}
+                                                    aria-current={isActive ? 'page' : undefined}
+                                                >
                                                     {item.label}
                                                 </a>
                                             );
                                         }
 
                                         return (
-                                            <Link key={item.key} href={item.href} className={classes}>
+                                            <Link
+                                                key={item.key}
+                                                href={item.href}
+                                                className={classes}
+                                                aria-current={isActive ? 'page' : undefined}
+                                            >
                                                 {item.label}
                                             </Link>
                                         );

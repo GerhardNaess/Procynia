@@ -19,15 +19,28 @@ use JsonException;
 use RuntimeException;
 use Throwable;
 
+/**
+ * DEPRECATED (AI-to-Wiki consolidation, final functional phase — see
+ * docs/ai-assessment-wiki-consolidation.md): replaced by
+ * App\Services\Ai\Wiki\RequirementWikiAssessmentService, which produces the same assessment
+ * contract (coverage_status, risk_level, the four free-text fields) from Enterprise Wiki knowledge
+ * instead of the Knowledge Base. No production code calls this class anymore
+ * (AiController::refreshAssessments() now calls the Wiki service). Kept, unused, undeleted — the
+ * Knowledge Base tables/columns this service reads are not deleted in this phase either.
+ *
+ * NOTE: assessRequirement() below still writes to a 'source_evidence_snapshot' column, which the
+ * same migration that added has_possible_conflict/engine_version renamed to 'wiki_sources_snapshot'
+ * on saved_notice_ai_requirement_assessments. This class would need that reference updated before
+ * ever being reactivated — left as-is since it is provably unreachable (see class docblock above).
+ */
 class RequirementAssessmentService
 {
     private const MAX_EVIDENCE_ROWS = 5;
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
-        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
-    ) {
-    }
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
+    ) {}
 
     /**
      * Purpose: Generate and persist one canonical assessment row for a requirement.
@@ -39,8 +52,7 @@ class RequirementAssessmentService
         SavedNoticeAiRequirement $requirement,
         ?int $assessedByUserId = null,
         ?string $caseInstructions = null,
-    ): SavedNoticeAiRequirementAssessment
-    {
+    ): SavedNoticeAiRequirementAssessment {
         $requirement->loadMissing([
             'savedNotice',
             'evidence.knowledgeItem',
@@ -82,8 +94,7 @@ class RequirementAssessmentService
     private function recordAiCaseUsageAfterSuccessfulAssessment(
         SavedNoticeAiRequirement $requirement,
         ?int $assessedByUserId,
-    ): void
-    {
+    ): void {
         try {
             $savedNotice = $requirement->savedNotice;
 
@@ -223,8 +234,7 @@ class RequirementAssessmentService
         SavedNoticeAiRequirement $requirement,
         Collection $evidenceRows,
         ?string $caseInstructions,
-    ): array
-    {
+    ): array {
         $response = $this->openAiClient->createResponse($this->openAiRequestPayload($requirement, $evidenceRows, $caseInstructions));
 
         try {
@@ -254,8 +264,7 @@ class RequirementAssessmentService
         SavedNoticeAiRequirement $requirement,
         Collection $evidenceRows,
         ?string $caseInstructions,
-    ): array
-    {
+    ): array {
         return [
             'model' => $this->openAiModel(),
             'input' => [
@@ -324,8 +333,7 @@ class RequirementAssessmentService
         SavedNoticeAiRequirement $requirement,
         Collection $evidenceRows,
         ?string $caseInstructions,
-    ): string
-    {
+    ): string {
         $payload = [
             'instruction' => 'Assess coverage of the requirement based only on the supplied evidence.',
             'requirement' => [

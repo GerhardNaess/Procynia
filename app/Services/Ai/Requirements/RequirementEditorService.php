@@ -28,7 +28,7 @@ class RequirementEditorService
         ?User $changedBy = null,
         array $publicationOverrides = [],
     ): SavedNoticeAiRequirement {
-        return DB::transaction(function () use ($document, $chunk, $candidate, $changedBy, $publicationOverrides): SavedNoticeAiRequirement {
+        return DB::transaction(function () use ($candidate, $changedBy, $publicationOverrides): SavedNoticeAiRequirement {
             $requirement = SavedNoticeAiRequirement::query()->create(array_merge(
                 $candidate->toCreationAttributes(),
                 [
@@ -330,6 +330,7 @@ class RequirementEditorService
 
             $beforeSnapshot = RequirementSnapshotData::fromRequirement($requirement)->toArray();
             $changedFields = [];
+            $rawApprovalStatusNeedsUpdate = $requirement->getRawOriginal('approval_status') !== $normalizedApprovalStatus;
 
             if ($requirement->review_status !== $normalizedReviewStatus) {
                 $changedFields[] = 'review_status';
@@ -338,7 +339,7 @@ class RequirementEditorService
                 ]);
             }
 
-            if ($requirement->approval_status !== $normalizedApprovalStatus) {
+            if ($rawApprovalStatusNeedsUpdate) {
                 $changedFields[] = 'approval_status';
                 $requirement->forceFill([
                     'approval_status' => $normalizedApprovalStatus,

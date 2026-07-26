@@ -3,10 +3,6 @@ import { useEffect, useMemo, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
 
-function classNames(...values) {
-    return values.filter(Boolean).join(' ');
-}
-
 function formatDateTime(value, locale) {
     if (!value) {
         return '—';
@@ -284,15 +280,10 @@ export default function KnowledgeVocabularyIndex({
     approvedVocabularyGroups = [],
     suggestions = [],
     recentBatches = [],
-    sourceDocuments = [],
     typeOptions = [],
-    storeBatchUrl = '',
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tai = translations?.ai ?? {};
-    const batchForm = useForm({
-        source_document_ids: [],
-    });
     const editForm = useForm({
         suggested_type: '',
         suggested_canonical_name: '',
@@ -366,47 +357,6 @@ export default function KnowledgeVocabularyIndex({
         termEditForm.clearErrors();
     }, [editingTerm?.id]);
 
-    const toggleDocument = (documentId) => {
-        const normalizedId = Number(documentId);
-        const selectedIds = Array.isArray(batchForm.data.source_document_ids)
-            ? [...batchForm.data.source_document_ids]
-            : [];
-
-        const index = selectedIds.findIndex((value) => Number(value) === normalizedId);
-
-        if (index >= 0) {
-            selectedIds.splice(index, 1);
-        } else {
-            selectedIds.push(normalizedId);
-        }
-
-        batchForm.setData('source_document_ids', selectedIds);
-    };
-
-    const selectAllDocuments = () => {
-        batchForm.setData(
-            'source_document_ids',
-            sourceDocuments.map((document) => document.id),
-        );
-    };
-
-    const clearDocuments = () => {
-        batchForm.setData('source_document_ids', []);
-    };
-
-    const submitBatch = (event) => {
-        event.preventDefault();
-
-        if (batchForm.processing || storeBatchUrl === '') {
-            return;
-        }
-
-        batchForm.post(storeBatchUrl, {
-            preserveScroll: true,
-            preserveState: true,
-        });
-    };
-
     const submitEditAndApprove = (event) => {
         event.preventDefault();
 
@@ -435,11 +385,7 @@ export default function KnowledgeVocabularyIndex({
         });
     };
 
-    const batchErrorMessage = Object.values(batchForm.errors).find(Boolean) ?? null;
     const editErrorMessage = Object.values(editForm.errors).find(Boolean) ?? null;
-    const selectedDocumentCount = Array.isArray(batchForm.data.source_document_ids)
-        ? batchForm.data.source_document_ids.length
-        : 0;
 
     return (
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
@@ -545,102 +491,17 @@ export default function KnowledgeVocabularyIndex({
                     </div>
                 </section>
 
-                <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="space-y-6">
-                        <div className="space-y-2">
-                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-600">
-                                Ny vokabularanalyse
-                            </div>
-                            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                Start analyse av representative dokumenter
-                            </h2>
-                            <p className="text-base leading-6 text-slate-600">
-                                Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt standardvokabular. Dokumentet forsvinner dersom kunnskapsdokumentet slettes.
-                            </p>
+                <section className="rounded-[22px] border border-amber-200 bg-amber-50 p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="space-y-2">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-amber-700">
+                            {tai.knowledge_vocabulary_deprecated_kicker ?? 'Under utfasing'}
                         </div>
-
-                        <form onSubmit={submitBatch} className="space-y-5">
-                            <div className="flex flex-wrap gap-3">
-                                <button
-                                    type="button"
-                                    onClick={selectAllDocuments}
-                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                >
-                                    Velg alle
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={clearDocuments}
-                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                >
-                                    Tøm
-                                </button>
-                                <div className="inline-flex items-center rounded-full bg-slate-100 px-4 py-2 text-base font-medium text-slate-600">
-                                    Valgt: {selectedDocumentCount}
-                                </div>
-                            </div>
-
-                            {batchErrorMessage ? <p className="text-base text-rose-700">{batchErrorMessage}</p> : null}
-
-                            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                                {sourceDocuments.map((document) => {
-                                    const isSelected = Array.isArray(batchForm.data.source_document_ids)
-                                        ? batchForm.data.source_document_ids.some((value) => Number(value) === Number(document.id))
-                                        : false;
-
-                                    return (
-                                        <label
-                                            key={document.id}
-                                            className={classNames(
-                                                'flex h-full cursor-pointer flex-col rounded-[20px] border p-4 transition',
-                                                isSelected
-                                                    ? 'border-violet-300 bg-violet-50/60'
-                                                    : 'border-slate-200 bg-white hover:border-slate-300',
-                                            )}
-                                        >
-                                            <div className="flex items-start gap-3">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={() => toggleDocument(document.id)}
-                                                    className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                                                />
-                                                <div className="min-w-0 space-y-1">
-                                                    <div className="font-semibold text-slate-950">
-                                                        {document.original_filename}
-                                                    </div>
-                                                    <div className="text-base uppercase tracking-[0.12em] text-slate-600">
-                                                        {document.document_type_label} · {document.chunk_count} chunks
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <p className="mt-3 line-clamp-4 text-base leading-6 text-slate-600">
-                                                {document.summary || 'Ingen sammendrag er lagret ennå.'}
-                                            </p>
-                                            <div className="mt-4 text-base text-slate-600">
-                                                Oppdatert {formatDateTime(document.updated_at, locale)}
-                                            </div>
-                                        </label>
-                                    );
-                                })}
-                            </div>
-
-                            {sourceDocuments.length === 0 ? (
-                                <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-base text-slate-600">
-                                    Ingen representative dokumenter er klare ennå.
-                                </div>
-                            ) : null}
-
-                            <div className="flex justify-end">
-                                <button
-                                    type="submit"
-                                    disabled={batchForm.processing || selectedDocumentCount === 0}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {batchForm.processing ? 'Starter...' : 'Start analyse'}
-                                </button>
-                            </div>
-                        </form>
+                        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
+                            {tai.knowledge_vocabulary_deprecated_title ?? 'Nye analyser kan ikke lenger startes'}
+                        </h2>
+                        <p className="text-base leading-6 text-slate-700">
+                            {tai.knowledge_vocabulary_deprecated_notice ?? 'Standardvokabular fases ut til fordel for Enterprise Wiki. Eksisterende godkjente begreper og ventende forslag kan fortsatt ses og behandles her, men det kan ikke lenger startes nye analyser. Se Wiki for virksomhetens samlede, godkjente kunnskap.'}
+                        </p>
                     </div>
                 </section>
 

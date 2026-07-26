@@ -304,6 +304,127 @@ class RequirementWikiAnswerAiClientTest extends TestCase
         $client->generateAnswer('1.1', 'text', $this->onePage(), 'no');
     }
 
+    /**
+     * AI-to-Wiki consolidation: the owning SavedNotice's ai_instructions (case_instructions) must
+     * reach the prompt, framed as a style-only directive that can never be mistaken for a knowledge
+     * source or an override of the anti-fabrication/citation rules.
+     */
+    public function test_case_instructions_are_included_as_a_subordinate_style_directive(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer(
+            '1.1',
+            'text',
+            $this->onePage(),
+            'no',
+            'Skriv i en uformell og vennlig tone.',
+        );
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringContainsString('CASE INSTRUCTIONS', $userText);
+        $this->assertStringContainsString('Skriv i en uformell og vennlig tone.', $userText);
+        $this->assertStringContainsString('never a source of facts', $userText);
+
+        $developerPrompt = data_get($captured, 'input.0.content.0.text');
+        $this->assertStringContainsString('Case instructions', $developerPrompt);
+        $this->assertStringContainsString('only for tone, terminology, style, and capitalization', $developerPrompt);
+        $this->assertStringContainsString('never override a Wiki page\'s SOURCE-DOCUMENTED FACTS', $developerPrompt);
+    }
+
+    public function test_no_case_instructions_block_is_added_when_none_are_provided(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringNotContainsString('CASE INSTRUCTIONS', $userText);
+    }
+
+    public function test_blank_case_instructions_are_treated_the_same_as_none(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no', "   \n  ");
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringNotContainsString('CASE INSTRUCTIONS', $userText);
+    }
+
+    /**
+     * AI-to-Wiki consolidation (Wiki-answer-as-sole-engine): a one-off, per-generation
+     * requirementUserPrompt (feature parity with the legacy answer-draft flow's user_answer_prompt)
+     * must reach the prompt, framed with the same subordinate, style-only status as case
+     * instructions, applied after it.
+     */
+    public function test_requirement_user_prompt_is_included_as_a_subordinate_style_directive(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer(
+            '1.1',
+            'text',
+            $this->onePage(),
+            'no',
+            'Skriv i en uformell og vennlig tone.',
+            'Fokuser spesielt på ansvarsfordeling.',
+        );
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringContainsString('REQUIREMENT-SPECIFIC INSTRUCTIONS', $userText);
+        $this->assertStringContainsString('Fokuser spesielt på ansvarsfordeling.', $userText);
+        $this->assertStringContainsString('never a source of facts', $userText);
+
+        $developerPrompt = data_get($captured, 'input.0.content.0.text');
+        $this->assertStringContainsString('requirement-specific instructions', $developerPrompt);
+    }
+
+    public function test_no_requirement_user_prompt_block_is_added_when_none_is_provided(): void
+    {
+        $captured = null;
+        $this->mock(OpenAiClient::class, function (MockInterface $mock) use (&$captured): void {
+            $mock->shouldReceive('createResponse')->once()->andReturnUsing(function (array $payload) use (&$captured): array {
+                $captured = $payload;
+
+                return $this->response(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => [101]]]]);
+            });
+        });
+
+        app(RequirementWikiAnswerAiClient::class)->generateAnswer('1.1', 'text', $this->onePage(), 'no');
+
+        $userText = data_get($captured, 'input.1.content.0.text');
+        $this->assertStringNotContainsString('REQUIREMENT-SPECIFIC INSTRUCTIONS', $userText);
+    }
+
     public function test_throws_when_ai_generation_is_disabled(): void
     {
         config(['services.enterprise_wiki.ai_enabled' => false]);

@@ -3,8 +3,8 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
-use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItemVersion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
@@ -216,7 +216,14 @@ class KnowledgeVocabularyControllerTest extends TestCase
         });
     }
 
-    public function test_it_starts_a_batch_analysis_from_selected_documents_and_creates_pending_suggestions(): void
+    /**
+     * AI-to-Wiki consolidation (docs/ai-wiki-consolidation-analysis.md): storeBatch() is
+     * deprecated — it no longer creates a batch or calls the extraction service at all, regardless
+     * of a valid document selection. Replaces the pre-consolidation
+     * test_it_starts_a_batch_analysis_from_selected_documents_and_creates_pending_suggestions, which
+     * asserted the now-removed successful-creation behavior.
+     */
+    public function test_storing_a_new_analysis_batch_is_blocked_and_creates_nothing(): void
     {
         $context = $this->customerContext('Vocabulary Batch AS');
         $context['customer']->forceFill([
@@ -230,36 +237,18 @@ class KnowledgeVocabularyControllerTest extends TestCase
         ]);
 
         $extraction = Mockery::mock(KnowledgeVocabularyExtractionService::class);
-        $extraction->shouldReceive('extract')
-            ->once()
-            ->andReturn([
-                'batch_summary' => 'Dokumentene beskriver styring og samhandling.',
-                'suggestions' => [
-                    [
-                        'type' => 'service_product_tag',
-                        'canonical_name' => 'Nytt begrep',
-                        'synonyms' => ['Ny synonym'],
-                        'description' => 'Beskrivelse.',
-                        'related_existing_term' => null,
-                        'reason' => 'Nytt begrep i dokumentene.',
-                        'confidence_score' => 0.93,
-                    ],
-                ],
-            ]);
+        $extraction->shouldNotReceive('extract');
         $this->app->instance(KnowledgeVocabularyExtractionService::class, $extraction);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-vocabulary.analysis-batches.store'), [
             'source_document_ids' => [$document->id],
         ]);
 
-        $response->assertRedirect();
+        $response->assertRedirect(route('app.ai.knowledge-vocabulary.index'));
+        $response->assertSessionHas('error');
 
-        $batch = KnowledgeVocabularyAnalysisBatch::query()->where('customer_id', $context['customer']->id)->firstOrFail();
-
-        $this->assertSame(KnowledgeVocabularyAnalysisBatch::STATUS_PENDING_REVIEW, $batch->status);
-        $this->assertSame('Dokumentene beskriver styring og samhandling.', $batch->summary);
-        $this->assertSame(1, KnowledgeMetadataTermSuggestion::query()->count());
-        $this->assertSame('Nytt begrep', KnowledgeMetadataTermSuggestion::query()->firstOrFail()->suggested_term);
+        $this->assertSame(0, KnowledgeVocabularyAnalysisBatch::query()->where('customer_id', $context['customer']->id)->count());
+        $this->assertSame(0, KnowledgeMetadataTermSuggestion::query()->count());
     }
 
     public function test_it_updates_an_approved_vocabulary_term(): void

@@ -1,7 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import InfoHint from '../../../Components/App/InfoHint';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -94,56 +94,9 @@ const INFO_CENTER_TAB_HELP_TEXTS = {
     inbound: 'Informasjon og oppfølginger som har kommet inn til deg eller saken.',
 };
 
-function InfoCenterTabHelpButton({ infoKey, label, openHelpKey, setOpenHelpKey }) {
-    const isOpen = openHelpKey === infoKey;
-    const helpText = INFO_CENTER_TAB_HELP_TEXTS[infoKey];
-
-    if (!helpText) {
-        return null;
-    }
-
-    return (
-        <span
-            className="relative z-20 inline-flex shrink-0"
-            onMouseEnter={() => setOpenHelpKey(infoKey)}
-            onMouseLeave={() => setOpenHelpKey((current) => (current === infoKey ? null : current))}
-        >
-            <button
-                type="button"
-                aria-label={`Vis forklaring for ${label}`}
-                aria-expanded={isOpen}
-                aria-describedby={isOpen ? `${infoKey}-tooltip` : undefined}
-                onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setOpenHelpKey((current) => (current === infoKey ? null : infoKey));
-                }}
-                onFocus={() => setOpenHelpKey(infoKey)}
-                onBlur={() => setOpenHelpKey((current) => (current === infoKey ? null : current))}
-                className={classNames(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-semibold leading-none text-slate-500 transition',
-                    'hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-                    isOpen ? 'border-violet-300 text-violet-700 shadow-sm' : '',
-                )}
-            >
-                i
-            </button>
-
-            {isOpen ? (
-                <div
-                    id={`${infoKey}-tooltip`}
-                    role="tooltip"
-                    className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-[0_20px_40px_rgba(15,23,42,0.12)]"
-                >
-                    {helpText}
-                </div>
-            ) : null}
-        </span>
-    );
-}
-
-function InfoCenterViewTab({ option, activeView, openHelpKey, setOpenHelpKey }) {
+function InfoCenterViewTab({ option, activeView }) {
     const isActive = option.value === activeView;
+    const helpText = INFO_CENTER_TAB_HELP_TEXTS[option.value];
 
     return (
         <div
@@ -167,14 +120,11 @@ function InfoCenterViewTab({ option, activeView, openHelpKey, setOpenHelpKey }) 
                 {option.label}
             </Link>
 
-            <div className="flex items-center pr-3">
-                <InfoCenterTabHelpButton
-                    infoKey={option.value}
-                    label={option.label}
-                    openHelpKey={openHelpKey}
-                    setOpenHelpKey={setOpenHelpKey}
-                />
-            </div>
+            {helpText ? (
+                <div className="flex items-center pr-3">
+                    <InfoHint label={`Vis forklaring for ${option.label}`} text={helpText} />
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -192,7 +142,6 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const heroClassName = heroToneClassName();
     const [countLabelSingular, countLabelPlural] = infoCenterCountLabels(activeView);
     const emptyState = infoCenterEmptyState(activeView);
-    const [openHelpKey, setOpenHelpKey] = useState(null);
 
     const goToPage = (url) => {
         if (!url) {
@@ -284,8 +233,6 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                 key={option.value}
                                 option={option}
                                 activeView={activeView}
-                                openHelpKey={openHelpKey}
-                                setOpenHelpKey={setOpenHelpKey}
                             />
                         ))}
                     </div>

@@ -33,13 +33,13 @@ use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
+use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
 use App\Services\InfoCenter\RequirementResponsibilityTaskService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
-use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
@@ -104,6 +104,7 @@ class AiController extends Controller
         private readonly AiUsageGuard $aiUsageGuard,
         private readonly RequirementWordExportService $requirementWordExportService,
         private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
+        private readonly RequirementWikiAssessmentService $requirementWikiAssessmentService,
     ) {}
 
     /**
@@ -172,7 +173,6 @@ class AiController extends Controller
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
             'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
-            'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
             'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
@@ -649,9 +649,9 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Export all requirements with saved answer drafts as a Word (.docx) document.
+     * Purpose: Export all requirements with a generated Wiki answer as a Word (.docx) document.
      * Inputs: The current request and the route-bound saved notice.
-     * Returns: A streamed .docx download response, or 422 if no drafts exist.
+     * Returns: A streamed .docx download response, or 422 if no Wiki answers exist.
      * Side effects: None.
      */
     public function exportRequirementsToDocx(
@@ -662,8 +662,10 @@ class AiController extends Controller
         $this->assertAiAccess($record);
 
         $requirements = $record->aiRequirements()
-            ->whereNotNull('answer_draft_text')
-            ->where('answer_draft_text', '!=', '')
+            ->whereHas('wikiAnswer', function ($query): void {
+                $query->whereNotNull('answer_text')->where('answer_text', '!=', '');
+            })
+            ->with('wikiAnswer')
             ->orderBy('requirement_identifier')
             ->get();
 
@@ -918,12 +920,40 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Generate and persist one answer draft for a visible requirement candidate.
+     * Purpose: Legacy Knowledge Base answer-draft generation endpoint — DEPRECATED (Wiki-answer
+     * consolidation): the Enterprise Wiki answer engine (generateRequirementWikiAnswer()) is now the
+     * sole operational answer generator in "I arbeid". This endpoint no longer calls
+     * RequirementAnswerDraftService; it only performs its existing authorization/customer-resolution
+     * side effects, then returns a controlled 410 Gone — never a 500. The original logic is preserved
+     * verbatim as legacyGenerateRequirementAnswerDraft() (unused, undeleted) so it is not lost.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A 410 Gone JSON response.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function generateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $record->aiRequirements()->whereKey($requirement->id)->firstOrFail();
+
+        return response()->json([
+            'requirement_id' => $requirement->id,
+            'error' => 'Svarutkast fra Kunnskapsbase er avviklet. Bruk Wiki-svar i stedet.',
+        ], 410);
+    }
+
+    /**
+     * Purpose: The answer-draft generation logic generateRequirementAnswerDraft() used to run before
+     * this flow was replaced by the Wiki-answer engine — kept, unused by any route, purely so the
+     * underlying capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A JSON response with the persisted answer draft payload.
      * Side effects: May call OpenAI and updates the requirement row.
      */
-    public function generateRequirementAnswerDraft(
+    private function legacyGenerateRequirementAnswerDraft(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
@@ -1202,12 +1232,39 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Persist edits to one visible requirement answer draft.
+     * Purpose: Legacy Knowledge Base answer-draft edit endpoint — DEPRECATED (Wiki-answer
+     * consolidation): editing now happens on the Wiki answer (updateRequirementWikiAnswer()). This
+     * endpoint only performs its existing authorization/customer-resolution side effects, then
+     * returns a controlled 410 Gone — never a 500. Original logic preserved verbatim as
+     * legacyUpdateRequirementAnswerDraft() (unused, undeleted).
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A 410 Gone JSON response.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function updateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $record->aiRequirements()->whereKey($requirement->id)->firstOrFail();
+
+        return response()->json([
+            'requirement_id' => $requirement->id,
+            'error' => 'Svarutkast fra Kunnskapsbase er avviklet. Bruk Wiki-svar i stedet.',
+        ], 410);
+    }
+
+    /**
+     * Purpose: The answer-draft edit logic updateRequirementAnswerDraft() used to run before this
+     * flow was replaced by the Wiki-answer engine — kept, unused by any route, purely so the
+     * underlying capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A JSON response with the persisted answer draft payload.
      * Side effects: Updates the requirement row.
      */
-    public function updateRequirementAnswerDraft(
+    private function legacyUpdateRequirementAnswerDraft(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiRequirement $requirement,
@@ -1250,6 +1307,11 @@ class AiController extends Controller
             ->whereKey($requirement->id)
             ->firstOrFail();
 
+        $validated = $request->validate([
+            'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
+        ]);
+        $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
+
         $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $record->customer()->firstOrFail(),
             $request->user(),
@@ -1268,6 +1330,8 @@ class AiController extends Controller
                 (int) $record->customer_id,
                 $languageCode,
                 $request->user()?->id,
+                $record->ai_instructions,
+                $userAnswerPrompt,
             );
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][WIKI_ANSWER] Wiki answer generation failed.', [
@@ -1286,6 +1350,35 @@ class AiController extends Controller
             $this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement),
             ['warning' => $usageWarning],
         ));
+    }
+
+    /**
+     * Purpose: Persist a hand-edit of one visible requirement's already-generated Wiki answer text.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted Wiki-answer payload.
+     * Side effects: Updates the requirement's saved_notice_ai_requirement_wiki_answers row.
+     */
+    public function updateRequirementWikiAnswer(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'answer_text' => ['required', 'string', 'max:20000'],
+        ]);
+
+        $wikiAnswer = $this->requirementWikiAnswerService->updateAnswerText(
+            $ownedRequirement,
+            (string) $validated['answer_text'],
+        );
+
+        return response()->json($this->aiRequirementWikiAnswerResponsePayload($wikiAnswer, $ownedRequirement));
     }
 
     /**
@@ -1350,12 +1443,37 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Rebuild persisted evidence rows for every confirmed requirement in the visible AI case.
+     * Purpose: Legacy Knowledge Base evidence-curation endpoint — DEPRECATED (AI-to-Wiki
+     * consolidation, final active-consumer removal). "Oppdater kilder" curated Knowledge Base chunk
+     * matches that fed the old KB-grounded answer-draft/assessment engines; both of those are already
+     * Wiki-only, so the curated evidence produced here no longer reaches any AI generation flow — it
+     * only fed the also-deprecated "Bruk i AI" usage report. No active flow needs manual source
+     * curation over Wiki content (Wiki-answer and Wiki-assessment already do automatic research), so
+     * this endpoint performs no Knowledge Base retrieval, no embedding call, and no
+     * SavedNoticeAiEvidence write. It only performs its existing authorization/customer-resolution
+     * side effects, then returns a controlled redirect back with an explanatory flash — never a 500.
+     * Original logic preserved verbatim as legacyRefreshEvidence() (unused, undeleted).
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: None beyond authorization/customer-resolution.
+     */
+    public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        return back()->with('error', 'Kildeoppdatering fra Kunnskapsbase er avviklet. Wiki-svar og Wiki-vurdering henter kilder automatisk.');
+    }
+
+    /**
+     * Purpose: The evidence-refresh logic refreshEvidence() used to run before Wiki became the sole
+     * active knowledge source — kept, unused by any route, purely so the underlying capability is not
+     * deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after refreshing the evidence rows.
      * Side effects: Deletes stale auto-suggested evidence rows and recreates deterministic matches.
      */
-    public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
+    private function legacyRefreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
@@ -1396,7 +1514,9 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Rebuild persisted assessment rows for every confirmed requirement in the visible AI case.
+     * Purpose: Rebuild persisted assessment rows for every confirmed requirement in the visible AI
+     *          case, using Enterprise Wiki knowledge (AI-to-Wiki consolidation — the Knowledge Base
+     *          is no longer read here; see RequirementWikiAssessmentService).
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after refreshing the assessment rows.
      * Side effects: Upserts one assessment row per confirmed requirement.
@@ -1420,13 +1540,18 @@ class AiController extends Controller
             }
         }
 
-        $requirementAssessmentService = app(RequirementAssessmentService::class);
-
+        $languageCode = $this->customerContext->resolveLanguageCode();
         $failedCount = 0;
 
         foreach ($confirmedRequirements as $requirement) {
             try {
-                $requirementAssessmentService->assessRequirement($requirement, $userId, $record->ai_instructions);
+                $this->requirementWikiAssessmentService->assessRequirement(
+                    $requirement,
+                    (int) $record->customer_id,
+                    $languageCode,
+                    $userId,
+                    $record->ai_instructions,
+                );
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
                 $failedCount++;
@@ -1441,12 +1566,43 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Update the selection state for one persisted evidence row.
+     * Purpose: Legacy Knowledge Base evidence-curation endpoint — DEPRECATED alongside
+     * refreshEvidence() (see its docblock for the full reasoning). Manual selection/rejection of
+     * Knowledge Base evidence rows no longer reaches any active AI generation flow, so this endpoint
+     * performs no evidence write. It only performs its existing authorization/ownership-resolution
+     * side effects, then returns a controlled redirect back — never a 500. Original logic preserved
+     * verbatim as legacyUpdateEvidenceSelectionStatus() (unused, undeleted).
+     * Inputs: The current request, route-bound saved notice, and route-bound evidence row.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: None beyond authorization/ownership-resolution.
+     */
+    public function updateEvidenceSelectionStatus(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiEvidence $evidence,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        SavedNoticeAiEvidence::query()
+            ->whereKey($evidence->id)
+            ->whereHas('requirement', static function ($query) use ($record): void {
+                $query->where('saved_notice_id', $record->id);
+            })
+            ->firstOrFail();
+
+        return back()->with('error', 'Kildeutvelgelse fra Kunnskapsbase er avviklet.');
+    }
+
+    /**
+     * Purpose: The evidence-selection logic updateEvidenceSelectionStatus() used to run before Wiki
+     * became the sole active knowledge source — kept, unused by any route, purely so the underlying
+     * capability is not deleted per the "no destructive cleanup in this phase" rule.
      * Inputs: The current request, route-bound saved notice, and route-bound evidence row.
      * Returns: A redirect back to the AI case view after updating the evidence state.
      * Side effects: Updates the evidence selection status and primary marker in the database.
      */
-    public function updateEvidenceSelectionStatus(
+    private function legacyUpdateEvidenceSelectionStatus(
         Request $request,
         SavedNotice $savedNotice,
         SavedNoticeAiEvidence $evidence,
@@ -1513,7 +1669,9 @@ class AiController extends Controller
                 'coverage_rationale' => null,
                 'missing_information' => null,
                 'recommended_next_step' => null,
-                'source_evidence_snapshot' => [],
+                'has_possible_conflict' => null,
+                'engine_version' => null,
+                'wiki_sources_snapshot' => [],
                 'assessed_at' => null,
                 'assessed_by_user_id' => $userId,
             ],
@@ -1911,8 +2069,11 @@ class AiController extends Controller
                     'savedNotice' => $requirement->saved_notice_id,
                     'requirement' => $requirement->id,
                 ]),
+                'wiki_answer_update_url' => route('app.ai.requirements.wiki-answer.update', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
                 'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
-                'evidence' => $this->aiRequirementEvidencePayload($requirement),
                 'knowledge_sources_sent_to_ai' => $this->aiRequirementKnowledgeSourcesPayload($requirement),
             ],
         );
@@ -1972,6 +2133,8 @@ class AiController extends Controller
             'coverage_rationale' => $assessment->coverage_rationale,
             'missing_information' => $assessment->missing_information,
             'recommended_next_step' => $assessment->recommended_next_step,
+            'has_possible_conflict' => $assessment->has_possible_conflict,
+            'wiki_sources' => is_array($assessment->wiki_sources_snapshot) ? $assessment->wiki_sources_snapshot : [],
             'assessed_at' => optional($assessment->assessed_at)?->toIso8601String(),
         ];
     }

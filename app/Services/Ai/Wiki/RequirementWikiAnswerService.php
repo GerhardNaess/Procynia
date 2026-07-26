@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
  * Generates a Wiki-based expert answer for an already-extracted requirement (Fase 9 — "Generer
@@ -43,6 +44,23 @@ use Illuminate\Support\Facades\DB;
  * concrete commitments, and now also the fact-checking basis for the alignment/revision steps. They
  * are never the sole permitted knowledge source, and a missing claim never by itself invalidates a
  * professionally sound best-practice statement.
+ *
+ * Prompt layering (AI-to-Wiki consolidation): generate()'s optional $caseInstructions parameter
+ * (the owning SavedNotice's ai_instructions) is passed straight through to
+ * RequirementWikiAnswerAiClient::generateAnswer() as a subordinate style directive — governs HOW the
+ * answer is phrased (tone/terminology/style/capitalization), never WHAT it claims. It is never used
+ * for the revision pass (reviseConflictingSectionsOnce()): that step's only job is resolving a
+ * detected possible_conflict against the Wiki text itself, not re-applying style preferences.
+ *
+ * generate()'s optional $requirementUserPrompt parameter carries the same one-off, per-generation
+ * guidance the legacy RequirementAnswerDraftService accepted as user_answer_prompt (feature-parity
+ * gap closed during the "make Wiki answers the sole operational draft" consolidation) — applied after
+ * $caseInstructions, with the same subordinate, style-only status, never forwarded to the revision
+ * pass for the same reason.
+ *
+ * updateAnswerText() lets a user hand-edit the generated answer text in place, mirroring
+ * RequirementAnswerDraftService::updateAnswerDraft() — the operative answer becomes editable content,
+ * not a read-only AI output, once generated.
  */
 class RequirementWikiAnswerService
 {
@@ -70,7 +88,11 @@ class RequirementWikiAnswerService
      * Purpose: Generate (or regenerate) the Wiki-based expert answer for one requirement.
      * Inputs: The requirement, the customer id it belongs to (never trusted from the requirement
      *         itself — always the owning SavedNotice's own customer_id, resolved by the caller),
-     *         the language to answer in, and the user triggering generation.
+     *         the language to answer in, the user triggering generation, the owning SavedNotice's
+     *         free-text case_instructions (ai_instructions) — governs tone/terminology/style only,
+     *         see RequirementWikiAnswerAiClient::generateAnswer() for the exact priority contract —
+     *         and an optional one-off requirementUserPrompt for this specific generation only (same
+     *         subordinate, style-only status as case_instructions, applied after it).
      * Returns: The persisted (created or updated in place) Wiki-answer row.
      * Side effects: Writes exactly one row to saved_notice_ai_requirement_wiki_answers, upserted
      *               by saved_notice_ai_requirement_id. Never touches saved_notice_ai_requirements
@@ -83,6 +105,8 @@ class RequirementWikiAnswerService
         int $customerId,
         string $languageCode,
         ?int $userId = null,
+        ?string $caseInstructions = null,
+        ?string $requirementUserPrompt = null,
     ): SavedNoticeAiRequirementWikiAnswer {
         $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
@@ -94,6 +118,8 @@ class RequirementWikiAnswerService
             (string) $requirement->requirement_text,
             $pagesForAi,
             $languageCode,
+            $caseInstructions,
+            $requirementUserPrompt,
         );
         $answerSections = $answer['answer_sections'];
 
@@ -137,6 +163,38 @@ class RequirementWikiAnswerService
             'stale_reason' => null,
             'stale_context' => null,
         ], $userId);
+    }
+
+    /**
+     * Purpose: Persist a hand-edit of an already-generated Wiki answer's text — mirrors
+     *          RequirementAnswerDraftService::updateAnswerDraft() so the Wiki answer is an editable
+     *          operative draft, not read-only AI output.
+     * Inputs: The requirement and the edited answer text.
+     * Returns: The persisted (refreshed) Wiki-answer row.
+     * Side effects: Updates answer_text on the existing saved_notice_ai_requirement_wiki_answers row.
+     *
+     * @throws RuntimeException when the text is empty/whitespace-only, or when the requirement has
+     *                          no Wiki answer yet to edit (generate() must run at least once first).
+     */
+    public function updateAnswerText(SavedNoticeAiRequirement $requirement, string $answerText): SavedNoticeAiRequirementWikiAnswer
+    {
+        $normalizedText = trim(str_replace(["\r\n", "\r"], "\n", $answerText));
+
+        if ($normalizedText === '') {
+            throw new RuntimeException('Wiki answer text cannot be empty.');
+        }
+
+        $wikiAnswer = $requirement->wikiAnswer()->first();
+
+        if ($wikiAnswer === null) {
+            throw new RuntimeException('Cannot edit a Wiki answer that has not been generated yet.');
+        }
+
+        return DB::transaction(function () use ($wikiAnswer, $normalizedText): SavedNoticeAiRequirementWikiAnswer {
+            $wikiAnswer->forceFill(['answer_text' => $normalizedText])->save();
+
+            return $wikiAnswer->refresh();
+        });
     }
 
     /**

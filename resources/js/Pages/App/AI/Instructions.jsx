@@ -67,6 +67,15 @@ export default function AiInstructions({
                                     intro={tai.instructions_page_help_intro}
                                     sections={[
                                         {
+                                            title: tai.instructions_page_help_section_wiki ?? 'Forholdet til Enterprise Wiki',
+                                            items: [
+                                                {
+                                                    title: tai.instructions_page_help_item_wiki_title ?? 'Wiki er kunnskapen, instrukser er bruken',
+                                                    text: tai.instructions_page_help_item_wiki_text ?? 'Enterprise Wiki inneholder virksomhetens godkjente kunnskap — begreper, fakta og kildehenvisninger. AI-instrukser endrer aldri dette innholdet og kan ikke overstyre en kilde eller et faktum. De styrer bare hvordan AI-en formulerer seg når den bruker Wiki-kunnskapen i et svar.',
+                                                },
+                                            ],
+                                        },
+                                        {
                                             title: tai.instructions_page_help_section_what ?? 'Hva er AI-instrukser?',
                                             items: [
                                                 {
@@ -100,6 +109,9 @@ export default function AiInstructions({
                                     ]}
                                 />
                             </div>
+                            <p className="max-w-2xl text-base leading-6 text-slate-600">
+                                {tai.instructions_page_subtitle ?? 'Enterprise Wiki er hva Procynia vet. AI-instrukser styrer hvordan AI-en skal bruke den kunnskapen — tone, terminologi, stil og arbeidsmåte, aldri fakta eller kilder.'}
+                            </p>
                         </div>
 
                         <form onSubmit={submit} className="space-y-4">
