@@ -13,6 +13,8 @@ class QueueHeartbeatHealthService
         'supplier-harvests',
         'supplier-lookups',
         'ai-requirements',
+        'enterprise-wiki',
+        'enterprise-wiki-pages',
         'default',
     ];
 

@@ -3,8 +3,8 @@
 namespace Tests\Feature\Ops;
 
 use App\Jobs\OpsQueueHeartbeatJob;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class QueueSchedulerHealthTest extends TestCase
@@ -116,14 +116,17 @@ class QueueSchedulerHealthTest extends TestCase
         $this->assertNotNull(Cache::get('ops.queue.heartbeat.supplier-harvests'));
     }
 
-    public function test_scheduler_registers_four_queue_heartbeat_jobs(): void
+    public function test_scheduler_registers_a_queue_heartbeat_job_for_every_worker_queue(): void
     {
         Artisan::call('schedule:list', ['--json' => true, '--next' => true]);
         $tasks = json_decode(Artisan::output(), true);
 
         $heartbeatJobs = array_values(array_filter($tasks, static fn ($task): bool => ($task['command'] ?? null) === 'App\\Jobs\\OpsQueueHeartbeatJob'));
 
-        $this->assertCount(4, $heartbeatJobs);
+        // One per queue a dedicated Docker worker service actually listens on (see
+        // docker-compose.yml): supplier-harvests, supplier-lookups, ai-requirements,
+        // enterprise-wiki, enterprise-wiki-pages, default.
+        $this->assertCount(6, $heartbeatJobs);
     }
 
     public function test_endpoint_requires_token_and_returns_403_without_it(): void

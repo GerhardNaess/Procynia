@@ -121,6 +121,8 @@ class QueueHeartbeatHealthTest extends TestCase
             'supplier-harvests' => ['supplier-harvests'],
             'supplier-lookups' => ['supplier-lookups'],
             'ai-requirements' => ['ai-requirements'],
+            'enterprise-wiki' => ['enterprise-wiki'],
+            'enterprise-wiki-pages' => ['enterprise-wiki-pages'],
             'default' => ['default'],
         ];
     }
