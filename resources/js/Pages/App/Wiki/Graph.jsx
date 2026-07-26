@@ -4,6 +4,7 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ function FilterPanel({
     statusFilters, setStatusFilters,
     showOrphans, setShowOrphans,
     tw, onReset, hasActiveFilters,
+    openFilterDropdown, setOpenFilterDropdown,
 }) {
     const types = [
         { key: 'article', label: tw.page_type_article ?? 'Artikkel' },
@@ -147,32 +149,17 @@ function FilterPanel({
         { key: 'ok',      label: tw.lint_summary_ok       ?? 'OK' },
     ];
 
-    const allDocumentsSelected = selectedDocumentIds.size === 0;
-    const allOwnersSelected = selectedOwnerIds.size === 0;
+    const documentOptions = documents.map((doc) => ({
+        id: doc.id,
+        label: doc.title,
+        count: documentPageCounts[doc.id] ?? 0,
+    }));
 
-    const toggleDocument = (documentId) => {
-        setSelectedDocumentIds((current) => {
-            const next = new Set(current);
-            if (next.has(documentId)) {
-                next.delete(documentId);
-            } else {
-                next.add(documentId);
-            }
-            return next;
-        });
-    };
-
-    const toggleOwner = (ownerId) => {
-        setSelectedOwnerIds((current) => {
-            const next = new Set(current);
-            if (next.has(ownerId)) {
-                next.delete(ownerId);
-            } else {
-                next.add(ownerId);
-            }
-            return next;
-        });
-    };
+    const ownerOptions = owners.map((owner) => ({
+        id: owner.id,
+        label: owner.name,
+        count: ownerPageCounts[owner.id] ?? 0,
+    }));
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -193,88 +180,38 @@ function FilterPanel({
 
             {/* 2. Source documents */}
             {documents.length > 0 && (
-                <fieldset className="mb-4">
-                    <legend className="mb-2 flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                        <span>{tw.graph_filter_documents ?? 'Kildedokumenter'}</span>
-                        {!allDocumentsSelected && (
-                            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
-                                {selectedDocumentIds.size}
-                            </span>
-                        )}
-                    </legend>
-                    <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
-                        <label className="flex cursor-pointer items-center gap-2">
-                            <input
-                                type="checkbox"
-                                checked={allDocumentsSelected}
-                                onChange={() => setSelectedDocumentIds(new Set())}
-                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
-                            />
-                            <span className="text-xs font-semibold text-slate-700">
-                                {tw.graph_filter_all_documents ?? 'Alle dokumenter'}
-                            </span>
-                        </label>
-                        {documents.map((doc) => (
-                            <label key={doc.id} className="flex cursor-pointer items-start gap-2">
-                                <input
-                                    type="checkbox"
-                                    checked={selectedDocumentIds.has(doc.id)}
-                                    onChange={() => toggleDocument(doc.id)}
-                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
-                                />
-                                <span className="min-w-0 flex-1 break-words text-xs text-slate-700" title={doc.title}>
-                                    {doc.title}
-                                </span>
-                                <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
-                                    {documentPageCounts[doc.id] ?? 0}
-                                </span>
-                            </label>
-                        ))}
-                    </div>
-                </fieldset>
+                <MultiSelectFilterDropdown
+                    label={tw.graph_filter_documents ?? 'Kildedokumenter'}
+                    allLabel={tw.graph_filter_all_documents ?? 'Alle dokumenter'}
+                    options={documentOptions}
+                    selectedIds={selectedDocumentIds}
+                    onChange={setSelectedDocumentIds}
+                    isOpen={openFilterDropdown === 'documents'}
+                    onOpenChange={(open) => setOpenFilterDropdown(open ? 'documents' : null)}
+                    searchPlaceholder={tw.graph_filter_document_search_placeholder ?? 'Søk i dokumenter …'}
+                    noResultsLabel={tw.graph_filter_dropdown_no_matches ?? 'Ingen treff.'}
+                    resetLabel={tw.graph_filter_dropdown_clear ?? 'Nullstill'}
+                    doneLabel={tw.graph_filter_dropdown_done ?? 'Ferdig'}
+                    selectedCountTemplate={tw.graph_filter_documents_selected ?? ':count dokumenter valgt'}
+                />
             )}
 
             {/* 3. Document owners */}
             {owners.length > 0 && (
-                <fieldset className="mb-4">
-                    <legend className="mb-2 flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                        <span>{tw.graph_filter_owners ?? 'Dokumenteier'}</span>
-                        {!allOwnersSelected && (
-                            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
-                                {selectedOwnerIds.size}
-                            </span>
-                        )}
-                    </legend>
-                    <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
-                        <label className="flex cursor-pointer items-center gap-2">
-                            <input
-                                type="checkbox"
-                                checked={allOwnersSelected}
-                                onChange={() => setSelectedOwnerIds(new Set())}
-                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
-                            />
-                            <span className="text-xs font-semibold text-slate-700">
-                                {tw.graph_filter_all_owners ?? 'Alle eiere'}
-                            </span>
-                        </label>
-                        {owners.map((owner) => (
-                            <label key={owner.id} className="flex cursor-pointer items-start gap-2">
-                                <input
-                                    type="checkbox"
-                                    checked={selectedOwnerIds.has(owner.id)}
-                                    onChange={() => toggleOwner(owner.id)}
-                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
-                                />
-                                <span className="min-w-0 flex-1 break-words text-xs text-slate-700" title={owner.name}>
-                                    {owner.name}
-                                </span>
-                                <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
-                                    {ownerPageCounts[owner.id] ?? 0}
-                                </span>
-                            </label>
-                        ))}
-                    </div>
-                </fieldset>
+                <MultiSelectFilterDropdown
+                    label={tw.graph_filter_owners ?? 'Dokumenteier'}
+                    allLabel={tw.graph_filter_all_owners ?? 'Alle eiere'}
+                    options={ownerOptions}
+                    selectedIds={selectedOwnerIds}
+                    onChange={setSelectedOwnerIds}
+                    isOpen={openFilterDropdown === 'owners'}
+                    onOpenChange={(open) => setOpenFilterDropdown(open ? 'owners' : null)}
+                    searchPlaceholder={tw.graph_filter_owner_search_placeholder ?? 'Søk i eiere …'}
+                    noResultsLabel={tw.graph_filter_dropdown_no_matches ?? 'Ingen treff.'}
+                    resetLabel={tw.graph_filter_dropdown_clear ?? 'Nullstill'}
+                    doneLabel={tw.graph_filter_dropdown_done ?? 'Ferdig'}
+                    selectedCountTemplate={tw.graph_filter_owners_selected ?? ':count eiere valgt'}
+                />
             )}
 
             {/* 4. Page types */}
@@ -444,6 +381,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         error: true, warning: true, ok: true,
     });
     const [showOrphans, setShowOrphans] = useState(true);
+    const [openFilterDropdown, setOpenFilterDropdown] = useState(null); // 'documents' | 'owners' | null
 
     const scope = initialPageId
         ? { type: 'page', pageId: initialPageId }
@@ -756,6 +694,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         setTypeFilters({ article: true, summary: true, concept: true, entity: true });
         setStatusFilters({ error: true, warning: true, ok: true });
         setShowOrphans(true);
+        setOpenFilterDropdown(null);
     };
 
     // ── render ────────────────────────────────────────────────────────────────
@@ -820,6 +759,8 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             tw={tw}
                             onReset={resetFilters}
                             hasActiveFilters={hasActiveFilters}
+                            openFilterDropdown={openFilterDropdown}
+                            setOpenFilterDropdown={setOpenFilterDropdown}
                         />
                         {graphData && (
                             <SummaryPanel
