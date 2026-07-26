@@ -627,6 +627,56 @@ function WikiTableBlock({ block, tw, sourceDocuments }) {
     );
 }
 
+/**
+ * Renders a deterministic "image" content block (see EnterpriseWikiImageBlockBuilder) as a real,
+ * semantic <figure>/<img>/<figcaption> — never as Markdown text. The image itself is never
+ * embedded directly or loaded from a raw storage path: image_data.image_url is always a server-
+ * computed, authenticated route (WikiSourceController::image()) that re-extracts and re-encodes
+ * the bytes on every request. Never editable in this phase, matching WikiTableBlock's precedent.
+ */
+function WikiImageBlock({ block, tw, sourceDocuments }) {
+    const imageData = block.image_data;
+
+    if (!imageData || !imageData.image_url) {
+        return null;
+    }
+
+    const sourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(block.source_id)) ?? null;
+    const caption = imageData.caption
+        || (tw.wiki_figure_caption ?? 'Figur :number').replace(':number', imageData.figure_number);
+
+    return (
+        <div className="not-prose my-4 space-y-2">
+            <figure className="m-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                <img
+                    src={imageData.image_url}
+                    alt={imageData.alt_text ?? ''}
+                    loading="lazy"
+                    className="block max-h-[28rem] w-full object-contain"
+                />
+                <figcaption className="border-t border-slate-200 bg-white px-4 py-2.5 text-base text-slate-700">
+                    {caption}
+                </figcaption>
+            </figure>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-500">
+                <p>
+                    {tw.source_page_reference ?? 'Plassering i kilden'}: {block.page_reference ?? '—'}
+                </p>
+                {sourceDocument?.download_url && (
+                    <a
+                        href={sourceDocument.download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                    >
+                        {tw.source_open_document ?? 'Åpne original kilde'}
+                    </a>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
@@ -2189,6 +2239,8 @@ export default function WikiShow({
                                             >
                                                 {block.block_type === 'table' ? (
                                                     <WikiTableBlock block={block} tw={tw} sourceDocuments={sourceDocuments} />
+                                                ) : block.block_type === 'image' ? (
+                                                    <WikiImageBlock block={block} tw={tw} sourceDocuments={sourceDocuments} />
                                                 ) : isEditingTargetBlock ? (
                                                     <div className="space-y-3">
                                                         <label className="block space-y-2">
