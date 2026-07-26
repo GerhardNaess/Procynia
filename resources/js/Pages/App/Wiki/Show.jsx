@@ -550,6 +550,83 @@ function StructureFindingContextPanel({
     );
 }
 
+/**
+ * Renders a deterministic "table" content block (see EnterpriseWikiTableBlockBuilder) as a real,
+ * semantic HTML table — never as Markdown text — so column headers, row order, and cell content
+ * survive exactly as written in the source Word table. Never editable in this phase (no existing
+ * block-editor affordance understands table_data), matching every other read-only source-based
+ * block until the block editor itself grows table support.
+ */
+function WikiTableBlock({ block, tw, sourceDocuments }) {
+    const tableData = block.table_data;
+
+    if (!tableData || !Array.isArray(tableData.headers) || tableData.headers.length === 0) {
+        return null;
+    }
+
+    const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
+    const tableNumber = (Number(tableData.table_index) || 0) + 1;
+    const sourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(block.source_id)) ?? null;
+
+    return (
+        <div className="not-prose my-4 space-y-2">
+            <p className="text-base font-semibold text-slate-700">
+                {(tw.wiki_table_caption ?? 'Tabell :number').replace(':number', tableNumber)}
+            </p>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full min-w-[480px] border-collapse text-base text-slate-800">
+                    <thead>
+                        <tr className="bg-slate-50">
+                            {tableData.headers.map((header, index) => (
+                                <th
+                                    key={index}
+                                    scope="col"
+                                    className="border-b border-slate-200 px-4 py-2.5 text-left font-semibold text-slate-700"
+                                >
+                                    {header}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row, rowIndex) => {
+                            const cellsByIndex = {};
+                            (Array.isArray(row?.cells) ? row.cells : []).forEach((cell) => {
+                                cellsByIndex[cell.column_index] = cell.value;
+                            });
+
+                            return (
+                                <tr key={row?.row_key ?? rowIndex} className="border-b border-slate-100 last:border-0">
+                                    {tableData.headers.map((_, columnIndex) => (
+                                        <td key={columnIndex} className="px-4 py-2.5 align-top leading-6">
+                                            {cellsByIndex[columnIndex] ?? ''}
+                                        </td>
+                                    ))}
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-500">
+                <p>
+                    {tw.source_page_reference ?? 'Plassering i kilden'}: {block.page_reference ?? '—'}
+                </p>
+                {sourceDocument?.download_url && (
+                    <a
+                        href={sourceDocument.download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                    >
+                        {tw.source_open_document ?? 'Åpne original kilde'}
+                    </a>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
@@ -2110,7 +2187,9 @@ export default function WikiShow({
                                                     ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
                                                     : undefined}
                                             >
-                                                {isEditingTargetBlock ? (
+                                                {block.block_type === 'table' ? (
+                                                    <WikiTableBlock block={block} tw={tw} sourceDocuments={sourceDocuments} />
+                                                ) : isEditingTargetBlock ? (
                                                     <div className="space-y-3">
                                                         <label className="block space-y-2">
                                                             <span className="text-base font-semibold text-violet-700">
