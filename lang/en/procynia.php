@@ -3767,6 +3767,8 @@ return [
         'graph_filter_search_placeholder' => 'Search by page title …',
         'graph_filter_documents' => 'Source documents',
         'graph_filter_all_documents' => 'All documents',
+        'graph_filter_owners' => 'Document owner',
+        'graph_filter_all_owners' => 'All owners',
         'graph_filter_page_types' => 'Page types',
         'graph_filter_status' => 'Status',
         'graph_filter_show_orphans' => 'Show orphan pages',

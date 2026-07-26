@@ -13,6 +13,12 @@ async function loginAsDevDataUser(page) {
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
 }
 
+// "Alisan Senel" (the logged-in dev user) also appears in the account menu button, so owner
+// checkbox clicks must be scoped to the Dokumenteier fieldset to avoid ambiguity.
+function ownerCheckbox(page, name) {
+    return page.locator('fieldset', { hasText: 'Dokumenteier' }).getByText(name, { exact: true });
+}
+
 test.beforeEach(async ({ page }) => {
     await loginAsDevDataUser(page);
 });
@@ -236,6 +242,183 @@ test('no console errors or failed requests while filtering', async ({ page }) =>
     await page.getByText('Masterdata ITIL.docx').click();
     await page.waitForTimeout(200);
     await page.getByLabel('Vis isolerte sider').uncheck();
+    await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Nullstill filtre' }).first().click();
+    await page.waitForTimeout(200);
+
+    expect(consoleErrors).toEqual([]);
+    expect(failedRequests).toEqual([]);
+});
+
+// ─── Document owner filter ───────────────────────────────────────────────────
+// Real dev data: "Gerhard Næss" owns Masterdata ITIL.docx (9 pages), "Alisan
+// Senel" owns Masterdata Samhandling.docx (7 pages) — a perfect 1:1 mapping onto
+// the document tests above.
+
+test('document owner filter panel shows names, never internal ids, with page counts', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    const panel = page.locator('fieldset', { hasText: 'Dokumenteier' });
+    await expect(panel.getByText('Gerhard Næss')).toBeVisible();
+    await expect(panel.getByText('Alisan Senel')).toBeVisible();
+    await expect(panel.getByLabel('Alle eiere')).toBeChecked();
+});
+
+test('selecting one owner filters the graph to only their documents\' pages', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByText('9 av 16 sider')).toBeVisible();
+    await expect(page.getByLabel('Alle eiere')).not.toBeChecked();
+    // The document filter itself is untouched — owner and document are independent groups.
+    await expect(page.getByLabel('Alle dokumenter')).toBeChecked();
+});
+
+test('selecting two owners combines them with OR', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.waitForTimeout(200);
+    await ownerCheckbox(page, 'Alisan Senel').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByText(/\d+ av 16 sider/)).toHaveCount(0);
+    const sidesRow = page.locator('dt', { hasText: 'Sider' }).locator('..');
+    await expect(sidesRow.getByText('16', { exact: true })).toBeVisible();
+});
+
+test('"Alle eiere" restores the full owner set', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.waitForTimeout(200);
+    await page.getByLabel('Alle eiere').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByText(/\d+ av 16 sider/)).toHaveCount(0);
+    await expect(page.getByLabel('Alle eiere')).toBeChecked();
+});
+
+test('owner filter combines with document filter (independent conditions, both must be satisfied)', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    // Owner = Gerhard (9 pages via Masterdata ITIL.docx) AND document = Masterdata
+    // Samhandling.docx (7 pages, owned by Alisan) — no page satisfies both independent
+    // conditions from the SAME two unrelated criteria, so this must show the empty state
+    // even though each filter alone matches pages.
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.getByText('Masterdata Samhandling.docx').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByRole('status')).toContainText('Ingen Wiki-sider matcher filtrene.');
+});
+
+test('owner filter combines with document filter (matching combination)', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.getByText('Masterdata ITIL.docx').click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByText('9 av 16 sider')).toBeVisible();
+});
+
+test('owner filter combines with page type filter', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.getByLabel('Sammendrag').uncheck();
+    await page.getByLabel('Konsept').uncheck();
+    await page.getByLabel('Entitet').uncheck();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByText('1 av 16 sider')).toBeVisible();
+});
+
+test('owner filter combines with status filter (no warning-status pages in this data set)', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.getByLabel('OK – ingen åpne funn').uncheck();
+    await page.waitForTimeout(300);
+
+    // Every page in this data set is lint-status "ok" — narrowing to error/warning only
+    // combined with an owner filter must correctly yield zero matches, not a stale count.
+    await expect(page.getByRole('status')).toContainText('Ingen Wiki-sider matcher filtrene.');
+});
+
+test('owner filter combines with search', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Alisan Senel').click();
+    await page.getByLabel('Søk i Wiki-sider').fill('styring');
+    await page.waitForTimeout(300);
+
+    const countText = await page.getByText(/\d+ av 16 sider/).textContent();
+    const count = parseInt(countText, 10);
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThan(7);
+});
+
+test('reset filters also clears the selected owners', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('button', { name: 'Nullstill filtre' }).first()).toBeEnabled();
+
+    await page.getByRole('button', { name: 'Nullstill filtre' }).first().click();
+    await page.waitForTimeout(300);
+
+    await expect(page.getByLabel('Alle eiere')).toBeChecked();
+    await expect(page.getByText(/\d+ av 16 sider/)).toHaveCount(0);
+});
+
+test('keyboard focus reaches the owner checkboxes', async ({ page }) => {
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+
+    const allOwners = page.getByLabel('Alle eiere');
+    await allOwners.focus();
+    await expect(allOwners).toBeFocused();
+});
+
+test('owner filter panel has no horizontal overflow on mobile (390px)', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1200);
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    await expect(page.getByText('Gerhard Næss')).toBeVisible();
+});
+
+test('no console errors or failed requests while using the owner filter', async ({ page }) => {
+    const consoleErrors = [];
+    const failedRequests = [];
+    page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+    page.on('requestfailed', (req) => failedRequests.push(`${req.method()} ${req.url()}`));
+    page.on('response', (res) => { if (res.status() >= 500) failedRequests.push(`${res.status()} ${res.url()}`); });
+
+    await page.goto('/app/wiki/graph');
+    await page.waitForTimeout(1000);
+    await ownerCheckbox(page, 'Gerhard Næss').click();
+    await page.waitForTimeout(200);
+    await ownerCheckbox(page, 'Alisan Senel').click();
     await page.waitForTimeout(200);
     await page.getByRole('button', { name: 'Nullstill filtre' }).first().click();
     await page.waitForTimeout(200);

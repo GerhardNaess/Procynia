@@ -129,6 +129,7 @@ function Legend({ tw }) {
 function FilterPanel({
     searchQuery, setSearchQuery,
     documents, selectedDocumentIds, setSelectedDocumentIds, documentPageCounts,
+    owners, selectedOwnerIds, setSelectedOwnerIds, ownerPageCounts,
     typeFilters, setTypeFilters,
     statusFilters, setStatusFilters,
     showOrphans, setShowOrphans,
@@ -147,6 +148,7 @@ function FilterPanel({
     ];
 
     const allDocumentsSelected = selectedDocumentIds.size === 0;
+    const allOwnersSelected = selectedOwnerIds.size === 0;
 
     const toggleDocument = (documentId) => {
         setSelectedDocumentIds((current) => {
@@ -155,6 +157,18 @@ function FilterPanel({
                 next.delete(documentId);
             } else {
                 next.add(documentId);
+            }
+            return next;
+        });
+    };
+
+    const toggleOwner = (ownerId) => {
+        setSelectedOwnerIds((current) => {
+            const next = new Set(current);
+            if (next.has(ownerId)) {
+                next.delete(ownerId);
+            } else {
+                next.add(ownerId);
             }
             return next;
         });
@@ -220,7 +234,50 @@ function FilterPanel({
                 </fieldset>
             )}
 
-            {/* 3. Page types */}
+            {/* 3. Document owners */}
+            {owners.length > 0 && (
+                <fieldset className="mb-4">
+                    <legend className="mb-2 flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                        <span>{tw.graph_filter_owners ?? 'Dokumenteier'}</span>
+                        {!allOwnersSelected && (
+                            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                                {selectedOwnerIds.size}
+                            </span>
+                        )}
+                    </legend>
+                    <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                        <label className="flex cursor-pointer items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={allOwnersSelected}
+                                onChange={() => setSelectedOwnerIds(new Set())}
+                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
+                            />
+                            <span className="text-xs font-semibold text-slate-700">
+                                {tw.graph_filter_all_owners ?? 'Alle eiere'}
+                            </span>
+                        </label>
+                        {owners.map((owner) => (
+                            <label key={owner.id} className="flex cursor-pointer items-start gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedOwnerIds.has(owner.id)}
+                                    onChange={() => toggleOwner(owner.id)}
+                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
+                                />
+                                <span className="min-w-0 flex-1 break-words text-xs text-slate-700" title={owner.name}>
+                                    {owner.name}
+                                </span>
+                                <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
+                                    {ownerPageCounts[owner.id] ?? 0}
+                                </span>
+                            </label>
+                        ))}
+                    </div>
+                </fieldset>
+            )}
+
+            {/* 4. Page types */}
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                 {tw.graph_filter_page_types ?? 'Sidetyper'}
             </h3>
@@ -244,7 +301,7 @@ function FilterPanel({
                 ))}
             </div>
 
-            {/* 4. Status */}
+            {/* 5. Status */}
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                 {tw.graph_filter_status ?? 'Status'}
             </h3>
@@ -262,7 +319,7 @@ function FilterPanel({
                 ))}
             </div>
 
-            {/* 5. Show isolated pages */}
+            {/* 6. Show isolated pages */}
             <label className="mb-4 flex cursor-pointer items-center gap-2">
                 <input
                     type="checkbox"
@@ -275,7 +332,7 @@ function FilterPanel({
                 </span>
             </label>
 
-            {/* 6. Reset */}
+            {/* 7. Reset */}
             <button
                 type="button"
                 onClick={onReset}
@@ -379,6 +436,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
 
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => new Set());
+    const [selectedOwnerIds, setSelectedOwnerIds] = useState(() => new Set());
     const [typeFilters, setTypeFilters] = useState({
         article: true, summary: true, concept: true, entity: true,
     });
@@ -534,9 +592,23 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         };
     }, [graphData]);
 
-    // Documents referenced by at least one node in this payload (backend already restricts
-    // the list to documents with real graph provenance — see EnterpriseWikiGraphDataService).
+    // Documents/owners referenced by at least one node in this payload (backend already
+    // restricts both lists to real graph provenance — see EnterpriseWikiGraphDataService).
     const documents = graphData?.documents ?? [];
+    const owners = graphData?.owners ?? [];
+
+    // document_id -> owner_user_id, so a node's document_ids can be checked against the
+    // selected owners without a second round trip. A document with no owner is simply absent
+    // here (owner filtering treats it the same as "no owner in the selected set").
+    const ownerIdByDocumentId = useMemo(() => {
+        const map = {};
+        documents.forEach((doc) => {
+            if (doc.owner_user_id !== null && doc.owner_user_id !== undefined) {
+                map[doc.id] = doc.owner_user_id;
+            }
+        });
+        return map;
+    }, [documents]);
 
     // Static per-document page counts, independent of the other active filters — "this
     // document has N pages in the wiki" — computed once per graph load.
@@ -549,6 +621,23 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         });
         return counts;
     }, [graphData]);
+
+    // Static per-owner page counts — one node counts once per owner even if two of its
+    // documents share the same owner.
+    const ownerPageCounts = useMemo(() => {
+        const counts = {};
+        (graphData?.nodes ?? []).forEach((n) => {
+            const ownerIdsForNode = new Set(
+                (n.document_ids ?? [])
+                    .map((docId) => ownerIdByDocumentId[docId])
+                    .filter((ownerId) => ownerId !== undefined),
+            );
+            ownerIdsForNode.forEach((ownerId) => {
+                counts[ownerId] = (counts[ownerId] ?? 0) + 1;
+            });
+        });
+        return counts;
+    }, [graphData, ownerIdByDocumentId]);
 
     // Nodes/edges matching every filter EXCEPT the "show isolated pages" toggle — this is
     // what Grafoversikt's page-type/status/error counts are computed from is derived below
@@ -565,9 +654,22 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             if (!typeFilters[n.page_type]) return false;
             if (!statusFilters[n.status]) return false;
 
+            const docIds = n.document_ids ?? [];
+
+            // Document and owner filters are independent conditions over the same
+            // document_ids array — a page need not have ONE document that is both a
+            // selected document AND owned by a selected owner, only at least one document
+            // satisfying each group on its own (see EnterpriseWikiGraphDataService docblock).
             if (selectedDocumentIds.size > 0) {
-                const docIds = n.document_ids ?? [];
                 if (!docIds.some((id) => selectedDocumentIds.has(id))) return false;
+            }
+
+            if (selectedOwnerIds.size > 0) {
+                const hasSelectedOwner = docIds.some((id) => {
+                    const ownerId = ownerIdByDocumentId[id];
+                    return ownerId !== undefined && selectedOwnerIds.has(ownerId);
+                });
+                if (!hasSelectedOwner) return false;
             }
 
             if (trimmedQuery !== '') {
@@ -582,7 +684,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         const edges = graphData.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
         return { nodes, edges };
-    }, [graphData, searchQuery, selectedDocumentIds, typeFilters, statusFilters]);
+    }, [graphData, searchQuery, selectedDocumentIds, selectedOwnerIds, ownerIdByDocumentId, typeFilters, statusFilters]);
 
     // Final displayed set — same as `matched`, minus pages that became isolated after
     // filtering, unless "show isolated pages" is on. Computed on the filtered result, not the
@@ -627,6 +729,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
 
     const hasActiveFilters = searchQuery.trim() !== ''
         || selectedDocumentIds.size > 0
+        || selectedOwnerIds.size > 0
         || !typeFilters.article || !typeFilters.summary || !typeFilters.concept || !typeFilters.entity
         || !statusFilters.error || !statusFilters.warning || !statusFilters.ok
         || !showOrphans;
@@ -649,6 +752,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const resetFilters = () => {
         setSearchQuery('');
         setSelectedDocumentIds(new Set());
+        setSelectedOwnerIds(new Set());
         setTypeFilters({ article: true, summary: true, concept: true, entity: true });
         setStatusFilters({ error: true, warning: true, ok: true });
         setShowOrphans(true);
@@ -703,6 +807,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             selectedDocumentIds={selectedDocumentIds}
                             setSelectedDocumentIds={setSelectedDocumentIds}
                             documentPageCounts={documentPageCounts}
+                            owners={owners}
+                            selectedOwnerIds={selectedOwnerIds}
+                            setSelectedOwnerIds={setSelectedOwnerIds}
+                            ownerPageCounts={ownerPageCounts}
                             typeFilters={typeFilters}
                             setTypeFilters={setTypeFilters}
                             statusFilters={statusFilters}

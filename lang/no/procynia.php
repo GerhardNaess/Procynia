@@ -3767,6 +3767,8 @@ return [
         'graph_filter_search_placeholder' => 'Søk på sidetittel …',
         'graph_filter_documents' => 'Kildedokumenter',
         'graph_filter_all_documents' => 'Alle dokumenter',
+        'graph_filter_owners' => 'Dokumenteier',
+        'graph_filter_all_owners' => 'Alle eiere',
         'graph_filter_page_types' => 'Sidetyper',
         'graph_filter_status' => 'Status',
         'graph_filter_show_orphans' => 'Vis isolerte sider',
