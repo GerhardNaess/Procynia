@@ -792,7 +792,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M13.28 7.78 19 2.06V6a.75.75 0 0 0 1.5 0V.75a.75.75 0 0 0-.75-.75H14a.75.75 0 0 0 0 1.5h3.94L12.22 7.22a.75.75 0 1 0 1.06 1.06ZM2 14a.75.75 0 0 0-1.5 0v5.25c0 .414.336.75.75.75H6a.75.75 0 0 0 0-1.5H2.06l5.72-5.72a.75.75 0 0 0-1.06-1.06L1 17.94V14Z" />
                         </svg>
-                        {tw.graph_fit_view ?? 'Tilpass visning'}
+                        {tw.graph_fit_view ?? 'Zoom ut'}
                     </button>
                 </div>
 

@@ -3778,7 +3778,7 @@ return [
         'graph_node_sources' => 'Source references',
         'graph_node_lint_errors' => 'Lint errors',
         'graph_node_lint_warnings' => 'Lint warnings',
-        'graph_fit_view' => 'Fit view',
+        'graph_fit_view' => 'Zoom out',
         'graph_legend_title' => 'Legend',
         'tab_pages' => 'Wiki pages',
         'tab_sources' => 'Source documents',
