@@ -43,7 +43,7 @@ function nodeSize(node, degree) {
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
-function SummaryPanel({ summary, tw }) {
+function SummaryPanel({ summary, totalNodeCount, tw }) {
     if (!summary) return null;
     const rows = [
         { label: tw.graph_summary_nodes    ?? 'Sider',           value: summary.node_count },
@@ -56,11 +56,19 @@ function SummaryPanel({ summary, tw }) {
         { label: tw.graph_summary_warnings ?? 'Advarsler',        value: summary.lint_warning_count, accent: summary.lint_warning_count > 0 ? 'text-amber-600'  : null },
         { label: tw.graph_summary_orphans  ?? 'Isolerte sider',   value: summary.orphan_count,       accent: summary.orphan_count       > 0 ? 'text-slate-500'  : null },
     ];
+    const isFiltered = typeof totalNodeCount === 'number' && totalNodeCount !== summary.node_count;
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                 {tw.graph_summary_title ?? 'Grafoversikt'}
             </h3>
+            {isFiltered && (
+                <p className="mb-2 text-xs font-semibold text-violet-700">
+                    {(tw.graph_summary_coverage ?? ':shown av :total sider')
+                        .replace(':shown', summary.node_count)
+                        .replace(':total', totalNodeCount)}
+                </p>
+            )}
             <dl className="space-y-1.5">
                 {rows.map(({ label, value, accent }) => (
                     <div key={label} className="flex items-center justify-between gap-3">
@@ -118,7 +126,14 @@ function Legend({ tw }) {
     );
 }
 
-function FilterPanel({ typeFilters, setTypeFilters, statusFilters, setStatusFilters, showOrphans, setShowOrphans, tw, onReset }) {
+function FilterPanel({
+    searchQuery, setSearchQuery,
+    documents, selectedDocumentIds, setSelectedDocumentIds, documentPageCounts,
+    typeFilters, setTypeFilters,
+    statusFilters, setStatusFilters,
+    showOrphans, setShowOrphans,
+    tw, onReset, hasActiveFilters,
+}) {
     const types = [
         { key: 'article', label: tw.page_type_article ?? 'Artikkel' },
         { key: 'summary', label: tw.page_type_summary ?? 'Sammendrag' },
@@ -131,20 +146,84 @@ function FilterPanel({ typeFilters, setTypeFilters, statusFilters, setStatusFilt
         { key: 'ok',      label: tw.lint_summary_ok       ?? 'OK' },
     ];
 
+    const allDocumentsSelected = selectedDocumentIds.size === 0;
+
+    const toggleDocument = (documentId) => {
+        setSelectedDocumentIds((current) => {
+            const next = new Set(current);
+            if (next.has(documentId)) {
+                next.delete(documentId);
+            } else {
+                next.add(documentId);
+            }
+            return next;
+        });
+    };
+
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                    {tw.graph_filter_page_types ?? 'Sidetyper'}
-                </h3>
-                <button
-                    type="button"
-                    onClick={onReset}
-                    className="text-[11px] text-violet-600 hover:underline"
-                >
-                    {tw.graph_filter_reset ?? 'Nullstill'}
-                </button>
+            {/* 1. Search */}
+            <div className="mb-4">
+                <label htmlFor="wiki-graph-search" className="mb-2 block text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                    {tw.graph_filter_search_label ?? 'Søk i Wiki-sider'}
+                </label>
+                <input
+                    id="wiki-graph-search"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={tw.graph_filter_search_placeholder ?? 'Søk på sidetittel …'}
+                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                />
             </div>
+
+            {/* 2. Source documents */}
+            {documents.length > 0 && (
+                <fieldset className="mb-4">
+                    <legend className="mb-2 flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                        <span>{tw.graph_filter_documents ?? 'Kildedokumenter'}</span>
+                        {!allDocumentsSelected && (
+                            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
+                                {selectedDocumentIds.size}
+                            </span>
+                        )}
+                    </legend>
+                    <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                        <label className="flex cursor-pointer items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={allDocumentsSelected}
+                                onChange={() => setSelectedDocumentIds(new Set())}
+                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
+                            />
+                            <span className="text-xs font-semibold text-slate-700">
+                                {tw.graph_filter_all_documents ?? 'Alle dokumenter'}
+                            </span>
+                        </label>
+                        {documents.map((doc) => (
+                            <label key={doc.id} className="flex cursor-pointer items-start gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedDocumentIds.has(doc.id)}
+                                    onChange={() => toggleDocument(doc.id)}
+                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-violet-600"
+                                />
+                                <span className="min-w-0 flex-1 break-words text-xs text-slate-700" title={doc.title}>
+                                    {doc.title}
+                                </span>
+                                <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
+                                    {documentPageCounts[doc.id] ?? 0}
+                                </span>
+                            </label>
+                        ))}
+                    </div>
+                </fieldset>
+            )}
+
+            {/* 3. Page types */}
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                {tw.graph_filter_page_types ?? 'Sidetyper'}
+            </h3>
             <div className="space-y-1.5 mb-4">
                 {types.map(({ key, label }) => (
                     <label key={key} className="flex cursor-pointer items-center gap-2">
@@ -164,6 +243,8 @@ function FilterPanel({ typeFilters, setTypeFilters, statusFilters, setStatusFilt
                     </label>
                 ))}
             </div>
+
+            {/* 4. Status */}
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                 {tw.graph_filter_status ?? 'Status'}
             </h3>
@@ -180,7 +261,9 @@ function FilterPanel({ typeFilters, setTypeFilters, statusFilters, setStatusFilt
                     </label>
                 ))}
             </div>
-            <label className="flex cursor-pointer items-center gap-2">
+
+            {/* 5. Show isolated pages */}
+            <label className="mb-4 flex cursor-pointer items-center gap-2">
                 <input
                     type="checkbox"
                     checked={showOrphans}
@@ -191,6 +274,16 @@ function FilterPanel({ typeFilters, setTypeFilters, statusFilters, setStatusFilt
                     {tw.graph_filter_show_orphans ?? 'Vis isolerte sider'}
                 </span>
             </label>
+
+            {/* 6. Reset */}
+            <button
+                type="button"
+                onClick={onReset}
+                disabled={!hasActiveFilters}
+                className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+                {tw.graph_filter_reset ?? 'Nullstill filtre'}
+            </button>
         </div>
     );
 }
@@ -284,6 +377,8 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const [error,        setError]        = useState(null);
     const [selectedNode, setSelectedNode] = useState(null);
 
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => new Set());
     const [typeFilters, setTypeFilters] = useState({
         article: true, summary: true, concept: true, entity: true,
     });
@@ -439,52 +534,121 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         };
     }, [graphData]);
 
-    // Apply filters by updating displayed sets and refreshing
-    useEffect(() => {
-        if (!graphData || !sigmaRef.current) return;
+    // Documents referenced by at least one node in this payload (backend already restricts
+    // the list to documents with real graph provenance — see EnterpriseWikiGraphDataService).
+    const documents = graphData?.documents ?? [];
 
-        const edgeById = Object.fromEntries(graphData.edges.map(e => [e.id, e]));
-
-        const filteredNodes = new Set(
-            graphData.nodes
-                .filter(n => typeFilters[n.page_type] && statusFilters[n.status])
-                .map(n => n.id),
-        );
-
-        let filteredEdges = new Set(
-            graphData.edges
-                .filter(e => filteredNodes.has(e.source) && filteredNodes.has(e.target))
-                .map(e => e.id),
-        );
-
-        if (!showOrphans) {
-            const connected = new Set();
-            filteredEdges.forEach(eid => {
-                const e = edgeById[eid];
-                if (e) { connected.add(e.source); connected.add(e.target); }
+    // Static per-document page counts, independent of the other active filters — "this
+    // document has N pages in the wiki" — computed once per graph load.
+    const documentPageCounts = useMemo(() => {
+        const counts = {};
+        (graphData?.nodes ?? []).forEach((n) => {
+            (n.document_ids ?? []).forEach((docId) => {
+                counts[docId] = (counts[docId] ?? 0) + 1;
             });
-            filteredNodes.forEach(nid => { if (!connected.has(nid)) filteredNodes.delete(nid); });
-            filteredEdges = new Set(
-                [...filteredEdges].filter(eid => {
-                    const e = edgeById[eid];
-                    return e && filteredNodes.has(e.source) && filteredNodes.has(e.target);
-                }),
-            );
+        });
+        return counts;
+    }, [graphData]);
+
+    // Nodes/edges matching every filter EXCEPT the "show isolated pages" toggle — this is
+    // what Grafoversikt's page-type/status/error counts are computed from is derived below
+    // (`displayed`), but isolated-page detection must run on this filtered-but-not-yet-orphan-
+    // trimmed set, never on the original unfiltered graph.
+    const matched = useMemo(() => {
+        if (!graphData) {
+            return { nodes: [], edges: [] };
         }
 
-        displayedNodes.current = filteredNodes;
-        displayedEdges.current = filteredEdges;
+        const trimmedQuery = searchQuery.trim().toLowerCase();
+
+        const nodes = graphData.nodes.filter((n) => {
+            if (!typeFilters[n.page_type]) return false;
+            if (!statusFilters[n.status]) return false;
+
+            if (selectedDocumentIds.size > 0) {
+                const docIds = n.document_ids ?? [];
+                if (!docIds.some((id) => selectedDocumentIds.has(id))) return false;
+            }
+
+            if (trimmedQuery !== '') {
+                const title = String(n.title ?? '').toLowerCase();
+                if (!title.includes(trimmedQuery)) return false;
+            }
+
+            return true;
+        });
+
+        const nodeIds = new Set(nodes.map((n) => n.id));
+        const edges = graphData.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+        return { nodes, edges };
+    }, [graphData, searchQuery, selectedDocumentIds, typeFilters, statusFilters]);
+
+    // Final displayed set — same as `matched`, minus pages that became isolated after
+    // filtering, unless "show isolated pages" is on. Computed on the filtered result, not the
+    // original graph.
+    const displayed = useMemo(() => {
+        if (showOrphans) {
+            return matched;
+        }
+
+        const connected = new Set();
+        matched.edges.forEach((e) => { connected.add(e.source); connected.add(e.target); });
+
+        const nodes = matched.nodes.filter((n) => connected.has(n.id));
+        const nodeIds = new Set(nodes.map((n) => n.id));
+        const edges = matched.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+
+        return { nodes, edges };
+    }, [matched, showOrphans]);
+
+    // Isolated-page count among the filtered (pre-orphan-toggle) result — a stable diagnostic
+    // independent of whether isolated pages are currently being shown or hidden.
+    const matchedOrphanCount = useMemo(() => {
+        const connected = new Set();
+        matched.edges.forEach((e) => { connected.add(e.source); connected.add(e.target); });
+        return matched.nodes.filter((n) => !connected.has(n.id)).length;
+    }, [matched]);
+
+    const filteredSummary = useMemo(() => {
+        const nodes = displayed.nodes;
+        return {
+            node_count: nodes.length,
+            edge_count: displayed.edges.length,
+            article_count: nodes.filter((n) => n.page_type === 'article').length,
+            summary_count: nodes.filter((n) => n.page_type === 'summary').length,
+            concept_count: nodes.filter((n) => n.page_type === 'concept').length,
+            entity_count: nodes.filter((n) => n.page_type === 'entity').length,
+            lint_error_count: nodes.reduce((sum, n) => sum + (n.lint_error_count ?? 0), 0),
+            lint_warning_count: nodes.reduce((sum, n) => sum + (n.lint_warning_count ?? 0), 0),
+            orphan_count: showOrphans ? matchedOrphanCount : 0,
+        };
+    }, [displayed, showOrphans, matchedOrphanCount]);
+
+    const hasActiveFilters = searchQuery.trim() !== ''
+        || selectedDocumentIds.size > 0
+        || !typeFilters.article || !typeFilters.summary || !typeFilters.concept || !typeFilters.entity
+        || !statusFilters.error || !statusFilters.warning || !statusFilters.ok
+        || !showOrphans;
+
+    // Sync the filtered result into Sigma's reducers whenever it changes.
+    useEffect(() => {
+        if (!sigmaRef.current) return;
+
+        displayedNodes.current = new Set(displayed.nodes.map((n) => n.id));
+        displayedEdges.current = new Set(displayed.edges.map((e) => e.id));
         sigmaRef.current.refresh();
 
-        // Deselect node if it became hidden
-        if (selectedNode && !filteredNodes.has(selectedNode.id)) {
+        if (selectedNode && !displayedNodes.current.has(selectedNode.id)) {
             setSelectedNode(null);
         }
-    }, [graphData, typeFilters, statusFilters, showOrphans]);
+    }, [displayed]);
 
     const fitView = () => sigmaRef.current?.getCamera().animatedReset();
 
     const resetFilters = () => {
+        setSearchQuery('');
+        setSelectedDocumentIds(new Set());
         setTypeFilters({ article: true, summary: true, concept: true, entity: true });
         setStatusFilters({ error: true, warning: true, ok: true });
         setShowOrphans(true);
@@ -518,7 +682,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     <button
                         type="button"
                         onClick={fitView}
-                        disabled={!graphData || graphData.nodes.length === 0}
+                        disabled={!graphData || displayed.nodes.length === 0}
                         className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                         <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -533,6 +697,12 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     {/* Left sidebar */}
                     <div className="flex w-56 shrink-0 flex-col gap-3 overflow-y-auto">
                         <FilterPanel
+                            searchQuery={searchQuery}
+                            setSearchQuery={setSearchQuery}
+                            documents={documents}
+                            selectedDocumentIds={selectedDocumentIds}
+                            setSelectedDocumentIds={setSelectedDocumentIds}
+                            documentPageCounts={documentPageCounts}
                             typeFilters={typeFilters}
                             setTypeFilters={setTypeFilters}
                             statusFilters={statusFilters}
@@ -541,8 +711,15 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             setShowOrphans={setShowOrphans}
                             tw={tw}
                             onReset={resetFilters}
+                            hasActiveFilters={hasActiveFilters}
                         />
-                        {graphData && <SummaryPanel summary={graphData.summary} tw={tw} />}
+                        {graphData && (
+                            <SummaryPanel
+                                summary={filteredSummary}
+                                totalNodeCount={graphData.nodes.length}
+                                tw={tw}
+                            />
+                        )}
                         <Legend tw={tw} />
                     </div>
 
@@ -581,7 +758,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             </div>
                         )}
 
-                        {/* Empty */}
+                        {/* Empty — no wiki pages at all in this scope */}
                         {!loading && !error && graphData && graphData.nodes.length === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-50 p-8">
                                 <div className="max-w-sm text-center">
@@ -591,6 +768,31 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                                     <p className="mt-1 text-xs text-slate-400">
                                         {tw.graph_empty_hint ?? 'Wikien er tom, eller alle sider er filtrert bort.'}
                                     </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* No matches — pages exist, but the active filters exclude all of them */}
+                        {!loading && !error && graphData && graphData.nodes.length > 0 && displayed.nodes.length === 0 && (
+                            <div
+                                role="status"
+                                aria-live="polite"
+                                className="absolute inset-0 z-10 flex items-center justify-center bg-slate-50 p-8"
+                            >
+                                <div className="max-w-sm text-center">
+                                    <p className="text-sm font-semibold text-slate-600">
+                                        {tw.graph_no_matches ?? 'Ingen Wiki-sider matcher filtrene.'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-slate-400">
+                                        {tw.graph_no_matches_hint ?? 'Prøv å endre søket, velge andre dokumenter eller nullstille filtrene.'}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={resetFilters}
+                                        className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                    >
+                                        {tw.graph_filter_reset ?? 'Nullstill filtre'}
+                                    </button>
                                 </div>
                             </div>
                         )}
