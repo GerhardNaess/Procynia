@@ -47,6 +47,8 @@ class EnterpriseWikiSourceReference extends Model
         'source_element_key',
         'source_element_type',
         'source_row_key',
+        'source_cell_key',
+        'source_column_key',
         'source_label',
         'excerpt',
         'source_hash',

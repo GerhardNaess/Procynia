@@ -77,6 +77,32 @@ class EnterpriseWikiDocumentSourceElementService
     }
 
     /**
+     * The raw, structured tables parsed from this document — same parse call and same
+     * (non-document-scoped, table-local) source_row_key convention as elementsForDocument()'s
+     * table_row elements below, so a row's key is identical whichever accessor produced it.
+     * Used by EnterpriseWikiTableBlockBuilder to render a genuine table block/claims for
+     * whichever table(s) a generated page's blocks actually cited — never a new, parallel
+     * identity scheme.
+     *
+     * @return list<DocxTableData>
+     */
+    public function tablesForDocument(EnterpriseWikiDocument $document): array
+    {
+        $path = $this->resolveDocumentPath($document);
+
+        if ($path === null || ! Str::endsWith(Str::lower($path), '.docx')) {
+            return [];
+        }
+
+        $payload = $this->documentTextExtractor->extractDocxTextAndTables($path);
+
+        return array_values(array_filter(
+            $payload['tables'] ?? [],
+            static fn (mixed $table): bool => $table instanceof DocxTableData,
+        ));
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function elementsForDocument(EnterpriseWikiDocument $document): array
