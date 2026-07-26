@@ -645,24 +645,29 @@ test('checkboxes inside an open dropdown are reachable via Tab', async ({ page }
 // ─── Filter dropdowns at scale (20+ documents, 20+ owners) ───────────────────
 // Real dev data only has 2 documents/2 owners, which is below the internal search
 // threshold (>8 options). These tests seed synthetic documents/owners on top of the
-// existing dev data (see app/Console/Commands/ScaleTestWikiFilterData.php) to
-// exercise search, scrolling, and layout at the scale the task requires, then
-// remove exactly what they added.
+// existing dev data via a test-only fixture class (tests/Support/WikiGraphFilterScale
+// TestFixture.php — autoload-dev only, not an Artisan command, invoked here through
+// tinker) to exercise search, scrolling, and layout at the scale the task requires,
+// then remove exactly what they added.
+
+const SCALE_TEST_FIXTURE = '\\Tests\\Support\\WikiGraphFilterScaleTestFixture';
 
 test.describe.serial('scale: 20+ documents and 20+ owners', () => {
     // Run via async exec (not execSync) — a synchronous, blocking child process call here
     // stalls Node's event loop for the seed command's full duration, which in practice was
     // enough to make the Playwright browser's IPC time out on the very next page.goto().
     test.beforeAll(async () => {
-        await execAsync('docker compose exec -T app php artisan wiki:scale-test-seed 4 --count=20', {
-            cwd: new URL('../..', import.meta.url).pathname,
-        });
+        await execAsync(
+            `docker compose exec -T app php artisan tinker --execute="${SCALE_TEST_FIXTURE}::seed(4, 20);"`,
+            { cwd: new URL('../..', import.meta.url).pathname },
+        );
     });
 
     test.afterAll(async () => {
-        await execAsync('docker compose exec -T app php artisan wiki:scale-test-cleanup 4', {
-            cwd: new URL('../..', import.meta.url).pathname,
-        });
+        await execAsync(
+            `docker compose exec -T app php artisan tinker --execute="${SCALE_TEST_FIXTURE}::cleanup(4);"`,
+            { cwd: new URL('../..', import.meta.url).pathname },
+        );
     });
 
     test('document dropdown shows an internal search field once options exceed the threshold', async ({ page }) => {

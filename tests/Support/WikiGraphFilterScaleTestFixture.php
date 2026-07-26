@@ -1,40 +1,39 @@
 <?php
 
-namespace App\Console\Commands;
+namespace Tests\Support;
 
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
- * Support command for the Wiki graph filter dropdown E2E scale tests
- * (tests/e2e/wiki-graph-filters.spec.js). Seeds synthetic documents/owners on top
- * of a customer's existing Enterprise Wiki pages so the document/owner filter
- * dropdowns have enough options to exercise their internal search and scrolling.
- * Paired with `wiki:scale-test-cleanup`, which removes exactly what this creates.
+ * Test-only fixture for the Wiki graph filter dropdown E2E scale tests
+ * (tests/e2e/wiki-graph-filters.spec.js). Lives under tests/ (autoload-dev
+ * only — absent from any `composer install --no-dev` production build) and is
+ * not registered as an Artisan command; invoked directly via
+ * `php artisan tinker --execute=...` from the Playwright spec.
+ *
+ * Synthetic rows are tagged with a "scale-test/" file_path prefix and an
+ * "@example.test" email domain so seed()/cleanup() can never touch real
+ * customer documents, owners, or cross-customer data.
  */
-class ScaleTestWikiFilterData extends Command
+class WikiGraphFilterScaleTestFixture
 {
-    protected $signature = 'wiki:scale-test-seed {customer_id=4} {--count=20}';
+    private const EMAIL_DOMAIN = '@example.test';
 
-    protected $description = 'Seed synthetic documents/owners for E2E scale testing of the Wiki graph filter dropdowns';
+    private const FILE_PATH_PREFIX = 'scale-test/';
 
-    public function handle(): int
+    public static function seed(int $customerId, int $count = 20): void
     {
-        $customerId = (int) $this->argument('customer_id');
-        $count = (int) $this->option('count');
-
         $pageIds = EnterpriseWikiPage::where('customer_id', $customerId)->pluck('id')->all();
 
         if ($pageIds === []) {
-            $this->error("No enterprise wiki pages found for customer {$customerId}.");
-
-            return self::FAILURE;
+            throw new RuntimeException("No enterprise wiki pages found for customer {$customerId}.");
         }
 
         for ($i = 1; $i <= $count; $i++) {
@@ -43,7 +42,7 @@ class ScaleTestWikiFilterData extends Command
             $owner = User::create([
                 'customer_id' => $customerId,
                 'name' => "Skalatest Eier {$n}",
-                'email' => "scale-test-owner-{$n}@example.test",
+                'email' => "scale-test-owner-{$n}".self::EMAIL_DOMAIN,
                 'password' => Hash::make('not-used-scale-test'),
                 'role' => 'user',
                 'bid_role' => 'contributor',
@@ -53,7 +52,7 @@ class ScaleTestWikiFilterData extends Command
                 'customer_id' => $customerId,
                 'owner_user_id' => $owner->id,
                 'original_filename' => "Skalatest dokument {$n} - lang beskrivende filnavn for testing av trunkering og linjebryting.docx",
-                'file_path' => "scale-test/doc-{$n}.docx",
+                'file_path' => self::FILE_PATH_PREFIX."doc-{$n}.docx",
                 'file_hash_sha256' => hash('sha256', "scale-test-doc-{$n}"),
                 'document_status' => 'processed',
             ]);
@@ -74,11 +73,27 @@ class ScaleTestWikiFilterData extends Command
                 ], ['action' => 'created']);
             }
         }
+    }
 
-        $this->info("Created {$count} scale-test documents/owners for customer {$customerId}.");
-        $this->info('Docs now: '.EnterpriseWikiDocument::where('customer_id', $customerId)->count());
-        $this->info('Users now: '.User::where('customer_id', $customerId)->count());
+    public static function cleanup(int $customerId): void
+    {
+        $docs = EnterpriseWikiDocument::where('customer_id', $customerId)
+            ->where('file_path', 'like', self::FILE_PATH_PREFIX.'%')
+            ->get();
 
-        return self::SUCCESS;
+        foreach ($docs as $doc) {
+            EnterpriseWikiIngestRun::where('customer_id', $customerId)
+                ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('source_id', $doc->id)
+                ->delete(); // cascades to enterprise_wiki_ingest_run_pages
+        }
+
+        EnterpriseWikiDocument::where('customer_id', $customerId)
+            ->where('file_path', 'like', self::FILE_PATH_PREFIX.'%')
+            ->delete();
+
+        User::where('customer_id', $customerId)
+            ->where('email', 'like', 'scale-test-owner-%'.self::EMAIL_DOMAIN)
+            ->delete();
     }
 }
