@@ -28,7 +28,7 @@ class RequirementEditorService
         ?User $changedBy = null,
         array $publicationOverrides = [],
     ): SavedNoticeAiRequirement {
-        return DB::transaction(function () use ($document, $chunk, $candidate, $changedBy, $publicationOverrides): SavedNoticeAiRequirement {
+        return DB::transaction(function () use ($candidate, $changedBy, $publicationOverrides): SavedNoticeAiRequirement {
             $requirement = SavedNoticeAiRequirement::query()->create(array_merge(
                 $candidate->toCreationAttributes(),
                 [
