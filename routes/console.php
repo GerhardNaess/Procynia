@@ -26,6 +26,8 @@ Schedule::command('procynia:backup')->hourly()->withoutOverlapping();
 Schedule::job(new OpsQueueHeartbeatJob('supplier-harvests'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('supplier-lookups'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('ai-requirements'))->everyMinute();
+Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki'))->everyMinute();
+Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki-pages'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('default'))->everyMinute();
 
 Schedule::command('ai:sync-model-prices')
