@@ -5,6 +5,7 @@ import Sigma from 'sigma';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
+import { truncateLabelToWidth } from './graphLabelLogic';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -31,6 +32,14 @@ const STATUS_RING = {
 const DEFAULT_EDGE_COLOR = '#cbd5e1';
 const SELECTED_NODE_BORDER = '#1e293b';
 
+// Node labels must meet the WCAG-oriented 16px floor set for this app — anything below
+// reads as "graph chrome" rather than content. Sigma draws labels on its own canvas layer
+// (not SVG/HTML) at a fixed screen-space font size (see labelSize below): it does not scale
+// with the camera zoom ratio, so this size is the actual on-screen size at every zoom level.
+const NODE_LABEL_SIZE = 16;
+const NODE_LABEL_COLOR = '#1e293b'; // slate-800 — darker than the slate-700 contrast floor
+const NODE_LABEL_MAX_WIDTH_PX = 180;
+
 // ─── small helpers ────────────────────────────────────────────────────────────
 
 function nodeColor(node) {
@@ -40,6 +49,29 @@ function nodeColor(node) {
 function nodeSize(node, degree) {
     const base = PAGE_TYPE_SIZES[node.page_type] ?? 9;
     return base + Math.min(degree * 0.8, 8);
+}
+
+// The full, untruncated title remains available via Sigma's built-in hover label box
+// (which measures data.label directly, unaffected by this truncated render path) and via
+// the node click panel (NodePanel already renders the full title with a `title` attribute).
+function drawTruncatedNodeLabel(context, data, settings) {
+    if (!data.label) return;
+    const size = settings.labelSize;
+    const font = settings.labelFont;
+    const weight = settings.labelWeight;
+    const color = settings.labelColor.attribute
+        ? data[settings.labelColor.attribute] || settings.labelColor.color || '#000'
+        : settings.labelColor.color;
+
+    context.fillStyle = color;
+    context.font = `${weight} ${size}px ${font}`;
+
+    const label = truncateLabelToWidth(
+        (text) => context.measureText(text).width,
+        data.label,
+        NODE_LABEL_MAX_WIDTH_PX,
+    );
+    context.fillText(label, data.x + data.size + 3, data.y + size / 3);
 }
 
 // ─── sub-components ──────────────────────────────────────────────────────────
@@ -506,8 +538,13 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             renderEdgeLabels:   false,
             defaultEdgeColor:   DEFAULT_EDGE_COLOR,
             labelFont:          'Inter, system-ui, sans-serif',
-            labelSize:          11,
+            labelSize:          NODE_LABEL_SIZE,
             labelWeight:        '500',
+            labelColor:         { color: NODE_LABEL_COLOR },
+            defaultDrawNodeLabel: drawTruncatedNodeLabel,
+            // Larger labels need more breathing room in the label-declutering grid, or the
+            // (now wider) text from neighboring nodes competes for the same cells and overlaps.
+            labelGridCellSize:  150,
             minCameraRatio:     0.04,
             maxCameraRatio:     12,
             nodeReducer: (node, data) =>
