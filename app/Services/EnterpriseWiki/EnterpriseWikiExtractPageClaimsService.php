@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -66,6 +67,7 @@ class EnterpriseWikiExtractPageClaimsService
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
     ) {}
 
     /**
@@ -365,6 +367,8 @@ class EnterpriseWikiExtractPageClaimsService
                 $created++;
             }
 
+            $created += $this->createTableClaims($page, $version, $created);
+
             $row->update([
                 'claims_extracted_at' => now(),
                 'claims_claimed_at' => null,
@@ -373,6 +377,79 @@ class EnterpriseWikiExtractPageClaimsService
 
             return $created;
         });
+    }
+
+    /**
+     * Deterministic, non-AI claims for any "table" content block on this version — one claim per
+     * (row, non-label column) cell, built directly from the table's own structured data (see
+     * EnterpriseWikiTableBlockBuilder::tableClaimPayloads()). Never calls the AI claim-extraction
+     * client: a table's cell values are already exact, verbatim source data, so there is nothing
+     * for an LLM to usefully paraphrase, and generating these deterministically gives every table
+     * claim exact row+cell provenance by construction instead of by the AI faithfully restating a
+     * source_element_key.
+     *
+     * Runs inside the same reservation-guarded transaction as the AI-derived claims above, so it
+     * shares the same (run, page) idempotency checkpoint — a re-ingest that reuses an existing
+     * completed extraction never re-enters this method at all.
+     *
+     * @return int number of claims created
+     */
+    private function createTableClaims(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, int $startingPosition): int
+    {
+        $created = 0;
+        $position = $startingPosition;
+
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (! is_array($block) || ($block['block_type'] ?? null) !== 'table') {
+                continue;
+            }
+
+            $sourceId = (int) ($block['source_id'] ?? 0);
+
+            if ($sourceId <= 0) {
+                continue;
+            }
+
+            $document = EnterpriseWikiDocument::query()->find($sourceId);
+
+            if ($document === null) {
+                continue;
+            }
+
+            foreach ($this->tableBlockBuilder->tableClaimPayloads($document, $block) as $payload) {
+                $createdClaim = EnterpriseWikiClaim::query()->create([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'enterprise_wiki_page_version_id' => $version->id,
+                    'claim_text' => $payload['claim_text'],
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'page_excerpt' => $payload['excerpt'],
+                    'content_block_key' => $block['block_key'] ?? null,
+                    'position_order' => $position++,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                    'conflict_flag' => false,
+                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                ]);
+
+                EnterpriseWikiSourceReference::query()->create([
+                    'enterprise_wiki_claim_id' => $createdClaim->id,
+                    'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                    'source_id' => $document->id,
+                    'source_element_key' => $payload['source_row_key'],
+                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_TABLE_ROW,
+                    'source_row_key' => $payload['source_row_key'],
+                    'source_cell_key' => $payload['source_cell_key'],
+                    'source_column_key' => $payload['source_column_key'],
+                    'source_label' => $document->original_filename,
+                    'excerpt' => $payload['excerpt'],
+                    'source_hash' => $document->file_hash_sha256 ?? '',
+                    'page_reference' => $payload['page_reference'],
+                ]);
+
+                $created++;
+            }
+        }
+
+        return $created;
     }
 
     /**

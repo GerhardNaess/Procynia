@@ -93,6 +93,57 @@ class EnterpriseWikiDocumentSourceElementServiceTest extends TestCase
         $this->assertSame('doc1-tbl0-row0', $result['elements'][1]['source_row_key']);
     }
 
+    public function test_tables_for_document_returns_the_raw_docx_table_data(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, 'example.docx');
+        Storage::disk('local')->put($document->file_path, 'docx-bytes');
+
+        $expectedPath = Storage::disk('local')->path($document->file_path);
+        $table = new DocxTableData(
+            tableIndex: 0,
+            headerLabels: ['Header'],
+            rows: [
+                new DocxTableRowData(
+                    sourceRowKey: 'tbl0-row0',
+                    tableIndex: 0,
+                    rowIndex: 0,
+                    charStart: 0,
+                    charEnd: 10,
+                    cells: [new DocxTableCellData(0, 'Header', 'header', 'Value')],
+                ),
+            ],
+        );
+
+        $this->mock(DocumentTextExtractor::class, function ($mock) use ($expectedPath, $table): void {
+            $mock->shouldReceive('extractDocxTextAndTables')
+                ->once()
+                ->with($expectedPath)
+                ->andReturn(['text' => '', 'tables' => [$table], 'headings' => [], 'list_items' => [], 'text_elements' => []]);
+        });
+
+        $service = app(EnterpriseWikiDocumentSourceElementService::class);
+        $tables = $service->tablesForDocument($document);
+
+        $this->assertCount(1, $tables);
+        $this->assertSame('tbl0-row0', $tables[0]->rows[0]->sourceRowKey);
+    }
+
+    public function test_tables_for_document_returns_empty_for_non_docx_documents(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, 'example.pdf');
+        Storage::disk('local')->put($document->file_path, 'pdf-bytes');
+
+        $service = app(EnterpriseWikiDocumentSourceElementService::class);
+
+        $this->assertSame([], $service->tablesForDocument($document));
+    }
+
     public function test_inspect_falls_back_to_manual_source_for_non_docx_documents(): void
     {
         Storage::fake('local');

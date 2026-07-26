@@ -3668,6 +3668,7 @@ return [
         'source_no_excerpt' => 'Ingen tekstutdrag tilgjengelig.',
         'claim_no_sources' => 'Systemet mangler kildegrunnlag for en kildebasert påstand. Dette skal normalt behandles som reparasjon, ikke som vanlig Dokumenteierarbeid.',
         'source_open_document' => 'Åpne original kilde',
+        'wiki_table_caption' => 'Tabell :number',
         'quality_source_found' => 'Kilde funnet',
         'quality_no_source' => 'Mangler kilde',
         'quality_missing_excerpt' => 'Mangler utdrag',

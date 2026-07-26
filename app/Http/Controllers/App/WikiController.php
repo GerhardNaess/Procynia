@@ -2077,6 +2077,13 @@ class WikiController extends Controller
                 'raw_markdown' => (string) $block['markdown'],
                 'content_origin' => $block['content_origin'] ?? null,
                 'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
+                // Deterministic "table" blocks (see EnterpriseWikiTableBlockBuilder) carry a real
+                // block_type + structured table_data alongside their Markdown fallback, so the
+                // frontend can render a genuine <table> instead of the Markdown string.
+                'block_type' => $block['block_type'] ?? null,
+                'table_data' => $block['table_data'] ?? null,
+                'source_label' => $block['source_label'] ?? null,
+                'page_reference' => $block['page_reference'] ?? null,
             ])
             ->values()
             ->all();

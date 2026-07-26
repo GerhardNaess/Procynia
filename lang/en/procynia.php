@@ -3668,6 +3668,7 @@ return [
         'source_no_excerpt' => 'No text excerpt available.',
         'claim_no_sources' => 'The system is missing source basis for a source-based claim. This should normally be handled as repair, not regular Document Owner work.',
         'source_open_document' => 'Open original source',
+        'wiki_table_caption' => 'Table :number',
         'quality_source_found' => 'Source found',
         'quality_no_source' => 'Missing source',
         'quality_missing_excerpt' => 'Missing excerpt',

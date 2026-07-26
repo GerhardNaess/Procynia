@@ -44,7 +44,44 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiArticleSummaryLinkService $articleSummaryLinkService,
+        private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
     ) {}
+
+    /**
+     * Appends a genuine, deterministic "table" block (never AI-authored) for each Word table
+     * whose rows the AI-generated blocks actually cited — only for article/summary pages, the
+     * "ordinary Wiki articles" a table is meant to appear in (concept/entity pages are abstract
+     * synthesis, not the table's home). See EnterpriseWikiTableBlockBuilder for why attachment is
+     * keyed off citation rather than "every table in the document".
+     *
+     * @param  list<array<string, mixed>>  $contentBlocks
+     * @return array{0: string, 1: list<array<string, mixed>>} [markdown, contentBlocks] with any
+     *                                                         table blocks appended
+     */
+    private function appendTableBlocksIfRelevant(EnterpriseWikiDocument $document, EnterpriseWikiPage $page, string $markdown, array $contentBlocks): array
+    {
+        if (! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $tableIndexes = $this->tableBlockBuilder->referencedTableIndexes($contentBlocks);
+
+        if ($tableIndexes === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $tables = $this->sourceElementService->tablesForDocument($document);
+        $tableBlocks = $this->tableBlockBuilder->buildTableBlocks($document, $tables, $tableIndexes, count($contentBlocks));
+
+        if ($tableBlocks === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $contentBlocks = [...$contentBlocks, ...$tableBlocks];
+        $markdown = trim($markdown."\n\n".implode("\n\n", array_column($tableBlocks, 'markdown')));
+
+        return [$markdown, $contentBlocks];
+    }
 
     /**
      * @return array{article: int, summary: int, concept: int, entity: int, skipped: int}
@@ -130,7 +167,8 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $sourceElements,
             );
 
-            [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $generated['markdown'], $contentBlocks, $languageCode);
+            [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $generated['markdown'], $contentBlocks);
+            [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
             $this->writeVersion($page->id, $markdown, $contentBlocks);
             $counts[$page->page_type]++;
@@ -290,6 +328,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $sourceElements,
         );
 
+        [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
