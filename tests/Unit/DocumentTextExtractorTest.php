@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Data\Ai\Requirements\DocxImageData;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Services\DocumentTextExtractor;
 use RuntimeException;
@@ -2834,6 +2835,347 @@ XML;
         $trailer = "trailer\n<</Size 5 /Root 1 0 R>>\nstartxref\n{$xrefOffset}\n%%EOF\n";
 
         file_put_contents($path, $header.$obj1.$obj2.$obj3.$obj4.$xref.$trailer);
+    }
+
+    public function test_it_extracts_png_and_jpeg_images_in_document_order_with_relationship_and_content_hash(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $imageParagraph1 = $this->docxImageParagraphXml('rId1', 'Figur 1', 'Alt-tekst for bilde 1');
+            $imageParagraph2 = $this->docxImageParagraphXml('rId4', 'Figur 2', 'Alt-tekst for bilde 2');
+
+            $documentXml = <<<XML
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Tekst før første bilde.</w:t></w:r></w:p>
+        {$imageParagraph1}
+        <w:p><w:r><w:t>Tekst mellom bildene.</w:t></w:r></w:p>
+        {$imageParagraph2}
+        <w:p><w:r><w:t>Tekst etter siste bilde.</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+    <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.jpeg"/>
+</Relationships>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            $zip->addFromString('word/media/image1.png', $this->docxSamplePngBytes());
+            $zip->addFromString('word/media/image2.jpeg', $this->docxSampleJpegBytes());
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+
+            $this->assertCount(2, $images);
+
+            $this->assertSame('rId1', $images[0]->relationshipId);
+            $this->assertSame('word/media/image1.png', $images[0]->originalMediaPath);
+            $this->assertSame('image/png', $images[0]->mimeType);
+            $this->assertSame(1, $images[0]->width);
+            $this->assertSame(1, $images[0]->height);
+            $this->assertSame(hash('sha256', $this->docxSamplePngBytes()), $images[0]->contentHash);
+            $this->assertSame(0, $images[0]->imageIndex);
+
+            $this->assertSame('rId4', $images[1]->relationshipId);
+            $this->assertSame('word/media/image2.jpeg', $images[1]->originalMediaPath);
+            $this->assertSame('image/jpeg', $images[1]->mimeType);
+            $this->assertSame(1, $images[1]->imageIndex);
+
+            // Document order reflects the flat paragraph walk (0-indexed body paragraphs), not
+            // just image ordinal — the second image's paragraph comes after 3 preceding paragraphs.
+            $this->assertGreaterThan($images[0]->documentOrder, $images[1]->documentOrder);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_preserves_alt_text_caption_heading_context_and_norwegian_characters(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $imageParagraph = $this->docxImageParagraphXml(
+                'rId1',
+                'Figur 3',
+                'Diagram som viser dataflyt mellom CRM og ERP – æøå',
+            );
+
+            $documentXml = <<<XML
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p>
+            <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+            <w:r><w:t>1 Integrasjoner</w:t></w:r>
+        </w:p>
+        <w:p><w:r><w:t>Figuren følger et avsnitt om dataflyt mellom CRM og ERP.</w:t></w:r></w:p>
+        {$imageParagraph}
+        <w:p>
+            <w:pPr><w:pStyle w:val="Caption"/></w:pPr>
+            <w:r><w:t>Figur 3: Oversikt over systemintegrasjonene – æøå</w:t></w:r>
+        </w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            $zip->addFromString('word/media/image1.png', $this->docxSamplePngBytes());
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+
+            $this->assertCount(1, $images);
+            $image = $images[0];
+
+            $this->assertSame('Diagram som viser dataflyt mellom CRM og ERP – æøå', $image->altText);
+            $this->assertSame('Figur 3: Oversikt over systemintegrasjonene – æøå', $image->caption);
+            $this->assertSame('1', $image->sectionNumber);
+            $this->assertSame('Integrasjoner', $image->sectionTitle);
+            $this->assertSame('Figuren følger et avsnitt om dataflyt mellom CRM og ERP.', $image->textBefore);
+            $this->assertSame('Figur 3: Oversikt over systemintegrasjonene – æøå', $image->textAfter);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_skips_images_inside_table_cells(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $imageParagraph = $this->docxImageParagraphXml('rId1', 'Figur 1', 'Logo i tabellcelle');
+
+            $documentXml = <<<XML
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:tbl>
+            <w:tr>
+                <w:tc>{$imageParagraph}</w:tc>
+            </w:tr>
+        </w:tbl>
+        <w:p><w:r><w:t>Vanlig avsnitt utenfor tabellen.</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            $zip->addFromString('word/media/image1.png', $this->docxSamplePngBytes());
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+
+            $this->assertSame([], $images);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_skips_images_with_unresolvable_or_missing_relationship_without_breaking_extraction(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            // rId1: relationship entry exists but references a media file never added to the ZIP.
+            // rId2: no relationship entry at all (missing from document.xml.rels).
+            // rId3: a valid, resolvable image — must still be extracted despite the two failures.
+            $brokenMediaImage = $this->docxImageParagraphXml('rId1', 'Figur 1', 'Manglende mediefil');
+            $missingRelationshipImage = $this->docxImageParagraphXml('rId2', 'Figur 2', 'Manglende relasjon');
+            $validImage = $this->docxImageParagraphXml('rId3', 'Figur 3', 'Gyldig bilde');
+
+            $documentXml = <<<XML
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        {$brokenMediaImage}
+        {$missingRelationshipImage}
+        {$validImage}
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+    <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image3.png"/>
+</Relationships>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            // Deliberately no word/media/image1.png entry.
+            $zip->addFromString('word/media/image3.png', $this->docxSamplePngBytes());
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+
+            $this->assertCount(1, $images);
+            $this->assertSame('rId3', $images[0]->relationshipId);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_stamps_document_scoped_source_image_key_via_many_with_document_id(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $imageParagraph = $this->docxImageParagraphXml('rId1', 'Figur 1', 'Alt-tekst');
+
+            $documentXml = <<<XML
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        {$imageParagraph}
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            $zip->addFromString('word/media/image1.png', $this->docxSamplePngBytes());
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+            $this->assertSame('img0', $images[0]->sourceImageKey);
+
+            $stamped = DocxImageData::manyWithDocumentId($images, 42);
+
+            $this->assertSame('doc42-img0', $stamped[0]->sourceImageKey);
+            // Stamping must not mutate the original, already-returned DTOs.
+            $this->assertSame('img0', $images[0]->sourceImageKey);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /**
+     * Purpose: Build an inline DOCX image paragraph fixture (mirrors the shape produced by real
+     * Word documents for an ordinary, non-anchored inline image).
+     * Inputs: The relationship ID to reference, and the docPr title/descr values.
+     * Returns: A <w:p> XML fragment containing a <w:drawing><wp:inline>...<a:blip>.
+     * Side effects: None.
+     */
+    private function docxImageParagraphXml(string $relationshipId, string $title, string $altText): string
+    {
+        $relationshipId = htmlspecialchars($relationshipId, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $title = htmlspecialchars($title, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $altText = htmlspecialchars($altText, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+
+        return <<<XML
+<w:p xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+    <w:r>
+        <w:drawing>
+            <wp:inline>
+                <wp:extent cx="952500" cy="952500"/>
+                <wp:docPr id="1" name="{$title}" title="{$title}" descr="{$altText}"/>
+                <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                        <pic:pic>
+                            <pic:blipFill>
+                                <a:blip r:embed="{$relationshipId}"/>
+                            </pic:blipFill>
+                        </pic:pic>
+                    </a:graphicData>
+                </a:graphic>
+            </wp:inline>
+        </w:drawing>
+    </w:r>
+</w:p>
+XML;
+    }
+
+    /**
+     * Purpose: Return a compact 1x1 PNG image fixture for image-extraction tests.
+     * Inputs: None.
+     * Returns: Binary PNG bytes suitable for a DOCX media entry.
+     * Side effects: None.
+     */
+    private function docxSamplePngBytes(): string
+    {
+        $bytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2X3b8AAAAASUVORK5CYII=', true);
+
+        if (! is_string($bytes) || $bytes === '') {
+            throw new RuntimeException('Unable to build a PNG image fixture.');
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * Purpose: Return a compact 1x1 JPEG image fixture for image-extraction tests.
+     * Inputs: None.
+     * Returns: Binary JPEG bytes suitable for a DOCX media entry.
+     * Side effects: None.
+     */
+    private function docxSampleJpegBytes(): string
+    {
+        $image = imagecreatetruecolor(1, 1);
+        imagefilledrectangle($image, 0, 0, 0, 0, (int) imagecolorallocate($image, 10, 20, 30));
+
+        ob_start();
+        imagejpeg($image);
+        $bytes = ob_get_clean();
+        imagedestroy($image);
+
+        if (! is_string($bytes) || $bytes === '') {
+            throw new RuntimeException('Unable to build a JPEG image fixture.');
+        }
+
+        return $bytes;
     }
 
     private function tempDocumentPath(string $extension): string

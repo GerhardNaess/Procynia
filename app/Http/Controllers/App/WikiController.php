@@ -2082,11 +2082,38 @@ class WikiController extends Controller
                 // frontend can render a genuine <table> instead of the Markdown string.
                 'block_type' => $block['block_type'] ?? null,
                 'table_data' => $block['table_data'] ?? null,
+                'image_data' => $this->renderedImageData($block),
                 'source_label' => $block['source_label'] ?? null,
                 'page_reference' => $block['page_reference'] ?? null,
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Turn a deterministic "image" block's image_data (see EnterpriseWikiImageBlockBuilder)
+     * into the frontend-facing payload — never exposes a raw storage path, only an authenticated,
+     * customer-scoped route URL (WikiSourceController::image()) the frontend's <img> tag can load.
+     * Inputs: A content block array.
+     * Returns: The image_data payload with image_url added, or null for a non-image block.
+     * Side effects: None.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>|null
+     */
+    private function renderedImageData(array $block): ?array
+    {
+        $imageData = $block['image_data'] ?? null;
+        $documentId = (int) ($block['source_id'] ?? 0);
+        $sourceImageKey = is_array($imageData) ? (string) ($imageData['source_image_key'] ?? '') : '';
+
+        if (! is_array($imageData) || $documentId <= 0 || $sourceImageKey === '') {
+            return null;
+        }
+
+        return array_merge($imageData, [
+            'image_url' => route('app.wiki.sources.image', [$documentId, $sourceImageKey]),
+        ]);
     }
 
     /**

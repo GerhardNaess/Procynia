@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\Requirements\DocxImageData;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiSourceReference;
@@ -13,6 +14,8 @@ class EnterpriseWikiDocumentSourceElementService
 {
     public function __construct(
         private readonly DocumentTextExtractor $documentTextExtractor,
+        private readonly EnterpriseWikiImageClassificationService $imageClassificationService,
+        private readonly EnterpriseWikiImageDescriptionBuilder $imageDescriptionBuilder,
     ) {}
 
     /**
@@ -103,6 +106,46 @@ class EnterpriseWikiDocumentSourceElementService
     }
 
     /**
+     * The raw images parsed from this document's ordinary body-level content flow — same
+     * (non-document-scoped) sourceImageKey convention ("img{n}") as elementsForDocument()'s image
+     * elements below, so an image's key is identical whichever accessor produced it. Used by
+     * EnterpriseWikiImageBlockBuilder to render a genuine figure block for whichever image(s) a
+     * generated page's blocks actually cited.
+     *
+     * @return list<DocxImageData>
+     */
+    public function imagesForDocument(EnterpriseWikiDocument $document): array
+    {
+        $path = $this->resolveDocumentPath($document);
+
+        if ($path === null || ! Str::endsWith(Str::lower($path), '.docx')) {
+            return [];
+        }
+
+        return $this->documentTextExtractor->extractDocxImages($path);
+    }
+
+    /**
+     * Purpose: Resolve a single previously-extracted image by its sourceImageKey (e.g. "img0") —
+     * used by the authenticated image-serving route, which never persists a separate copy of the
+     * image file (see WikiSourceController::image()).
+     * Inputs: The owning document and the image's sourceImageKey.
+     * Returns: The matching image, or null if the key does not resolve to any image currently
+     * extractable from the document (e.g. the document was replaced, or the key is stale/invalid).
+     * Side effects: Re-parses the document's stored .docx file.
+     */
+    public function imageBySourceKey(EnterpriseWikiDocument $document, string $sourceImageKey): ?DocxImageData
+    {
+        foreach ($this->imagesForDocument($document) as $image) {
+            if ($image->sourceImageKey === $sourceImageKey) {
+                return $image;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function elementsForDocument(EnterpriseWikiDocument $document): array
@@ -181,6 +224,32 @@ class EnterpriseWikiDocumentSourceElementService
             }
         }
 
+        $images = $this->imagesForDocument($document);
+        $occurrenceCounts = $this->contentHashOccurrenceCounts($images);
+
+        foreach ($images as $image) {
+            $category = $this->imageClassificationService->classify($image, $occurrenceCounts[$image->contentHash] ?? 1);
+
+            if (! $this->imageClassificationService->isShowable($category)) {
+                // Fase 1 (Section 4): decorative/logo images are never citable Wiki content.
+                continue;
+            }
+
+            $description = $this->imageDescriptionBuilder->build($image, $category, $document);
+
+            $elements[] = [
+                'source_element_key' => $image->sourceImageKey,
+                'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE,
+                'source_row_key' => null,
+                'section_number' => $image->sectionNumber,
+                'section_title' => $image->sectionTitle,
+                'page_reference' => $this->imageDescriptionBuilder->citation($image, $document),
+                'reference_text' => $description,
+                'display_text' => Str::limit($description, 280),
+                'sort_order' => $image->documentOrder,
+            ];
+        }
+
         usort($elements, static fn (array $left, array $right): int => ($left['sort_order'] ?? 0) <=> ($right['sort_order'] ?? 0));
 
         return array_map(static function (array $element): array {
@@ -242,6 +311,28 @@ class EnterpriseWikiDocumentSourceElementService
         }
 
         return 'Løpende tekst';
+    }
+
+    /**
+     * Purpose: Count how many times each distinct content_hash occurs among a document's images —
+     * the repetition signal EnterpriseWikiImageClassificationService uses to detect a recurring
+     * logo/brand graphic pasted several times in the same document.
+     * Inputs: The document's extracted images.
+     * Returns: content_hash => occurrence count.
+     * Side effects: None.
+     *
+     * @param  list<DocxImageData>  $images
+     * @return array<string, int>
+     */
+    private function contentHashOccurrenceCounts(array $images): array
+    {
+        $counts = [];
+
+        foreach ($images as $image) {
+            $counts[$image->contentHash] = ($counts[$image->contentHash] ?? 0) + 1;
+        }
+
+        return $counts;
     }
 
     private function resolveDocumentPath(EnterpriseWikiDocument $document): ?string

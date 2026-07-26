@@ -45,6 +45,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiArticleSummaryLinkService $articleSummaryLinkService,
         private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
+        private readonly EnterpriseWikiImageBlockBuilder $imageBlockBuilder,
     ) {}
 
     /**
@@ -79,6 +80,42 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $contentBlocks = [...$contentBlocks, ...$tableBlocks];
         $markdown = trim($markdown."\n\n".implode("\n\n", array_column($tableBlocks, 'markdown')));
+
+        return [$markdown, $contentBlocks];
+    }
+
+    /**
+     * Appends a genuine, deterministic "image" figure block (never AI-authored/interpreted) for
+     * each Word image whose citable source element the AI-generated blocks actually referenced —
+     * only for article/summary pages, mirroring appendTableBlocksIfRelevant() exactly (see
+     * EnterpriseWikiImageBlockBuilder for why attachment is keyed off citation rather than "every
+     * image in the document").
+     *
+     * @param  list<array<string, mixed>>  $contentBlocks
+     * @return array{0: string, 1: list<array<string, mixed>>} [markdown, contentBlocks] with any
+     *                                                         image blocks appended
+     */
+    private function appendImageBlocksIfRelevant(EnterpriseWikiDocument $document, EnterpriseWikiPage $page, string $markdown, array $contentBlocks): array
+    {
+        if (! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $imageIndexes = $this->imageBlockBuilder->referencedImageIndexes($contentBlocks);
+
+        if ($imageIndexes === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $images = $this->sourceElementService->imagesForDocument($document);
+        $imageBlocks = $this->imageBlockBuilder->buildImageBlocks($document, $images, $imageIndexes, count($contentBlocks));
+
+        if ($imageBlocks === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $contentBlocks = [...$contentBlocks, ...$imageBlocks];
+        $markdown = trim($markdown."\n\n".implode("\n\n", array_column($imageBlocks, 'markdown')));
 
         return [$markdown, $contentBlocks];
     }
@@ -168,6 +205,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
 
             [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $generated['markdown'], $contentBlocks);
+            [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
             [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
             $this->writeVersion($page->id, $markdown, $contentBlocks);

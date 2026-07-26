@@ -10,11 +10,13 @@ use App\Models\User;
 use App\Services\DocumentTextExtractor;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -31,6 +33,7 @@ class WikiSourceController extends Controller
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentDeletionService $deletionService,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -181,6 +184,81 @@ class WikiSourceController extends Controller
         $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $document->original_filename);
 
         return $response;
+    }
+
+    /**
+     * Serves a single Word image extracted from this document's ordinary content flow. There is
+     * no separate stored copy of the image anywhere (Fase 1 Enterprise Wiki image support
+     * deliberately reuses the document's own already-private, already customer-scoped storage
+     * instead of introducing a parallel media store — see CLAUDE.md: "reuse existing
+     * architecture") — the image is re-extracted from the stored .docx on every request and its
+     * bytes are re-encoded through GD before being served, which both validates the bytes really
+     * decode as the claimed format and strips any embedded metadata (e.g. JPEG EXIF) the source
+     * file might carry (Section 5: "remove or ignore unnecessary metadata").
+     */
+    public function image(EnterpriseWikiDocument $document, string $imageKey): Response
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        $image = $this->sourceElementService->imageBySourceKey($document, $imageKey);
+
+        if ($image === null) {
+            abort(404);
+        }
+
+        $servableBytes = $this->resolveServableImageBytes($image->bytes, $image->mimeType);
+
+        abort_if($servableBytes === null, 404);
+
+        return response($servableBytes, 200, [
+            'Content-Type' => $image->mimeType,
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Purpose: Decide what bytes are safe to serve for one image, preferring a GD re-encode (which
+     * strips embedded metadata, e.g. JPEG EXIF — Section 5: "remove or ignore unnecessary
+     * metadata") but falling back to the original bytes when GD cannot decode an otherwise
+     * genuinely well-formed image (some valid, spec-compliant PNG/JPEG files exercise decoder
+     * edge cases GD's bundled libraries reject even though the format's own header is intact).
+     * Only bytes that fail BOTH the GD re-encode and a raw header check are treated as truly
+     * corrupt and refused (Section 12: a corrupt image must be handled in a controlled way, not
+     * served as broken content — but a merely GD-unfriendly one should still display).
+     * Inputs: The raw bytes and the MIME type DocumentTextExtractor determined at extraction time.
+     * Returns: Bytes ready to serve, or null when the bytes are genuinely corrupt/unsupported.
+     * Side effects: None (operates entirely in memory).
+     */
+    private function resolveServableImageBytes(string $bytes, ?string $mimeType): ?string
+    {
+        $resource = @imagecreatefromstring($bytes);
+
+        if ($resource !== false) {
+            ob_start();
+
+            $encoded = match ($mimeType) {
+                'image/png' => imagepng($resource),
+                'image/jpeg' => imagejpeg($resource, null, 90),
+                default => false,
+            };
+
+            $reencodedBytes = ob_get_clean();
+            imagedestroy($resource);
+
+            if ($encoded && is_string($reencodedBytes) && $reencodedBytes !== '') {
+                return $reencodedBytes;
+            }
+        }
+
+        $headerInfo = @getimagesizefromstring($bytes);
+        $headerMimeType = is_array($headerInfo) ? ($headerInfo['mime'] ?? null) : null;
+
+        return $headerMimeType === $mimeType ? $bytes : null;
     }
 
     public function deletePreview(EnterpriseWikiDocument $document): JsonResponse
