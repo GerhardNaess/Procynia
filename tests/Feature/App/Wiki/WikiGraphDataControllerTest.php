@@ -837,6 +837,131 @@ class WikiGraphDataControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Document owner provenance (graph owner filter)
+    // =========================================================================
+
+    public function test_document_owner_id_is_carried_on_the_documents_list(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $owner = $this->createNamedUser($customer, 'Kari Nordmann');
+        $page = $this->createPage($customer, 'article', 'Side med eid dokument');
+        $run = $this->createAppliedRunForOwner($customer, $owner, $page);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $document = collect($response->json('documents'))->firstWhere('id', $run->source_id);
+        $this->assertSame($owner->id, $document['owner_user_id']);
+    }
+
+    public function test_owners_list_shows_the_owners_full_name(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $owner = $this->createNamedUser($customer, 'Kari Nordmann');
+        $page = $this->createPage($customer, 'article', 'Side med eid dokument');
+        $this->createAppliedRunForOwner($customer, $owner, $page);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $owners = collect($response->json('owners'));
+        $this->assertCount(1, $owners);
+        $this->assertSame($owner->id, $owners->first()['id']);
+        $this->assertSame('Kari Nordmann', $owners->first()['name']);
+    }
+
+    public function test_owner_with_no_represented_documents_is_not_listed(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $ownerWithPage = $this->createNamedUser($customer, 'Kari Nordmann');
+        $ownerWithoutPage = $this->createNamedUser($customer, 'Ola Hansen');
+        $page = $this->createPage($customer, 'article', 'Side med eid dokument');
+        $this->createAppliedRunForOwner($customer, $ownerWithPage, $page);
+        // Ola owns a document, but it is never attached to any page in this graph.
+        $this->createDocument($customer, $ownerWithoutPage->id);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $ownerIds = collect($response->json('owners'))->pluck('id');
+        $this->assertTrue($ownerIds->contains($ownerWithPage->id));
+        $this->assertFalse($ownerIds->contains($ownerWithoutPage->id));
+    }
+
+    public function test_a_user_from_another_customer_never_leaks_as_an_owner(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer);
+        $foreignUser = $this->createNamedUser($other, 'Fremmed Eier');
+        $page = $this->createPage($customer, 'article', 'Side hos egen kunde');
+        // Simulates a data inconsistency: a document belonging to this customer whose
+        // owner_user_id happens to reference a user from a different customer.
+        $document = $this->createDocument($customer, $foreignUser->id);
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => str_pad('h', 64, '0'),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+        ]);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $ownerIds = collect($response->json('owners'))->pluck('id');
+        $this->assertFalse($ownerIds->contains($foreignUser->id));
+        $document = collect($response->json('documents'))->first();
+        $this->assertNull($document['owner_user_id']);
+    }
+
+    public function test_document_with_no_owner_has_null_owner_user_id_and_contributes_no_owner(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'article', 'Side uten eier');
+        $this->createAppliedRunForOwner($customer, null, $page);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $document = collect($response->json('documents'))->first();
+        $this->assertNull($document['owner_user_id']);
+        $this->assertSame([], $response->json('owners'));
+    }
+
+    public function test_page_with_documents_from_two_different_owners_is_associated_with_both(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $ownerA = $this->createNamedUser($customer, 'Kari Nordmann');
+        $ownerB = $this->createNamedUser($customer, 'Ola Hansen');
+        $sharedConcept = $this->createPage($customer, 'concept', 'Delt konsept');
+        $runA = $this->createAppliedRunForOwner($customer, $ownerA, $sharedConcept);
+        $runB = $this->createAppliedRunForOwner($customer, $ownerB, $sharedConcept);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $documents = collect($response->json('documents'))->keyBy('id');
+        $this->assertSame($ownerA->id, $documents[$runA->source_id]['owner_user_id']);
+        $this->assertSame($ownerB->id, $documents[$runB->source_id]['owner_user_id']);
+        $ownerIds = collect($response->json('owners'))->pluck('id');
+        $this->assertTrue($ownerIds->contains($ownerA->id));
+        $this->assertTrue($ownerIds->contains($ownerB->id));
+    }
+
+    // =========================================================================
     // No side effects
     // =========================================================================
 
@@ -916,6 +1041,20 @@ class WikiGraphDataControllerTest extends TestCase
     {
         return User::query()->create([
             'name' => 'Test User',
+            'email' => Str::lower(Str::random(8)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+    }
+
+    /** A user with a specific, assertable display name — used as a document owner in tests. */
+    private function createNamedUser(Customer $customer, string $name): User
+    {
+        return User::query()->create([
+            'name' => $name,
             'email' => Str::lower(Str::random(8)).'@test.invalid',
             'password' => bcrypt('secret'),
             'role' => User::ROLE_USER,
@@ -1025,7 +1164,7 @@ class WikiGraphDataControllerTest extends TestCase
         ]);
     }
 
-    private function createDocument(Customer $customer): EnterpriseWikiDocument
+    private function createDocument(Customer $customer, ?int $ownerUserId = null): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
             'customer_id' => $customer->id,
@@ -1033,7 +1172,34 @@ class WikiGraphDataControllerTest extends TestCase
             'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
             'file_hash_sha256' => hash('sha256', Str::random(32)),
             'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'owner_user_id' => $ownerUserId,
         ]);
+    }
+
+    /** Creates an applied run for a document owned by $owner and registers the given pages. */
+    private function createAppliedRunForOwner(Customer $customer, ?User $owner, EnterpriseWikiPage ...$pages): EnterpriseWikiIngestRun
+    {
+        $document = $this->createDocument($customer, $owner?->id);
+
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => str_pad('h', 64, '0'),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
+
+        foreach ($pages as $page) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $page->id,
+            ]);
+        }
+
+        return $run;
     }
 
     /** Creates an applied maintainer decision run and registers the given pages in the pivot. */

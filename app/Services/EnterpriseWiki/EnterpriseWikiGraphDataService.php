@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\User;
 use Illuminate\Support\Collection;
 
 /**
@@ -216,7 +217,7 @@ class EnterpriseWikiGraphDataService
             ->where('is_current', true)
             ->pluck('id', 'enterprise_wiki_page_id');
 
-        ['by_page' => $documentIdsByPageId, 'documents' => $documentsPayload] =
+        ['by_page' => $documentIdsByPageId, 'documents' => $documentsPayload, 'owners' => $ownersPayload] =
             $this->documentProvenanceForPages($pageIds, $customerId);
 
         // --- Nodes ---
@@ -296,6 +297,7 @@ class EnterpriseWikiGraphDataService
             'edges' => $edges,
             'summary' => $summary,
             'documents' => $documentsPayload,
+            'owners' => $ownersPayload,
             'scope' => [
                 'type' => $scopeType,
                 'run_id' => $scopeRunId,
@@ -313,21 +315,36 @@ class EnterpriseWikiGraphDataService
      *          Article and summary pages typically resolve to exactly one document (possibly
      *          reached via several re-ingestion runs of the same document); concept and entity
      *          pages are shared across documents by design and may resolve to zero, one, or many.
-     * Inputs: The page ids visible in this graph payload, and the customer id (source_id carries
-     *         no foreign key, so the resolved document is always re-verified against this customer
-     *         to prevent a stale/cross-tenant id from ever surfacing another customer's filename).
+     *          Each document also carries its owner_user_id (EnterpriseWikiDocument::owner(),
+     *          the same field the customer-frontend document-owner UI already uses) so the
+     *          frontend can filter by document owner without a separate lookup — a page has a
+     *          given owner in scope whenever at least one of its documents is owned by them
+     *          (document and owner filters are independent conditions over the same
+     *          document_ids array, not a requirement that one specific document satisfy both).
+     * Inputs: The page ids visible in this graph payload, and the customer id (source_id and
+     *         owner_user_id carry no enforced customer scoping of their own here, so both the
+     *         resolved document and its owner are always re-verified against this customer to
+     *         prevent a stale/cross-tenant id from ever surfacing another customer's data).
      * Returns: 'by_page' — page_id => list<document_id> (only pages with at least one resolved
-     *          document are present); 'documents' — the deduplicated {id, title} list for exactly
-     *          the documents referenced by at least one page in this payload.
+     *          document are present); 'documents' — the deduplicated {id, title, owner_user_id}
+     *          list for exactly the documents referenced by at least one page in this payload;
+     *          'owners' — the deduplicated {id, name} list for exactly the owners of those
+     *          documents (a document with no owner contributes nothing here).
      * Side effects: None (read-only).
      *
      * @param  list<int>  $pageIds
-     * @return array{by_page: array<int, list<int>>, documents: list<array{id: int, title: string}>}
+     * @return array{
+     *     by_page: array<int, list<int>>,
+     *     documents: list<array{id: int, title: string, owner_user_id: ?int}>,
+     *     owners: list<array{id: int, name: string}>,
+     * }
      */
     private function documentProvenanceForPages(array $pageIds, int $customerId): array
     {
+        $empty = ['by_page' => [], 'documents' => [], 'owners' => []];
+
         if ($pageIds === []) {
-            return ['by_page' => [], 'documents' => []];
+            return $empty;
         }
 
         $runPageRows = EnterpriseWikiIngestRunPage::query()
@@ -335,7 +352,7 @@ class EnterpriseWikiGraphDataService
             ->get(['enterprise_wiki_ingest_run_id', 'enterprise_wiki_page_id']);
 
         if ($runPageRows->isEmpty()) {
-            return ['by_page' => [], 'documents' => []];
+            return $empty;
         }
 
         $runIds = $runPageRows->pluck('enterprise_wiki_ingest_run_id')->unique()->all();
@@ -347,22 +364,24 @@ class EnterpriseWikiGraphDataService
             ->pluck('source_id', 'id');
 
         if ($documentIdByRunId->isEmpty()) {
-            return ['by_page' => [], 'documents' => []];
+            return $empty;
         }
 
         // Defense in depth: source_id carries no foreign key constraint — re-verify every
-        // candidate document id actually belongs to this customer before trusting its filename.
-        $documentTitleById = EnterpriseWikiDocument::query()
+        // candidate document id actually belongs to this customer before trusting its filename
+        // or owner.
+        $documentRowsById = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->whereIn('id', $documentIdByRunId->unique()->values()->all())
-            ->pluck('original_filename', 'id');
+            ->get(['id', 'original_filename', 'owner_user_id'])
+            ->keyBy('id');
 
         $byPage = [];
 
         foreach ($runPageRows->groupBy('enterprise_wiki_page_id') as $pageId => $rows) {
             $documentIds = $rows
                 ->map(fn (EnterpriseWikiIngestRunPage $row): ?int => $documentIdByRunId[$row->enterprise_wiki_ingest_run_id] ?? null)
-                ->filter(fn (?int $documentId): bool => $documentId !== null && $documentTitleById->has($documentId))
+                ->filter(fn (?int $documentId): bool => $documentId !== null && $documentRowsById->has($documentId))
                 ->unique()
                 ->values()
                 ->all();
@@ -374,12 +393,42 @@ class EnterpriseWikiGraphDataService
 
         $usedDocumentIds = collect($byPage)->flatten()->unique();
 
-        $documents = $documentTitleById
-            ->filter(fn (string $title, int $documentId): bool => $usedDocumentIds->contains($documentId))
-            ->map(fn (string $title, int $documentId): array => ['id' => $documentId, 'title' => $title])
+        $usedDocuments = $documentRowsById->filter(
+            fn (EnterpriseWikiDocument $document): bool => $usedDocumentIds->contains($document->id)
+        );
+
+        // Defense in depth: owner_user_id has a real foreign key to users, but re-verify the
+        // owner belongs to this customer before returning their name — a document's owner must
+        // always be a member of the same customer in normal operation, but this is the same
+        // cross-tenant safety margin already applied to the document lookup above.
+        $ownerIds = $usedDocuments->pluck('owner_user_id')->filter()->unique()->values()->all();
+
+        $ownerNameById = $ownerIds === [] ? collect() : User::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('id', $ownerIds)
+            ->get(['id', 'name', 'email'])
+            ->mapWithKeys(fn (User $user): array => [
+                $user->id => trim((string) $user->name) !== '' ? $user->name : $user->email,
+            ]);
+
+        $documents = $usedDocuments
+            ->map(function (EnterpriseWikiDocument $document) use ($ownerNameById): array {
+                $ownerId = $document->owner_user_id;
+
+                return [
+                    'id' => $document->id,
+                    'title' => $document->original_filename,
+                    'owner_user_id' => $ownerId !== null && $ownerNameById->has($ownerId) ? $ownerId : null,
+                ];
+            })
             ->values()
             ->all();
 
-        return ['by_page' => $byPage, 'documents' => $documents];
+        $owners = $ownerNameById
+            ->map(fn (string $name, int $id): array => ['id' => $id, 'name' => $name])
+            ->values()
+            ->all();
+
+        return ['by_page' => $byPage, 'documents' => $documents, 'owners' => $owners];
     }
 }
