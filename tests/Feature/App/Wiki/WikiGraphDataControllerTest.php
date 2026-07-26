@@ -703,6 +703,140 @@ class WikiGraphDataControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Document provenance (graph filters — search/document/type/status)
+    // =========================================================================
+
+    public function test_page_attached_to_an_applied_run_has_the_documents_id_in_document_ids(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'article', 'Artikkel med dokument');
+        $run = $this->createAppliedRun($customer, $page);
+        $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $node = collect($response->json('nodes'))->firstWhere('page_id', $page->id);
+        $this->assertSame([$document->id], $node['document_ids']);
+    }
+
+    public function test_top_level_documents_list_includes_id_and_human_readable_title(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'article', 'Artikkel med dokument');
+        $run = $this->createAppliedRun($customer, $page);
+        $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $documents = collect($response->json('documents'));
+        $this->assertCount(1, $documents);
+        $this->assertSame($document->id, $documents->first()['id']);
+        $this->assertSame($document->original_filename, $documents->first()['title']);
+    }
+
+    public function test_documents_list_only_includes_documents_referenced_by_at_least_one_node(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $linkedPage = $this->createPage($customer, 'article', 'Med dokument');
+        $unlinkedPage = $this->createPage($customer, 'article', 'Uten dokument');
+        $run = $this->createAppliedRun($customer, $linkedPage);
+        $usedDocument = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+        // A second document exists but is never attached to any page in this graph.
+        $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $documentIds = collect($response->json('documents'))->pluck('id');
+        $this->assertSame([$usedDocument->id], $documentIds->all());
+        $unlinkedNode = collect($response->json('nodes'))->firstWhere('page_id', $unlinkedPage->id);
+        $this->assertSame([], $unlinkedNode['document_ids']);
+    }
+
+    public function test_page_with_no_ingest_run_has_empty_document_ids(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'concept', 'Konsept uten kilde');
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $node = collect($response->json('nodes'))->firstWhere('page_id', $page->id);
+        $this->assertSame([], $node['document_ids']);
+    }
+
+    public function test_a_shared_concept_page_can_have_more_than_one_document_id(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $sharedConcept = $this->createPage($customer, 'concept', 'Delt konsept');
+        $runA = $this->createAppliedRun($customer, $sharedConcept);
+        $runB = $this->createAppliedRun($customer, $sharedConcept);
+        $documentA = EnterpriseWikiDocument::query()->findOrFail($runA->source_id);
+        $documentB = EnterpriseWikiDocument::query()->findOrFail($runB->source_id);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $node = collect($response->json('nodes'))->firstWhere('page_id', $sharedConcept->id);
+        $this->assertEqualsCanonicalizing([$documentA->id, $documentB->id], $node['document_ids']);
+        $this->assertCount(2, $response->json('documents'));
+    }
+
+    public function test_a_run_belonging_to_another_customer_never_leaks_its_document(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'article', 'Side hos egen kunde');
+        $foreignDocument = $this->createDocument($other);
+        $foreignRun = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $other->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $foreignDocument->id,
+            'source_hash' => str_pad('h', 64, '0'),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
+        // Simulates a stale/inconsistent pivot row pointing at a run from a different customer —
+        // source_id/source_type carry no foreign key, so this must be defended against explicitly.
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $foreignRun->id,
+            'enterprise_wiki_page_id' => $page->id,
+        ]);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $node = collect($response->json('nodes'))->firstWhere('page_id', $page->id);
+        $this->assertSame([], $node['document_ids']);
+        $this->assertSame([], $response->json('documents'));
+    }
+
+    public function test_run_scoped_graph_also_includes_document_provenance(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $page = $this->createPage($customer, 'article', 'Side i kjøring');
+        $run = $this->createAppliedRun($customer, $page);
+        $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?run_id='.$run->id);
+
+        $response->assertOk();
+        $node = collect($response->json('nodes'))->firstWhere('page_id', $page->id);
+        $this->assertSame([$document->id], $node['document_ids']);
+    }
+
+    // =========================================================================
     // No side effects
     // =========================================================================
 

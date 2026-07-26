@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
@@ -215,6 +216,9 @@ class EnterpriseWikiGraphDataService
             ->where('is_current', true)
             ->pluck('id', 'enterprise_wiki_page_id');
 
+        ['by_page' => $documentIdsByPageId, 'documents' => $documentsPayload] =
+            $this->documentProvenanceForPages($pageIds, $customerId);
+
         // --- Nodes ---
 
         $nodes = $pages->map(function (EnterpriseWikiPage $page) use (
@@ -223,6 +227,7 @@ class EnterpriseWikiGraphDataService
             $lintErrorCounts,
             $lintWarningCounts,
             $currentVersionIds,
+            $documentIdsByPageId,
         ): array {
             $errors = (int) ($lintErrorCounts[$page->id] ?? 0);
             $warnings = (int) ($lintWarningCounts[$page->id] ?? 0);
@@ -244,6 +249,7 @@ class EnterpriseWikiGraphDataService
                     $warnings > 0 => 'warning',
                     default => 'ok',
                 },
+                'document_ids' => $documentIdsByPageId[$page->id] ?? [],
             ];
         })->values()->all();
 
@@ -289,11 +295,91 @@ class EnterpriseWikiGraphDataService
             'nodes' => $nodes,
             'edges' => $edges,
             'summary' => $summary,
+            'documents' => $documentsPayload,
             'scope' => [
                 'type' => $scopeType,
                 'run_id' => $scopeRunId,
                 'page_id' => $scopePageId,
             ],
         ];
+    }
+
+    /**
+     * Purpose: Derive which source document(s) each page is associated with, using the same
+     *          provenance model as EnterpriseWikiDocumentDeletionService — most Enterprise Wiki
+     *          tables carry no direct document_id column, so a page's document dependency is
+     *          derived from enterprise_wiki_ingest_run_pages (the pivot between ingest runs and
+     *          the pages those runs touched) joined to each run's own source_type/source_id.
+     *          Article and summary pages typically resolve to exactly one document (possibly
+     *          reached via several re-ingestion runs of the same document); concept and entity
+     *          pages are shared across documents by design and may resolve to zero, one, or many.
+     * Inputs: The page ids visible in this graph payload, and the customer id (source_id carries
+     *         no foreign key, so the resolved document is always re-verified against this customer
+     *         to prevent a stale/cross-tenant id from ever surfacing another customer's filename).
+     * Returns: 'by_page' — page_id => list<document_id> (only pages with at least one resolved
+     *          document are present); 'documents' — the deduplicated {id, title} list for exactly
+     *          the documents referenced by at least one page in this payload.
+     * Side effects: None (read-only).
+     *
+     * @param  list<int>  $pageIds
+     * @return array{by_page: array<int, list<int>>, documents: list<array{id: int, title: string}>}
+     */
+    private function documentProvenanceForPages(array $pageIds, int $customerId): array
+    {
+        if ($pageIds === []) {
+            return ['by_page' => [], 'documents' => []];
+        }
+
+        $runPageRows = EnterpriseWikiIngestRunPage::query()
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->get(['enterprise_wiki_ingest_run_id', 'enterprise_wiki_page_id']);
+
+        if ($runPageRows->isEmpty()) {
+            return ['by_page' => [], 'documents' => []];
+        }
+
+        $runIds = $runPageRows->pluck('enterprise_wiki_ingest_run_id')->unique()->all();
+
+        $documentIdByRunId = EnterpriseWikiIngestRun::query()
+            ->where('customer_id', $customerId)
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->whereIn('id', $runIds)
+            ->pluck('source_id', 'id');
+
+        if ($documentIdByRunId->isEmpty()) {
+            return ['by_page' => [], 'documents' => []];
+        }
+
+        // Defense in depth: source_id carries no foreign key constraint — re-verify every
+        // candidate document id actually belongs to this customer before trusting its filename.
+        $documentTitleById = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('id', $documentIdByRunId->unique()->values()->all())
+            ->pluck('original_filename', 'id');
+
+        $byPage = [];
+
+        foreach ($runPageRows->groupBy('enterprise_wiki_page_id') as $pageId => $rows) {
+            $documentIds = $rows
+                ->map(fn (EnterpriseWikiIngestRunPage $row): ?int => $documentIdByRunId[$row->enterprise_wiki_ingest_run_id] ?? null)
+                ->filter(fn (?int $documentId): bool => $documentId !== null && $documentTitleById->has($documentId))
+                ->unique()
+                ->values()
+                ->all();
+
+            if ($documentIds !== []) {
+                $byPage[(int) $pageId] = $documentIds;
+            }
+        }
+
+        $usedDocumentIds = collect($byPage)->flatten()->unique();
+
+        $documents = $documentTitleById
+            ->filter(fn (string $title, int $documentId): bool => $usedDocumentIds->contains($documentId))
+            ->map(fn (string $title, int $documentId): array => ['id' => $documentId, 'title' => $title])
+            ->values()
+            ->all();
+
+        return ['by_page' => $byPage, 'documents' => $documents];
     }
 }
