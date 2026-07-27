@@ -216,6 +216,7 @@ class WikiSourceController extends Controller
 
         return response($servableBytes, 200, [
             'Content-Type' => $image->mimeType,
+            'Content-Disposition' => 'inline',
             'Cache-Control' => 'private, no-store, max-age=0',
             'X-Content-Type-Options' => 'nosniff',
         ]);

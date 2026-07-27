@@ -97,6 +97,21 @@ class WikiSourceControllerImageTest extends TestCase
         $this->assertStringContainsString('no-store', $cacheControl);
     }
 
+    public function test_response_sets_inline_content_disposition_and_correct_mime_type(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocxDocument($customer, $this->buildDocxWithOneImage());
+
+        $response = $this->actingAs($user)->get("/app/wiki/sources/{$document->id}/images/img0");
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'image/png');
+        $this->assertStringContainsString('inline', (string) $response->headers->get('Content-Disposition'));
+        $this->assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
+    }
+
     private function buildDocxWithOneImage(?string $mediaBytesOverride = null): string
     {
         $path = tempnam(sys_get_temp_dir(), 'procynia-wiki-image-');

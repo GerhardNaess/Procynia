@@ -3103,6 +3103,101 @@ XML;
     }
 
     /**
+     * Regression for a real production document ("Incident Management Illustration.docx", run
+     * 475): an image pasted from a web page becomes an INCLUDEPICTURE field (fldChar begin/
+     * instrText/fldChar separate/<w:drawing>/fldChar end, all inside one paragraph) rather than a
+     * bare <w:drawing> — Word still caches a normal embedded relationship+drawing inside the field
+     * result run, so extraction must still find it. The image's wp:docPr in this real document
+     * carries only Word's auto-generated `name="Picture 1"` — no descr, no title — and there is no
+     * formal Word caption paragraph anywhere. Before the fix, `docxImageAltText()` fell back to
+     * `name`, producing the meaningless alt-text "Picture 1"; this test locks in that it now
+     * resolves to null instead.
+     */
+    public function test_it_extracts_an_includepicture_field_image_with_no_real_alt_text_or_caption(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren i forbindelse med Incident prosessen.</w:t></w:r></w:p>
+        <w:p/>
+        <w:p xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+            <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+            <w:r><w:instrText xml:space="preserve"> INCLUDEPICTURE "/tmp/some-temp-file" \* MERGEFORMATINET </w:instrText></w:r>
+            <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+            <w:r>
+                <w:rPr><w:noProof/></w:rPr>
+                <w:drawing>
+                    <wp:inline>
+                        <wp:extent cx="5731510" cy="5731510"/>
+                        <wp:docPr id="1828865866" name="Picture 1"/>
+                        <a:graphic>
+                            <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:pic>
+                                    <pic:blipFill>
+                                        <a:blip r:embed="rId4"/>
+                                    </pic:blipFill>
+                                </pic:pic>
+                            </a:graphicData>
+                        </a:graphic>
+                    </wp:inline>
+                </w:drawing>
+            </w:r>
+            <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+            // A real-sized (not tiny) image — the actual production document's picture was 554x554.
+            $mediaImage = imagecreatetruecolor(554, 554);
+            imagefilledrectangle($mediaImage, 0, 0, 553, 553, (int) imagecolorallocate($mediaImage, 50, 90, 140));
+            ob_start();
+            imagepng($mediaImage);
+            $mediaBytes = (string) ob_get_clean();
+            imagedestroy($mediaImage);
+
+            $zip->addFromString('word/document.xml', $documentXml);
+            $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            $zip->addFromString('word/media/image1.png', $mediaBytes);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor;
+            $images = $extractor->extractDocxImages($path);
+
+            $this->assertCount(1, $images);
+            $image = $images[0];
+
+            $this->assertSame('rId4', $image->relationshipId);
+            $this->assertSame('image/png', $image->mimeType);
+            $this->assertSame(554, $image->width);
+            $this->assertSame(554, $image->height);
+            // Word's auto-generated shape name must never be mistaken for real alt-text.
+            $this->assertNull($image->altText);
+            $this->assertNull($image->caption);
+            $this->assertSame(
+                'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren i forbindelse med Incident prosessen.',
+                $image->textBefore,
+            );
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    /**
      * Purpose: Build an inline DOCX image paragraph fixture (mirrors the shape produced by real
      * Word documents for an ordinary, non-anchored inline image).
      * Inputs: The relationship ID to reference, and the docPr title/descr values.

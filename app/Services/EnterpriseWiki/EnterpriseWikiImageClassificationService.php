@@ -69,9 +69,20 @@ class EnterpriseWikiImageClassificationService
         }
 
         if ($normalizedText === '') {
-            // No caption, no alt-text: only a size-based guess is available. A small image with
-            // no textual signal at all is conservatively treated as decorative; a larger one is
-            // left 'unknown' rather than assumed to be either informative or decorative.
+            // No caption, no alt-text — but Word never requires either for an image to be
+            // genuinely informative (confirmed via a real production document: an
+            // INCLUDEPICTURE-pasted diagram with no formal alt-text/caption at all). When the
+            // paragraph immediately before/after the image explicitly introduces it ("Figuren
+            // under illustrerer ...", "Bildet over viser ..."), that phrasing is a strong,
+            // deterministic signal that the image is informative and belongs to the surrounding
+            // text — a figure must not be demoted just because Word's metadata is empty.
+            if ($this->isExplicitlyIntroducedAsFigure($image)) {
+                return self::CATEGORY_INFORMATIVE;
+            }
+
+            // Otherwise only a size-based guess is available. A small image with no textual
+            // signal at all is conservatively treated as decorative; a larger one is left
+            // 'unknown' rather than assumed to be either informative or decorative.
             return $this->isSmall($image) ? self::CATEGORY_DECORATIVE : self::CATEGORY_UNKNOWN;
         }
 
@@ -138,5 +149,28 @@ class EnterpriseWikiImageClassificationService
         $combined = trim(implode(' ', array_filter([$image->caption, $image->altText])));
 
         return mb_strtolower($combined, 'UTF-8');
+    }
+
+    /**
+     * Purpose: Detect whether the paragraph immediately before/after the image explicitly
+     * introduces it as a figure (e.g. "Figuren under illustrerer ...", "Bildet over viser ...",
+     * "Illustrasjonen beskriver ..."). Deliberately narrow — only a direct
+     * subject+direction?+verb phrase counts, never a passing mid-sentence mention — so this
+     * cannot be triggered by unrelated body text that merely contains the word "figur".
+     * Inputs: The image (its textBefore/textAfter).
+     * Returns: Whether either surrounding paragraph explicitly introduces the figure.
+     * Side effects: None.
+     */
+    private function isExplicitlyIntroducedAsFigure(DocxImageData $image): bool
+    {
+        $pattern = '/\b(figur(?:en)?|bilde(?:t)?|illustrasjon(?:en)?|diagram(?:met)?)\s+(?:under|over|nedenfor|ovenfor)?\s*(?:illustrerer|viser|beskriver)\b/u';
+
+        foreach ([$image->textBefore, $image->textAfter] as $candidate) {
+            if ($candidate !== null && preg_match($pattern, mb_strtolower($candidate, 'UTF-8')) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

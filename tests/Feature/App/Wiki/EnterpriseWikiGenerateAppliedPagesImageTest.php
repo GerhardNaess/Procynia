@@ -134,6 +134,173 @@ class EnterpriseWikiGenerateAppliedPagesImageTest extends TestCase
         );
     }
 
+    /**
+     * Full-chain regression for the exact real production document that failed in run 475
+     * ("Incident Management Illustration.docx"): a paragraph explicitly introducing the figure
+     * ("Figuren under illustrerer ..."), a blank spacer paragraph, then an INCLUDEPICTURE-wrapped
+     * image with no formal alt-text (only Word's auto-generated docPr name="Picture 1") and no
+     * Word caption paragraph anywhere. The AI mock replays exactly what the real gpt-5 response
+     * did for this document — citing both the intro paragraph and the image on the article page.
+     * DOCX -> image extraction -> classification -> source element -> page citation -> image
+     * block -> content_blocks_json, driven through the real wiki:generate-applied-pages command,
+     * with no real OpenAI call.
+     */
+    public function test_the_real_incident_management_illustration_document_produces_a_figure_block(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createIncidentManagementIllustrationDocument($customer);
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer, $document);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultCitingBothParagraphAndImage($sourceElements));
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->firstOrFail();
+
+        $imageBlocks = collect($version->content_blocks_json)
+            ->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')
+            ->values();
+
+        $this->assertCount(1, $imageBlocks);
+        $this->assertSame('img0', $imageBlocks[0]['image_data']['source_image_key']);
+        $this->assertSame('informative', $imageBlocks[0]['image_data']['category']);
+        // Word's auto-generated "Picture 1" name must never surface as real alt-text — an image
+        // with no genuine alt-text gets an empty alt attribute (accessible, not fabricated).
+        $this->assertSame('', $imageBlocks[0]['image_data']['alt_text']);
+        $this->assertSame(
+            $document->original_filename.' → Figur 1',
+            $imageBlocks[0]['page_reference'],
+        );
+        // The intro paragraph's own text reaches the figure's deterministic description (Section
+        // 9: reused as Wiki-answer context) even though there is no formal Word caption.
+        $this->assertStringContainsString(
+            'Figuren under illustrerer samhandlingsprosessen',
+            $imageBlocks[0]['image_data']['description'],
+        );
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function structuredPageResultCitingBothParagraphAndImage(array $sourceElements): array
+    {
+        $paragraph = collect($sourceElements)->firstWhere('source_element_type', 'paragraph');
+        $image = collect($sourceElements)->firstWhere('source_element_type', 'image');
+
+        $this->assertNotNull($paragraph, 'Expected the intro paragraph to be a citable source element.');
+        $this->assertNotNull($image, 'Expected the image to be exposed as a citable source element.');
+
+        return [
+            'markdown' => self::FAKE_MARKDOWN,
+            'blocks' => [
+                [
+                    'markdown' => self::FAKE_MARKDOWN,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => [
+                        (string) $paragraph['source_element_key'],
+                        (string) $image['source_element_key'],
+                    ],
+                    'source_element_types' => [
+                        (string) $paragraph['source_element_type'],
+                        (string) $image['source_element_type'],
+                    ],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
+    }
+
+    private function createIncidentManagementIllustrationDocument(Customer $customer): EnterpriseWikiDocument
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren i forbindelse med Incident prosessen.</w:t></w:r></w:p>
+        <w:p/>
+        <w:p xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+            <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+            <w:r><w:instrText xml:space="preserve"> INCLUDEPICTURE "/tmp/some-temp-file" \* MERGEFORMATINET </w:instrText></w:r>
+            <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+            <w:r>
+                <w:rPr><w:noProof/></w:rPr>
+                <w:drawing>
+                    <wp:inline>
+                        <wp:extent cx="5731510" cy="5731510"/>
+                        <wp:docPr id="1828865866" name="Picture 1"/>
+                        <a:graphic>
+                            <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:pic>
+                                    <pic:blipFill>
+                                        <a:blip r:embed="rId4"/>
+                                    </pic:blipFill>
+                                </pic:pic>
+                            </a:graphicData>
+                        </a:graphic>
+                    </wp:inline>
+                </w:drawing>
+            </w:r>
+            <w:r><w:fldChar w:fldCharType="end"/></w:r>
+        </w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+        $mediaImage = imagecreatetruecolor(554, 554);
+        imagefilledrectangle($mediaImage, 0, 0, 553, 553, (int) imagecolorallocate($mediaImage, 50, 90, 140));
+        ob_start();
+        imagepng($mediaImage);
+        $mediaBytes = (string) ob_get_clean();
+        imagedestroy($mediaImage);
+
+        $path = tempnam(sys_get_temp_dir(), 'incident-management-illustration-').'.docx';
+        $zip = new ZipArchive;
+        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $zip->addFromString('word/document.xml', $documentXml);
+        $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+        $zip->addFromString('word/media/image1.png', $mediaBytes);
+        $zip->close();
+        $docxBytes = (string) file_get_contents($path);
+        @unlink($path);
+
+        $filename = 'Incident Management Illustration.docx';
+        $document = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => $filename,
+            'file_path' => sprintf('customers/%d/wiki-documents/%s.docx', $customer->id, Str::random(8)),
+            'file_hash_sha256' => hash('sha256', $docxBytes),
+            'extracted_text' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren i forbindelse med Incident prosessen.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+
+        Storage::disk('local')->put($document->file_path, $docxBytes);
+
+        return $document;
+    }
+
     private function mockAiClientCitingFirstSourceElement(): void
     {
         $this->mock(WikiPageContentAiClient::class)

@@ -73,6 +73,67 @@ class EnterpriseWikiImageClassificationServiceTest extends TestCase
         $this->assertTrue($service->isShowable(EnterpriseWikiImageClassificationService::CATEGORY_UNKNOWN));
     }
 
+    /**
+     * Regression for a real production document ("Incident Management Illustration.docx", run
+     * 475): no caption, no real alt-text (Word's auto-generated "Picture 1" name is already
+     * excluded upstream in DocumentTextExtractor), but the paragraph immediately before the image
+     * explicitly introduces it. A figure must not be demoted to 'unknown'/'decorative' just
+     * because Word's own metadata is empty when the surrounding text already establishes it as
+     * informative.
+     */
+    public function test_it_classifies_an_image_explicitly_introduced_by_preceding_text_as_informative(): void
+    {
+        $service = new EnterpriseWikiImageClassificationService;
+        $image = $this->image([
+            'width' => 554,
+            'height' => 554,
+            'caption' => null,
+            'altText' => null,
+            'textBefore' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren i forbindelse med Incident prosessen.',
+        ]);
+
+        $category = $service->classify($image, 1);
+
+        $this->assertSame(EnterpriseWikiImageClassificationService::CATEGORY_INFORMATIVE, $category);
+        $this->assertTrue($service->isShowable($category));
+    }
+
+    public function test_it_classifies_an_image_explicitly_introduced_by_following_text_as_informative(): void
+    {
+        $service = new EnterpriseWikiImageClassificationService;
+        $image = $this->image([
+            'width' => 400,
+            'height' => 300,
+            'caption' => null,
+            'altText' => null,
+            'textAfter' => 'Bildet over viser en oversikt over arbeidsflyten.',
+        ]);
+
+        $this->assertSame(
+            EnterpriseWikiImageClassificationService::CATEGORY_INFORMATIVE,
+            $service->classify($image, 1),
+        );
+    }
+
+    public function test_it_does_not_treat_a_passing_mid_sentence_mention_of_figur_as_an_introduction(): void
+    {
+        $service = new EnterpriseWikiImageClassificationService;
+        $image = $this->image([
+            'width' => 900,
+            'height' => 700,
+            'caption' => null,
+            'altText' => null,
+            'textBefore' => 'Denne figuren er ikke nevnt andre steder i dokumentet.',
+        ]);
+
+        // "Denne figuren er ikke nevnt" does not match the direct subject+verb introduction
+        // pattern ("figuren ... illustrerer/viser/beskriver") — stays conservatively 'unknown'.
+        $this->assertSame(
+            EnterpriseWikiImageClassificationService::CATEGORY_UNKNOWN,
+            $service->classify($image, 1),
+        );
+    }
+
     public function test_it_classifies_a_screenshot_by_caption_keyword(): void
     {
         $service = new EnterpriseWikiImageClassificationService;
