@@ -323,6 +323,106 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame('semantic_verification', $claim->review_metadata['classification_basis'] ?? null);
     }
 
+    // =========================================================================
+    // Run-482 fix: a claim the model mis-tagged source_based, but whose text genuinely reads
+    // as advice, is rescued to best_practice instead of unsupported_generated_content
+    // =========================================================================
+
+    public function test_source_based_claim_with_genuine_best_practice_wording_is_rescued_to_best_practice_on_not_supported_verdict(): void
+    {
+        $customer = $this->createCustomer();
+
+        // The model generated this as content_origin=source_based with real cited source
+        // elements (its own mistake — this is exactly what happened in ingest run 482) even
+        // though the text is a general recommendation, not a fact drawn from those elements.
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Illustrasjonen kan brukes som et felles referansepunkt i opplæring og onboarding.',
+            [[
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                'page_reference' => 'Løpende tekst',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+        $this->assertFalse(
+            EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists(),
+        );
+    }
+
+    public function test_customer_specific_claim_without_best_practice_wording_still_blocks_as_unsupported(): void
+    {
+        $customer = $this->createCustomer();
+
+        // No recommendation marker at all — a plain assertion of fact about the customer's
+        // process. This must still block regardless of the run-482 rescue fix.
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Kunden har fem godkjente eskaleringsnivåer definert i sin styringsmodell.',
+            [[
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                'page_reference' => 'Løpende tekst',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT, $claim->sourceStatus());
+    }
+
+    public function test_same_guidance_presented_as_a_customer_fact_still_blocks_instead_of_being_rescued(): void
+    {
+        $customer = $this->createCustomer();
+
+        // Same underlying guidance as the rescued test above, but phrased as something the
+        // supplier already does for this customer, not as advice — Section 4's explicit "must
+        // not present best practice as if it comes from the document" rule. The marker word
+        // ("kan brukes") is present, but assertsCurrentPartyState() must still veto it.
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
+            $customer,
+            'Leverandøren bruker illustrasjonen som kan brukes som et felles referansepunkt i opplæringen.',
+            [[
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                'page_reference' => 'Løpende tekst',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+    }
+
     public function test_explicit_best_practice_block_remains_best_practice_review_without_calling_verification_ai(): void
     {
         $customer = $this->createCustomer();

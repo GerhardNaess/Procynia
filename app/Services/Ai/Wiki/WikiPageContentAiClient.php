@@ -35,6 +35,7 @@ class WikiPageContentAiClient
      * other wiki pages via inline [[slug]]/[[slug|anchor]] wikilinks without inventing slugs.
      *
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
      */
     public function generateFromSource(
@@ -209,6 +210,8 @@ class WikiPageContentAiClient
             '- For source_based blocks, copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
             '- A source_based block without source_element_keys is invalid. Never mark a block source_based just because it sounds plausible or reads like something the source document would say — only when you can cite the specific source_element_keys it is drawn from.',
             '- A block is best_practice when it deliberately goes beyond the source document with advice, a recommendation, or a possible improvement — and does NOT claim the customer or supplier already has, does, or follows the thing being suggested. It must be phrased as advice ("could", "should consider", "a recommended approach is..."), never as a statement of the customer\'s or supplier\'s current state ("the customer has...", "the service uses...", "the supplier follows...").',
+            '- Open every best_practice sentence with an explicit advisory marker in the response language — e.g. in Norwegian: "Det anbefales ...", "Som beste praksis ...", "En vanlig tilnærming er ...", "Faglig anbefaling: ..."; in English: "It is recommended ...", "As a best practice, ...", "A common approach is ...", "Professional guidance suggests ...". A reader must be able to tell it is a suggestion from the sentence\'s own opening words, without needing any other context.',
+            '- Do NOT write a best_practice sentence as a soft-sounding but still declarative claim about the general benefit of something — e.g. "X bidrar til raskere avklaringer", "X blir et effektivt støtteverktøy", "X kan brukes som et referansepunkt" read as statements of fact, not advice, even though they are gentler than a hard claim. Recast them as explicit advice instead: "Det anbefales å bruke X til Y" / "Som beste praksis bør X brukes til Y".',
             '- General industry/framework knowledge that elaborates on a concept beyond what the source document literally states (e.g. explaining what a standard practice typically involves) is best_practice, not source_based — even if it uses similar terminology to the source. Only mark it source_based if you can cite the exact source_element_keys that state those specific facts.',
             '- For best_practice blocks, explain the positive basis in best_practice_reason and leave source_element_keys/source_element_types empty.',
             '- Do not classify factual statements, uncertain source facts, rewritten source facts, statements about the customer\'s or supplier\'s current/actual state, or likely hallucinations as best_practice — those must be source_based (if genuinely grounded, with real source_element_keys) or omitted.',

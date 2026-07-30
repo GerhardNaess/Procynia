@@ -3670,6 +3670,7 @@ return [
         'source_open_document' => 'Open original source',
         'wiki_table_caption' => 'Table :number',
         'wiki_figure_caption' => 'Figure :number',
+        'wiki_best_practice_section_label' => 'Best practice',
         'quality_source_found' => 'Source found',
         'quality_no_source' => 'Missing source',
         'quality_missing_excerpt' => 'Missing excerpt',

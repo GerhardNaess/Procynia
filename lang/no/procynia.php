@@ -3670,6 +3670,7 @@ return [
         'source_open_document' => 'Åpne original kilde',
         'wiki_table_caption' => 'Tabell :number',
         'wiki_figure_caption' => 'Figur :number',
+        'wiki_best_practice_section_label' => 'Beste praksis',
         'quality_source_found' => 'Kilde funnet',
         'quality_no_source' => 'Mangler kilde',
         'quality_missing_excerpt' => 'Mangler utdrag',

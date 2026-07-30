@@ -2001,25 +2001,23 @@ class EnterpriseWikiVerifyPageClaimsService
     /**
      * Only reached for a claim that did NOT take the best-practice fast path above — either it
      * was never best_practice, or it was but its wording had already drifted into an unverified
-     * factual assertion (Del 4 test: "bør" → "har" requires re-classification). In both cases the
-     * text must still genuinely read as a recommendation now, under the AI verdict this method
-     * gates — a stale content_origin/review_metadata tag is never trusted on its own.
+     * factual assertion (Del 4 test: "bør" → "har" requires re-classification), or the generating
+     * block never declared best_practice at all.
+     *
+     * Run-482 fix: this used to ALSO require the claim's own content_origin/review_metadata to
+     * already say best_practice (i.e. only ever "reconfirming" a tag the AI got right at
+     * generation time) — so a genuinely advisory sentence the model mis-tagged source_based (a
+     * real, observed generation-time inconsistency, not a hypothetical) had no path to rescue: it
+     * failed source verification and was recorded as unsupported_generated_content — a blocking
+     * claim-integrity defect — purely because of the model's own labeling mistake, not because the
+     * text was actually presented as a customer fact. The deterministic text check
+     * (isGenuineBestPracticeText — a real recommendation marker AND no assertion that a named
+     * party already has/does the thing suggested) is now the sole criterion: it is what actually
+     * decides whether a claim reads as advice or as a customer-specific fact, so a stale or wrong
+     * content_origin/review_metadata tag must not override it in either direction.
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        if (! $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)) {
-            return false;
-        }
-
-        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
-            return true;
-        }
-
-        $metadata = (array) ($claim->review_metadata ?? []);
-
-        return in_array(($metadata['classification_basis'] ?? null), [
-            'ai_block_content_origin',
-            'approved_best_practice',
-        ], true);
+        return $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text);
     }
 }

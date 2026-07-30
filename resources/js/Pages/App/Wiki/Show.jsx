@@ -2218,6 +2218,15 @@ export default function WikiShow({
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
+                                        // A block's own content_origin is set once at generation time and never
+                                        // rewritten — but claim verification can later re-classify a specific claim
+                                        // (e.g. AI-mistagged source_based text that reads as genuine best-practice
+                                        // advice gets promoted, see EnterpriseWikiVerifyPageClaimsService). Checking
+                                        // the block's linked claims too keeps the reader-facing label in sync with
+                                        // that reclassification instead of showing a stale origin.
+                                        const claimsForBlock = claims.filter((claim) => claim.content_block_key === block.block_key);
+                                        const isBestPracticeBlock = block.content_origin === 'best_practice'
+                                            || (claimsForBlock.length > 0 && claimsForBlock.every((claim) => claim.content_origin === 'best_practice'));
                                         const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
                                         const canSaveBlockEdit = Boolean(
                                             canEditWikiClaims
@@ -2286,6 +2295,13 @@ export default function WikiShow({
                                                                 Lagring krever gyldig kjøringskontekst. Åpne funnet fra Kjøringer og prøv igjen.
                                                             </p>
                                                         )}
+                                                    </div>
+                                                ) : isBestPracticeBlock ? (
+                                                    <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                                                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                            {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                        </p>
+                                                        <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
                                                     </div>
                                                 ) : (
                                                     <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>

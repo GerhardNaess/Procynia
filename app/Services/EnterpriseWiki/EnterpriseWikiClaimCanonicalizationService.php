@@ -63,6 +63,11 @@ class EnterpriseWikiClaimCanonicalizationService
         'hensiktsmessig', 'kan bidra', 'kan redusere', 'kan forbedre', 'kan bedre', 'forbedring',
         'mulig å', 'god praksis', 'beste praksis', 'recommended', 'recommendation', 'best practice',
         'should consider', 'could', 'may want', 'may consider', 'suggested',
+        // Run-482 fix: additional soft-advisory Norwegian constructs a real generation pass
+        // produced that the original, narrower list did not recognize (e.g. "Illustrasjonen kan
+        // brukes som et felles referansepunkt...", "kan man med fordel se den i sammenheng
+        // med...") — see EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion().
+        'kan brukes', 'kan støtte', 'kan anvendes', 'med fordel', 'vanlig tilnærming', 'faglig anbefaling',
     ];
 
     /**

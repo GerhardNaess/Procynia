@@ -177,6 +177,55 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Run-482 fix: additional soft-advisory markers a real generation pass produced that the
+    // original marker list did not recognize
+    // =========================================================================
+
+    public function test_kan_brukes_som_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText(
+            'Illustrasjonen kan brukes som et felles referansepunkt i opplæring og onboarding.',
+        ));
+    }
+
+    public function test_kan_stotte_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText(
+            'Illustrasjonen kan støtte forventningsavklaringer knyttet til responstider og eskaleringspunkter.',
+        ));
+    }
+
+    public function test_med_fordel_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText(
+            'Når figuren anvendes i praksis, kan man med fordel se den i sammenheng med målte responstider.',
+        ));
+    }
+
+    public function test_faglig_anbefaling_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText(
+            'Faglig anbefaling: definer tydelige roller og eskaleringspunkter i prosessen.',
+        ));
+    }
+
+    public function test_vanlig_tilnaerming_recommendation_is_genuine_best_practice(): void
+    {
+        $this->assertTrue($this->service()->isGenuineBestPracticeText(
+            'En vanlig tilnærming er å avklare kontaktpunkter før en hendelse oppstår.',
+        ));
+    }
+
+    public function test_med_fordel_marker_still_excluded_when_asserting_current_party_state(): void
+    {
+        // The marker alone is not enough — a sentence that also asserts a named party's current
+        // state must still be excluded (Section 4's "ikke hevder at kunden allerede gjør dette").
+        $this->assertFalse($this->service()->isGenuineBestPracticeText(
+            'Leverandøren bruker figuren med fordel i sin daglige drift.',
+        ));
+    }
+
+    // =========================================================================
     // detectDeterministicConflict() — Del 3's cross-language verification safety net
     // =========================================================================
 
