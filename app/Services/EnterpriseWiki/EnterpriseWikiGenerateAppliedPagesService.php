@@ -367,6 +367,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         );
 
         [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
+        [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
