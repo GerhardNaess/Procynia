@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
@@ -274,6 +275,50 @@ class WikiSourceController extends Controller
         abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
 
         return response()->json($this->deletionService->preview($document));
+    }
+
+    /**
+     * Cancels every non-terminal ingest run for this document so the document becomes eligible
+     * for the ordinary deletion flow, which is blocked by ANY non-terminal run (see
+     * EnterpriseWikiDocumentDeletionService::hasActiveRun()). Deliberately separate from
+     * WikiController::cancelRun() (the Kjøringer-tab "Avbryt kjøring" action, which only allows
+     * cancelling a run EnterpriseWikiIngestRun::isCancellable() considers still genuinely under
+     * automatic processing): a run stuck waiting on Document Owner approval has nothing left
+     * running to interrupt from the Kjøringer tab, but it still blocks deletion, and this action
+     * exists specifically to unblock that — never presented as an ordinary "stop the run" control.
+     */
+    public function cancelBlockingRunsForDeletion(EnterpriseWikiDocument $document): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        $blockingRuns = $this->deletionService->documentRuns($document)
+            ->reject(fn (EnterpriseWikiIngestRun $run): bool => $run->isTerminal());
+
+        if ($blockingRuns->isEmpty()) {
+            return redirect()->route('app.wiki.index')
+                ->with('error', __('procynia.wiki.cancel_blocking_runs_none_active'));
+        }
+
+        foreach ($blockingRuns as $run) {
+            $this->documentFlowService->cancelRun($run, $user);
+        }
+
+        Log::info('[PROCYNIA][WIKI_SOURCE] Cancelled blocking ingest runs to unblock document deletion.', [
+            'document_id' => $document->id,
+            'customer_id' => $customerId,
+            'run_ids' => $blockingRuns->pluck('id')->all(),
+            'user_id' => $user->id,
+        ]);
+
+        return redirect()->route('app.wiki.index')
+            ->with('success', __('procynia.wiki.cancel_blocking_runs_success'));
     }
 
     public function destroy(EnterpriseWikiDocument $document): RedirectResponse

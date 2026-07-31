@@ -789,7 +789,7 @@ class WikiController extends Controller
                     'maintainer_decision_status' => $run->maintainer_decision_status,
                     'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,
-                    'can_cancel' => ! $run->isTerminal()
+                    'can_cancel' => $run->isCancellable()
                         && $document instanceof EnterpriseWikiDocument
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
                     'error_message' => $run->error_message,
@@ -874,12 +874,15 @@ class WikiController extends Controller
     }
 
     /**
-     * Manually cancel a non-terminal ingest run — e.g. one that is legitimately waiting on
-     * Document Owner approval with no active job/lease behind it — so its source document
-     * becomes eligible for the existing document-scoped deletion. Authorization mirrors
-     * WikiSourceController::destroy() exactly: the run is cancelled by whoever could delete its
-     * source document (System Owner, or the document's registered owner), since cancelling a
-     * run only ever exists to unblock that same deletion.
+     * Manually cancel a run that is still genuinely under automatic processing — i.e.
+     * EnterpriseWikiIngestRun::isCancellable() is true (see that constant's docblock for why this
+     * is narrower than "not terminal"). A run already waiting on Document Owner approval has
+     * nothing left running to interrupt, so this ordinary Kjøringer-tab action correctly refuses
+     * it; WikiSourceController::cancelBlockingRunsForDeletion() is the separate, narrowly-scoped
+     * action for unblocking document deletion when a run is stuck in that (or any other
+     * non-terminal) state. Authorization here otherwise mirrors WikiSourceController::destroy():
+     * the run is cancelled by whoever could delete its source document (System Owner, or the
+     * document's registered owner).
      */
     public function cancelRun(EnterpriseWikiIngestRun $run): RedirectResponse
     {
@@ -896,9 +899,9 @@ class WikiController extends Controller
         abort_unless($document instanceof EnterpriseWikiDocument, 404);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
-        if ($run->isTerminal()) {
+        if (! $run->isCancellable()) {
             return redirect()->route('app.wiki.index', ['tab' => 'runs'])
-                ->with('error', __('procynia.wiki.run_cancel_already_terminal'));
+                ->with('error', __('procynia.wiki.run_cancel_not_cancellable'));
         }
 
         $this->documentFlowService->cancelRun($run, $user);

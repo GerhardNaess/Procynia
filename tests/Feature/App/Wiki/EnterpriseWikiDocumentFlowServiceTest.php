@@ -5,8 +5,8 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
-use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -25,8 +25,8 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use RuntimeException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class EnterpriseWikiDocumentFlowServiceTest extends TestCase
@@ -129,7 +129,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $run = $this->flowService()->prepareRunForDocument($customer->id, $document->id)['run'];
 
         $pages = $this->attachAllPageTypes($run);
-        $existingVersion = \App\Models\EnterpriseWikiPageVersion::query()->create([
+        $existingVersion = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $pages['article']->id,
             'version_number' => 1,
             'is_current' => true,
@@ -385,6 +385,51 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
 
         $this->assertTrue($run->isTerminal());
         $this->assertNotContains(EnterpriseWikiIngestRun::STATUS_CANCELLED, EnterpriseWikiIngestRun::NON_TERMINAL_STATUSES);
+    }
+
+    // =========================================================================
+    // isCancellable() — the single central rule for whether the ordinary "Avbryt kjøring"
+    // action applies (deliberately narrower than !isTerminal()).
+    // =========================================================================
+
+    public function test_is_cancellable_true_for_every_genuinely_active_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::CANCELLABLE_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertTrue($run->isCancellable(), "Expected status [{$status}] to be cancellable.");
+        }
+    }
+
+    public function test_is_cancellable_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $this->assertFalse($run->isCancellable());
+    }
+
+    public function test_is_cancellable_false_for_decision_only(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_DECISION_ONLY);
+
+        $this->assertFalse($run->isCancellable());
+    }
+
+    public function test_is_cancellable_false_for_every_terminal_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::TERMINAL_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertFalse($run->isCancellable(), "Expected terminal status [{$status}] to not be cancellable.");
+        }
     }
 
     // =========================================================================

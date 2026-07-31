@@ -137,6 +137,32 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_DECISION_ONLY,
     ];
 
+    /**
+     * The single, central definition of "this run is still being worked on by the automatic
+     * pipeline" — deliberately narrower than NON_TERMINAL_STATUSES. STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL
+     * and STATUS_DECISION_ONLY are both non-terminal (the run genuinely isn't finished/failed/
+     * cancelled) but neither has any active job or lease behind it: the automatic pipeline has
+     * already finished everything it is going to do, and the run is now waiting on a human
+     * decision (or, for decision_only, was never meant to progress further at all). Presenting
+     * "Avbryt kjøring" for either is misleading — there is nothing left to interrupt.
+     *
+     * Every caller that decides whether to show/allow the ordinary run-cancellation action
+     * (WikiController's `can_cancel` flag and cancelRun() guard) must use this method rather than
+     * re-deriving its own status list, so the Kjøringer tab and the backend can never disagree
+     * about which runs are actually cancellable.
+     */
+    public const CANCELLABLE_STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+    ];
+
     protected $fillable = [
         'uuid',
         'customer_id',
@@ -229,5 +255,14 @@ class EnterpriseWikiIngestRun extends Model
     public function isQueued(): bool
     {
         return $this->status === self::STATUS_QUEUED;
+    }
+
+    /**
+     * Whether the ordinary "Avbryt kjøring" action should be offered/allowed for this run. See
+     * CANCELLABLE_STATUSES's own docblock for why this is narrower than !isTerminal().
+     */
+    public function isCancellable(): bool
+    {
+        return in_array($this->status, self::CANCELLABLE_STATUSES, true);
     }
 }

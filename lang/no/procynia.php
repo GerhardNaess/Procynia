@@ -4112,6 +4112,12 @@ return [
         'run_cancel_confirm_button' => 'Avbryt kjøringen',
         'run_cancel_dismiss_button' => 'Lukk',
         'run_cancel_success' => 'Kjøringen ble avbrutt.',
-        'run_cancel_already_terminal' => 'Kjøringen er allerede avsluttet og kan ikke avbrytes på nytt.',
+        'run_cancel_not_cancellable' => 'Kjøringen er ikke lenger under automatisk behandling og kan ikke avbrytes.',
+        'cancel_blocking_runs_button' => 'Avbryt kjøring og fortsett sletting',
+        'cancel_blocking_runs_confirm_title' => 'Avbryt kjøring for å låse opp sletting',
+        'cancel_blocking_runs_confirm_body' => 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.',
+        'cancel_blocking_runs_confirm_button' => 'Avbryt og lås opp sletting',
+        'cancel_blocking_runs_success' => 'Blokkerende kjøring(er) ble avbrutt. Dokumentet kan nå slettes.',
+        'cancel_blocking_runs_none_active' => 'Fant ingen aktive kjøringer å avbryte for dette dokumentet.',
     ],
 ];

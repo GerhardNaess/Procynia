@@ -1699,6 +1699,17 @@ function SourcesTab({
 
     const handleDeleteCancel = () => setDeletePreview(null);
 
+    // Separate from RunsTab's ordinary "Avbryt kjøring" action — this cancels whichever
+    // non-terminal run(s) are currently blocking THIS document's deletion (including one waiting
+    // on Document Owner approval, which the ordinary action correctly no longer allows cancelling
+    // from the Kjøringer tab). See WikiSourceController::cancelBlockingRunsForDeletion().
+    const handleCancelBlockingRunsForDeletion = () => {
+        if (!deletePreview?.source) return;
+        const sourceId = deletePreview.source.id;
+        setDeletePreview(null);
+        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, {}, { preserveScroll: true });
+    };
+
     const submitUpload = (event) => {
         event.preventDefault();
         if (!uploadForm.data.file || uploadForm.processing) return;
@@ -2057,9 +2068,14 @@ function SourcesTab({
                         )}
 
                         {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
-                            <p className="text-sm text-rose-600">
-                                {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
-                            </p>
+                            <div className="space-y-2">
+                                <p className="text-sm text-rose-600">
+                                    {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                    {tw.cancel_blocking_runs_confirm_body ?? 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.'}
+                                </p>
+                            </div>
                         )}
 
                         {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
@@ -2137,6 +2153,15 @@ function SourcesTab({
                                     className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
                                 >
                                     {tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold'}
+                                </button>
+                            )}
+                            {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
+                                <button
+                                    type="button"
+                                    onClick={handleCancelBlockingRunsForDeletion}
+                                    className="inline-flex h-9 items-center rounded-full bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700"
+                                >
+                                    {tw.cancel_blocking_runs_button ?? 'Avbryt kjøring og fortsett sletting'}
                                 </button>
                             )}
                         </div>

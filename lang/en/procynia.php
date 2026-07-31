@@ -4112,6 +4112,12 @@ return [
         'run_cancel_confirm_button' => 'Cancel the run',
         'run_cancel_dismiss_button' => 'Close',
         'run_cancel_success' => 'The run was cancelled.',
-        'run_cancel_already_terminal' => 'The run has already finished and cannot be cancelled again.',
+        'run_cancel_not_cancellable' => 'The run is no longer in automatic processing and cannot be cancelled.',
+        'cancel_blocking_runs_button' => 'Cancel run and continue deleting',
+        'cancel_blocking_runs_confirm_title' => 'Cancel run to unlock deletion',
+        'cancel_blocking_runs_confirm_body' => 'This cancels the run(s) blocking deletion of this document, so the document can be deleted. Wiki content that has already been generated is kept. This action cannot be undone.',
+        'cancel_blocking_runs_confirm_button' => 'Cancel and unlock deletion',
+        'cancel_blocking_runs_success' => 'Blocking run(s) were cancelled. The document can now be deleted.',
+        'cancel_blocking_runs_none_active' => 'Found no active runs to cancel for this document.',
     ],
 ];
