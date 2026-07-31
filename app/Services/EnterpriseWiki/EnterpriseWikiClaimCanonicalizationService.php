@@ -50,45 +50,35 @@ class EnterpriseWikiClaimCanonicalizationService
     private const NORMATIVE_MARKERS = ['skal', 'bør', 'må', 'plikter', 'kreves', 'pålagt'];
 
     /**
-     * Words that signal a genuine best-practice RECOMMENDATION rather than a requirement or a
-     * plain factual statement — deliberately excludes "skal"/"må" (NORMATIVE_MARKERS above):
-     * those read as obligations/requirements ("Leverandøren skal levere...") which are exactly
-     * the kind of contractual/factual-sounding phrasing that must NOT be waved through as
-     * best_practice just because it contains a modal verb. A genuine improvement suggestion is
-     * phrased as advice the customer may or may not already follow, not as a requirement anyone
-     * must meet.
-     */
-    private const BEST_PRACTICE_MARKERS = [
-        'bør', 'anbefales', 'anbefaling', 'anbefalt', 'kan vurdere', 'bør vurdere', 'vurdere å',
-        'hensiktsmessig', 'kan bidra', 'kan redusere', 'kan forbedre', 'kan bedre', 'forbedring',
-        'mulig å', 'god praksis', 'beste praksis', 'recommended', 'recommendation', 'best practice',
-        'should consider', 'could', 'may want', 'may consider', 'suggested',
-        // Run-482 fix: additional soft-advisory Norwegian constructs a real generation pass
-        // produced that the original, narrower list did not recognize (e.g. "Illustrasjonen kan
-        // brukes som et felles referansepunkt...", "kan man med fordel se den i sammenheng
-        // med...") — see EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion().
-        'kan brukes', 'kan støtte', 'kan anvendes', 'med fordel', 'vanlig tilnærming', 'faglig anbefaling',
-    ];
-
-    /**
-     * A party noun immediately followed by a present-tense factual verb — "Kunden har",
-     * "Leverandøren følger" — asserts that a named party ALREADY has/does/is something, which is
-     * exactly what best_practice text must never claim (Del 2/4's "ikke hevder at kunden allerede
-     * gjør dette"). Deliberately a plain substring/regex check, not a full grammatical parse — it
-     * is a secondary safety-net signal alongside BEST_PRACTICE_MARKERS, never the sole mechanism
-     * (the AI's own declared content_origin, and human review of the resulting suggestion, remain
-     * the primary decision).
+     * A party/agreement noun immediately followed by a present-tense factual verb — "Kunden har",
+     * "Leverandøren følger", "avtalen omfatter" — asserts that a specific, named referent (the
+     * customer, the supplier, or the agreement/contract this document is actually about) ALREADY
+     * has/does/is/covers something. This is the SOLE deterministic signal that disqualifies text
+     * from being classified/kept as best_practice (see isEligibleForBestPractice()) — Procynia's
+     * best-practice text is written in the same formal, declarative, constaterende style as any
+     * other Wiki text (CLAUDE.md: content_origin and UI labeling carry the distinction, never
+     * wording or tone), so a recommendation-phrasing marker is never checked or required. Only a
+     * concrete, undocumented claim about a NAMED party/agreement must still require source
+     * evidence — a general professional/industry statement that names no specific party or
+     * agreement is eligible regardless of how declaratively it is phrased. Deliberately a plain
+     * substring/regex check, not a full grammatical parse — a secondary safety-net signal, never
+     * the sole protection (the AI's own declared content_origin, and human review of the resulting
+     * suggestion, remain the primary decision).
      */
     private const CURRENT_STATE_SUBJECTS = [
         'kunden', 'leverandøren', 'systemet', 'tjenesten', 'virksomheten', 'selskapet',
-        'servicedesken', 'servicedesk', 'organisasjonen', 'avdelingen',
+        'servicedesken', 'servicedesk', 'organisasjonen', 'avdelingen', 'avtalen', 'kontrakten',
         'the customer', 'the contractor', 'the supplier', 'the vendor', 'the service',
+        'the agreement', 'the contract',
     ];
 
     private const CURRENT_STATE_VERBS = [
         'har', 'er', 'bruker', 'følger', 'tilbyr', 'benytter', 'opererer', 'driver', 'besvarer',
-        'håndterer', 'gjennomfører', 'anvender', 'praktiserer',
+        'håndterer', 'gjennomfører', 'anvender', 'praktiserer', 'utfører', 'omfatter', 'inneholder',
+        'dekker', 'krever', 'sikrer', 'ivaretar', 'leverer', 'utøver', 'styrer', 'koordinerer',
+        'forvalter', 'vedlikeholder',
         'has', 'is', 'uses', 'follows', 'offers', 'operates', 'provides', 'runs', 'handles',
+        'performs', 'covers', 'includes', 'requires', 'ensures', 'delivers', 'manages', 'maintains',
     ];
 
     /**
@@ -197,61 +187,27 @@ class EnterpriseWikiClaimCanonicalizationService
     ) {}
 
     /**
-     * Del 2/4's deterministic backend guard on top of the AI's own content_origin/best_practice
-     * choice: text only counts as a genuine best-practice suggestion when it carries a real
-     * recommendation marker AND does not itself assert that a named party already has/does the
-     * thing being suggested. Never the sole classification mechanism — the model's own declared
-     * content_origin (block-level, inherited by the claim) remains the primary signal; this is
-     * the check that stops a claim whose wording has drifted from advice ("bør") into an
-     * unverified factual assertion ("har") from silently keeping the best_practice label.
+     * The single, canonical answer to "is this text still eligible to be classified/kept as
+     * best_practice" — used identically whether the claim is already anchored to a block the
+     * generation step tagged best_practice (a reconfirm), a claim being rescued from a stale or
+     * wrong content_origin tag (a mislabeled block), or an existing claim being re-evaluated later
+     * (EnterpriseWikiRunBestPracticeReevaluationService). There is deliberately no separate,
+     * stricter check for any of these callers — Procynia writes best_practice content in the same
+     * formal, declarative, constaterende register as any other Wiki text, so a recommendation-
+     * phrasing marker ("bør"/"kan"/"anbefales"/"recommended"/...) is never checked, never required,
+     * and carries no classification weight (CLAUDE.md: the distinction is content_origin plus UI
+     * labeling, never wording or tone). The one thing that disqualifies a piece of text, regardless
+     * of caller or context, is its own wording asserting that a specific, NAMED party or agreement
+     * (the customer, the supplier, or "avtalen"/"kontrakten" this document is actually about)
+     * ALREADY has/does/is/covers the thing described — assertsCurrentPartyState()'s party-/
+     * agreement-specific drift check. A general professional/industry statement that names no
+     * such specific referent is eligible no matter how plainly or authoritatively it is phrased.
      */
-    public function isGenuineBestPracticeText(string $text): bool
+    public function isEligibleForBestPractice(string $text): bool
     {
         $normalized = $this->textNormalizer->normalize($text);
 
-        if ($normalized === '') {
-            return false;
-        }
-
-        return $this->hasBestPracticeMarker($normalized) && ! $this->assertsCurrentPartyState($normalized);
-    }
-
-    /**
-     * Run-486 fix: a narrower guard than isGenuineBestPracticeText(), for the one case where a
-     * claim is already anchored to a content block the generation step independently classified
-     * best_practice (extraction's own split of that block into claim sentences, or a later
-     * reconfirm/reevaluation of a claim that already carries the tag). Requiring the claim's OWN
-     * extracted sentence to carry a marker word is wrong here: a recommendation paragraph is
-     * routinely split into several claims, and only ONE of them carries the actual "bør"/
-     * "anbefales" wording — the others are supporting/context sentences of the same
-     * already-approved recommendation, not independent assertions needing their own marker.
-     * The one thing that must still disqualify such a claim, regardless of its block's tag, is
-     * its own text asserting that a named party ALREADY has/does/is the thing suggested — a real
-     * drift into a false, unverified customer-state fact (Del 3/4's "ikke hevder at kunden
-     * allerede gjør dette").
-     *
-     * Never use this in place of isGenuineBestPracticeText() for a claim whose anchoring block is
-     * NOT already best_practice — that block-agnostic "rescue a mislabeled claim" judgment
-     * (EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion()) must keep
-     * requiring an explicit marker, since it is the only signal available when the block's own
-     * tag cannot be trusted.
-     */
-    public function hasDriftedFromBestPracticeBlock(string $text): bool
-    {
-        $normalized = $this->textNormalizer->normalize($text);
-
-        return $normalized === '' || $this->assertsCurrentPartyState($normalized);
-    }
-
-    public function hasBestPracticeMarker(string $normalizedText): bool
-    {
-        foreach (self::BEST_PRACTICE_MARKERS as $marker) {
-            if ($this->containsWord($normalizedText, $marker)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $normalized !== '' && ! $this->assertsCurrentPartyState($normalized);
     }
 
     public function assertsCurrentPartyState(string $normalizedText): bool

@@ -255,12 +255,13 @@ class EnterpriseWikiClaimIntegrityRepairService
     /**
      * Same guard as EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion() —
      * a stale content_origin/review_metadata tag is never trusted on its own; the claim's actual
-     * current text must still genuinely read as a recommendation (not a customer-state assertion
-     * it has drifted into since).
+     * current text must not have drifted into a party-/agreement-specific current-state assertion
+     * since. No recommendation marker is required or checked — Procynia writes best-practice text
+     * in the same formal, declarative register as any other Wiki text.
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        if (! $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)) {
+        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)) {
             return false;
         }
 

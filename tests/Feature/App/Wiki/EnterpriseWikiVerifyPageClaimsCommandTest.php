@@ -721,9 +721,12 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     {
         $customer = $this->createCustomer();
 
+        // Kunden har... — a concrete, party-specific claim (misattribution: this describes what
+        // the source states about "Brukerstøtte", not "Hendelseshåndtering") that must stay
+        // blocked regardless of the isPositiveBestPracticeSuggestion() text check.
         [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
             $customer,
-            'Hendelseshåndtering bidrar til forutsigbar registrering, prioritering og oppfølging av saker som påvirker Kundens IT-tjenester.',
+            'Kunden har hendelseshåndtering som bidrar til forutsigbar registrering, prioritering og oppfølging av saker som påvirker IT-tjenester.',
             [[
                 'source_element_key' => 'paragraph-15',
                 'source_element_type' => 'paragraph',
@@ -891,7 +894,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $customer = $this->createCustomer();
         [$run, , , $claim] = $this->createClaimWithStructuredSourceBlock(
             $customer,
-            'Kritiske hendelser skal besvares innen 30 minutter.',
+            'Leverandøren besvarer kritiske hendelser innen 30 minutter.',
             [[
                 'source_element_key' => 'paragraph-9',
                 'source_element_type' => 'paragraph',
@@ -1326,7 +1329,7 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         string $verificationStatus,
         ?string $oldReason = null,
     ): array {
-        $claimText = 'Hendelseshåndtering bidrar til forutsigbar registrering, prioritering og oppfølging av saker.';
+        $claimText = 'Kunden har hendelseshåndtering som bidrar til forutsigbar registrering, prioritering og oppfølging av saker.';
 
         [$run, , , $claim, $document] = $this->createClaimWithStructuredSourceBlock(
             $customer,

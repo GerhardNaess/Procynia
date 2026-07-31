@@ -683,7 +683,7 @@ class EnterpriseWikiVerifyPageClaimsService
         // to source_based on a coincidental partial text match). Only re-validate that it
         // is still genuinely normative and still anchored — never prove source support.
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-            && ! $this->canonicalizationService->hasDriftedFromBestPracticeBlock($claim->claim_text)
+            && $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)
         ) {
             $outcome = $this->persistBestPracticeVerification(
                 $claim->id,
@@ -1405,7 +1405,15 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED) {
-            $bestPractice = $allowBestPracticePromotion && $this->isPositiveBestPracticeSuggestion($claim);
+            // A deterministic conflict (number/date/negation/modality/actor/scope/currency/subject
+            // mismatch — applyDeterministicSafetyNet()) is concrete, checkable evidence that this
+            // claim describes a specific fact, never a general professional statement — it must
+            // never be waved through to best_practice just because its own wording is party-
+            // agnostic.
+            $hasDeterministicConflict = ($extraReviewMetadata['deterministic_reason'] ?? null) !== null;
+            $bestPractice = $allowBestPracticePromotion
+                && ! $hasDeterministicConflict
+                && $this->isPositiveBestPracticeSuggestion($claim);
 
             // Run-38 fix: a plain not_supported verdict used to store review_reason/review_metadata
             // as null — leaving no trace of why AI rejected the claim, unlike the contradicted/
@@ -2000,24 +2008,49 @@ class EnterpriseWikiVerifyPageClaimsService
 
     /**
      * Only reached for a claim that did NOT take the best-practice fast path above — either it
-     * was never best_practice, or it was but its wording had already drifted into an unverified
-     * factual assertion (Del 4 test: "bør" → "har" requires re-classification), or the generating
-     * block never declared best_practice at all.
+     * was never best_practice, or its block never declared best_practice at all, or a prior
+     * reconfirm found it had drifted into a party/agreement-specific current-state assertion.
      *
      * Run-482 fix: this used to ALSO require the claim's own content_origin/review_metadata to
      * already say best_practice (i.e. only ever "reconfirming" a tag the AI got right at
-     * generation time) — so a genuinely advisory sentence the model mis-tagged source_based (a
-     * real, observed generation-time inconsistency, not a hypothetical) had no path to rescue: it
-     * failed source verification and was recorded as unsupported_generated_content — a blocking
-     * claim-integrity defect — purely because of the model's own labeling mistake, not because the
-     * text was actually presented as a customer fact. The deterministic text check
-     * (isGenuineBestPracticeText — a real recommendation marker AND no assertion that a named
-     * party already has/does the thing suggested) is now the sole criterion: it is what actually
-     * decides whether a claim reads as advice or as a customer-specific fact, so a stale or wrong
-     * content_origin/review_metadata tag must not override it in either direction.
+     * generation time) — so a genuinely general-practice sentence the model mis-tagged
+     * source_based (a real, observed generation-time inconsistency, not a hypothetical) had no
+     * path to rescue: it failed source verification and was recorded as
+     * unsupported_generated_content — a blocking claim-integrity defect — purely because of the
+     * model's own labeling mistake, not because the text was actually presented as a customer
+     * fact.
+     *
+     * Run-486-follow-up fix: this used to also require the claim's own extracted sentence to
+     * carry an explicit recommendation marker ("bør"/"anbefales"/...) — but Procynia's best-
+     * practice text is written in the same formal, declarative register as any other Wiki text
+     * (CLAUDE.md: the distinction is content_origin plus UI labeling, never wording), so a marker
+     * requirement rejected genuine, plainly-stated professional content just because it wasn't
+     * phrased as advice. isEligibleForBestPractice() (party-/agreement-specific drift check only)
+     * is now the deterministic content criterion, replacing the marker requirement in either
+     * direction.
+     *
+     * A second, structural requirement guards against the failure mode a text-only check cannot
+     * see: a decontextualized, never-anchored claim (no content_block_key, or one that no longer
+     * resolves to a real block on the page's CURRENT version) has no page content it is actually
+     * part of — "blokktilhørighet" (item 3/5 of the Del 3 spec) — so it is never eligible for
+     * rescue regardless of how general its wording reads. This is what still correctly blocks an
+     * arbitrary undocumented factual claim with generic phrasing and no block anchor at all, while
+     * still rescuing a genuinely general-practice sentence anchored to a real (if mis-tagged)
+     * content block.
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        return $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text);
+        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)) {
+            return false;
+        }
+
+        $blockKey = trim((string) ($claim->content_block_key ?? ''));
+        $version = $claim->version;
+
+        if ($blockKey === '' || ! $version instanceof EnterpriseWikiPageVersion) {
+            return false;
+        }
+
+        return $this->findBlockByKey($version, $blockKey) !== null;
     }
 }
