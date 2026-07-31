@@ -275,7 +275,7 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <ol className="mt-2 flex flex-wrap gap-1.5">
+        <ol className="mt-2 flex flex-wrap gap-2">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
                 const stateCls = state === 'done'
@@ -295,9 +295,9 @@ function RunTimeline({ run, tw }) {
                 return (
                     <li
                         key={step.key}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${stateCls}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-base font-semibold leading-6 ${stateCls}`}
                     >
-                        <span className={`h-2 w-2 rounded-full ${dotCls}`} aria-hidden="true" />
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
                         {tw[step.labelKey] ?? step.fallback}
                     </li>
                 );
@@ -340,17 +340,17 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
 
     return (
-        <div className="mt-2 space-y-1.5" aria-live={isActive ? 'polite' : 'off'}>
+        <div className="mt-2 space-y-2" aria-live={isActive ? 'polite' : 'off'}>
             {!isEscalated && (
                 <div className="flex flex-wrap items-center gap-2">
                     {activity?.tone === 'active' ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
-                            <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700">
+                            <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
                             {activity.label}
                         </span>
                     ) : (
                         <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${
                                 activity?.tone === 'done'
                                     ? 'bg-emerald-50 text-emerald-700'
                                     : activity?.tone === 'error'
@@ -366,7 +366,7 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                         </span>
                     )}
                     {seemsStalled && (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
                             {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
                         </span>
                     )}
@@ -397,27 +397,27 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                     )}
                 </div>
             ) : (
-                <p className="text-[11px] leading-4 text-slate-500">
+                <p className="text-base leading-6 text-slate-500">
                     {activity?.detail ?? run.status}
                     {activity?.waiting ? ` · ${activity.waiting}` : ''}
                 </p>
             )}
 
             {seemsStalled && (
-                <p className="text-[11px] leading-4 text-amber-700">
+                <p className="text-base leading-6 text-amber-700">
                     {(tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
                         .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())}
                 </p>
             )}
 
             {showCounters && counters.length > 0 && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {counters.join(' · ')}
                 </p>
             )}
 
             {lastProgressLabel && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {lastProgressLabel}
                 </p>
             )}
@@ -971,7 +971,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <div className="space-y-1.5">
                 <span className={`${BADGE} bg-violet-100 text-violet-700`}>{label}</span>
                 {generatedAt && (
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-base leading-6 text-slate-400">
                         {(tw ?? {}).decision_panel_generated ?? 'Generert'} {generatedAt}
                     </p>
                 )}
@@ -979,7 +979,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     <button
                         type="button"
                         onClick={() => onViewDecision(run)}
-                        className="inline-flex h-6 items-center rounded-full border border-violet-200 bg-violet-50 px-3 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-100"
+                        className="inline-flex h-9 items-center rounded-full border border-violet-200 bg-violet-50 px-3.5 text-base font-semibold leading-6 text-violet-700 transition hover:bg-violet-100"
                     >
                         {(tw ?? {}).decision_panel_view_button ?? 'Vis beslutning'}
                     </button>
@@ -993,21 +993,21 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
     const errorMessage = run.qa_last_error ?? run.error_message;
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
             <div className="flex items-center gap-2">
                 <span className={`${BADGE} ${cls}`}>{label}</span>
                 {isInProgress && (
                     <button
                         type="button"
                         onClick={onReload}
-                        className="text-[11px] text-slate-400 underline hover:text-slate-600"
+                        className="text-base leading-6 text-slate-400 underline hover:text-slate-600"
                     >
                         Oppdater
                     </button>
                 )}
             </div>
             {run.status === 'queued' && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {queuedSince ? `I kø siden ${queuedSince} · ` : ''}
                     {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
@@ -1015,7 +1015,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <RunActivityBlock run={run} tw={tw} locale={locale} showCounters />
             {run.status === 'failed' && errorMessage && (
                 <p
-                    className="line-clamp-2 wrap-break-word text-[11px] leading-4 text-rose-500"
+                    className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-500"
                     title={errorMessage}
                 >
                     {errorMessage}
@@ -2186,6 +2186,11 @@ function findingsCountToneClass(run) {
     return 'text-slate-500 hover:bg-slate-100 focus-visible:ring-slate-400';
 }
 
+// Readability pass: a Kjøringer-tab-specific select style, kept separate from the shared
+// SELECT_CLS (text-sm) so this fix stays scoped to this tab rather than resizing every filter
+// dropdown across Wiki-sider/Kvalitet too — same scoping precedent as FINDING_BADGE above.
+const RUNS_SELECT_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+
 function RunsTab({ runs, runsFilters, tw, locale }) {
     const filters = runsFilters ?? {};
     // expandedRuns[runId] is null (closed) | 'pages' | 'findings' — only one panel is ever shown
@@ -2285,7 +2290,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 <select
                     value={filters.status ?? ''}
                     onChange={(e) => navigate({ run_status: e.target.value })}
-                    className={SELECT_CLS}
+                    className={RUNS_SELECT_CLS}
                 >
                     <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
                     {[
@@ -2309,7 +2314,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 <select
                     value={filters.decision ?? ''}
                     onChange={(e) => navigate({ run_decision: e.target.value })}
-                    className={SELECT_CLS}
+                    className={RUNS_SELECT_CLS}
                 >
                     <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
                     <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
@@ -2318,7 +2323,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 </select>
 
                 {filters.src_id && (
-                    <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm text-violet-700">
+                    <span className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-base leading-6 text-violet-700">
                         {tw.runs_filter_src_active ?? 'Filtrert på dokument'}
                         <button
                             type="button"
@@ -2326,7 +2331,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                             className="ml-0.5 text-violet-400 hover:text-violet-700"
                             aria-label="Fjern kildefilter"
                         >
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                             </svg>
                         </button>
@@ -2337,9 +2342,9 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     <button
                         type="button"
                         onClick={() => navigate({ run_status: '', run_decision: '', run_src: '' })}
-                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                        className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                     >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                         </svg>
                         {tw.runs_filter_clear ?? 'Nullstill'}
@@ -2357,7 +2362,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
-                                <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                     <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_document ?? 'Dokument'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
@@ -2378,15 +2383,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     const panelId = `run-panel-${run.id}`;
                                     return (
                                     <Fragment key={run.id}>
-                                        <tr className="text-sm text-slate-700">
-                                            <td className="px-4 py-3 text-right font-mono text-xs text-slate-400 tabular-nums">
+                                        <tr className="text-base leading-6 text-slate-700">
+                                            <td className="px-4 py-3 text-right font-mono text-base text-slate-400 tabular-nums">
                                                 {run.id}
                                             </td>
                                             <td className="max-w-[200px] px-4 py-3">
                                                 {run.source_id ? (
                                                     <Link
                                                         href={`/app/wiki?tab=sources`}
-                                                        className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
+                                                        className="block truncate text-base font-medium leading-6 text-slate-900 hover:text-violet-700 hover:underline"
                                                         title={run.source_document_filename ?? ''}
                                                     >
                                                         {run.source_document_filename ?? '—'}
@@ -2395,7 +2400,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                                 {run.status === 'failed' && runError && (
-                                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-rose-500" title={runError}>
+                                                    <p className="mt-1 line-clamp-2 text-base leading-6 text-rose-500" title={runError}>
                                                         {runError}
                                                     </p>
                                                 )}
@@ -2435,7 +2440,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                         onClick={() => togglePanel(run, 'pages', true)}
                                                         aria-expanded={activePanel === 'pages'}
                                                         aria-controls={panelId}
-                                                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                     >
                                                         {run.pages_count}
                                                         <svg
@@ -2471,7 +2476,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                                 .replace(':total', run.lint_count)
                                                                 .replace(':blocking', run.findings_open_blocking_count)
                                                             : undefined}
-                                                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
+                                                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
                                                     >
                                                         {run.lint_count}
                                                         <svg
@@ -2487,10 +2492,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
                                                 {formatDate(run.created_at, locale)}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
                                             <td className="whitespace-nowrap px-4 py-3">
@@ -2544,24 +2549,24 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         <h2 className="mb-4 text-base font-semibold text-slate-900">
                             {tw.run_cancel_confirm_title ?? 'Bekreft avbrutt kjøring'}
                         </h2>
-                        <p className="text-sm font-medium text-slate-800 break-all">
+                        <p className="text-base font-medium leading-6 text-slate-800 break-all">
                             {cancelTarget.source_document_filename}
                         </p>
-                        <p className="mt-2 text-sm text-slate-600">
+                        <p className="mt-2 text-base leading-6 text-slate-600">
                             {tw.run_cancel_confirm_body ?? 'Dette stopper kjøringen. Wiki-innhold som allerede er generert blir beholdt, men kjøringen kan ikke fortsette eller fullføres etterpå. Handlingen kan ikke angres.'}
                         </p>
                         <div className="mt-5 flex justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={handleCancelDismiss}
-                                className="inline-flex h-9 items-center rounded-full border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex h-11 items-center rounded-full border border-slate-200 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                             >
                                 {tw.run_cancel_dismiss_button ?? 'Lukk'}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleCancelConfirm}
-                                className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                className="inline-flex h-11 items-center rounded-full bg-rose-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-rose-700"
                             >
                                 {tw.run_cancel_confirm_button ?? 'Avbryt kjøringen'}
                             </button>
@@ -2596,7 +2601,7 @@ const OWNER_STATUS_STYLES = {
 function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     if (!state || state.status === 'loading') {
         return (
-            <div id={panelId} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+            <div id={panelId} className="flex items-center gap-2 py-2 text-base leading-6 text-slate-500">
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-violet-500" aria-hidden="true" />
                 {tw.runs_pages_loading ?? 'Henter berørte Wiki-sider …'}
             </div>
@@ -2605,12 +2610,12 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
 
     if (state.status === 'error') {
         return (
-            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-sm text-rose-600">
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-600">
                 <span>{tw.runs_pages_error ?? 'Kunne ikke hente Wiki-sidene. Prøv igjen.'}</span>
                 <button
                     type="button"
                     onClick={onRetry}
-                    className="shrink-0 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                    className="shrink-0 rounded-md border border-rose-200 px-3.5 py-2 text-base font-medium leading-6 text-rose-700 transition hover:bg-rose-50"
                 >
                     {tw.runs_pages_retry ?? 'Prøv igjen'}
                 </button>
@@ -2643,51 +2648,51 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     return (
         <div id={panelId} className="space-y-3">
             <div>
-                <h4 className="text-sm font-semibold text-slate-700">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
-                <p className="mt-0.5 text-xs text-slate-500">{summaryParts.join(' · ')}</p>
+                <h4 className="text-lg font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
+                <p className="mt-1 text-base leading-6 text-slate-500">{summaryParts.join(' · ')}</p>
                 {stallExplanation && (
-                    <p className="mt-1 text-xs font-medium text-amber-700">{stallExplanation}</p>
+                    <p className="mt-1 text-base font-medium leading-6 text-amber-700">{stallExplanation}</p>
                 )}
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-full divide-y divide-slate-100 text-sm">
-                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
+                    <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-500">
                         <tr className="text-left">
-                            <th className="px-3 py-2">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_result ?? 'Resultat'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
-                            <th className="px-3 py-2 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_result ?? 'Resultat'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
+                            <th className="px-3 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {pages.map((page) => (
                             <tr key={page.page_id} className="text-slate-700">
-                                <td className="max-w-[240px] px-3 py-2">
+                                <td className="max-w-[240px] px-3 py-2.5">
                                     <span className="block truncate font-medium text-slate-900" title={page.title}>
                                         {page.title}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2">
+                                <td className="px-3 py-2.5">
                                     <span className={`${BADGE} ${page.action === 'created' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
                                         {page.action === 'created'
                                             ? (tw.runs_pages_result_created ?? 'Opprettet')
                                             : (tw.runs_pages_result_updated ?? 'Oppdatert')}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+                                <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">
                                     {page.version_number
                                         ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
                                         : '—'}
                                 </td>
-                                <td className="px-3 py-2">
+                                <td className="px-3 py-2.5">
                                     <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-500'}`}>
                                         {page.document_owner_status?.label ?? '—'}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    <Link href={page.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                    <Link href={page.url} className="text-base font-medium leading-6 text-violet-700 hover:underline">
                                         {page.can_handle
                                             ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
                                             : (tw.runs_pages_action_open ?? 'Åpne side')}
