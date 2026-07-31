@@ -63,15 +63,18 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         await expect(row.getByText(/Ingen registrert fremdrift siden/)).toHaveCount(0);
     });
 
-    test('the waiting run shows normal owner-approval wait copy instead', async ({ page }) => {
+    test('the waiting run shows normal owner-approval wait copy instead, without the redundant secondary badge', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
         await expect(row).toBeVisible();
         await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toBeVisible();
-        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toBeVisible();
         await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        // The secondary "Avventer dokumenteier" pill duplicated the main badge above in
+        // different words and carries no extra information — see
+        // wiki-runs-duplicate-status.spec.js for the dedicated regression.
+        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
     });
 
     test('the waiting run still shows no cancel action (previous fix stays intact)', async ({ page }) => {
@@ -107,7 +110,8 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
         await expect(row).toBeVisible();
         await expect(row.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
-        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toBeVisible();
+        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
 
         const bodyOverflows = await page.evaluate(
             () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

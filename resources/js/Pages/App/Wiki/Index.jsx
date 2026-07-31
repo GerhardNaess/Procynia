@@ -313,6 +313,15 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const activity = getIngestActivityCopy(run, tw);
     const isActive = isActiveWikiRun(run);
     const isEscalated = run.status === 'escalated';
+    // The secondary activity pill only adds information while the automatic pipeline still
+    // expects to make technical progress (queued/running/generating/etc.) — for every other
+    // status (awaiting_document_owner_approval, decision_only, completed, failed, cancelled) it
+    // just restates the main status badge in slightly different words ("Avventer
+    // dokumenteiergodkjenning" vs "Avventer dokumenteier"). A literal string comparison against
+    // the main badge's label would miss that case entirely (different wording, same fact), so
+    // this reuses the same backend-computed, status-driven flag the stalled check already relies
+    // on rather than hardcoding a single text comparison.
+    const showSecondaryStatusPill = !!run.expects_automatic_progress;
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
     const progressLabel = formatRelativeProgress(progressAt, locale);
     const lastProgressLabel = progressLabel
@@ -344,29 +353,31 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
 
     return (
         <div className="mt-2 space-y-2" aria-live={isActive ? 'polite' : 'off'}>
-            {!isEscalated && (
+            {!isEscalated && (showSecondaryStatusPill || seemsStalled) && (
                 <div className="flex flex-wrap items-center gap-2">
-                    {activity?.tone === 'active' ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700">
-                            <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
-                            {activity.label}
-                        </span>
-                    ) : (
-                        <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${
-                                activity?.tone === 'done'
-                                    ? 'bg-emerald-50 text-emerald-700'
-                                    : activity?.tone === 'error'
-                                        ? 'bg-rose-50 text-rose-700'
-                                        : activity?.tone === 'warning'
-                                            ? 'bg-amber-50 text-amber-700'
-                                            : activity?.tone === 'decision'
-                                                ? 'bg-violet-50 text-violet-700'
-                                                : 'bg-slate-100 text-slate-500'
-                            }`}
-                        >
-                            {activity?.label ?? run.status}
-                        </span>
+                    {showSecondaryStatusPill && (
+                        activity?.tone === 'active' ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700">
+                                <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
+                                {activity.label}
+                            </span>
+                        ) : (
+                            <span
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${
+                                    activity?.tone === 'done'
+                                        ? 'bg-emerald-50 text-emerald-700'
+                                        : activity?.tone === 'error'
+                                            ? 'bg-rose-50 text-rose-700'
+                                            : activity?.tone === 'warning'
+                                                ? 'bg-amber-50 text-amber-700'
+                                                : activity?.tone === 'decision'
+                                                    ? 'bg-violet-50 text-violet-700'
+                                                    : 'bg-slate-100 text-slate-500'
+                                }`}
+                            >
+                                {activity?.label ?? run.status}
+                            </span>
+                        )
                     )}
                     {seemsStalled && (
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
