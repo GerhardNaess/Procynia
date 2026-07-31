@@ -691,6 +691,7 @@ class WikiController extends Controller
                 'finished_at' => $latestRuns[$doc->id]->finished_at,
                 'updated_at' => $latestRuns[$doc->id]->updated_at,
                 'last_progress_at' => $latestRuns[$doc->id]->updated_at,
+                'expects_automatic_progress' => $latestRuns[$doc->id]->expectsAutomaticProgress(),
                 'maintainer_decision_json' => $latestRuns[$doc->id]->maintainer_decision_json,
                 'maintainer_decision_status' => $latestRuns[$doc->id]->maintainer_decision_status,
                 'maintainer_decision_generated_at' => $latestRuns[$doc->id]->maintainer_decision_generated_at,
@@ -811,6 +812,7 @@ class WikiController extends Controller
                     'finished_at' => $run->finished_at,
                     'updated_at' => $run->updated_at,
                     'last_progress_at' => $run->updated_at,
+                    'expects_automatic_progress' => $run->expectsAutomaticProgress(),
                 ];
             })->all(),
             'runs_filters' => [

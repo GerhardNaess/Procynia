@@ -163,6 +163,36 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_QA,
     ];
 
+    /**
+     * The single, central definition of "the automatic pipeline currently expects to make
+     * technical progress on this run" — used to decide whether a long gap since the last
+     * recorded activity is actually suspicious (a "seems stalled" warning) or just an ordinary
+     * wait for something else to happen. Deliberately a SEPARATE concept from
+     * CANCELLABLE_STATUSES above, even though their membership happens to be identical today:
+     * cancellability is a policy/permission question ("can a user interrupt this run right
+     * now"), while this is a technical-health question ("is there still automatic work
+     * scheduled here, such that silence would be unusual"). A run waiting on a human decision
+     * (STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) or one that was never meant to progress further
+     * (STATUS_DECISION_ONLY) is correctly excluded from both lists for genuinely different
+     * reasons, and the two must be free to diverge later without one silently dragging the
+     * other along — never derive one from the other just to save a line.
+     *
+     * Every caller that decides whether a long-idle run should be flagged as stalled (the
+     * Kjøringer/Kildedokumenter "Ser ut til å stå stille" warning) must use
+     * expectsAutomaticProgress() rather than re-deriving its own status list.
+     */
+    public const EXPECTS_AUTOMATIC_PROGRESS_STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+    ];
+
     protected $fillable = [
         'uuid',
         'customer_id',
@@ -264,5 +294,15 @@ class EnterpriseWikiIngestRun extends Model
     public function isCancellable(): bool
     {
         return in_array($this->status, self::CANCELLABLE_STATUSES, true);
+    }
+
+    /**
+     * Whether a long gap since this run's last recorded activity should be treated as
+     * suspicious. See EXPECTS_AUTOMATIC_PROGRESS_STATUSES's own docblock for why this is not
+     * simply isCancellable() or !isTerminal().
+     */
+    public function expectsAutomaticProgress(): bool
+    {
+        return in_array($this->status, self::EXPECTS_AUTOMATIC_PROGRESS_STATUSES, true);
     }
 }

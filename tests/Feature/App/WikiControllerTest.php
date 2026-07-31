@@ -4370,6 +4370,63 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    // =========================================================================
+    // Runs tab — expects_automatic_progress flag (drives the "Ser ut til å stå stille" warning)
+    // =========================================================================
+
+    public function test_runs_tab_expects_automatic_progress_true_for_active_status(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['expects_automatic_progress'] === true;
+        });
+    }
+
+    public function test_runs_tab_expects_automatic_progress_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $run->id);
+
+            return $found !== null && $found['expects_automatic_progress'] === false;
+        });
+    }
+
+    public function test_sources_tab_expects_automatic_progress_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($doc): bool {
+            $found = collect(data_get($inertia, 'props.sources', []))->firstWhere('id', $doc->id);
+
+            return $found !== null
+                && $found['latest_ingest_run'] !== null
+                && $found['latest_ingest_run']['expects_automatic_progress'] === false;
+        });
+    }
+
     public function test_runs_tab_can_cancel_false_for_contributor_without_ownership(): void
     {
         $customer = $this->createCustomer();

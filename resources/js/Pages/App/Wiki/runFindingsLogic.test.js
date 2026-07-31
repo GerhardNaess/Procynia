@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy } from './runFindingsLogic.js';
+import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy, isRunStalled } from './runFindingsLogic.js';
 
 describe('matchesFindingsLocalFilter', () => {
     test('"open" matches every open status a finding can carry, from every source', () => {
@@ -90,6 +90,64 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
 
         assert.equal(getRunTimelineState(run, pagesIndex), 'active');
         assert.equal(getRunTimelineState(run, pagesIndex + 1), 'empty');
+    });
+});
+
+describe('isRunStalled — requires BOTH an actively-processing status AND a long gap since progress', () => {
+    const NOW = new Date('2026-07-31T12:00:00Z').getTime();
+    const twentyMinutesAgo = new Date(NOW - 20 * 60_000).toISOString();
+    const twoMinutesAgo = new Date(NOW - 2 * 60_000).toISOString();
+
+    test('a queued run with no progress past the threshold can be flagged stalled', () => {
+        const run = { status: 'queued', expects_automatic_progress: true, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), true);
+    });
+
+    test('an active generation status (generating_pages) with no progress past the threshold can be flagged stalled', () => {
+        const run = { status: 'generating_pages', expects_automatic_progress: true, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), true);
+    });
+
+    test('an active run with recent progress is not flagged stalled', () => {
+        const run = { status: 'generating_pages', expects_automatic_progress: true, last_progress_at: twoMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('awaiting_document_owner_approval is never flagged stalled, no matter how long it has waited', () => {
+        const run = { status: 'awaiting_document_owner_approval', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+
+        // Even an implausibly long wait must not flip this — the backend flag alone decides.
+        const longWait = { ...run, last_progress_at: new Date(NOW - 60 * 24 * 60_000).toISOString() };
+        assert.equal(isRunStalled(longWait, 15, NOW), false);
+    });
+
+    test('decision_only is never flagged stalled', () => {
+        const run = { status: 'decision_only', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('completed, failed, escalated, and cancelled are never flagged stalled', () => {
+        for (const status of ['completed', 'failed', 'escalated', 'cancelled']) {
+            const run = { status, expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+            assert.equal(isRunStalled(run, 15, NOW), false, `expected ${status} to never be stalled`);
+        }
+    });
+
+    test('a missing expects_automatic_progress flag (undefined) is treated as not expecting progress', () => {
+        const run = { status: 'generating_pages', last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('no run at all is never flagged stalled', () => {
+        assert.equal(isRunStalled(null, 15, NOW), false);
+        assert.equal(isRunStalled(undefined, 15, NOW), false);
     });
 });
 

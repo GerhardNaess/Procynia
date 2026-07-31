@@ -11,6 +11,7 @@ import {
     matchesFindingsLocalFilter,
     getRunTimelineState,
     getEscalationCopy,
+    isRunStalled,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -317,8 +318,10 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const lastProgressLabel = progressLabel
         ? `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${progressLabel}`
         : null;
-    const staleMinutes = progressAt ? Math.max(0, Math.round((Date.now() - new Date(progressAt).getTime()) / 60000)) : null;
-    const seemsStalled = isActive && staleMinutes !== null && staleMinutes >= 15;
+    // Deliberately NOT based on isActive/isActiveWikiRun — that list also covers
+    // awaiting_document_owner_approval (kept "active" for polling/aria-live purposes), which must
+    // never be flagged stalled: it is a normal, indefinite wait for a human, not a stuck pipeline.
+    const seemsStalled = isRunStalled(run);
     const counters = [];
 
     if (showCounters) {

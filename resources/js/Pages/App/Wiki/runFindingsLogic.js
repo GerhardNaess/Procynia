@@ -127,6 +127,34 @@ export function getRunTimelineState(run, stepIndex) {
  * both are shown when that happens. Neither is guessed — a run with neither ends up on the same
  * generic fallback word the badge already shows, never a fabricated reason.
  */
+/**
+ * Whether a run's row should show the "Ser ut til å stå stille" warning and its explanation.
+ * Requires BOTH halves — a status where the automatic pipeline still expects to make technical
+ * progress (run.expects_automatic_progress, computed once centrally by
+ * EnterpriseWikiIngestRun::expectsAutomaticProgress() and never re-derived from the status
+ * string here), AND a genuinely long gap since the last recorded activity. A run waiting on a
+ * human decision (e.g. awaiting_document_owner_approval) can sit idle for hours by design —
+ * that is never "stalled", regardless of how long ago its last progress timestamp was.
+ *
+ * `now` is injectable (defaults to the real current time) purely so this stays deterministic
+ * under a fixed clock in unit tests — callers never need to pass it themselves.
+ */
+export function isRunStalled(run, thresholdMinutes = 15, now = Date.now()) {
+    if (!run || !run.expects_automatic_progress) {
+        return false;
+    }
+
+    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
+
+    if (!progressAt) {
+        return false;
+    }
+
+    const staleMinutes = Math.max(0, Math.round((now - new Date(progressAt).getTime()) / 60000));
+
+    return staleMinutes >= thresholdMinutes;
+}
+
 export function getEscalationCopy(run, tw = {}) {
     const blockingCount = run?.findings_open_blocking_count ?? 0;
     const totalCount = run?.lint_count ?? 0;

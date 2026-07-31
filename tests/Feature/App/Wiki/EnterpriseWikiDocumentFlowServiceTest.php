@@ -433,6 +433,52 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     // =========================================================================
+    // expectsAutomaticProgress() — the central rule for the "Ser ut til å stå stille" warning.
+    // A separate concept from isCancellable() even though membership currently matches — see
+    // EXPECTS_AUTOMATIC_PROGRESS_STATUSES's own docblock.
+    // =========================================================================
+
+    public function test_expects_automatic_progress_true_for_every_genuinely_active_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::EXPECTS_AUTOMATIC_PROGRESS_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertTrue($run->expectsAutomaticProgress(), "Expected status [{$status}] to expect automatic progress.");
+        }
+    }
+
+    public function test_expects_automatic_progress_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $this->assertFalse($run->expectsAutomaticProgress());
+    }
+
+    public function test_expects_automatic_progress_false_for_decision_only(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_DECISION_ONLY);
+
+        $this->assertFalse($run->expectsAutomaticProgress());
+    }
+
+    public function test_expects_automatic_progress_false_for_every_terminal_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::TERMINAL_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertFalse($run->expectsAutomaticProgress(), "Expected terminal status [{$status}] to not expect automatic progress.");
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
