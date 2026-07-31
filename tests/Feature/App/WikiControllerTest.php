@@ -4473,7 +4473,7 @@ class WikiControllerTest extends TestCase
         $doc = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_RUNNING);
 
-        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertRedirect(route('app.wiki.index', ['tab' => 'runs']));
         $response->assertSessionHas('success');
@@ -4489,7 +4489,7 @@ class WikiControllerTest extends TestCase
         $doc->update(['owner_user_id' => $owner->id]);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_RUNNING);
 
-        $response = $this->actingAs($owner)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($owner)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertSessionHas('success');
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
@@ -4502,7 +4502,7 @@ class WikiControllerTest extends TestCase
         $doc = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_RUNNING);
 
-        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertForbidden();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_RUNNING, $run->fresh()->status);
@@ -4516,7 +4516,7 @@ class WikiControllerTest extends TestCase
         $doc = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_RUNNING);
 
-        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertNotFound();
     }
@@ -4528,7 +4528,7 @@ class WikiControllerTest extends TestCase
         $doc = $this->createDocument($customer);
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
 
-        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertRedirect(route('app.wiki.index', ['tab' => 'runs']));
         $response->assertSessionHas('error');
@@ -4547,7 +4547,7 @@ class WikiControllerTest extends TestCase
         $run->update(array_merge(['error_message' => null, 'finished_at' => null], $overrides));
         $before = $run->fresh();
 
-        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel");
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs']);
 
         $response->assertRedirect(route('app.wiki.index', ['tab' => 'runs']));
         $response->assertSessionHas('error');
@@ -4600,7 +4600,7 @@ class WikiControllerTest extends TestCase
         $blockedPreview->assertOk();
         $this->assertTrue($blockedPreview->json('blocked'));
 
-        $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel")->assertSessionHas('success');
+        $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs'])->assertSessionHas('success');
 
         $unblockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");
         $unblockedPreview->assertOk();
@@ -4621,7 +4621,7 @@ class WikiControllerTest extends TestCase
         $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
 
         // The ordinary Kjøringer-tab action must still refuse this run...
-        $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel")->assertSessionHas('error');
+        $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs'])->assertSessionHas('error');
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
 
         $blockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");

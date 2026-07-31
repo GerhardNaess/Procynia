@@ -1616,6 +1616,15 @@ function SourcesTab({
 }) {
     const srcFilters = sourcesFilters ?? {};
     const [srcSearchInput, setSrcSearchInput] = useState(srcFilters.search ?? '');
+
+    // Sent with every write request from this tab so the backend redirects back here (with the
+    // active filters, where present) instead of falling back to the default Wiki-sider tab — see
+    // App\Http\Controllers\Concerns\RedirectsToWikiIndexTab.
+    const tabReturnParams = () => ({
+        tab: 'sources',
+        src_q: srcFilters.search ?? '',
+        src_status: srcFilters.status ?? '',
+    });
     const { auth = {} } = usePage().props;
     const currentUser = auth.user ?? {};
     const canAssignDocumentOwner = Boolean(currentUser.can_assign_enterprise_wiki_document_owner);
@@ -1668,7 +1677,7 @@ function SourcesTab({
 
         router.patch(
             `/app/wiki/sources/${source.id}/owner`,
-            { owner_user_id: normalized === '' ? null : Number(normalized) },
+            { owner_user_id: normalized === '' ? null : Number(normalized), ...tabReturnParams() },
             {
                 preserveScroll: true,
                 onFinish: () => {
@@ -1708,7 +1717,7 @@ function SourcesTab({
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
         setDeletePreview(null);
-        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true });
+        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true, data: tabReturnParams() });
     };
 
     const handleDeleteCancel = () => setDeletePreview(null);
@@ -1722,12 +1731,13 @@ function SourcesTab({
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
         setDeletePreview(null);
-        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, {}, { preserveScroll: true });
+        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, tabReturnParams(), { preserveScroll: true });
     };
 
     const submitUpload = (event) => {
         event.preventDefault();
         if (!uploadForm.data.file || uploadForm.processing) return;
+        uploadForm.transform((data) => ({ ...data, ...tabReturnParams() }));
         uploadForm.post(sourcesStoreUrl, {
             forceFormData: true,
             onSuccess: () => {
@@ -1949,7 +1959,7 @@ function SourcesTab({
                                                                     setIngestingIds((prev) => new Set(prev).add(source.id));
                                                                     router.post(
                                                                         `/app/wiki/sources/${source.id}/ingest`,
-                                                                        {},
+                                                                        tabReturnParams(),
                                                                         {
                                                                             onFinish: () =>
                                                                                 setIngestingIds((prev) => {
@@ -2235,7 +2245,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
         if (!cancelTarget) return;
         const runId = cancelTarget.id;
         setCancelTarget(null);
-        router.patch(`/app/wiki/runs/${runId}/cancel`, {}, { preserveScroll: true });
+        // Sent so the backend redirects back to Kjøringer (with the active filters, where
+        // present) instead of falling back to the default Wiki-sider tab — see
+        // App\Http\Controllers\Concerns\RedirectsToWikiIndexTab.
+        router.patch(`/app/wiki/runs/${runId}/cancel`, {
+            tab: 'runs',
+            run_status: filters.status ?? '',
+            run_decision: filters.decision ?? '',
+            run_src: filters.src_id ?? '',
+        }, { preserveScroll: true });
     };
 
     const navigate = (overrides) => {

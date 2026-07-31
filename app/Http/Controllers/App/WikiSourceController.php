@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
@@ -29,6 +30,8 @@ use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class WikiSourceController extends Controller
 {
+    use RedirectsToWikiIndexTab;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
@@ -115,7 +118,7 @@ class WikiSourceController extends Controller
             throw $e;
         }
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
     }
 
@@ -159,7 +162,7 @@ class WikiSourceController extends Controller
             'updated_by_user_id' => $user?->id,
         ]);
 
-        return redirect()->route('app.wiki.index', ['tab' => 'sources'])
+        return $this->redirectToWikiTab($request)
             ->with('success', 'Dokumenteier oppdatert.');
     }
 
@@ -287,7 +290,7 @@ class WikiSourceController extends Controller
      * running to interrupt from the Kjøringer tab, but it still blocks deletion, and this action
      * exists specifically to unblock that — never presented as an ordinary "stop the run" control.
      */
-    public function cancelBlockingRunsForDeletion(EnterpriseWikiDocument $document): RedirectResponse
+    public function cancelBlockingRunsForDeletion(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
@@ -302,7 +305,7 @@ class WikiSourceController extends Controller
             ->reject(fn (EnterpriseWikiIngestRun $run): bool => $run->isTerminal());
 
         if ($blockingRuns->isEmpty()) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', __('procynia.wiki.cancel_blocking_runs_none_active'));
         }
 
@@ -317,11 +320,11 @@ class WikiSourceController extends Controller
             'user_id' => $user->id,
         ]);
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.cancel_blocking_runs_success'));
     }
 
-    public function destroy(EnterpriseWikiDocument $document): RedirectResponse
+    public function destroy(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
@@ -336,7 +339,7 @@ class WikiSourceController extends Controller
         $result = $this->deletionService->delete($document, $user);
 
         if ($result['blocked'] ?? false) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', __('procynia.wiki.delete_preview_blocked_in_progress'));
         }
 
@@ -355,7 +358,7 @@ class WikiSourceController extends Controller
             'storage_error' => $result['storage_error'],
         ]);
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with('success', $this->deletionSuccessMessage($result));
     }
 
@@ -388,7 +391,7 @@ class WikiSourceController extends Controller
         return $message;
     }
 
-    public function ingest(EnterpriseWikiDocument $document): RedirectResponse
+    public function ingest(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
 
@@ -397,12 +400,12 @@ class WikiSourceController extends Controller
         }
 
         if (! EnterpriseWikiMaintainerDecisionAiClient::isAvailable()) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Wiki-generering er ikke aktivert ennå.');
         }
 
         if ($document->document_status !== EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Dokumentet er ikke klart for ingest. Kun ekstraherte dokumenter kan brukes.');
         }
 
@@ -411,7 +414,7 @@ class WikiSourceController extends Controller
         } catch (InvalidArgumentException $e) {
             Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
 
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Kunne ikke starte ingest. Prøv igjen.');
         }
 
@@ -428,7 +431,7 @@ class WikiSourceController extends Controller
             'created' => $prepared['created'],
         ]);
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with(
                 'success',
                 $prepared['created']

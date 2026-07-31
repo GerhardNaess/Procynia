@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Exceptions\EnterpriseWikiOrphanConceptLinkException;
+use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -38,6 +39,8 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
+    use RedirectsToWikiIndexTab;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
@@ -56,10 +59,7 @@ class WikiController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $allowedTabs = ['pages', 'sources', 'runs', 'quality'];
-        $tab = in_array($request->query('tab'), $allowedTabs, true)
-            ? $request->query('tab')
-            : 'pages';
+        $tab = $this->resolveWikiReturnTab($request);
 
         $lintBySeverity = EnterpriseWikiLintFinding::query()
             ->where('customer_id', $customerId)
@@ -886,7 +886,7 @@ class WikiController extends Controller
      * the run is cancelled by whoever could delete its source document (System Owner, or the
      * document's registered owner).
      */
-    public function cancelRun(EnterpriseWikiIngestRun $run): RedirectResponse
+    public function cancelRun(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
@@ -902,7 +902,7 @@ class WikiController extends Controller
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
         if (! $run->isCancellable()) {
-            return redirect()->route('app.wiki.index', ['tab' => 'runs'])
+            return $this->redirectToWikiTab($request)
                 ->with('error', __('procynia.wiki.run_cancel_not_cancellable'));
         }
 
@@ -914,7 +914,7 @@ class WikiController extends Controller
             'user_id' => $user->id,
         ]);
 
-        return redirect()->route('app.wiki.index', ['tab' => 'runs'])
+        return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_cancel_success'));
     }
 

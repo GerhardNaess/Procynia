@@ -57,9 +57,10 @@ class WikiSourceControllerTest extends TestCase
 
         $response = $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('tjeneste.pdf', 256, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
         $this->assertSame(1, EnterpriseWikiDocument::query()
             ->where('customer_id', $customer->id)
@@ -80,9 +81,10 @@ class WikiSourceControllerTest extends TestCase
                 128,
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             ),
+            'tab' => 'sources',
         ]);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
         $this->assertSame(1, EnterpriseWikiDocument::query()
             ->where('customer_id', $customer->id)
@@ -102,6 +104,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('scoped.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $this->assertSame(1, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
@@ -120,6 +123,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('status.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -138,6 +142,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('tekst.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -157,6 +162,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('tom.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -174,6 +180,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('tom.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -191,6 +198,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('check.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $pendingCount = EnterpriseWikiDocument::query()
@@ -213,6 +221,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('uploader.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -230,6 +239,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('owner-default.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -251,6 +261,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($owner)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $bidManager->id,
+                'tab' => 'sources',
             ])
             ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
@@ -273,6 +284,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($owner)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $foreignOwner->id,
+                'tab' => 'sources',
             ])
             ->assertSessionHasErrors(['owner_user_id']);
 
@@ -291,6 +303,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($contributor)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $contributor->id,
+                'tab' => 'sources',
             ])
             ->assertForbidden();
 
@@ -314,6 +327,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $firstOwner->id,
+                'tab' => 'sources',
             ])
             ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
@@ -337,6 +351,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $secondOwner->id,
+                'tab' => 'sources',
             ])
             ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
@@ -359,6 +374,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/sources/{$document->id}/owner", [
                 'owner_user_id' => $secondOwner->id,
+                'tab' => 'sources',
             ])
             ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
@@ -390,6 +406,7 @@ class WikiSourceControllerTest extends TestCase
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/sources/{$usedDocument->id}/owner", [
                 'owner_user_id' => $newOwner->id,
+                'tab' => 'sources',
             ])
             ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
@@ -439,6 +456,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('min-fil-navn.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -456,6 +474,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('path-check.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
@@ -488,6 +507,7 @@ class WikiSourceControllerTest extends TestCase
                 'duplikat-same-hash.pdf',
                 (string) file_get_contents(Storage::disk('local')->path($firstDoc->file_path)),
             ),
+            'tab' => 'sources',
         ]);
 
         $response->assertSessionHasErrors('file');
@@ -529,6 +549,7 @@ class WikiSourceControllerTest extends TestCase
 
         $response = $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('script.txt', 8, 'text/plain'),
+            'tab' => 'sources',
         ]);
 
         $response->assertSessionHasErrors('file');
@@ -558,9 +579,9 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createExtractedDocument($customer);
 
-        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         Queue::assertNothingPushed();
     }
@@ -574,7 +595,7 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createExtractedDocument($customer);
 
-        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources']);
 
         // Passes availability check — redirects after successful run creation, not with 'error'.
         $response->assertRedirect();
@@ -592,11 +613,11 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createExtractedDocument($customer);
 
-        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest")
-            ->assertRedirect(route('app.wiki.index'));
+        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources'])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
-        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest")
-            ->assertRedirect(route('app.wiki.index'));
+        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources'])
+            ->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
 
         $this->assertSame(1, EnterpriseWikiIngestRun::query()->count());
         Queue::assertPushedOn('enterprise-wiki', RunEnterpriseWikiDocumentFlow::class);
@@ -613,7 +634,7 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $foreignDoc = $this->createExtractedDocument($other);
 
-        $response = $this->actingAs($user)->post("/app/wiki/sources/{$foreignDoc->id}/ingest");
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$foreignDoc->id}/ingest", ['tab' => 'sources']);
 
         $response->assertForbidden();
         Queue::assertNothingPushed();
@@ -627,9 +648,9 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING);
 
-        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         Queue::assertNothingPushed();
     }
@@ -642,9 +663,9 @@ class WikiSourceControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED);
 
-        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         Queue::assertNothingPushed();
     }
@@ -713,9 +734,9 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         Storage::disk('local')->put($document->file_path, 'test content');
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         Storage::disk('local')->assertMissing($document->file_path);
@@ -731,9 +752,9 @@ class WikiSourceControllerTest extends TestCase
         // Failed run with no wiki page (failed before sections_planned)
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_FAILED, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseCount('enterprise_wiki_ingest_runs', 0);
@@ -754,7 +775,7 @@ class WikiSourceControllerTest extends TestCase
             'status' => 'failed',
         ]);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
 
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
@@ -770,7 +791,7 @@ class WikiSourceControllerTest extends TestCase
         $foreignDoc = $this->createDocument($other, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
 
         $this->actingAs($user)
-            ->delete("/app/wiki/sources/{$foreignDoc->id}")
+            ->delete("/app/wiki/sources/{$foreignDoc->id}", ['tab' => 'sources'])
             ->assertNotFound();
 
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $foreignDoc->id]);
@@ -793,9 +814,9 @@ class WikiSourceControllerTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
@@ -852,9 +873,9 @@ class WikiSourceControllerTest extends TestCase
         $preview->assertJsonPath('claim_count', 0);
         $preview->assertJsonPath('source_reference_count', 0);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
 
         $answer->refresh();
@@ -984,9 +1005,9 @@ class WikiSourceControllerTest extends TestCase
         $preview->assertJsonPath('sole_source_page_count', 0);
         $preview->assertJsonPath('shared_page_count', 1);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $this->assertDatabaseMissing('enterprise_wiki_source_references', ['enterprise_wiki_claim_id' => $claim->id]);
 
         $claim->refresh();
@@ -1010,9 +1031,9 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_QUEUED, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1025,9 +1046,9 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_RUNNING, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1041,9 +1062,9 @@ class WikiSourceControllerTest extends TestCase
         $page = $this->createWikiPage($customer);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED, $page->id);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('error');
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1056,9 +1077,9 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_ESCALATED, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1071,9 +1092,9 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_CANCELLED, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1089,9 +1110,9 @@ class WikiSourceControllerTest extends TestCase
         Storage::disk('local')->put($document->file_path, 'test content');
         $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
@@ -1130,9 +1151,9 @@ class WikiSourceControllerTest extends TestCase
             'updated_at' => now(),
         ]);
 
-        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
@@ -1180,7 +1201,7 @@ class WikiSourceControllerTest extends TestCase
             'excerpt' => 'Støttende dokumentasjon.',
         ]);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
 
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
@@ -1216,7 +1237,7 @@ class WikiSourceControllerTest extends TestCase
         });
 
         try {
-            $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+            $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
             $this->fail('Expected the simulated exception to propagate.');
         } catch (\RuntimeException $e) {
             $this->assertSame('Simulated mid-transaction failure.', $e->getMessage());
@@ -1241,11 +1262,11 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
 
         // A second delete for the same (now-gone) document must not error or resurrect anything.
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertNotFound();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertNotFound();
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
     }
 
@@ -1260,9 +1281,9 @@ class WikiSourceControllerTest extends TestCase
         $document->update(['owner_user_id' => $owner->id]);
         Storage::disk('local')->put($document->file_path, 'test content');
 
-        $response = $this->actingAs($owner)->delete("/app/wiki/sources/{$document->id}");
+        $response = $this->actingAs($owner)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources']);
 
-        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertRedirect(route('app.wiki.index', ['tab' => 'sources']));
         $response->assertSessionHas('success');
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
     }
@@ -1277,7 +1298,7 @@ class WikiSourceControllerTest extends TestCase
         $document->update(['owner_user_id' => $owner->id]);
 
         $this->actingAs($otherContributor)
-            ->delete("/app/wiki/sources/{$document->id}")
+            ->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])
             ->assertForbidden();
 
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
@@ -1291,7 +1312,7 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
 
         $this->actingAs($contributor)
-            ->delete("/app/wiki/sources/{$document->id}")
+            ->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])
             ->assertForbidden();
 
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
@@ -1305,7 +1326,7 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
 
         $this->actingAs($viewer)
-            ->delete("/app/wiki/sources/{$document->id}")
+            ->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])
             ->assertForbidden();
 
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
@@ -1458,7 +1479,7 @@ class WikiSourceControllerTest extends TestCase
             'verification_status' => EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
         ]);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
 
         $this->assertDatabaseMissing('enterprise_wiki_canonical_facts', ['id' => $fact->id]);
     }
@@ -1475,7 +1496,7 @@ class WikiSourceControllerTest extends TestCase
         $sameFileDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $sameFileDocument->update(['file_path' => $document->file_path]);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
 
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
         Storage::disk('local')->assertExists($document->file_path);
@@ -1489,11 +1510,11 @@ class WikiSourceControllerTest extends TestCase
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         Storage::disk('local')->put($document->file_path, 'test content');
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
         $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
 
         $this->actingAs($user)
-            ->delete("/app/wiki/sources/{$document->id}")
+            ->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])
             ->assertNotFound();
     }
 
@@ -1539,7 +1560,7 @@ class WikiSourceControllerTest extends TestCase
             'excerpt' => 'Støttende dokumentasjon.',
         ]);
 
-        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}", ['tab' => 'sources'])->assertRedirect();
 
         $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $page->id]);
 
@@ -1563,6 +1584,7 @@ class WikiSourceControllerTest extends TestCase
 
         $this->actingAs($user)->post('/app/wiki/sources', [
             'file' => UploadedFile::fake()->create('isolation.pdf', 64, 'application/pdf'),
+            'tab' => 'sources',
         ]);
 
         $this->assertSame(0, KnowledgeItem::query()->where('customer_id', $customer->id)->count());
