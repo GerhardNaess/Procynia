@@ -216,6 +216,33 @@ class EnterpriseWikiClaimCanonicalizationService
         return $this->hasBestPracticeMarker($normalized) && ! $this->assertsCurrentPartyState($normalized);
     }
 
+    /**
+     * Run-486 fix: a narrower guard than isGenuineBestPracticeText(), for the one case where a
+     * claim is already anchored to a content block the generation step independently classified
+     * best_practice (extraction's own split of that block into claim sentences, or a later
+     * reconfirm/reevaluation of a claim that already carries the tag). Requiring the claim's OWN
+     * extracted sentence to carry a marker word is wrong here: a recommendation paragraph is
+     * routinely split into several claims, and only ONE of them carries the actual "bør"/
+     * "anbefales" wording — the others are supporting/context sentences of the same
+     * already-approved recommendation, not independent assertions needing their own marker.
+     * The one thing that must still disqualify such a claim, regardless of its block's tag, is
+     * its own text asserting that a named party ALREADY has/does/is the thing suggested — a real
+     * drift into a false, unverified customer-state fact (Del 3/4's "ikke hevder at kunden
+     * allerede gjør dette").
+     *
+     * Never use this in place of isGenuineBestPracticeText() for a claim whose anchoring block is
+     * NOT already best_practice — that block-agnostic "rescue a mislabeled claim" judgment
+     * (EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion()) must keep
+     * requiring an explicit marker, since it is the only signal available when the block's own
+     * tag cannot be trusted.
+     */
+    public function hasDriftedFromBestPracticeBlock(string $text): bool
+    {
+        $normalized = $this->textNormalizer->normalize($text);
+
+        return $normalized === '' || $this->assertsCurrentPartyState($normalized);
+    }
+
     public function hasBestPracticeMarker(string $normalizedText): bool
     {
         foreach (self::BEST_PRACTICE_MARKERS as $marker) {

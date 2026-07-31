@@ -555,6 +555,53 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
     }
 
+    /**
+     * Regression for ingest run 486: a best_practice claim split out of a larger recommendation
+     * paragraph carries no marker word of its own ("bør"/"anbefales" live in a sibling sentence of
+     * the same block) but also does not assert anything about the customer's current state. It
+     * must be reconfirmed via the no-AI fast path, exactly like a claim that does carry its own
+     * marker — the block's own already-established best_practice tag is enough on its own.
+     */
+    public function test_best_practice_claim_without_its_own_marker_but_no_drift_is_reconfirmed_without_ai(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version, $claim] = $this->createAppliedRunWithClaimedPage($customer);
+        $text = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$text}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $text,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ]],
+        ]);
+        $claim->update([
+            'claim_text' => $text,
+            'page_excerpt' => $text,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->never();
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNotNull($claim->verified_at);
+    }
+
     // =========================================================================
     // Semantic (cross-language/paraphrase) verification — structured source elements
     // =========================================================================

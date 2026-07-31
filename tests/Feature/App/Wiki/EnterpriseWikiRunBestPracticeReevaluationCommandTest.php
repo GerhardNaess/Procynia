@@ -128,6 +128,30 @@ class EnterpriseWikiRunBestPracticeReevaluationCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->fresh()->content_origin);
     }
 
+    /**
+     * Regression for ingest run 486: real production wording split from a best_practice block —
+     * no marker of its own ("bør"/"anbefales" lived in a sibling sentence of the same paragraph),
+     * but also no current-state assertion. Unlike the marker-based check this command used to
+     * apply, it must still be eligible and reclassified — the block's own tag is enough.
+     */
+    public function test_claim_without_its_own_marker_but_no_drift_is_reclassified(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createRunWithClaim(
+            $customer,
+            claimText: 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.',
+            blockOrigin: EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            bestPracticeReason: 'Regelmessig oppfølging reduserer risiko.',
+        );
+
+        $this->artisan('wiki:reevaluate-run-best-practice-claims', ['--run-id' => $run->id, '--apply' => true])
+            ->expectsOutputToContain('Eligible for best_practice:                     1')
+            ->expectsOutputToContain('Reclassified:                                   1')
+            ->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
+    }
+
     public function test_internal_error_claims_are_never_touched(): void
     {
         $customer = $this->createCustomer();

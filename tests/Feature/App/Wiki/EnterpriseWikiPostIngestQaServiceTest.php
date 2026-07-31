@@ -648,6 +648,78 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
     }
 
+    /**
+     * Regression for ingest run 486 (real production document "Incident Management Illustration
+     * (E2E).docx"): the block was correctly tagged best_practice at generation time (not
+     * mis-tagged source_based, unlike the run-482 case above) — the bug here was that the claim
+     * extracted from it, a supporting sentence with no marker word of its own, was independently
+     * downgraded to unsupported_generated_content anyway, escalating the run for content that was
+     * never presented as a customer-specific fact.
+     */
+    public function test_run_with_best_practice_block_supporting_sentence_lacking_its_own_marker_does_not_escalate(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustration');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        // Real run-486 wording: a supporting/context sentence within a best_practice-tagged
+        // recommendation paragraph, extracted as its own claim. It carries no "bør"/"anbefales"
+        // marker of its own (that lives in a sibling sentence of the same block) and does not
+        // assert anything about the customer's current state.
+        $supportingText = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+
+        $version->update([
+            'content_markdown' => "# Incident Management Illustration\n\n{$supportingText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => 'Når illustrasjonen brukes i operativ styring, bør team vurdere hvordan hendelser henger sammen med beslektede prosesser. '.$supportingText,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Generell ITSM-kontekst utover kildedokumentet.',
+            ]],
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $supportingText,
+            'page_excerpt' => $supportingText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->never();
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+
+        $this->markStepsComplete($run);
+
+        $result = $this->service()->runForRun($run->fresh());
+
+        $this->assertNotNull($result);
+        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $run->refresh();
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
     public function test_run_with_an_unsupported_customer_fact_still_requires_repair_even_alongside_best_practice_content(): void
     {
         $customer = $this->createCustomer();

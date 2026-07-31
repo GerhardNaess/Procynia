@@ -556,6 +556,53 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertNull($claim->review_reason);
     }
 
+    /**
+     * Regression for ingest run 486 (production document "Incident Management Illustration.docx"):
+     * a genuinely best_practice-tagged block ("## Berøringspunkter mot øvrige ITIL-prosesser") was
+     * a multi-sentence recommendation paragraph — one sentence carried the "bør"/"lurt å" markers,
+     * but the AI extraction step split it into several separate claims, and this particular
+     * sentence (general ITIL domain context, no marker of its own, no assertion about the
+     * customer's current state) was wrongly downgraded to unsupported_generated_content purely
+     * because it lacked its own marker word — creating a blocking claim-integrity defect for
+     * content that was never presented as a customer-specific fact.
+     */
+    public function test_supporting_sentence_from_best_practice_block_without_its_own_marker_stays_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $blocks = $version->content_blocks_json;
+        foreach ([1, 2] as $index) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+            $blocks[$index]['source_id'] = null;
+            $blocks[$index]['source_element_key'] = null;
+            $blocks[$index]['source_elements'] = [];
+            $blocks[$index]['best_practice_reason'] = 'Anbefalingen er lagt til som eksplisitt beste praksis.';
+        }
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->andReturn(['claims' => [
+                ['text' => 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt alpha.', 'conflict_note' => null],
+                ['text' => 'Å koble prosessflyten til etablert datakatalog og systemforvaltningspraksis i masterdata-samhandling og til operasjonelle rutiner i applikasjonsdrift kan gjøre hendelseshåndteringen mer presis og sporbar.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt beta.', 'conflict_note' => null],
+            ]]);
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->get();
+
+        $this->assertCount(2, $claims);
+
+        foreach ($claims as $claim) {
+            $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+            $this->assertNotSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
+        }
+    }
+
     public function test_command_does_not_create_additional_ingest_runs(): void
     {
         $customer = $this->createCustomer();
@@ -768,6 +815,47 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
         $this->assertSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
+    }
+
+    /**
+     * Regression for ingest run 486 — same manual-mixed-block path, using the real production
+     * wording that lacks its own recommendation marker but does not assert any current-state fact
+     * either. Must stay best_practice, unlike the "Kunden har..." drift case above.
+     */
+    public function test_manual_mixed_block_best_practice_fact_without_own_marker_is_not_degraded(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $text = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = 'mixed';
+        $blocks[1]['markdown'] = $text;
+        $blocks[1]['source_elements'] = [];
+        $version->update([
+            'content_markdown' => "# Test Page\n\n{$blocks[1]['markdown']}",
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => $text,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                'excerpt' => $text,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'source_element_keys' => [],
+                'best_practice_reason' => 'AI mente dette var normativt.',
+                'conflict_note' => null,
+            ]]]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)
+            ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
+
+        $claim = EnterpriseWikiClaim::query()->findOrFail($result['claim_ids'][0]);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNotSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
     }
 
     public function test_manual_mixed_block_invalid_claim_rolls_back_whole_block_response(): void

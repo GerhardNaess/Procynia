@@ -177,6 +177,38 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     }
 
     // =========================================================================
+    // hasDriftedFromBestPracticeBlock() — run-486 fix: narrower than isGenuineBestPracticeText()
+    // for a claim already anchored to a generation-time best_practice block.
+    // =========================================================================
+
+    public function test_supporting_sentence_without_marker_has_not_drifted(): void
+    {
+        // Real run-486 wording — a supporting/context sentence split from a larger
+        // recommendation paragraph, with no "bør"/"anbefales" marker of its own and no
+        // current-state assertion. isGenuineBestPracticeText() alone would wrongly say this
+        // isn't genuine (no marker); hasDriftedFromBestPracticeBlock() must say it hasn't drifted.
+        $text = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+
+        $this->assertFalse($this->service()->isGenuineBestPracticeText($text));
+        $this->assertFalse($this->service()->hasDriftedFromBestPracticeBlock($text));
+    }
+
+    public function test_current_state_assertion_has_drifted_regardless_of_block(): void
+    {
+        $this->assertTrue($this->service()->hasDriftedFromBestPracticeBlock('Kunden har allerede etablert en fast eskaleringsrutine.'));
+    }
+
+    public function test_genuine_marker_wording_has_not_drifted(): void
+    {
+        $this->assertFalse($this->service()->hasDriftedFromBestPracticeBlock('Det anbefales å etablere en fast eskaleringsrutine.'));
+    }
+
+    public function test_empty_text_has_drifted(): void
+    {
+        $this->assertTrue($this->service()->hasDriftedFromBestPracticeBlock(''));
+    }
+
+    // =========================================================================
     // Run-482 fix: additional soft-advisory markers a real generation pass produced that the
     // original marker list did not recognize
     // =========================================================================

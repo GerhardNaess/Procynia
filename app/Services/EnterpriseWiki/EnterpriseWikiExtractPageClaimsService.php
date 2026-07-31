@@ -318,7 +318,7 @@ class EnterpriseWikiExtractPageClaimsService
                 // still gets real (human) scrutiny rather than silently riding through as a
                 // "harmless suggestion" it no longer actually is.
                 $bestPracticeDrifted = $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-                    && ! $this->canonicalizationService->isGenuineBestPracticeText((string) $claim['text']);
+                    && $this->canonicalizationService->hasDriftedFromBestPracticeBlock((string) $claim['text']);
 
                 if ($bestPracticeDrifted) {
                     $contentOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;
@@ -489,7 +489,7 @@ class EnterpriseWikiExtractPageClaimsService
             foreach ($claims as $claim) {
                 $contentOrigin = $claim['content_origin'];
                 $bestPracticeDrifted = $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-                    && ! $this->canonicalizationService->isGenuineBestPracticeText($claim['text']);
+                    && $this->canonicalizationService->hasDriftedFromBestPracticeBlock($claim['text']);
 
                 if ($bestPracticeDrifted) {
                     $contentOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;

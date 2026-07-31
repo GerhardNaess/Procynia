@@ -24,10 +24,14 @@ use App\Models\EnterpriseWikiPageVersion;
  *      already made this call — this service never invents best-practice status for a block that
  *      was never tagged as such; doing so would be constructing false history).
  *   3. That block carries a real, non-empty best_practice_reason.
- *   4. The claim's OWN current text still reads as a genuine recommendation, not a customer-state
- *      assertion (EnterpriseWikiClaimCanonicalizationService::isGenuineBestPracticeText() — the
+ *   4. The claim's OWN current text has not drifted into a customer-state assertion
+ *      (EnterpriseWikiClaimCanonicalizationService::hasDriftedFromBestPracticeBlock() — the
  *      same deterministic check used by extraction and verification, so a claim can never end up
- *      classified differently depending on which code path last touched it).
+ *      classified differently depending on which code path last touched it). Unlike the
+ *      block-agnostic rescue check (isPositiveBestPracticeSuggestion()), this does not require
+ *      the claim's own sentence to carry its own "bør"/"anbefales" marker — step 2 above
+ *      already established the anchoring block is genuinely best_practice, so a supporting
+ *      sentence split out of that same recommendation paragraph is not required to repeat it.
  *
  * Read-only by default; only writes when explicitly told to apply. verified_at is deliberately
  * left untouched — the claim's original verification timestamp remains an honest record of when
@@ -97,7 +101,7 @@ class EnterpriseWikiRunBestPracticeReevaluationService
                 continue;
             }
 
-            if (! $this->canonicalizationService->isGenuineBestPracticeText((string) $claim->claim_text)) {
+            if ($this->canonicalizationService->hasDriftedFromBestPracticeBlock((string) $claim->claim_text)) {
                 $skippedNotGenuine++;
 
                 continue;
