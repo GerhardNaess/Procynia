@@ -3363,6 +3363,7 @@ return [
         'sources_title' => 'Source documents',
         'sources_description' => 'Upload source documents directly to the Enterprise Wiki. The document is stored and text is extracted before it can be used to generate wiki content.',
         'sources_file_label' => 'Choose file',
+        'sources_no_file_selected' => 'No file selected',
         'sources_file_hint' => 'PDF or DOCX · Max 20 MB',
         'sources_upload_button' => 'Upload source',
         'sources_uploading' => 'Uploading...',

@@ -1764,7 +1764,7 @@ function SourcesTab({
                         <h2 className="text-base font-semibold text-slate-950">
                             {tw.sources_title ?? 'Kildedokumenter'}
                         </h2>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
+                        <p className="max-w-2xl text-base leading-6 text-slate-500">
                             {tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.'}
                         </p>
                     </div>
@@ -1804,7 +1804,7 @@ function SourcesTab({
                             <button
                                 type="button"
                                 onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '' }); }}
-                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -1815,7 +1815,7 @@ function SourcesTab({
                     </div>
 
                     {sources.length === 0 ? (
-                        <p className="text-sm text-slate-400">
+                        <p className="text-base text-slate-500">
                             {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                         </p>
                     ) : (
@@ -1830,7 +1830,7 @@ function SourcesTab({
                                     <col style={{ width: '420px' }} />
                                 </colgroup>
                                 <thead className="bg-slate-50">
-                                    <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                    <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                         <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                         <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                         <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
@@ -1857,7 +1857,7 @@ function SourcesTab({
                                         const hasBlockingRun = !!source.latest_ingest_run?.expects_automatic_progress;
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
-                                        <tr key={source.id} className="text-sm">
+                                        <tr key={source.id} className="text-base leading-6 text-slate-700">
                                             <td className="overflow-hidden px-4 py-3 align-top">
                                                 <span className="block truncate font-medium text-slate-900" title={source.original_filename}>
                                                     {source.original_filename}
@@ -1869,7 +1869,7 @@ function SourcesTab({
                                                     label={sourceStatusLabel(source.document_status)}
                                                 />
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 align-top text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 align-top text-base text-slate-500">
                                                 {formatDate(source.created_at, locale)}
                                             </td>
                                             <td className="px-4 py-3 align-top">
@@ -1888,7 +1888,7 @@ function SourcesTab({
                                                             <li key={p.id}>
                                                                 <Link
                                                                     href={`/app/wiki/${p.slug}`}
-                                                                    className="block truncate text-[11px] text-violet-600 hover:text-violet-800 hover:underline"
+                                                                    className="block truncate text-base text-violet-600 hover:text-violet-800 hover:underline"
                                                                     title={p.title}
                                                                 >
                                                                     {p.title}
@@ -1904,7 +1904,7 @@ function SourcesTab({
                                                         <select
                                                             value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
                                                             onChange={(event) => handleOwnerChange(source.id, event.target.value)}
-                                                            className={`${SELECT_CLS} w-full`}
+                                                            className={`${RUNS_SELECT_CLS} w-full`}
                                                         >
                                                             <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
                                                             {ownerOptions.map((option) => (
@@ -1917,7 +1917,7 @@ function SourcesTab({
                                                             type="button"
                                                             disabled={savingOwnerIds.has(source.id)}
                                                             onClick={() => handleOwnerSave(source)}
-                                                            className="inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className={ACTION_BUTTON_SECONDARY}
                                                         >
                                                             {savingOwnerIds.has(source.id)
                                                                 ? (tw.document_owner_saving ?? 'Lagrer eier...')
@@ -1925,7 +1925,7 @@ function SourcesTab({
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                    <span className={`${BADGE} ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
                                                         {sourceOwnerLabel}
                                                     </span>
                                                 )}
@@ -1997,12 +1997,12 @@ function SourcesTab({
                                                     </div>
                                                     <Link
                                                         href={`/app/wiki?tab=runs&run_src=${source.id}`}
-                                                        className="text-[11px] text-slate-400 hover:text-violet-600 hover:underline"
+                                                        className="text-base text-slate-500 hover:text-violet-600 hover:underline"
                                                     >
                                                         {tw.runs_view_runs ?? 'Kjøringer'}
                                                     </Link>
                                                     {source.document_status === 'extracted' && !wikiGenerationAvailable && (
-                                                        <span className="text-[11px] text-slate-400">
+                                                        <span className="text-base text-slate-500">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
                                                         </span>
                                                     )}
@@ -2017,37 +2017,46 @@ function SourcesTab({
                     )}
 
                     <div className="border-t border-slate-100 pt-4">
-                        <form onSubmit={submitUpload} className="space-y-3">
+                        <form onSubmit={submitUpload} className="space-y-4">
                             <div className="space-y-1.5">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    {tw.sources_file_label ?? 'Velg fil'}
-                                </span>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".pdf,.docx"
-                                    disabled={uploadForm.processing}
-                                    onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
-                                    className="block w-full max-w-sm cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
-                                />
-                                <p className="text-xs text-slate-400">
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <input
+                                        ref={fileInputRef}
+                                        id="wiki-source-file"
+                                        type="file"
+                                        accept=".pdf,.docx"
+                                        disabled={uploadForm.processing}
+                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                        className="peer sr-only"
+                                    />
+                                    <label
+                                        htmlFor="wiki-source-file"
+                                        className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-700"
+                                    >
+                                        {tw.sources_file_label ?? 'Velg fil'}
+                                    </label>
+                                    <span className="min-w-0 break-all text-base text-slate-700">
+                                        {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
+                                    </span>
+                                </div>
+                                <p className="text-base text-slate-500">
                                     {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
                                 </p>
                                 {uploadForm.errors.file ? (
-                                    <p className="text-sm text-rose-600">{uploadForm.errors.file}</p>
+                                    <p className="text-base text-rose-600">{uploadForm.errors.file}</p>
                                 ) : null}
                             </div>
 
                             {canAssignDocumentOwner ? (
                                 <div className="space-y-1.5">
-                                    <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="wiki-source-owner">
+                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="wiki-source-owner">
                                         {tw.document_owner_label ?? 'Dokumenteier'}
                                     </label>
                                     <select
                                         id="wiki-source-owner"
                                         value={uploadForm.data.owner_user_id}
                                         onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
-                                        className={`${SELECT_CLS} w-full max-w-sm`}
+                                        className={`${RUNS_SELECT_CLS} w-full max-w-sm`}
                                     >
                                         <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
                                         {ownerOptions.map((option) => (
@@ -2057,7 +2066,7 @@ function SourcesTab({
                                         ))}
                                     </select>
                                     {uploadForm.errors.owner_user_id ? (
-                                        <p className="text-sm text-rose-600">{uploadForm.errors.owner_user_id}</p>
+                                        <p className="text-base text-rose-600">{uploadForm.errors.owner_user_id}</p>
                                     ) : null}
                                 </div>
                             ) : (
@@ -2067,7 +2076,7 @@ function SourcesTab({
                             <button
                                 type="submit"
                                 disabled={!uploadForm.data.file || uploadForm.processing}
-                                className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-11 items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {uploadForm.processing
                                     ? (tw.sources_uploading ?? 'Laster opp...')
