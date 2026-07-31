@@ -330,10 +330,10 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
         $documentId = $document->id;
-        $result = $this->deletionService->delete($document);
+        $result = $this->deletionService->delete($document, $user);
 
         if ($result['blocked'] ?? false) {
             return redirect()->route('app.wiki.index')
@@ -344,6 +344,7 @@ class WikiSourceController extends Controller
             'document_id' => $documentId,
             'customer_id' => $customerId,
             'runs_deleted' => $result['runs_deleted'],
+            'pending_approval_runs_cancelled' => $result['pending_approval_runs_cancelled'],
             'sole_source_pages_deleted' => $result['sole_source_pages_deleted'],
             'shared_pages_kept' => $result['shared_pages_kept'],
             'page_versions_deleted' => $result['page_versions_deleted'],

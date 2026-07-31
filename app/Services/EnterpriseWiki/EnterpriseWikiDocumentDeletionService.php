@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -45,6 +46,16 @@ use Illuminate\Support\Str;
  * lint_findings, by contrast, only has NULLABLE (nullOnDelete) foreign keys to page/claim/run/
  * document — deleting a page would otherwise leave orphaned finding rows with every FK nulled
  * out, so they are deleted explicitly, before their parents, in the same transaction.
+ *
+ * Provenance model (Del 8 — human-waiting runs): a run stuck in
+ * EnterpriseWikiIngestRun::isAwaitingHumanAction() (currently only
+ * STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) has already finished all automatic processing and has
+ * nothing left running to interrupt — it does NOT block deletion (see hasActiveRun()). Deletion
+ * ends any such run via EnterpriseWikiDocumentFlowService::cancelRun(), the same underlying action
+ * WikiSourceController::cancelBlockingRunsForDeletion() uses, inside the SAME transaction as the
+ * rest of the deletion so the whole operation is atomic — never a parallel cancellation path. A
+ * run genuinely still under automatic processing (expectsAutomaticProgress()) still blocks
+ * deletion exactly as before and requires that separate, explicit cancel-first action.
  */
 class EnterpriseWikiDocumentDeletionService
 {
@@ -52,6 +63,7 @@ class EnterpriseWikiDocumentDeletionService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $stalenessService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
     ) {}
 
     /**
@@ -67,11 +79,27 @@ class EnterpriseWikiDocumentDeletionService
     }
 
     /**
+     * Whether any run for this document is still genuinely under automatic processing — the only
+     * thing that blocks deletion. A run merely awaiting a human decision
+     * (EnterpriseWikiIngestRun::isAwaitingHumanAction(), e.g. STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL)
+     * has nothing left running to interrupt and does NOT block deletion; delete() ends it
+     * automatically instead. Deliberately expectsAutomaticProgress(), not !isTerminal() — see that
+     * method's docblock.
+     *
      * @param  Collection<int, EnterpriseWikiIngestRun>  $runs
      */
     public function hasActiveRun(Collection $runs): bool
     {
-        return $runs->contains(fn (EnterpriseWikiIngestRun $run): bool => ! $run->isTerminal());
+        return $runs->contains(fn (EnterpriseWikiIngestRun $run): bool => $run->expectsAutomaticProgress());
+    }
+
+    /**
+     * @param  Collection<int, EnterpriseWikiIngestRun>  $runs
+     * @return Collection<int, EnterpriseWikiIngestRun>
+     */
+    private function awaitingHumanActionRuns(Collection $runs): Collection
+    {
+        return $runs->filter(fn (EnterpriseWikiIngestRun $run): bool => $run->isAwaitingHumanAction())->values();
     }
 
     /**
@@ -81,7 +109,8 @@ class EnterpriseWikiDocumentDeletionService
      *     blocked: bool, reason: ?string, document_name?: string, document_owner_name?: ?string,
      *     run_count?: int, sole_source_page_count?: int, shared_page_count?: int,
      *     page_version_count?: int, claim_count?: int, source_reference_count?: int,
-     *     finding_count?: int, stale_wiki_answer_count?: int, storage_file_exists?: bool
+     *     finding_count?: int, stale_wiki_answer_count?: int, storage_file_exists?: bool,
+     *     pending_approval_run_count?: int
      * }
      */
     public function preview(EnterpriseWikiDocument $document): array
@@ -110,23 +139,33 @@ class EnterpriseWikiDocumentDeletionService
             'finding_count' => $this->findingCount($document, $runIds, $soleSourcePageIds),
             'stale_wiki_answer_count' => $staleImpact['stale_wiki_answer_count'],
             'storage_file_exists' => $this->storageFileExists($document),
+            'pending_approval_run_count' => $this->awaitingHumanActionRuns($runs)->count(),
         ];
     }
 
     /**
      * Performs the deletion. Returns `['blocked' => true, 'reason' => ...]` without changing
-     * anything if a run is still active — the caller (controller) is expected to check this
-     * exactly like preview() rather than relying on an exception, since an active run showing up
-     * between preview and confirm is an ordinary race, not an exceptional error.
+     * anything if a run is still genuinely under automatic processing — the caller (controller) is
+     * expected to check this exactly like preview() rather than relying on an exception, since an
+     * active run showing up between preview and confirm is an ordinary race, not an exceptional
+     * error. $actor is the deleting user, used to attribute any human-waiting run this call ends
+     * on the document's behalf (see class docblock, "Del 8").
+     *
+     * Run rows are locked (lockForUpdate()) inside the transaction before anything is cancelled or
+     * deleted, re-checking for a genuinely active run under the lock — this closes the race where
+     * a run transitions to active processing between the unlocked read above and the transaction
+     * actually starting. If that happens, the transaction commits having changed nothing and this
+     * still returns the ordinary blocked response.
      *
      * @return array{
      *     blocked: bool, reason?: string,
      *     runs_deleted?: int, sole_source_pages_deleted?: int, shared_pages_kept?: int,
      *     page_versions_deleted?: int, claims_affected?: int, findings_deleted?: int,
-     *     stale_wiki_answers_marked?: int, storage_deleted?: bool, storage_error?: ?string
+     *     stale_wiki_answers_marked?: int, pending_approval_runs_cancelled?: int,
+     *     storage_deleted?: bool, storage_error?: ?string
      * }
      */
-    public function delete(EnterpriseWikiDocument $document): array
+    public function delete(EnterpriseWikiDocument $document, User $actor): array
     {
         $runs = $this->documentRuns($document);
 
@@ -149,7 +188,29 @@ class EnterpriseWikiDocumentDeletionService
         $filePath = (string) $document->file_path;
         $customerId = (int) $document->customer_id;
 
-        DB::transaction(function () use ($document, $runIds, $soleSourcePageIds, $impactedClaimIds): void {
+        $blockedByRace = false;
+        $pendingApprovalRunsCancelled = 0;
+
+        DB::transaction(function () use (
+            $document, $runIds, $soleSourcePageIds, $impactedClaimIds, $actor, &$blockedByRace, &$pendingApprovalRunsCancelled,
+        ): void {
+            $lockedRuns = $runIds->isEmpty()
+                ? collect()
+                : EnterpriseWikiIngestRun::query()->whereIn('id', $runIds)->lockForUpdate()->get(['id', 'status']);
+
+            if ($lockedRuns->contains(fn (EnterpriseWikiIngestRun $run): bool => $run->expectsAutomaticProgress())) {
+                $blockedByRace = true;
+
+                return;
+            }
+
+            $awaitingRuns = $lockedRuns->filter(fn (EnterpriseWikiIngestRun $run): bool => $run->isAwaitingHumanAction());
+            $pendingApprovalRunsCancelled = $awaitingRuns->count();
+
+            foreach ($awaitingRuns as $run) {
+                $this->documentFlowService->cancelRun($run, $actor);
+            }
+
             $this->stalenessService->markAnswersStaleForDeletedDocument($document, $runIds, $soleSourcePageIds);
 
             if ($soleSourcePageIds->isNotEmpty()) {
@@ -214,6 +275,10 @@ class EnterpriseWikiDocumentDeletionService
             $document->delete();
         });
 
+        if ($blockedByRace) {
+            return ['blocked' => true, 'reason' => 'in_progress_run'];
+        }
+
         // Del 4: a kept shared page's document-owner-approval requirements were computed from its
         // claims' source references, which just changed (this document's references are gone) —
         // re-derive them through the existing sync mechanism rather than leaving a stale
@@ -225,6 +290,7 @@ class EnterpriseWikiDocumentDeletionService
         return [
             'blocked' => false,
             'runs_deleted' => $runIds->count(),
+            'pending_approval_runs_cancelled' => $pendingApprovalRunsCancelled,
             'sole_source_pages_deleted' => $soleSourcePageIds->count(),
             'shared_pages_kept' => $sharedPageIds->count(),
             'page_versions_deleted' => $pageVersionsDeleted,

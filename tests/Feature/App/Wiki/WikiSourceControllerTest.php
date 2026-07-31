@@ -25,6 +25,7 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -1045,6 +1046,207 @@ class WikiSourceControllerTest extends TestCase
         $response->assertRedirect(route('app.wiki.index'));
         $response->assertSessionHas('error');
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_delete_does_not_reject_document_with_escalated_ingest_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_ESCALATED, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_delete_does_not_reject_document_with_cancelled_ingest_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_CANCELLED, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    // ─── Delete while awaiting document owner approval (human-waiting run) ────
+
+    public function test_document_awaiting_document_owner_approval_can_be_deleted(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+        Storage::disk('local')->assertMissing($document->file_path);
+    }
+
+    public function test_delete_preview_is_not_blocked_for_awaiting_document_owner_approval_and_reports_pending_approval_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
+
+        $preview = $this->actingAs($user)->getJson("/app/wiki/sources/{$document->id}/delete-preview");
+
+        $preview->assertOk();
+        $preview->assertJsonPath('blocked', false);
+        $preview->assertJsonPath('pending_approval_run_count', 1);
+    }
+
+    public function test_delete_cascades_sole_source_wiki_page_when_run_is_awaiting_document_owner_approval(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $page->id);
+
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+    }
+
+    public function test_delete_keeps_shared_page_and_clears_verification_claim_when_run_is_awaiting_document_owner_approval(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $supportingDocument = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $page = $this->createWikiPage($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $page->id);
+        $supportingRun = $this->createIngestRun($customer, $supportingDocument, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            ['enterprise_wiki_ingest_run_id' => $run->id, 'enterprise_wiki_page_id' => $page->id, 'action' => 'created', 'created_at' => now(), 'updated_at' => now()],
+            ['enterprise_wiki_ingest_run_id' => $supportingRun->id, 'enterprise_wiki_page_id' => $page->id, 'action' => 'created', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Påstand som fortsatt holder siden delt.',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 0,
+            'verification_claimed_at' => now(),
+            'verification_claim_token' => (string) Str::uuid(),
+        ]);
+        $claim->sourceReferences()->create([
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $supportingDocument->id,
+            'source_label' => $supportingDocument->original_filename,
+            'excerpt' => 'Støttende dokumentasjon.',
+        ]);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+        // Shared page (also built from supportingDocument) is kept, not deleted.
+        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $page->id]);
+        $this->assertDatabaseHas('enterprise_wiki_claims', ['id' => $claim->id]);
+
+        // Proves the run was actually cancelled (via EnterpriseWikiDocumentFlowService::cancelRun())
+        // before being deleted, not merely hard-deleted — the surviving claim's verification lease
+        // must be released, or it would stay stuck forever referencing a run that no longer exists.
+        $claim->refresh();
+        $this->assertNull($claim->verification_claimed_at);
+        $this->assertNull($claim->verification_claim_token);
+    }
+
+    public function test_delete_rolls_back_document_and_run_when_deletion_fails_mid_transaction(): void
+    {
+        $this->withoutExceptionHandling();
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
+
+        $this->mock(EnterpriseWikiDocumentWikiAnswerStalenessService::class, function ($mock): void {
+            $mock->shouldReceive('previewDeletionImpact')->andReturn([
+                'impacted_claim_count' => 0,
+                'impacted_source_reference_count' => 0,
+                'stale_wiki_answer_count' => 0,
+            ]);
+            $mock->shouldReceive('markAnswersStaleForDeletedDocument')->andThrow(new \RuntimeException('Simulated mid-transaction failure.'));
+        });
+
+        try {
+            $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+            $this->fail('Expected the simulated exception to propagate.');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Simulated mid-transaction failure.', $e->getMessage());
+        }
+
+        // Nothing committed: the document, the (still-uncancelled) run, and the storage file all
+        // survive exactly as before the attempt — the cancel-then-delete sequence is one atomic
+        // transaction, so a failure partway through leaves no partial state behind.
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseHas('enterprise_wiki_ingest_runs', [
+            'id' => $run->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+        ]);
+        Storage::disk('local')->assertExists($document->file_path);
+    }
+
+    public function test_repeated_delete_request_for_awaiting_document_owner_approval_document_is_idempotent(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, null);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+
+        // A second delete for the same (now-gone) document must not error or resurrect anything.
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertNotFound();
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
     }
 
     // ─── Authorization (Del 6) ────────────────────────────────────────────────

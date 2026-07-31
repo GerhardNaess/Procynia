@@ -1713,10 +1713,11 @@ function SourcesTab({
 
     const handleDeleteCancel = () => setDeletePreview(null);
 
-    // Separate from RunsTab's ordinary "Avbryt kjøring" action — this cancels whichever
-    // non-terminal run(s) are currently blocking THIS document's deletion (including one waiting
-    // on Document Owner approval, which the ordinary action correctly no longer allows cancelling
-    // from the Kjøringer tab). See WikiSourceController::cancelBlockingRunsForDeletion().
+    // Separate from RunsTab's ordinary "Avbryt kjøring" action — this cancels whichever run(s) are
+    // still genuinely under automatic processing and blocking THIS document's deletion. A run only
+    // waiting on Document Owner approval no longer needs this step at all: delete() ends it
+    // automatically as part of deletion. See WikiSourceController::cancelBlockingRunsForDeletion()
+    // and EnterpriseWikiDocumentDeletionService::hasActiveRun().
     const handleCancelBlockingRunsForDeletion = () => {
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
@@ -1837,6 +1838,13 @@ function SourcesTab({
                                         // the button while a run is active, but it is disabled with a clear
                                         // explanation rather than silently disappearing.
                                         const canDelete = !!source.can_delete;
+                                        // Deliberately narrower than isInProgress above: a run merely awaiting
+                                        // document-owner approval has finished all automatic processing and
+                                        // does not block deletion (the backend ends it automatically as part
+                                        // of delete) — only a run the pipeline is still actively working on
+                                        // should disable the Delete button. Mirrors
+                                        // EnterpriseWikiDocumentDeletionService::hasActiveRun().
+                                        const hasBlockingRun = !!source.latest_ingest_run?.expects_automatic_progress;
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
                                         <tr key={source.id} className="text-sm">
@@ -1965,8 +1973,8 @@ function SourcesTab({
                                                         {canDelete && (
                                                             <button
                                                                 type="button"
-                                                                disabled={isInProgress}
-                                                                title={isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
+                                                                disabled={hasBlockingRun}
+                                                                title={hasBlockingRun ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
                                                                 onClick={() => handleDeleteClick(source)}
                                                                 className={ACTION_BUTTON_DESTRUCTIVE}
                                                             >
@@ -2100,6 +2108,11 @@ function SourcesTab({
                                 <p className="text-sm text-slate-600">
                                     {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
                                 </p>
+                                {deletePreview.data.pending_approval_run_count > 0 && (
+                                    <p className="text-sm font-medium text-amber-700">
+                                        {tw.delete_preview_pending_approval ?? 'Dokumentet har en åpen godkjenningsflyt som venter på dokumenteiergodkjenning. Denne avsluttes automatisk dersom du sletter dokumentet nå.'}
+                                    </p>
+                                )}
                                 <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm space-y-1.5">
                                     <div className="flex justify-between">
                                         <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
@@ -2166,7 +2179,9 @@ function SourcesTab({
                                     onClick={handleDeleteConfirm}
                                     className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
                                 >
-                                    {tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold'}
+                                    {deletePreview.data?.pending_approval_run_count > 0
+                                        ? (tw.delete_confirm_button_pending_approval ?? 'Avbryt godkjenningsflyt og slett dokument')
+                                        : (tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold')}
                                 </button>
                             )}
                             {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (

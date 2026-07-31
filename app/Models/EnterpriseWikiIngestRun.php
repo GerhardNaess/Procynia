@@ -305,4 +305,20 @@ class EnterpriseWikiIngestRun extends Model
     {
         return in_array($this->status, self::EXPECTS_AUTOMATIC_PROGRESS_STATUSES, true);
     }
+
+    /**
+     * Whether this run is non-terminal but has no active technical job behind it — waiting on a
+     * human decision (STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) or never meant to progress further
+     * (STATUS_DECISION_ONLY) — rather than genuinely still being processed. The complement of
+     * expectsAutomaticProgress() within the non-terminal statuses.
+     *
+     * Callers deciding whether source-document deletion may proceed directly (auto-ending the
+     * human-waiting run as part of deletion) rather than requiring an explicit prior cancel must
+     * use this method, not a re-derived status list. See
+     * EnterpriseWikiDocumentDeletionService::hasActiveRun().
+     */
+    public function isAwaitingHumanAction(): bool
+    {
+        return ! $this->isTerminal() && ! $this->expectsAutomaticProgress();
+    }
 }
