@@ -12,6 +12,7 @@ import {
     getRunTimelineState,
     getEscalationCopy,
     isRunStalled,
+    formatFindingUserId,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -2967,8 +2968,8 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                                     </button>
                                                 )}
                                                 <div className="min-w-0 flex-1 space-y-1">
-                                                    <span className="block font-mono text-xs text-slate-400">
-                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', finding.id)}
+                                                    <span className="block font-mono text-sm font-semibold text-slate-600">
+                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
                                                     </span>
                                                     {finding.category_label && (
                                                         <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-base font-semibold uppercase tracking-wide leading-6 text-sky-800">
@@ -3044,8 +3045,8 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                         <tr key={`${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
                                             <td colSpan={5} className="px-4 py-4">
                                                 <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-6">
-                                                    <div className="font-mono text-xs text-slate-400">
-                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', finding.id)}
+                                                    <div className="font-mono text-sm font-semibold text-slate-600">
+                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
                                                     </div>
                                                     <div>
                                                         <span className="font-semibold text-slate-700">

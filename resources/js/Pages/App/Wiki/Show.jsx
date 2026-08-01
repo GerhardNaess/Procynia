@@ -8,6 +8,7 @@ import {
     groupWikiFindingsByCode,
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
+import { formatFindingUserId } from './runFindingsLogic';
 
 function getWikiShowHelpSections(tw) {
     return [
@@ -1285,8 +1286,8 @@ export default function WikiShow({
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
                             {findingIdForClaim(claim) && (
-                                <p className="font-mono text-xs text-slate-400">
-                                    {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', findingIdForClaim(claim))}
+                                <p className="font-mono text-sm font-semibold text-slate-600">
+                                    {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                                 </p>
                             )}
                             <p className="text-lg font-semibold text-slate-900">
@@ -1467,8 +1468,8 @@ export default function WikiShow({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                         {findingIdForClaim(claim) && (
-                            <p className="font-mono text-xs text-slate-400">
-                                {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', findingIdForClaim(claim))}
+                            <p className="font-mono text-sm font-semibold text-slate-600">
+                                {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
                             </p>
                         )}
                         {showClaimText && (

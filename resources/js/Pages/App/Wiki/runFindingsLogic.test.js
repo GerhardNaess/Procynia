@@ -1,6 +1,37 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy, isRunStalled } from './runFindingsLogic.js';
+import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy, isRunStalled, formatFindingUserId } from './runFindingsLogic.js';
+
+describe('formatFindingUserId', () => {
+    test('strips the claim-defect prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('claim-defect-5378'), '5378');
+    });
+
+    test('strips the best-practice prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('best-practice-5390'), '5390');
+    });
+
+    test('strips the lint prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('lint-82'), '82');
+    });
+
+    test('same input always produces the same output (list and detail view use identical formatting)', () => {
+        assert.equal(formatFindingUserId('claim-defect-5378'), formatFindingUserId('claim-defect-5378'));
+    });
+
+    test('falls back to the full original id for an unrecognized prefix, never an empty value', () => {
+        assert.equal(formatFindingUserId('unknown-format-123'), 'unknown-format-123');
+    });
+
+    test('falls back to the full original id when a known prefix is followed by a non-numeric remainder', () => {
+        assert.equal(formatFindingUserId('claim-defect-abc'), 'claim-defect-abc');
+    });
+
+    test('handles null/undefined without throwing, never returning an empty-looking value silently', () => {
+        assert.equal(formatFindingUserId(null), '');
+        assert.equal(formatFindingUserId(undefined), '');
+    });
+});
 
 describe('matchesFindingsLocalFilter', () => {
     test('"open" matches every open status a finding can carry, from every source', () => {

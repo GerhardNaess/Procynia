@@ -7,6 +7,35 @@
  * count as user-facing.
  */
 
+/**
+ * Technical id prefixes EnterpriseWikiRunFindingsService::buildForRun() prepends to the
+ * underlying stable database id (claim id or lint finding id) to keep ids unique across finding
+ * categories on the backend (e.g. 'claim-defect-5378') — never meant to be user-facing wording.
+ */
+const FINDING_ID_KNOWN_PREFIXES = ['claim-defect-', 'best-practice-', 'lint-'];
+
+/**
+ * Strips the backend's internal category prefix from a finding id, leaving only the stable
+ * numeric database id a user can reasonably read as "the finding's ID" (e.g.
+ * 'claim-defect-5378' -> '5378'). The full underlying id is never changed or lost anywhere else —
+ * this only affects how it is PRESENTED. Falls back to the full original id whenever the value
+ * doesn't match a known prefix, or what follows a known prefix isn't a plain numeric primary key,
+ * so a user is never shown an empty/missing id.
+ */
+export function formatFindingUserId(id) {
+    const raw = String(id ?? '');
+
+    for (const prefix of FINDING_ID_KNOWN_PREFIXES) {
+        if (raw.startsWith(prefix)) {
+            const remainder = raw.slice(prefix.length);
+
+            return /^\d+$/.test(remainder) ? remainder : raw;
+        }
+    }
+
+    return raw;
+}
+
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
     { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
