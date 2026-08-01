@@ -4005,6 +4005,7 @@ return [
         'runs_panel_tab_pages' => 'Berørte Wiki-sider',
         'runs_panel_tab_findings' => 'Kvalitetsfunn',
         'runs_findings_heading' => 'Kvalitetsfunn',
+        'runs_findings_id_label' => 'Funn #:id',
         'runs_findings_total_label' => ':count funn totalt',
         'runs_findings_open_blocking' => 'Åpne blokkerende (teknisk)',
         'runs_findings_open_qa_review' => 'åpne QA-punkter (blokkerer ikke Wiki)',

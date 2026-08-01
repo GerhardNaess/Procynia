@@ -4005,6 +4005,7 @@ return [
         'runs_panel_tab_pages' => 'Affected Wiki pages',
         'runs_panel_tab_findings' => 'Quality findings',
         'runs_findings_heading' => 'Quality findings',
+        'runs_findings_id_label' => 'Finding #:id',
         'runs_findings_total_label' => ':count findings total',
         'runs_findings_open_blocking' => 'Open blocking (technical)',
         'runs_findings_open_qa_review' => 'open QA points (does not block the Wiki)',

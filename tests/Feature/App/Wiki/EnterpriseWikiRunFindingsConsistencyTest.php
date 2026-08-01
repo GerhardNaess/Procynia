@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -317,6 +318,124 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $informativeRows = array_values(array_filter($panel['findings'], fn (array $f): bool => $f['status'] === 'informative'));
         $this->assertCount(1, $informativeRows);
         $this->assertSame(3, count($openRows) + count($informativeRows), 'Every user-facing row must land in exactly one filter bucket.');
+    }
+
+    // =========================================================================
+    // Acceptance F: every finding has a stable, existing-domain id (never a row index)
+    // =========================================================================
+
+    public function test_claim_defect_finding_id_is_stable_across_separate_requests_and_matches_the_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-real', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'reason' => 'Confirmed deviation from source.',
+        ]);
+        $this->createSourceReference($claim, $document);
+
+        [, $panelFirst] = $this->fetchBadgeAndPanel($user, $run);
+        [, $panelSecond] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertSame("claim-defect-{$claim->id}", $panelFirst['findings'][0]['id']);
+        $this->assertSame($panelFirst['findings'][0]['id'], $panelSecond['findings'][0]['id'], 'The id must not change across separate requests (reloads).');
+    }
+
+    public function test_best_practice_finding_id_is_stable_and_matches_the_primary_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, contentBlockKey: 'block-bp');
+
+        [, $panelFirst] = $this->fetchBadgeAndPanel($user, $run);
+        [, $panelSecond] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertSame("best-practice-{$claim->id}", $panelFirst['findings'][0]['id']);
+        $this->assertSame($panelFirst['findings'][0]['id'], $panelSecond['findings'][0]['id']);
+    }
+
+    public function test_two_textually_similar_best_practice_findings_have_different_ids(): void
+    {
+        // Del 2 of the finding-id task: findings that read almost identically must still be
+        // individually addressable — two distinct blocks, near-identical wording.
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        $claimA = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, contentBlockKey: 'block-a');
+        $claimA->update(['claim_text' => 'Det anbefales å gjennomføre kvartalsvise tilgangsgjennomganger.']);
+        $claimB = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, contentBlockKey: 'block-b');
+        $claimB->update(['claim_text' => 'Det anbefales å gjennomføre kvartalsvise tilgangsgjennomganger og logge resultatet.']);
+
+        [, $panel] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertCount(2, $panel['findings']);
+        $ids = collect($panel['findings'])->pluck('id')->all();
+        $this->assertSame(["best-practice-{$claimA->id}", "best-practice-{$claimB->id}"], $ids);
+        $this->assertNotSame($ids[0], $ids[1], 'Textually similar findings on different blocks must keep distinct ids.');
+    }
+
+    public function test_canonical_fact_grouped_claim_defect_keeps_one_stable_id_across_occurrences(): void
+    {
+        // Several claims (different pages/blocks) sharing the same canonical fact are grouped
+        // into ONE finding (EnterpriseWikiRunFindingsService::claimDefectGroupKey()) — the id must
+        // stay the same, stable "primary" occurrence's id across requests, not fluctuate.
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        $fact = EnterpriseWikiCanonicalFact::query()->create([
+            'customer_id' => $customer->id,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'source_element_keys' => [],
+            'source_element_keys_hash' => hash('sha256', Str::random(32)),
+            'normalized_fingerprint' => hash('sha256', 'shared-fact'),
+            'canonical_text' => 'Kunden har fem godkjente eskaleringsnivåer.',
+            'verification_status' => 'verified_unsupported',
+            'verification_reason' => 'Ikke støttet av kilden.',
+            'verified_at' => now(),
+        ]);
+
+        $claimOne = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-one', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+        ]);
+        $claimOne->update(['canonical_fact_id' => $fact->id]);
+        $claimTwo = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-two', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+        ]);
+        $claimTwo->update(['canonical_fact_id' => $fact->id]);
+
+        [, $panelFirst] = $this->fetchBadgeAndPanel($user, $run);
+        [, $panelSecond] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertCount(1, $panelFirst['findings'], 'Both occurrences of the same fact must be one finding.');
+        $this->assertSame(2, $panelFirst['findings'][0]['claim_count']);
+        $expectedPrimaryId = min($claimOne->id, $claimTwo->id);
+        $this->assertSame("claim-defect-{$expectedPrimaryId}", $panelFirst['findings'][0]['id']);
+        $this->assertSame($panelFirst['findings'][0]['id'], $panelSecond['findings'][0]['id'], 'The grouped finding id must stay stable across requests.');
     }
 
     // =========================================================================

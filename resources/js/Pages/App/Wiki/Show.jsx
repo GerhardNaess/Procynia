@@ -1194,6 +1194,18 @@ export default function WikiShow({
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
 
+    // Mirrors EnterpriseWikiRunFindingsService's own id construction ('claim-defect-'.$claim->id /
+    // 'best-practice-'.$primary->id) so the SAME stable id shown in the Kjøringer "Funn" panel is
+    // shown here too — reconstructed client-side from data already present on the claim
+    // (content_origin, id) rather than requiring a backend prop change. Returns null for a claim
+    // that is not itself a Funn-panel finding category (e.g. a plain source_based claim).
+    const findingIdForClaim = (claim) => {
+        if (claim.content_origin === 'best_practice') return `best-practice-${claim.id}`;
+        if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') return `claim-defect-${claim.id}`;
+
+        return null;
+    };
+
     const claimProblemLabel = (claim) => {
         if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') {
             return tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.';
@@ -1272,6 +1284,11 @@ export default function WikiShow({
                             <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
+                            {findingIdForClaim(claim) && (
+                                <p className="font-mono text-xs text-slate-400">
+                                    {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', findingIdForClaim(claim))}
+                                </p>
+                            )}
                             <p className="text-lg font-semibold text-slate-900">
                                 {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
                             </p>
@@ -1449,6 +1466,11 @@ export default function WikiShow({
             >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
+                        {findingIdForClaim(claim) && (
+                            <p className="font-mono text-xs text-slate-400">
+                                {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', findingIdForClaim(claim))}
+                            </p>
+                        )}
                         {showClaimText && (
                             <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
