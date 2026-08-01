@@ -170,7 +170,14 @@ class EnterpriseWikiGenerateAppliedPagesService
         $articleSummaryPageIds = [];
 
         // --- Pass 1: article and summary ---
-        foreach ($pivotRows as $row) {
+        // Article sorted before summary (stable otherwise) so that, when a summary page is
+        // generated in the same call, buildArticleSummaryContextForRun() can already read the
+        // article's just-written version instead of falling back to the raw source document.
+        $articleFirstPivotRows = $pivotRows->sortBy(
+            fn (EnterpriseWikiIngestRunPage $row): int => $row->page?->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 0 : 1,
+        )->values();
+
+        foreach ($articleFirstPivotRows as $row) {
             $page = $row->page;
 
             if ($page === null || ! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
@@ -195,6 +202,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 pageType: $page->page_type,
                 sourceText: $sourceText,
                 languageCode: $languageCode,
+                additionalContext: $this->buildArticleSummaryContextForRun($run, $page),
                 sourceElements: $sourceElements,
             );
 
@@ -329,7 +337,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $additionalContext = in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)
             ? $this->buildConceptEntityContextForRun($run, $page)
-            : '';
+            : $this->buildArticleSummaryContextForRun($run, $page);
 
         $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
 
@@ -474,6 +482,58 @@ class EnterpriseWikiGenerateAppliedPagesService
         return $this->buildConceptEntityContext($page, $decisionJson, $sharedContext);
     }
 
+    /**
+     * Context for article/summary generation — previously always empty (see class history):
+     * neither page ever received its own maintainer-assigned responsibility, and summary was
+     * generated independently from the raw source text rather than from the finished article.
+     *
+     * source_article/source_summary are matched by page_type, not by title lookup — unlike
+     * concept/entity pages there is exactly one of each per run, and the decision key is fixed.
+     *
+     * For a summary page specifically, also includes the sibling article's CURRENT version
+     * content_markdown (when one already exists) so the summary condenses what the article
+     * actually says instead of re-deriving independently from the same raw source document —
+     * see WikiPageContentAiClient's summary prompt branch for the matching instruction. A summary
+     * generated before its sibling article exists (or has no article in this run — should not
+     * normally happen, but defensively handled) falls back to the source document exactly as
+     * before; this is a best-effort improvement, not a hard dependency.
+     */
+    private function buildArticleSummaryContextForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): string
+    {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+        $decisionKey = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 'source_article' : 'source_summary';
+        $entry = (array) data_get($decisionJson, $decisionKey, []);
+
+        $parts = array_filter([$this->responsibilityGuidance($entry)], fn (string $part): bool => $part !== '');
+
+        if ($page->page_type === EnterpriseWikiPage::PAGE_TYPE_SUMMARY) {
+            $articleMarkdown = $this->finishedArticleMarkdownForRun($run);
+
+            if ($articleMarkdown !== '') {
+                $parts[] = "Finished article to summarize (base this summary on the article's actual content and structure below — do not independently re-derive it from the raw source document; condense what the article covers and link to it and other detail pages rather than repeating them):\n\n{$articleMarkdown}";
+            }
+        }
+
+        return implode("\n\n", $parts);
+    }
+
+    private function finishedArticleMarkdownForRun(EnterpriseWikiIngestRun $run): string
+    {
+        $articlePageId = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->whereHas('page', fn ($query) => $query->where('page_type', EnterpriseWikiPage::PAGE_TYPE_ARTICLE))
+            ->value('enterprise_wiki_page_id');
+
+        if ($articlePageId === null) {
+            return '';
+        }
+
+        return (string) (EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $articlePageId)
+            ->where('is_current', true)
+            ->value('content_markdown') ?? '');
+    }
+
     private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = []): EnterpriseWikiPageVersion
     {
         $next = ((int) EnterpriseWikiPageVersion::query()
@@ -574,8 +634,12 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $match = collect($entries)->firstWhere('title', $page->title);
 
-        if ($match !== null && ! empty($match['reason'])) {
-            $parts[] = "Maintainer note for this page: {$match['reason']}";
+        if ($match !== null) {
+            $guidance = $this->responsibilityGuidance($match);
+
+            if ($guidance !== '') {
+                $parts[] = $guidance;
+            }
         }
 
         if ($sharedContext !== '') {
@@ -583,6 +647,76 @@ class EnterpriseWikiGenerateAppliedPagesService
         }
 
         return implode("\n\n", $parts);
+    }
+
+    /**
+     * Formats one planned page's maintainer-decision entry (reason, plus the responsibility
+     * fields added to reduce cross-page repetition — see EnterpriseWikiMaintainerDecisionPrompt)
+     * into readable prompt text. Shared by article/summary and concept/entity context building so
+     * the format is identical everywhere; gracefully produces '' when the entry has none of these
+     * fields (a legacy stored decision predating this feature, or a hand-built test fixture),
+     * which is exactly the pre-existing behavior for a page with no maintainer note.
+     *
+     * @param  array<string, mixed>  $entry
+     */
+    private function responsibilityGuidance(array $entry): string
+    {
+        $lines = [];
+
+        $reason = trim((string) ($entry['reason'] ?? ''));
+
+        if ($reason !== '') {
+            $lines[] = "Maintainer note for this page: {$reason}";
+        }
+
+        $responsibility = $this->nonEmptyStringList($entry['content_responsibility'] ?? []);
+
+        if ($responsibility !== []) {
+            $lines[] = "This page's own content responsibility:\n".implode("\n", array_map(
+                fn (string $item): string => "- {$item}",
+                $responsibility,
+            ));
+        }
+
+        $mustNotRepeat = $this->nonEmptyStringList($entry['must_not_repeat'] ?? []);
+
+        if ($mustNotRepeat !== []) {
+            $lines[] = "Do NOT explain these in full — another page already owns them (give at most a short mention and link there instead):\n".implode("\n", array_map(
+                fn (string $item): string => "- {$item}",
+                $mustNotRepeat,
+            ));
+        }
+
+        $relatedGuidance = array_values(array_filter(
+            (array) ($entry['related_page_guidance'] ?? []),
+            fn (mixed $item): bool => is_array($item)
+                && trim((string) ($item['page_title'] ?? '')) !== ''
+                && trim((string) ($item['relationship'] ?? '')) !== '',
+        ));
+
+        if ($relatedGuidance !== []) {
+            $lines[] = "Related pages and how to reference them:\n".implode("\n", array_map(
+                fn (array $item): string => sprintf('- %s: %s', $item['page_title'], $item['relationship']),
+                $relatedGuidance,
+            ));
+        }
+
+        return implode("\n\n", $lines);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function nonEmptyStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(fn (mixed $item): string => is_string($item) ? trim($item) : '', $value),
+            fn (string $item): bool => $item !== '',
+        ));
     }
 
     private function resolveLanguageCode(int $customerId): string

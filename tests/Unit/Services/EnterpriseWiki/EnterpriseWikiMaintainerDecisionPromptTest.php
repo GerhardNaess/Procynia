@@ -44,6 +44,32 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertContains('null', $items['properties']['page_id']['type']);
     }
 
+    public function test_schema_requires_responsibility_fields_on_source_article(): void
+    {
+        $sourceArticleSchema = $this->schemaProps()['source_article'];
+
+        foreach (['content_responsibility', 'must_not_repeat', 'related_page_guidance'] as $field) {
+            $this->assertContains($field, $sourceArticleSchema['required']);
+            $this->assertArrayHasKey($field, $sourceArticleSchema['properties']);
+        }
+    }
+
+    public function test_schema_requires_responsibility_fields_on_concept_page_items(): void
+    {
+        $items = $this->schemaProps()['concept_pages']['items'];
+
+        foreach (['content_responsibility', 'must_not_repeat', 'related_page_guidance'] as $field) {
+            $this->assertContains($field, $items['required']);
+        }
+    }
+
+    public function test_schema_related_page_guidance_items_require_page_title_and_relationship(): void
+    {
+        $relatedPageGuidanceItems = $this->schemaProps()['source_article']['properties']['related_page_guidance']['items'];
+
+        $this->assertSame(['page_title', 'relationship'], $relatedPageGuidanceItems['required']);
+    }
+
     // =========================================================================
     // validate() — structure
     // =========================================================================
@@ -86,6 +112,140 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         $decision = $this->validDecision();
         unset($decision['concept_pages'], $decision['entity_pages']);
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    // =========================================================================
+    // validate() — page responsibility fields (content_responsibility / must_not_repeat /
+    // related_page_guidance) — required in the OpenAI schema (strict-mode constraint) but
+    // deliberately optional in the PHP validator, exactly like concept_pages/entity_pages/
+    // warnings, so a decision predating this field (or a hand-built fixture) stays valid.
+    // =========================================================================
+
+    public function test_responsibility_fields_absent_is_not_an_error(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($this->validDecision());
+        $this->assertEmpty($errors);
+    }
+
+    public function test_content_responsibility_with_valid_strings_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['content_responsibility'] = ['Definer ITIL som rammeverk.', 'Forklar sentrale prinsipper.'];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_content_responsibility_with_non_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['content_responsibility'] = [123];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('content_responsibility', implode(' ', $errors));
+    }
+
+    public function test_content_responsibility_with_empty_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['content_responsibility'] = [''];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_must_not_repeat_can_be_an_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['must_not_repeat'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_must_not_repeat_with_non_array_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['must_not_repeat'] = 'not an array';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('must_not_repeat', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_with_valid_entry_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL', 'relationship' => 'Lenk hit for rammeverksforklaring.'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_related_page_guidance_missing_page_title_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['relationship' => 'Lenk hit for rammeverksforklaring.'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('page_title', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_missing_relationship_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('relationship', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_non_object_entry_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = ['not an object'];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_control_character_in_must_not_repeat_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['must_not_repeat'] = ["Detaljert \x0Fflyt."];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('control character', implode(' ', $errors));
+    }
+
+    public function test_responsibility_fields_on_concept_page_entry_are_validated_too(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'ITIL',
+            'proposed_slug' => 'itil',
+            'reason' => 'Overordnet rammeverk.',
+            'content_responsibility' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+            'must_not_repeat' => ['Detaljert Incident Management-arbeidsflyt.'],
+            'related_page_guidance' => [
+                ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
+            ],
+        ]];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
@@ -307,6 +467,22 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertSame([], $parsed['entity_pages']);
         $this->assertSame([], $parsed['warnings']);
         $this->assertNull($parsed['no_action_reason']);
+    }
+
+    public function test_parse_preserves_responsibility_fields_when_present(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['content_responsibility'] = ['Definer ITIL som rammeverk.'];
+        $decision['source_article']['must_not_repeat'] = ['Detaljert Incident Management-flyt.'];
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit.'],
+        ];
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
+
+        $this->assertSame(['Definer ITIL som rammeverk.'], $parsed['source_article']['content_responsibility']);
+        $this->assertSame(['Detaljert Incident Management-flyt.'], $parsed['source_article']['must_not_repeat']);
+        $this->assertSame('Incident Management', $parsed['source_article']['related_page_guidance'][0]['page_title']);
     }
 
     public function test_parse_throws_on_invalid_decision(): void

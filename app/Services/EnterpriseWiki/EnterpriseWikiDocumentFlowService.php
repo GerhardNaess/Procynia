@@ -406,6 +406,13 @@ class EnterpriseWikiDocumentFlowService
      * Concept and entity pages are deliberately NOT dispatched here — they read the
      * finished article/summary content as context, so FinalizeEnterpriseWikiPageGeneration
      * dispatches them only once every article/summary job has completed successfully.
+     *
+     * Article dispatched before summary (best effort, not a hard guarantee under a
+     * multi-worker queue): EnterpriseWikiGenerateAppliedPagesService::buildArticleSummaryContextForRun()
+     * has the summary page read the article's finished content_markdown as context when it is
+     * already available, so the summary condenses the actual article instead of independently
+     * re-deriving from the raw source — this ordering maximizes the chance that content exists in
+     * time, with a graceful, correctness-preserving fallback to the raw source when it does not.
      */
     private function beginGeneratingPages(EnterpriseWikiIngestRun $run): void
     {
@@ -418,6 +425,9 @@ class EnterpriseWikiDocumentFlowService
                 EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
                 EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
             ]))
+            ->with('page')
+            ->get()
+            ->sortBy(fn (EnterpriseWikiIngestRunPage $row): int => $row->page?->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 0 : 1)
             ->pluck('enterprise_wiki_page_id');
 
         foreach ($pageIds as $pageId) {

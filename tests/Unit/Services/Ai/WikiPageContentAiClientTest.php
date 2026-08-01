@@ -108,6 +108,52 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('slug', mb_strtolower($developerPrompt));
     }
 
+    // =========================================================================
+    // Page responsibility (reduce cross-page repetition)
+    // =========================================================================
+
+    public function test_developer_prompt_documents_page_responsibility_for_every_page_type(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+            $this->assertStringContainsString('PAGE RESPONSIBILITY', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('must not repeat', mb_strtolower($developerPrompt), "page type: {$pageType}");
+        }
+    }
+
+    public function test_summary_developer_prompt_instructs_basing_on_the_finished_article(): void
+    {
+        $payload = $this->capturePayload(pageType: 'summary');
+        $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('Additional context', $developerPrompt);
+        $this->assertStringContainsString('finished article', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('independently re-deriving', mb_strtolower($developerPrompt));
+    }
+
+    public function test_concept_and_entity_developer_prompts_instruct_linking_instead_of_repeating(): void
+    {
+        foreach (['concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('do not restate its content in full', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_additional_context_with_responsibility_guidance_reaches_the_user_prompt(): void
+    {
+        $context = "This page's own content responsibility:\n- Definer ITIL som rammeverk.\n\nDo NOT explain these in full — another page already owns them (give at most a short mention and link there instead):\n- Detaljert Incident Management-flyt.";
+
+        $payload = $this->capturePayload(pageType: 'concept', additionalContext: $context);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('Definer ITIL som rammeverk.', $userPrompt);
+        $this->assertStringContainsString('Detaljert Incident Management-flyt.', $userPrompt);
+    }
+
     public function test_empty_link_catalog_is_documented_as_no_pages_available(): void
     {
         $payload = $this->capturePayload(linkCatalog: []);
@@ -212,11 +258,11 @@ class WikiPageContentAiClientTest extends TestCase
                         [
                             'type' => 'output_text',
                             'text' => json_encode([
-                        'page' => [
-                            'blocks' => [
-                                $this->sourceBasedBlock($expectedMarkdown),
-                            ],
-                        ],
+                                'page' => [
+                                    'blocks' => [
+                                        $this->sourceBasedBlock($expectedMarkdown),
+                                    ],
+                                ],
                             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                         ],
                     ],

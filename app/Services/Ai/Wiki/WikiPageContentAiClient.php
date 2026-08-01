@@ -218,6 +218,13 @@ class WikiPageContentAiClient
             '- link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
         ]);
 
+        $responsibilityRules = implode("\n", [
+            'PAGE RESPONSIBILITY:',
+            '- "Additional context" (if present) may state this page\'s own content responsibility, topics it must not repeat in full because another page already owns them, and guidance on how to refer to those related pages.',
+            '- Stay inside this page\'s own content responsibility. For any topic listed as owned by another page, write at most one short sentence of context and use an inline [[wikilink]] to that page instead of re-explaining it in full — this applies ACROSS pages, not only within this page\'s own sections.',
+            '- When no such guidance is given, fall back to writing what the source material actually supports for this specific page type, without independently re-deriving a full explanation of a topic that a linked page is clearly dedicated to.',
+        ]);
+
         $wikilinkRules = implode("\n", [
             'INLINE WIKILINKS:',
             '- content_markdown is wiki content — reference other pages inline the way a wiki article does.',
@@ -234,13 +241,19 @@ class WikiPageContentAiClient
 
         return match ($pageType) {
             'summary' => implode("\n", [
-                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName} based on the provided source document.",
+                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName}.",
                 '',
                 'SUMMARY STRUCTURE (mandatory):',
                 '- First line must be a # heading containing the page title',
-                '- Follow with 2-4 paragraphs summarising the key points of the source document',
+                '- Follow with 2-4 paragraphs summarising the key points',
                 '- Write flowing prose — no bullet lists, no headings beyond the title',
                 '- Inline-link the most important concept/entity pages from the allowed targets; keep the summary short and natural',
+                '',
+                'SOURCE FOR THIS SUMMARY:',
+                '- If "Additional context" provides the finished article for this same source document, base this summary on that article\'s actual content and structure — condense what the article covers and link to it and other detail pages, rather than independently re-deriving the summary from the raw source document.',
+                '- If no finished article is provided, summarise the source document directly.',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -261,7 +274,9 @@ class WikiPageContentAiClient
                 'SYNTHESIS RULES:',
                 '- Derive meaning from the provided source text and related page content',
                 '- Do not invent facts not supported by the provided material',
-                '- If related article or summary content is provided, use it to enrich the explanation',
+                '- If related article or summary content is provided, use it to understand context and to decide what this page itself is responsible for — do not restate its content in full here just because it was provided; a topic another page already covers in depth belongs behind a short mention and a link (see PAGE RESPONSIBILITY below), not a repeated explanation',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -282,7 +297,9 @@ class WikiPageContentAiClient
                 'SYNTHESIS RULES:',
                 '- Derive all facts from the provided source text and related page content',
                 '- Do not invent roles, relationships, or attributes not present in the material',
-                '- If related article or summary content is provided, use it to enrich the description',
+                '- If related article or summary content is provided, use it to understand context and to decide what this page itself is responsible for — do not restate its content in full here just because it was provided; a topic another page already covers in depth belongs behind a short mention and a link (see PAGE RESPONSIBILITY below), not a repeated explanation',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -305,6 +322,8 @@ class WikiPageContentAiClient
                 '- Synthesise the source material into coherent prose',
                 '- Do not repeat the same fact across multiple sections',
                 '- Do not invent facts not present in the source document',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',

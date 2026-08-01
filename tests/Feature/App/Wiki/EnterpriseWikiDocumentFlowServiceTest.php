@@ -87,6 +87,39 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }
 
+    /**
+     * Best-effort ordering (see beginGeneratingPages()'s docblock): article dispatched before
+     * summary so EnterpriseWikiGenerateAppliedPagesService::buildArticleSummaryContextForRun()
+     * has the best chance of finding the article's finished content already written when the
+     * summary job runs, letting the summary condense the actual article instead of independently
+     * re-deriving from the raw source document.
+     */
+    public function test_article_page_job_is_dispatched_before_summary_page_job(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->flowService()->prepareRunForDocument($customer->id, $document->id)['run'];
+
+        $pages = $this->attachAllPageTypes($run);
+
+        $callOrder = [];
+        $this->configureStage1Mocks($customer, $document, $callOrder);
+
+        $this->flowService()->run($run->id);
+
+        $pushedPageIds = Queue::pushed(GenerateEnterpriseWikiAppliedPage::class)
+            ->map(fn (GenerateEnterpriseWikiAppliedPage $job) => $job->pageId)
+            ->values()
+            ->all();
+
+        $this->assertSame(
+            [$pages['article']->id, $pages['summary']->id],
+            $pushedPageIds,
+        );
+    }
+
     public function test_run_dispatches_article_page_job(): void
     {
         $this->assertPageTypeDispatched(EnterpriseWikiPage::PAGE_TYPE_ARTICLE);

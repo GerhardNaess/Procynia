@@ -250,6 +250,201 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertStringContainsString('Kort sammendrag av kontrollert tilbudsarbeid', $capturedContext);
     }
 
+    public function test_concept_page_receives_its_own_maintainer_assigned_responsibility_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'ITIL');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => 'ITIL',
+                'proposed_slug' => $concept->slug,
+                'reason' => 'Overordnet rammeverk.',
+                'content_responsibility' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+                'must_not_repeat' => ['Detaljert Incident Management-arbeidsflyt.'],
+                'related_page_guidance' => [
+                    ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
+                ],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Definer ITIL som rammeverk for tjenestestyring.', $capturedContext);
+        $this->assertStringContainsString('Detaljert Incident Management-arbeidsflyt.', $capturedContext);
+        $this->assertStringContainsString('Incident Management: Lenk hit for detaljert hendelseshåndtering.', $capturedContext);
+    }
+
+    public function test_article_page_receives_its_own_maintainer_assigned_responsibility_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => [
+                'action' => 'create',
+                'title' => $article->title,
+                'proposed_slug' => $article->slug,
+                'reason' => 'r',
+                'content_responsibility' => ['Beskriv hva illustrasjonen viser og bruksområder for den.'],
+                'must_not_repeat' => ['Full generell definisjon av ITIL.'],
+                'related_page_guidance' => [
+                    ['page_title' => 'ITIL', 'relationship' => 'Lenk hit for rammeverksforklaring.'],
+                ],
+            ],
+            'source_summary' => ['action' => 'create', 'title' => $summary->title, 'proposed_slug' => $summary->slug, 'reason' => 'r'],
+            'concept_pages' => [],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $summary): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Beskriv hva illustrasjonen viser og bruksområder for den.', $capturedContext);
+        $this->assertStringContainsString('Full generell definisjon av ITIL.', $capturedContext);
+        $this->assertStringContainsString('ITIL: Lenk hit for rammeverksforklaring.', $capturedContext);
+    }
+
+    public function test_summary_page_receives_the_finished_article_content_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        // Simulate the article having already been generated (phase 1's article-first ordering).
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Incident Management Illustration'."\n\nDenne siden beskriver figuren i detalj.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Finished article to summarize', $capturedContext);
+        $this->assertStringContainsString('Denne siden beskriver figuren i detalj.', $capturedContext);
+    }
+
+    public function test_summary_page_falls_back_gracefully_when_article_is_not_yet_generated(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringNotContainsString('Finished article to summarize', (string) $capturedContext);
+    }
+
     /**
      * Regression for run 475/480: EnterpriseWikiGenerateAppliedPagesService has two generation
      * paths — generate() (used by the wiki:generate-applied-pages command, and by every other

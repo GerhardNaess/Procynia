@@ -19,6 +19,16 @@ namespace App\Services\EnterpriseWiki;
  *  - proposed_slug must not contain a file extension.
  *  - title must not be a raw filename (e.g. "Masterdata.pdf").
  *  - output is a decision only — no article content, no OpenAI calls in this class.
+ *
+ * content_responsibility/must_not_repeat/related_page_guidance (added to reduce cross-page
+ * repetition — see docs/enterprise-llm-wiki-plan.md, the section on page responsibility): the
+ * maintainer sees every planned page for this source document in one decision, so it is the one
+ * place that can assign non-overlapping faglig ansvar between them before any page content is
+ * generated. Required in the OpenAI strict JSON schema (every property must be, per the API's own
+ * strict-mode constraint — see the existing concept_pages/entity_pages/warnings top-level fields
+ * for the same pattern), but treated as OPTIONAL by the PHP validator/parser, defaulting to an
+ * empty list when absent — exactly like every other optional top-level field in this contract —
+ * so a hand-built decision (tests, or a legacy stored run predating this field) remains valid.
  */
 class EnterpriseWikiMaintainerDecisionPrompt
 {
@@ -32,28 +42,45 @@ class EnterpriseWikiMaintainerDecisionPrompt
      */
     public static function jsonSchema(): array
     {
+        $responsibilityProperties = [
+            'content_responsibility' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'must_not_repeat' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'related_page_guidance' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'page_title' => ['type' => 'string'],
+                        'relationship' => ['type' => 'string'],
+                    ],
+                    'required' => ['page_title', 'relationship'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+
         $sourcePageSchema = [
             'type' => 'object',
-            'properties' => [
+            'properties' => array_merge([
                 'action' => ['type' => 'string', 'enum' => self::ACTIONS],
                 'title' => ['type' => 'string'],
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
-            ],
-            'required' => ['action', 'title', 'proposed_slug', 'reason'],
+            ], $responsibilityProperties),
+            'required' => ['action', 'title', 'proposed_slug', 'reason', 'content_responsibility', 'must_not_repeat', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
 
         $sharedPageSchema = [
             'type' => 'object',
-            'properties' => [
+            'properties' => array_merge([
                 'action' => ['type' => 'string', 'enum' => self::ACTIONS],
                 'page_id' => ['type' => ['integer', 'null']],
                 'title' => ['type' => 'string'],
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
-            ],
-            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason'],
+            ], $responsibilityProperties),
+            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'content_responsibility', 'must_not_repeat', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
 
@@ -192,6 +219,60 @@ class EnterpriseWikiMaintainerDecisionPrompt
 
         if (isset($entry['proposed_slug']) && is_string($entry['proposed_slug'])) {
             $errors = array_merge($errors, self::validateNoFileExtensionInSlug($entry['proposed_slug'], "{$ctx}.proposed_slug"));
+        }
+
+        foreach (['content_responsibility', 'must_not_repeat'] as $field) {
+            if (! array_key_exists($field, $entry)) {
+                continue;
+            }
+
+            if (! is_array($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be an array of strings.";
+
+                continue;
+            }
+
+            foreach ($entry[$field] as $i => $item) {
+                if (! is_string($item) || trim($item) === '') {
+                    $errors[] = "{$ctx}.{$field}[{$i}] must be a non-empty string.";
+
+                    continue;
+                }
+
+                $errors = array_merge($errors, self::validateNoControlCharacters($item, "{$ctx}.{$field}[{$i}]"));
+            }
+        }
+
+        if (array_key_exists('related_page_guidance', $entry)) {
+            if (! is_array($entry['related_page_guidance'])) {
+                $errors[] = "{$ctx}.related_page_guidance must be an array.";
+            } else {
+                foreach ($entry['related_page_guidance'] as $i => $item) {
+                    $errors = array_merge($errors, self::validateRelatedPageGuidanceEntry($item, "{$ctx}.related_page_guidance[{$i}]"));
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    private static function validateRelatedPageGuidanceEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = [];
+
+        foreach (['page_title', 'relationship'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
         }
 
         return $errors;
