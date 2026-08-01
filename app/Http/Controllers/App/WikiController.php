@@ -16,6 +16,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
@@ -52,6 +53,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiOrphanConceptLinkService $orphanConceptLinkService,
+        private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
     ) {}
 
     public function index(Request $request): Response
@@ -2082,23 +2084,36 @@ class WikiController extends Controller
      */
     private function renderedContentBlocks(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page, int $customerId): array
     {
+        // Section boundaries (heading block + its following best-practice blocks) are computed
+        // once here — the single shared source of truth also used by EnterpriseWikiRunFindingsService
+        // for QA finding grouping — so the frontend never re-derives heading/level detection
+        // itself; it only groups consecutive blocks sharing the same section_key for display.
+        $sectionMap = $this->bestPracticeSectionService->mapBlocksToSections($version);
+
         return $this->displayContentBlocks($version)
-            ->map(fn (array $block): array => [
-                'block_key' => $block['block_key'] ?? null,
-                'position' => $block['position'] ?? 0,
-                'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
-                'raw_markdown' => (string) $block['markdown'],
-                'content_origin' => $block['content_origin'] ?? null,
-                'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
-                // Deterministic "table" blocks (see EnterpriseWikiTableBlockBuilder) carry a real
-                // block_type + structured table_data alongside their Markdown fallback, so the
-                // frontend can render a genuine <table> instead of the Markdown string.
-                'block_type' => $block['block_type'] ?? null,
-                'table_data' => $block['table_data'] ?? null,
-                'image_data' => $this->renderedImageData($block),
-                'source_label' => $block['source_label'] ?? null,
-                'page_reference' => $block['page_reference'] ?? null,
-            ])
+            ->map(function (array $block) use ($customerId, $page, $sectionMap): array {
+                $blockKey = $block['block_key'] ?? null;
+                $section = $blockKey !== null ? ($sectionMap[$blockKey] ?? null) : null;
+
+                return [
+                    'block_key' => $blockKey,
+                    'position' => $block['position'] ?? 0,
+                    'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
+                    'raw_markdown' => (string) $block['markdown'],
+                    'content_origin' => $block['content_origin'] ?? null,
+                    'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
+                    // Deterministic "table" blocks (see EnterpriseWikiTableBlockBuilder) carry a real
+                    // block_type + structured table_data alongside their Markdown fallback, so the
+                    // frontend can render a genuine <table> instead of the Markdown string.
+                    'block_type' => $block['block_type'] ?? null,
+                    'table_data' => $block['table_data'] ?? null,
+                    'image_data' => $this->renderedImageData($block),
+                    'source_label' => $block['source_label'] ?? null,
+                    'page_reference' => $block['page_reference'] ?? null,
+                    'section_key' => $section['section_key'] ?? null,
+                    'section_heading' => $section['heading_text'] ?? null,
+                ];
+            })
             ->values()
             ->all();
     }

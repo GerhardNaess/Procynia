@@ -2977,6 +2977,11 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                                         </span>
                                                     )}
                                                     <span className="block text-base leading-6 font-semibold text-slate-900">{finding.title}</span>
+                                                    {finding.category === 'best_practice_suggestion' && finding.section_text && (
+                                                        <span className="block text-base leading-6 text-slate-600">
+                                                            {finding.section_text}
+                                                        </span>
+                                                    )}
                                                     <span className="block text-base leading-6 text-slate-600">
                                                         {finding.category === 'best_practice_suggestion' && (
                                                             <span className="font-medium text-slate-700">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>

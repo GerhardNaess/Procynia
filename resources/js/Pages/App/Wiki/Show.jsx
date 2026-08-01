@@ -9,6 +9,7 @@ import {
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
 import { formatFindingUserId } from './runFindingsLogic';
+import { groupContentBlocksBySection } from './wikiBestPracticeSectionLogic';
 
 function getWikiShowHelpSections(tw) {
     return [
@@ -2235,8 +2236,12 @@ export default function WikiShow({
                     {hasArticle ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             <div className="wiki-article">
-                                {contentBlocks.length > 0 ? (
-                                    contentBlocks.map((block) => {
+                                {(() => {
+                                    // A single content block's own markup — table/image/editing/plain markdown —
+                                    // WITHOUT its own "Beste praksis" frame; suppressBestPracticeFrame is true when
+                                    // this block is rendered inside a shared section frame (see below) so the label
+                                    // and amber background are shown once per faglig seksjon, not once per block.
+                                    const renderBlock = (block, { suppressBestPracticeFrame = false } = {}) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
@@ -2319,7 +2324,7 @@ export default function WikiShow({
                                                             </p>
                                                         )}
                                                     </div>
-                                                ) : isBestPracticeBlock ? (
+                                                ) : isBestPracticeBlock && !suppressBestPracticeFrame ? (
                                                     <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
                                                         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
                                                             {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
@@ -2350,10 +2355,34 @@ export default function WikiShow({
                                                 )}
                                             </div>
                                         );
-                                    })
-                                ) : (
-                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>
-                                )}
+                                    };
+
+                                    if (contentBlocks.length === 0) {
+                                        return <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>;
+                                    }
+
+                                    // Server-computed section_key (EnterpriseWikiBestPracticeSectionService, via
+                                    // WikiController::renderedContentBlocks()) is grouped here purely by "consecutive
+                                    // blocks sharing the same key" — the heading/level detection itself is never
+                                    // re-derived on the frontend (Del 3: "ikke dupliser logikken").
+                                    return groupContentBlocksBySection(contentBlocks).map((group) => {
+                                        if (group.type === 'single') {
+                                            return renderBlock(group.block);
+                                        }
+
+                                        return (
+                                            <div
+                                                key={`section-${group.sectionKey}`}
+                                                className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3"
+                                            >
+                                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                    {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                </p>
+                                                {group.blocks.map((block) => renderBlock(block, { suppressBestPracticeFrame: true }))}
+                                            </div>
+                                        );
+                                    });
+                                })()}
                             </div>
                         </div>
                     ) : (

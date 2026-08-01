@@ -45,6 +45,7 @@ class EnterpriseWikiRunFindingsService
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly EnterpriseWikiBestPracticeSectionService $sectionService,
     ) {}
 
     /**
@@ -127,16 +128,26 @@ class EnterpriseWikiRunFindingsService
             $items[] = $this->normalizeClaimDefect($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
         }
 
-        // Grouped by (page, content_block_key) — several best-practice claims anchored to the
-        // same contiguous text block are ONE user-facing case, never one per claim (v0.7 rule
-        // #4). A claim with no stable block anchor falls back to its own claim id as the group
-        // key, so it is never incorrectly merged with an unrelated claim.
+        // Grouped by faglig seksjon (heading block + its immediately-following best-practice
+        // blocks, see EnterpriseWikiBestPracticeSectionService) rather than raw content_block_key
+        // — several best-practice blocks that together form one coherent section (a heading plus
+        // its paragraph(s)/list, not just one paragraph) are ONE user-facing QA case, never one
+        // per paragraph or per claim. A claim with no resolvable section falls back to its own
+        // claim id as the group key, so it is never incorrectly merged with an unrelated claim.
+        $sectionMapsByVersionId = $bestPracticeSuggestions
+            ->pluck('version')
+            ->filter()
+            ->unique('id')
+            ->mapWithKeys(fn (EnterpriseWikiPageVersion $version): array => [
+                $version->id => $this->sectionService->mapBlocksToSections($version),
+            ]);
+
         $bestPracticeGroups = $bestPracticeSuggestions->groupBy(
-            fn (EnterpriseWikiClaim $claim): string => $this->additionGroupKey($claim),
+            fn (EnterpriseWikiClaim $claim): string => $this->additionGroupKey($claim, $sectionMapsByVersionId),
         );
 
         foreach ($bestPracticeGroups as $groupClaims) {
-            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
+            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $sectionMapsByVersionId, $user, $includeTechnical, $returnUrl);
         }
 
         usort($items, $this->sortComparator());
@@ -408,26 +419,45 @@ class EnterpriseWikiRunFindingsService
      * panel, but WikiController::show() resolves it into a validated review_reference that scrolls
      * to and highlights the actual suggested text block, not just the top of the page.
      *
-     * v0.7 rule #4: several claims anchored to the same content_block_key are ONE case, not one
-     * per claim — $claims is every claim in the group (usually exactly one). The PRIMARY claim
-     * (lowest position_order, then lowest id — the same tie-break WikiClaimController's cascade
-     * uses) drives title/url/claim_id; the group's status is "still pending" as long as ANY claim
-     * in it is undecided (WikiClaimController::cascadeBlockDecision() keeps siblings in sync when
-     * a decision is recorded, so this is normally never observed mid-way, but the aggregate check
-     * is the honest source of truth regardless of whether the cascade ran).
+     * Grouped by faglig seksjon (EnterpriseWikiBestPracticeSectionService), not raw
+     * content_block_key: several claims anchored across the section's blocks — a heading plus its
+     * paragraph(s)/list — are ONE case, not one per paragraph or per claim. $claims is every claim
+     * in the group. The PRIMARY claim (lowest position_order, then lowest id — the same tie-break
+     * WikiClaimController's cascade uses) drives id/url/claim_id — this is itself an existing,
+     * stable domain id (Del 7): it never changes across a reload of the same run/claim set, and is
+     * never an array index or a per-render random value. The group's status is "still pending" as
+     * long as ANY claim in it is undecided (WikiClaimController::cascadeBlockDecision() keeps
+     * siblings in sync when a decision is recorded, so this is normally never observed mid-way,
+     * but the aggregate check is the honest source of truth regardless of whether the cascade
+     * ran).
+     *
+     * `title` is the section's own heading text when EnterpriseWikiBestPracticeSectionService
+     * found one (e.g. "Begrepsramme: ITIL og Incident management") — this is what makes a QA
+     * specialist see one faglig seksjon, not the primary claim's own single, arbitrary sentence.
+     * Falls back to the primary claim's text when no heading was detected (a single unheaded
+     * best-practice block), matching the pre-existing behavior exactly. `section_text` is every
+     * claim's text in the group, in reading order, for "et lesbart utdrag eller samlet tekst"
+     * (Del 6) — approving/editing/rejecting still acts on the single primary claim only
+     * (WikiClaimController is unchanged); the other claims in the section remain individually
+     * traceable via `technical.claim_ids` and `block_keys`, exactly like claim-defect grouping's
+     * `occurrences` (Del 4: "dagens behandling kan bare håndtere ett claim om gangen" — this is
+     * the minimal extension needed to represent the section as one QA unit, not a new workflow).
      *
      * @param  Collection<int, EnterpriseWikiClaim>  $claims
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
+     * @param  Collection<int, array<string, array{section_key: string, heading_text: ?string, heading_block_key: ?string}>>  $sectionMapsByVersionId
      */
     private function normalizeBestPracticeSuggestion(
         Collection $claims,
         Collection $pagesById,
+        Collection $sectionMapsByVersionId,
         ?User $user,
         bool $includeTechnical,
         ?string $returnUrl,
     ): array {
-        $primary = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
-        )->first();
+        $orderedClaims = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
+        )->values();
+        $primary = $orderedClaims->first();
 
         $page = $pagesById->get($primary->enterprise_wiki_page_id);
         $editedBeforeApproval = (bool) data_get($primary->review_metadata, 'edited_before_approval', false);
@@ -451,9 +481,20 @@ class EnterpriseWikiRunFindingsService
             default => 'view_page',
         };
 
+        $sectionMap = $sectionMapsByVersionId->get($primary->enterprise_wiki_page_version_id, []);
+        $headingText = $sectionMap[trim((string) $primary->content_block_key)]['heading_text'] ?? null;
+        $sectionText = $orderedClaims->pluck('claim_text')->implode(' ');
+        $blockKeys = $orderedClaims
+            ->map(fn (EnterpriseWikiClaim $c): string => trim((string) $c->content_block_key))
+            ->filter(fn (string $key): bool => $key !== '')
+            ->unique()
+            ->values()
+            ->all();
+
         $item = [
             'id' => 'best-practice-'.$primary->id,
-            'title' => $primary->claim_text,
+            'title' => $headingText ?? $primary->claim_text,
+            'section_text' => $sectionText,
             'explanation' => (string) ($primary->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
             'category' => 'best_practice_suggestion',
             'category_label' => __('procynia.wiki.runs_findings_best_practice_category'),
@@ -470,6 +511,7 @@ class EnterpriseWikiRunFindingsService
             'page_version_number' => $primary->version?->version_number,
             'claim_id' => $primary->id,
             'claim_count' => $claims->count(),
+            'block_keys' => $blockKeys,
             'created_at' => $primary->created_at?->toIso8601String(),
             'resolved_at' => $primary->approved_at?->toIso8601String(),
             'decided_by_name' => $primary->approvedBy?->name,
@@ -493,18 +535,28 @@ class EnterpriseWikiRunFindingsService
     }
 
     /**
-     * Grouping key for v0.7 rule #4 — several claims anchored to the same contiguous text block
-     * (content_block_key) on the same page version are one case. A claim with no stable block
-     * anchor (content_block_key empty/null) falls back to its own claim id, so it is never
-     * incorrectly merged with an unrelated claim that also happens to lack one.
+     * Grouping key: every best-practice claim in the same faglig seksjon (heading block plus its
+     * following best-practice blocks — EnterpriseWikiBestPracticeSectionService) is one case, not
+     * one per paragraph/content_block_key (superseding the narrower v0.7 rule #4 grouping). A
+     * claim whose block cannot be resolved to a section (e.g. legacy content_blocks_json with no
+     * detectable heading structure at all) falls back to its raw content_block_key, and one with
+     * no stable block anchor at all falls back to its own claim id — either way it is never
+     * incorrectly merged with an unrelated claim.
+     *
+     * @param  Collection<int, array<string, array{section_key: string, heading_text: ?string, heading_block_key: ?string}>>  $sectionMapsByVersionId
      */
-    private function additionGroupKey(EnterpriseWikiClaim $claim): string
+    private function additionGroupKey(EnterpriseWikiClaim $claim, Collection $sectionMapsByVersionId): string
     {
         $blockKey = trim((string) $claim->content_block_key);
 
-        return $blockKey !== ''
-            ? $claim->enterprise_wiki_page_version_id.'|'.$blockKey
-            : 'claim-'.$claim->id;
+        if ($blockKey === '') {
+            return 'claim-'.$claim->id;
+        }
+
+        $sectionMap = $sectionMapsByVersionId->get($claim->enterprise_wiki_page_version_id, []);
+        $sectionKey = $sectionMap[$blockKey]['section_key'] ?? null;
+
+        return $sectionKey ?? $claim->enterprise_wiki_page_version_id.'|'.$blockKey;
     }
 
     private function pageUrl(
