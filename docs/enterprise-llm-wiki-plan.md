@@ -1,8 +1,8 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.22
-Dato: 2026-07-21
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Neste planlagt: Fase 9 — Wiki-svar på eksisterende ekstraherte krav — produktbeslutning tatt 2026-07-13, ikke implementert**
+Versjon: 0.23
+Dato: 2026-08-01
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Neste planlagt: Fase 9 — Wiki-svar på eksisterende ekstraherte krav — produktbeslutning tatt 2026-07-13, ikke implementert** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe — bindende for alt videre arbeid, tekniske konsekvenser identifisert men ikke implementert**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -17,6 +17,8 @@ Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 
 > **Presisering (v0.8, 2026-07-21):** v0.7 gjør interne verifiseringssignaler usynlige som *brukersaker* — det betyr ikke at claims som datastruktur er mindre viktige. Claims er og forblir Procynias atomære, maskinlesbare kunnskapslag: semantiske relasjoner, wikilenker, kunnskapsgraf, begreper/enheter, Wiki-søk og Wiki-baserte svar, med sporbarhet til claim/tekstblokk/sideversjon/kilde og grunnlagstype (`source_based`/`best_practice`/`mixed`). Claims skal aldri fjernes, deaktiveres eller reduseres til kun en verifiseringsmekanisme. Samtidig er QA-portvakten rettet: et internt signal (negasjon/modalitet/aktør/scope/subjekt-avvik, teknisk usikkerhet) skal aldri alene sette en kjøring til `repair_required` — kun en reell brukersak eller en eksplisitt menneskelig blokkeringsbeslutning gjør det. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
 >
 > **Presisering (v0.9, 2026-07-21):** Det konkrete proveniens-gapet v0.8 kartla (Wiki-baserte svar skilte ikke `source_based` fra `best_practice` når claims ble brukt som grunnlag) er lukket. `content_origin` bæres nå gjennom hele forsknings-/rangerings-/svargenereringsflyten, og hver svarseksjon får en deterministisk (ikke AI-selvrapportert) `provenance_type`. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
+>
+> **Produktstrategikorrigering (v0.10, 2026-08-01):** Claims og QA er en frivillig, ikke-blokkerende kvalitetssløyfe — ikke en obligatorisk godkjenningsport. Dette overstyrer v0.8-setningen om at «en reell brukersak ... setter en kjøring til `repair_required`»: heller ikke en reell brukersak skal blokkere Wiki-generering, publisering eller bruk. Selgere (Procynias primære brukere av Enterprise Wiki) skal ikke måtte forholde seg til claims for å generere, publisere, forbedre og bruke Wiki i anbudsarbeid. Claims skal være få, vesentlige og dedupliserte faglige kontrollpunkter for kundens frivillige QA-fagpersoner — aldri en automatisk faglig fasit over merket beste praksis. Se det dedikerte arkitekturnotatet ved slutten av dokumentet for full presisering og identifiserte tekniske konsekvenser.
 
 ## Arkitekturnotat — v0.6 kurskorrigering: Karpathy-lenking og inkrementelt vedlikehold
 
@@ -1866,6 +1868,8 @@ Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal 
 
 #### QA som arkitektonisk senter
 
+> **Presisert i v0.10 (2026-08-01):** beskrivelsen under av QA som «completion gate» er historisk korrekt for hvordan 8G ble bygget, men er **opphevet som produktprinsipp**. Claims og QA er en frivillig kvalitetssløyfe — en kjørings/sides tilgjengelighet for bruk skal aldri avhenge av at QA er fullført. Se Arkitekturnotat v0.10 for den bindende strategien.
+
 Post-ingest QA er **completion gate** for alle applied ingest-kjøringer. QA er delt i tre nivåer med ulike ansvarsområder.
 
 **Nivå 1 — Teknisk QA** *(8G-3, fullført)*
@@ -2787,6 +2791,8 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 
 ## Arkitekturnotat — v0.8: claims som obligatorisk aktiv kunnskapsstruktur (2026-07-21)
 
+> **Presisering (v0.10, 2026-08-01):** «obligatorisk» i tittelen og notatet under gjelder utelukkende *datastrukturen* — at claims ikke skal fjernes/deaktiveres som kunnskapslag for søk, graf og Wiki-baserte svar. Det har aldri betydd, og betyr fortsatt ikke, at claims må behandles eller godkjennes før Wiki kan genereres, publiseres eller brukes. Se Arkitekturnotat v0.10 for den bindende, ikke-blokkerende claim-/QA-strategien.
+
 **Bindende presisering, som en direkte konsekvens av v0.7 (og for å hindre en feillesning av den):** v0.7 gjorde negasjon/modalitet/aktør/scope/subjekt-avvik og teknisk usikkerhet usynlige som *brukersaker*. Dette må aldri leses som at claims som datastruktur er mindre viktige, kan fjernes, eller reduseres til bare en verifiseringsmekanisme.
 
 **Bindende regel:**
@@ -2829,6 +2835,57 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 - `RequirementWikiPageRanker::claimHitCountsByPageId()` vekter `source_based`-treff høyere enn `best_practice`-treff (`SCORE_PER_CLAIM_HIT=3` vs. `SCORE_PER_BEST_PRACTICE_CLAIM_HIT=1`) — kun for rangering, ikke for sitering, så eksisterende `unclassified`-fixtures/tester er upåvirket. Tittel-/overskrift-/innholdstreff (hovedsignalene) er uendret, så beste-praksis-sider fortsatt kan rangere høyt for anbefalingsspørsmål.
 
 **Ikke endret:** Kjøring 39 er ikke reparert. Commits `39d62c3` og `2ebedf6` sin Kjøringer→Funn-logikk, badge-tekst og QA-portvakt er urørt — dette notatet gjelder utelukkende Wiki-svar-generering (Fase 9), en helt separat kodesti.
+
+## Arkitekturnotat — v0.10: Claims og QA som frivillig, ikke-blokkerende kvalitetssløyfe (2026-08-01)
+
+**Bindende produktregel, overordnet enhver tidligere claim-, QA- eller godkjenningsstrategi i dette dokumentet der de er i konflikt:**
+
+> Claims er en frivillig, ikke-blokkerende kvalitetssløyfe for kunder som ønsker å bruke intern spisskompetanse til å profesjonalisere og forbedre Enterprise Wiki over tid. Ubehandlede claims er aldri en feiltilstand — verken for siden, kjøringen eller wikien som helhet.
+
+**Bakgrunn:** v0.7–v0.9 fjernet interne verifiseringssignaler (negasjon/modalitet/aktør/scope/subjekt, teknisk usikkerhet) som *brukersaker*, men rørte ikke selve gate-logikken: `EnterpriseWikiPostIngestQaService`/8G-modellen fortsetter å beskrive QA som en obligatorisk "completion gate", og `EnterpriseWikiClaimFindingExplainer::buildContentFinding()` markerer fortsatt enhver gjenværende brukersak (inkludert den mer forbeholdne kategorien "mulig avvik") som blokkerende. Dette notatet er den bindende presiseringen av at **selve blokkeringen** — ikke bare hvilke claim-kategorier som vises som brukersaker — er i strid med produktstrategien, og opphever den delen av tidligere faseplaner.
+
+**Primær bruker og hovedflyt:** Procynias primære brukere er normalt selgere som bruker Enterprise Wiki til å lage svar på anbud. Selgerens arbeid skal ikke blokkeres eller forsinkes av claims eller QA-behandling. Wiki skal kunne genereres, publiseres, brukes i anbudsarbeid og forbedres videre uten at claims først må behandles.
+
+**Beste praksis (videreført, uendret som prinsipp):** Procynia kan bevisst supplere kildedokumentet med beste praksis. All vesentlig tekst Procynia legger til utover kildedokumentet skal merkes tydelig og konsekvent som beste praksis (eksisterende `content_origin = best_practice`-merking, jf. v0.7). Det er ikke i seg selv en feil at innhold mangler i kildedokumentet når tilføyelsen er bevisst, tydelig merket, og ikke presenteres som om den kommer fra kilden. Eksisterende beste-praksis-merking er en sentral, videreført del av løsningen — ikke noe dette notatet endrer.
+
+**Claims — presisert rolle:** Claim-motoren har normalt ikke bedre bransjekunnskap enn den modellen som genererte Wiki-innholdet, og skal derfor ikke late som den sikkert kan avgjøre om merket beste praksis er faglig riktig eller galt. Claims er i stedet utvalgte faglige kontrollpunkter i en **frivillig** QA-prosess. Claims skal:
+- være få og vesentlige, ikke uttømmende
+- være dedupliserte — samme faglige forhold skal ikke opprettes som mange separate claims/funn bare fordi det forekommer på flere Wiki-sider (se «tekniske konsekvenser» under — ikke løst i dagens kode)
+- prioritere innhold der kundens spisskompetanse kan tilføre verdi
+- kunne knyttes til relevant Wiki-tekst og kildegrunnlag
+- fremstå som forbedringsmuligheter, aldri som feilstatus
+- aldri blokkere Wiki-generering, publisering eller bruk
+
+**QA-rollen — presisert:** QA kan bestå av kundens egne fagpersoner med spisskompetanse. QA-prosessen er en verdiøkende mulighet for kunder som ønsker å profesjonalisere og forbedre Wiki over tid — ikke en obligatorisk godkjenningsport. QA skal kunne se den aktuelle påstanden, se hvor den brukes, se relevant kildegrunnlag, se om teksten er merket beste praksis, godkjenne påstanden, redigere eller foreslå forbedret tekst, avvise eller fjerne innhold, og tilføre kundespesifikk fagkunnskap. Når QA gjør en godkjent endring, oppdateres relevant Wiki-innhold på en kontrollert og sporbar måte (gjenbruker eksisterende godkjenn/rediger/avvis-flyt, ingen ny mekanisme).
+
+**Ikke-blokkerende prinsipp (absolutt):**
+- Ubehandlede claims skal ikke blokkere noe.
+- Claims skal ikke sette en Wiki-kjøring i feilstatus.
+- Claims skal ikke hindre publisering.
+- Claims skal ikke hindre bruk av Wiki i anbudsarbeid.
+- Selgere skal normalt ikke måtte forholde seg til claims.
+- Manglende QA-behandling betyr ikke at Wiki er ugyldig.
+- QA er kontinuerlig forbedring, ikke en obligatorisk godkjenningsport.
+
+**Rollefordeling:**
+- Procynia genererer Wiki og merker beste praksis.
+- Claim-prosessen velger ut få, vesentlige faglige kontrollpunkter.
+- Kundens QA-fagpersoner tilfører den faglige vurderingen.
+- Godkjente QA-endringer forbedrer Wiki over tid.
+- Selgerne kan fortsette å bruke Wiki uavhengig av QA-køen.
+
+**Hva dette opphever/presiserer i tidligere deler av dette dokumentet — les i lys av v0.10 der de er i konflikt:**
+- **Fase 8G, «QA som arkitektonisk senter»:** setningene «Post-ingest QA er **completion gate** for alle applied ingest-kjøringer» og «En applied run regnes ikke som ferdig før all QA er bestått» beskriver en gjennomført teknisk fase korrekt historisk, men uttrykker en obligatorisk-portvakt-strategi som v0.10 opphever som produktprinsipp. En kjørings/sides tilgjengelighet for bruk i anbudsarbeid skal aldri avhenge av at QA er fullført.
+- **Fase 8G, «Hva coverage/eval måler»:** `claim_coverage_pct` og rød/gul/grønn-scoringen (der «approved uten claims» gir rødt) kan fortsatt vises som et **informativt helsesignal**, men skal aldri tolkes eller presenteres som at siden er ugyldig, feil, eller ikke kan brukes.
+- **v0.8-tittelen** («claims som obligatorisk aktiv kunnskapsstruktur»): «obligatorisk» gjelder fortsatt kun *datastrukturen* — claims skal ikke fjernes/deaktiveres som kunnskapslag for søk, graf og Wiki-baserte svar (uendret av v0.10). Det har aldri betydd, og betyr fortsatt ikke, at claims må behandles eller godkjennes før Wiki kan brukes eller publiseres.
+- **§B.5 Claim-/verifikasjonsregler:** oppdatert til å vise til dette notatet — se nedenfor.
+
+**Tekniske konsekvenser identifisert for senere arbeid (dokumentert her, ikke implementert):**
+- `EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()` setter i dag `qa_status = repair_required` (og `escalateRun()` kan følge av det) basert på blokkerende claim-funn — denne koblingen mellom claim-funn og kjøringens QA-status/tilgjengelighet står i motsetning til v0.10s ikke-blokkerende prinsipp og bør frikobles i en senere kodeendring.
+- `EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefects()` undertrykker Dokumenteier-godkjenning basert på aktive claim-funn — bør vurderes på nytt i lys av v0.10 (godkjenning/publisering bør ikke avhenge av ubehandlede claims).
+- Det finnes i dag ingen deduplisering av claim-/QA-funn på tvers av Wiki-sider når samme fakta gjentas (kun `best_practice`-funn grupperes per blokk, jf. 39d62c3; `unsupported_generated_content`- og gjenbrukte-kanonisk-fakta-funn får fortsatt ett funn per side-forekomst). v0.10s krav om at claims skal være «få, vesentlige og dedupliserte» krever en fremtidig endring i `EnterpriseWikiRunFindingsService`/`EnterpriseWikiClaimFindingExplainer`, ikke gjort her.
+- `WikiPageClaimExtractionAiClient::MAX_CLAIMS = 20` gjelder per side, uten en øvre grense per kjøring/dokument — i spenning med kravet om at claims skal være «få og vesentlige»; en fremtidig innstramming er ikke gjort her.
+- Status-/UI-tekst som i dag kan fremstå som at en kjøring har «feilet» eller «ikke er ferdig» pga. claims/QA (`qa_status = escalated/failed/repair_required` i Kjøringer-fanen) bør vurderes for språk som tydelig reflekterer at claims/QA er frivillig — ikke endret her.
 
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 
@@ -3032,13 +3089,15 @@ Spesifikke regler:
 
 ### B.5 Claim-/verifikasjonsregler
 
+Se Arkitekturnotat v0.10 for den bindende produktstrategien: claims er en frivillig, ikke-blokkerende kvalitetssløyfe for kundens QA-fagpersoner, aldri en obligatorisk godkjenningsport og aldri en automatisk faglig fasit over merket beste praksis.
+
 Claims skal:
 
 - være konkrete og verifiserbare
 - ha `confidence`
 - ha `excerpt`
 - ha `conflict_note` ved konflikt
-- brukes til review, ikke som artikkelens primære layout
+- brukes til frivillig review, ikke som artikkelens primære layout, og aldri som en blokkerende gate for generering, publisering eller bruk
 
 ### B.6 Teststrategi
 
