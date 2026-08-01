@@ -6,7 +6,6 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -30,6 +29,7 @@ class EnterpriseWikiSemanticRepairService
     public function __construct(
         private readonly WikiSemanticReviserAiClient $aiClient,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+        private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
     ) {}
 
     /**
@@ -99,9 +99,9 @@ class EnterpriseWikiSemanticRepairService
         $languageCode = $this->resolveLanguageCode($run->customer_id);
 
         Log::info('[WIKI_QA] Attempting semantic repair (8G-5)', [
-            'run_id'              => $run->id,
-            'action'              => $action,
-            'document_id'         => $document->id,
+            'run_id' => $run->id,
+            'action' => $action,
+            'document_id' => $document->id,
             'previous_version_id' => $articleVersion->id,
         ]);
 
@@ -120,18 +120,18 @@ class EnterpriseWikiSemanticRepairService
         );
 
         Log::info('[WIKI_QA] Semantic repair completed — new version created', [
-            'run_id'         => $run->id,
-            'page_id'        => $articleVersion->enterprise_wiki_page_id,
+            'run_id' => $run->id,
+            'page_id' => $articleVersion->enterprise_wiki_page_id,
             'new_version_id' => $newVersion->id,
         ]);
 
         return [
-            'success'             => true,
-            'page_id'             => $articleVersion->enterprise_wiki_page_id,
-            'page_version_id'     => $newVersion->id,
+            'success' => true,
+            'page_id' => $articleVersion->enterprise_wiki_page_id,
+            'page_version_id' => $newVersion->id,
             'previous_version_id' => $articleVersion->id,
-            'model'               => WikiSemanticReviserAiClient::MODEL . '/' . WikiSemanticReviserAiClient::PROMPT_VERSION,
-            'reason'              => null,
+            'model' => WikiSemanticReviserAiClient::MODEL.'/'.WikiSemanticReviserAiClient::PROMPT_VERSION,
+            'reason' => null,
         ];
     }
 
@@ -145,16 +145,52 @@ class EnterpriseWikiSemanticRepairService
 
             $version = EnterpriseWikiPageVersion::create([
                 'enterprise_wiki_page_id' => $pageId,
-                'version_number'          => $versionNumber,
-                'is_current'              => true,
-                'content_markdown'        => $content,
-                'generated_by_model'      => WikiSemanticReviserAiClient::MODEL . '/semantic-repair',
+                'version_number' => $versionNumber,
+                'is_current' => true,
+                'content_markdown' => $content,
+                'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
             ]);
+
+            $this->restoreBlockProvenance($pageId, $version);
 
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
 
             return $version;
         });
+    }
+
+    /**
+     * The revised markdown just persisted above never carries content_blocks_json — reuses
+     * EnterpriseWikiPageVersionBlockProvenanceRepairService (the same reconstruction/matching
+     * rules as wiki:repair-page-version-block-provenance) to restore it immediately from the
+     * superseded version's blocks, and re-link any already-existing unanchored claims, instead of
+     * leaving this version anchor-less until a later manual sweep. Never guesses: an ambiguous or
+     * impossible reconstruction is logged and left for the manual command — it must never block
+     * or fail this otherwise-successful semantic repair.
+     */
+    private function restoreBlockProvenance(int $pageId, EnterpriseWikiPageVersion $version): void
+    {
+        $result = $this->blockProvenanceRepairService->repairPageVersion($pageId, $version);
+
+        if ($result['status'] === 'repaired') {
+            Log::info('[WIKI_QA] Block provenance restored for new version (8G-5).', [
+                'page_id' => $pageId,
+                'page_version_id' => $version->id,
+                'claims_linked' => $result['claims_linked'],
+            ]);
+
+            return;
+        }
+
+        if ($result['status'] === 'skipped_already_has_blocks') {
+            return;
+        }
+
+        Log::warning('[WIKI_QA] Block provenance could not be restored for new version (8G-5) — claims on it will remain unanchored until a targeted repair runs.', [
+            'page_id' => $pageId,
+            'page_version_id' => $version->id,
+            'status' => $result['status'],
+        ]);
     }
 
     private function resolveLanguageCode(int $customerId): string
@@ -167,12 +203,12 @@ class EnterpriseWikiSemanticRepairService
     private function skippedResult(string $reason): array
     {
         return [
-            'success'             => false,
-            'page_id'             => null,
-            'page_version_id'     => null,
+            'success' => false,
+            'page_id' => null,
+            'page_version_id' => null,
             'previous_version_id' => null,
-            'model'               => null,
-            'reason'              => $reason,
+            'model' => null,
+            'reason' => $reason,
         ];
     }
 }

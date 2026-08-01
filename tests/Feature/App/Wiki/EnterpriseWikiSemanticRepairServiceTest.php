@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -12,6 +13,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Services\EnterpriseWiki\EnterpriseWikiSemanticRepairService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -298,6 +300,150 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Block provenance preserved after semantic repair (regression: createRevisedVersion() used
+    // to write a new current version with content_markdown only, never content_blocks_json —
+    // the exact same drift as EnterpriseWikiLinkSemanticRepairService, see
+    // EnterpriseWikiPageVersionBlockProvenanceRepairService's docblock).
+    // =========================================================================
+
+    public function test_repair_restores_block_provenance_for_the_new_version(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt uten lenke.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt med Konsept innhold.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            $run,
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'Article',
+            "Første avsnitt uten lenke.\n\nAndre avsnitt med Konsept innhold.",
+            $blocks,
+        );
+        $articleVersion = $this->currentVersion($article);
+
+        // Only a wikilink is added around an already-present word — the visible text of both
+        // paragraphs is otherwise byte-identical, exactly the kind of revision that must still
+        // reconstruct cleanly (a genuine wording rewrite is intentionally NOT reconstructible —
+        // see test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_semantic_repair()).
+        $revisedMarkdown = "Første avsnitt uten lenke.\n\nAndre avsnitt med [[konsept|Konsept]] innhold.";
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')->once()->andReturn($revisedMarkdown);
+
+        $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
+        $result = $this->repairService()->repair($run, $diagnosis);
+
+        $this->assertTrue($result['success']);
+
+        $newVersion = EnterpriseWikiPageVersion::query()->find($result['page_version_id']);
+        $newBlocks = collect($newVersion->content_blocks_json);
+
+        $this->assertCount(2, $newBlocks);
+        $this->assertSame('source_based', $newBlocks->firstWhere('block_key', 'block-0001')['content_origin']);
+        $this->assertSame('source_based', $newBlocks->firstWhere('block_key', 'block-0002')['content_origin']);
+        $this->assertNotEmpty($newBlocks->firstWhere('block_key', 'block-0002')['source_elements']);
+    }
+
+    public function test_restored_blocks_let_a_real_excerpt_anchor_to_the_correct_block(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt uten lenke.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt med Konsept innhold.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            $run,
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'Article',
+            "Første avsnitt uten lenke.\n\nAndre avsnitt med Konsept innhold.",
+            $blocks,
+        );
+        $articleVersion = $this->currentVersion($article);
+
+        $revisedMarkdown = "Første avsnitt uten lenke.\n\nAndre avsnitt med [[konsept|Konsept]] innhold.";
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')->once()->andReturn($revisedMarkdown);
+
+        $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
+        $result = $this->repairService()->repair($run, $diagnosis);
+
+        $newVersion = EnterpriseWikiPageVersion::query()->find($result['page_version_id']);
+        $match = app(EnterpriseWikiPageContentBlockService::class)
+            ->findUniqueBlockForExcerpt($newVersion, 'Andre avsnitt med Konsept innhold.');
+
+        $this->assertNotNull($match);
+        $this->assertSame('block-0002', $match['block_key']);
+    }
+
+    public function test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_semantic_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt uten Topic B.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            $run,
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'Article',
+            "Første avsnitt.\n\nAndre avsnitt uten Topic B.",
+            $blocks,
+        );
+        $articleVersion = $this->currentVersion($article);
+
+        // The revision merges both paragraphs into a single segment — segment count (1) no
+        // longer matches the prior block count (2); reconstruction must refuse, not guess. The
+        // semantic repair itself is otherwise valid and must still succeed.
+        $revisedMarkdown = 'Første avsnitt. Andre avsnitt om Topic B.';
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')->once()->andReturn($revisedMarkdown);
+
+        $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
+        $result = $this->repairService()->repair($run, $diagnosis);
+
+        $this->assertTrue($result['success']);
+
+        $newVersion = EnterpriseWikiPageVersion::query()->find($result['page_version_id']);
+        $this->assertEmpty($newVersion->content_blocks_json ?? []);
+    }
+
+    public function test_old_version_blocks_are_never_touched_by_block_provenance_restore(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+
+        $blocks = [$this->sourceBasedBlock('block-0001', 0, 'Innhold uten Topic B.')];
+        $article = $this->createVersionedPage(
+            $customer,
+            $run,
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'Article',
+            'Innhold uten Topic B.',
+            $blocks,
+        );
+        $articleVersion = $this->currentVersion($article);
+
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')->once()->andReturn('Innhold om Topic B.');
+
+        $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
+        $this->repairService()->repair($run, $diagnosis);
+
+        $articleVersion->refresh();
+        $this->assertFalse((bool) $articleVersion->is_current);
+        $this->assertSame($blocks, $articleVersion->content_blocks_json);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -421,12 +567,16 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         ]);
     }
 
+    /**
+     * @param  list<array<string, mixed>>|null  $blocks
+     */
     private function createVersionedPage(
         Customer $customer,
         EnterpriseWikiIngestRun $run,
         string $pageType,
         string $title,
         string $content = '',
+        ?array $blocks = null,
     ): EnterpriseWikiPage {
         $page = $this->createPage($customer, $pageType, $title);
         $this->addPageToRun($run, $page);
@@ -436,9 +586,28 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
             'version_number' => 1,
             'is_current' => true,
             'content_markdown' => $content !== '' ? $content : "# {$title}\n\nContent.",
+            'content_blocks_json' => $blocks,
             'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;
+    }
+
+    private function sourceBasedBlock(string $blockKey, int $position, string $markdown): array
+    {
+        return [
+            'block_key' => $blockKey,
+            'position' => $position,
+            'markdown' => $markdown,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_id' => 789,
+            'source_label' => 'source.docx',
+            'source_elements' => [[
+                'source_type' => 'enterprise_wiki_document',
+                'source_id' => 789,
+                'source_element_key' => 'paragraph-'.$position,
+                'source_excerpt' => $markdown,
+            ]],
+        ];
     }
 }

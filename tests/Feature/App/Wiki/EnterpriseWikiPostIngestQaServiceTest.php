@@ -14,6 +14,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionBlockProvenanceRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -726,6 +727,132 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    // =========================================================================
+    // Block-anchor safety net (Preserve Wiki block provenance after semantic repair): confirms
+    // isPositiveBestPracticeSuggestion() still refuses to rescue a claim with no resolvable
+    // content_block_key — this task's block-provenance fix restores the anchor earlier in the
+    // pipeline, it never loosens this structural requirement — and that restoring the anchor via
+    // EnterpriseWikiPageVersionBlockProvenanceRepairService is what lets a legitimate best-practice
+    // claim be rescued afterwards.
+    // =========================================================================
+
+    public function test_claim_without_a_resolvable_block_key_is_never_rescued_to_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'ITIL');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: ITIL');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        // Exactly the confirmed production drift (claims 5382/5384 on page 290 "ITIL"): real,
+        // eligible best-practice wording, but content_blocks_json is empty on this version — no
+        // prior block-bearing version exists in this test, so there is nothing to reconstruct.
+        $bestPracticeText = 'Bruk av prosessbilder sammen med nøkkelindikatorer gjør årsak-virkning-forhold mer synlige.';
+
+        $version->update([
+            'content_markdown' => "# ITIL\n\n{$bestPracticeText}",
+            'content_blocks_json' => [],
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $bestPracticeText,
+            'page_excerpt' => $bestPracticeText,
+            'content_block_key' => '',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source does not describe this guidance.',
+                'checks' => [],
+            ]);
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+    }
+
+    public function test_restoring_the_block_anchor_lets_the_same_claim_be_rescued_to_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'ITIL');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: ITIL');
+
+        $bestPracticeText = 'Bruk av prosessbilder sammen med nøkkelindikatorer gjør årsak-virkning-forhold mer synlige.';
+
+        // A prior version carries the real block (as if generated normally) — mirroring the real
+        // production page 290 "ITIL" shape, the block's own markdown includes the page heading
+        // (single newline, not a blank line) so it forms exactly one "\n\n"-delimited segment.
+        $blockMarkdown = "# ITIL\n{$bestPracticeText}";
+        $priorVersion = $article->versions()->where('is_current', true)->first();
+        $priorVersion->update([
+            'is_current' => false,
+            'content_markdown' => $blockMarkdown,
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $blockMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Generell ITSM-anbefaling.',
+            ]],
+        ]);
+
+        // …but the CURRENT version is exactly the confirmed drift left by a semantic repair that
+        // predates this task's fix: content_markdown carried over unchanged, content_blocks_json empty.
+        $current = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => $blockMarkdown,
+            'content_blocks_json' => [],
+            'generated_by_model' => 'gpt-5/semantic-repair',
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $current->id,
+            'claim_text' => $bestPracticeText,
+            'page_excerpt' => $bestPracticeText,
+            'content_block_key' => '',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        // This is exactly what EnterpriseWikiLinkSemanticRepairService/EnterpriseWikiSemanticRepairService
+        // now call automatically right after creating a new current version (see restoreBlockProvenance()
+        // in both services) — invoked directly here to isolate the effect on classification.
+        app(EnterpriseWikiPageVersionBlockProvenanceRepairService::class)
+            ->repairPageVersion($article->id, $current);
+
+        $this->assertSame('block-0001', $claim->fresh()->content_block_key);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source does not describe this guidance.',
+                'checks' => [],
+            ]);
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
     }
 
     public function test_run_with_an_unsupported_customer_fact_still_reports_an_open_qa_signal_but_never_blocks(): void

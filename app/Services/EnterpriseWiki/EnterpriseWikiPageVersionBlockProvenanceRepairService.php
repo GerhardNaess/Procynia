@@ -54,18 +54,7 @@ class EnterpriseWikiPageVersionBlockProvenanceRepairService
      */
     public function repair(?EnterpriseWikiIngestRun $onlyRun, bool $apply): array
     {
-        $result = [
-            'page_versions_checked' => 0,
-            'page_versions_repaired' => 0,
-            'page_versions_skipped_already_has_blocks' => 0,
-            'page_versions_skipped_no_prior_blocks' => 0,
-            'page_versions_skipped_ambiguous' => 0,
-            'claims_checked' => 0,
-            'claims_linked' => 0,
-            'claims_already_linked' => 0,
-            'claims_ambiguous' => 0,
-            'ambiguous_page_ids' => [],
-        ];
+        $result = $this->emptyResult();
 
         $query = EnterpriseWikiIngestRun::query()
             ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED);
@@ -81,6 +70,74 @@ class EnterpriseWikiPageVersionBlockProvenanceRepairService
         });
 
         return $result;
+    }
+
+    /**
+     * Targeted, single-page-version counterpart to repair() — used by services that just
+     * created a brand-new current EnterpriseWikiPageVersion (EnterpriseWikiLinkSemanticRepairService,
+     * EnterpriseWikiSemanticRepairService) to restore content_blocks_json/content_block_key
+     * immediately, instead of leaving the version anchor-less until a later full-run sweep via
+     * wiki:repair-page-version-block-provenance. Shares the exact same reconstruction/matching
+     * rules as repair() (see repairSinglePageVersion()) — refuses silently on any ambiguity,
+     * never guesses, never touches content_markdown or creates a new version.
+     *
+     * @return array{status: string, claims_linked: int, claims_ambiguous: int}
+     */
+    public function repairPageVersion(int $pageId, EnterpriseWikiPageVersion $current, bool $apply = true): array
+    {
+        $result = $this->emptyResult();
+
+        $this->repairSinglePageVersion($pageId, $current, $apply, $result);
+
+        return [
+            'status' => $this->resolveStatus($result),
+            'claims_linked' => $result['claims_linked'],
+            'claims_ambiguous' => $result['claims_ambiguous'],
+        ];
+    }
+
+    /**
+     * @return array{
+     *     page_versions_checked: int,
+     *     page_versions_repaired: int,
+     *     page_versions_skipped_already_has_blocks: int,
+     *     page_versions_skipped_no_prior_blocks: int,
+     *     page_versions_skipped_ambiguous: int,
+     *     claims_checked: int,
+     *     claims_linked: int,
+     *     claims_already_linked: int,
+     *     claims_ambiguous: int,
+     *     ambiguous_page_ids: list<int>,
+     * }
+     */
+    private function emptyResult(): array
+    {
+        return [
+            'page_versions_checked' => 0,
+            'page_versions_repaired' => 0,
+            'page_versions_skipped_already_has_blocks' => 0,
+            'page_versions_skipped_no_prior_blocks' => 0,
+            'page_versions_skipped_ambiguous' => 0,
+            'claims_checked' => 0,
+            'claims_linked' => 0,
+            'claims_already_linked' => 0,
+            'claims_ambiguous' => 0,
+            'ambiguous_page_ids' => [],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function resolveStatus(array $result): string
+    {
+        return match (true) {
+            $result['page_versions_repaired'] > 0 => 'repaired',
+            $result['page_versions_skipped_already_has_blocks'] > 0 => 'skipped_already_has_blocks',
+            $result['page_versions_skipped_no_prior_blocks'] > 0 => 'skipped_no_prior_blocks',
+            $result['page_versions_skipped_ambiguous'] > 0 => 'skipped_ambiguous',
+            default => 'skipped_no_current_version',
+        };
     }
 
     /**
@@ -101,45 +158,53 @@ class EnterpriseWikiPageVersionBlockProvenanceRepairService
                 continue;
             }
 
-            $result['page_versions_checked']++;
-
-            if (! empty($current->content_blocks_json)) {
-                $result['page_versions_skipped_already_has_blocks']++;
-
-                continue;
-            }
-
-            $prior = EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $page->id)
-                ->where('version_number', '<', $current->version_number)
-                ->whereNotNull('content_blocks_json')
-                ->orderByDesc('version_number')
-                ->get()
-                ->first(fn (EnterpriseWikiPageVersion $v): bool => ! empty($v->content_blocks_json));
-
-            if ($prior === null) {
-                $result['page_versions_skipped_no_prior_blocks']++;
-
-                continue;
-            }
-
-            $newBlocks = $this->reconstructBlocks($prior, $current);
-
-            if ($newBlocks === null) {
-                $result['page_versions_skipped_ambiguous']++;
-                $result['ambiguous_page_ids'][] = $page->id;
-
-                continue;
-            }
-
-            $result['page_versions_repaired']++;
-
-            if ($apply) {
-                $current->update(['content_blocks_json' => $newBlocks]);
-            }
-
-            $this->linkClaims($current, $newBlocks, $apply, $result);
+            $this->repairSinglePageVersion($page->id, $current, $apply, $result);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function repairSinglePageVersion(int $pageId, EnterpriseWikiPageVersion $current, bool $apply, array &$result): void
+    {
+        $result['page_versions_checked']++;
+
+        if (! empty($current->content_blocks_json)) {
+            $result['page_versions_skipped_already_has_blocks']++;
+
+            return;
+        }
+
+        $prior = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $pageId)
+            ->where('version_number', '<', $current->version_number)
+            ->whereNotNull('content_blocks_json')
+            ->orderByDesc('version_number')
+            ->get()
+            ->first(fn (EnterpriseWikiPageVersion $v): bool => ! empty($v->content_blocks_json));
+
+        if ($prior === null) {
+            $result['page_versions_skipped_no_prior_blocks']++;
+
+            return;
+        }
+
+        $newBlocks = $this->reconstructBlocks($prior, $current);
+
+        if ($newBlocks === null) {
+            $result['page_versions_skipped_ambiguous']++;
+            $result['ambiguous_page_ids'][] = $pageId;
+
+            return;
+        }
+
+        $result['page_versions_repaired']++;
+
+        if ($apply) {
+            $current->update(['content_blocks_json' => $newBlocks]);
+        }
+
+        $this->linkClaims($current, $newBlocks, $apply, $result);
     }
 
     /**

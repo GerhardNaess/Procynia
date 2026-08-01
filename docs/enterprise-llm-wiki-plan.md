@@ -2906,6 +2906,18 @@ Alle fem tekniske konsekvenser v0.10 identifiserte over er nå implementert. Ing
 - Eksisterende `blocking_override`-veksling på et claim («Ja, blokkerer» / «Nei, blokkerer ikke») er beholdt strukturelt uendret — feltet har ingen funksjonell gate-effekt lenger (siden ingen forbruker lenger bruker det til å avgjøre noe), men selve UI-mekanismen for å sette det ble ikke fjernet eller redesignet i denne oppgaven.
 - Ingen automatisk bakoverkompatibel statusomskriving av allerede-eskalerte historiske kjøringer (f.eks. kjøring 565) er gjort — de forblir synlig «eskalert» i Kjøringer-listen som historisk faktum; Wiki-sidene de produserte er uansett fullt lesbare og brukbare uavhengig av dette (sideslesetilgang er allerede uavhengig av godkjennings-/kjøringsstatus, jf. commit 2098416).
 
+### Blokkproveniens tapt etter semantisk reparasjon — rettet (2026-08-01)
+
+**Bakgrunn:** enkelte claims på concept-/entity-sider fikk tom `content_block_key` og `content_origin = unsupported_generated_content`, selv om claim-teksten fantes ordrett i sidens `content_markdown`. Dette hindret `EnterpriseWikiVerifyPageClaimsService::isPositiveBestPracticeSuggestion()` fra å klassifisere reelt legitimt beste-praksis-innhold som sådan, fordi metoden bevisst krever et gyldig blokkanker (uendret i denne oppgaven).
+
+**Rotårsak:** `EnterpriseWikiLinkSemanticRepairService::writeNewCurrentVersion()` og `EnterpriseWikiSemanticRepairService::createRevisedVersion()` opprettet begge en ny gjeldende `EnterpriseWikiPageVersion` med kun `content_markdown` satt — `content_blocks_json` ble aldri videreført, uavhengig av sidetype. I praksis rammet dette nesten utelukkende concept-/entity-sider, fordi lenke-semantisk QA i det observerte datagrunnlaget kun faktisk anbefalte og utførte reparasjon på disse sidetypene — ikke fordi mekanismen selv skiller på `page_type`.
+
+**Fiks:** begge tjenestene kaller nå `EnterpriseWikiPageVersionBlockProvenanceRepairService::repairPageVersion()` (ny, targeted single-page-version inngang til den allerede eksisterende blokkproveniens-reparasjonstjenesten — se `wiki:repair-page-version-block-provenance`) rett etter at den nye versjonen er persistert, i samme databasetransaksjon. Rekonstruksjonen og claim-tilkoblingen gjenbrukes uendret (ingen duplisert matching-logikk); en tvetydig eller umulig rekonstruksjon logges og etterlater versjonen ubetjent (aldri gjettet), uten å blokkere den ellers vellykkede reparasjonen. `isPositiveBestPracticeSuggestion()` og kravet om gyldig blokkanker er ikke endret.
+
+**Tester:** ny `EnterpriseWikiPageVersionBlockProvenanceRepairServiceTest` (7, dekker entydig/tvetydig/allerede-reparert), utvidet `EnterpriseWikiLinkLintAndSemanticRepairTest` (4 nye), utvidet `EnterpriseWikiSemanticRepairServiceTest` (4 nye), og to nye tester i `EnterpriseWikiPostIngestQaServiceTest` som bekrefter både at sikkerhetsregelen fortsatt står og at en reell beste-praksis-claim nå kan reddes etter at ankeret er gjenopprettet.
+
+**Historiske tilfeller:** denne oppgaven retter kun nye tilfeller fremover. `wiki:repair-page-version-block-provenance --apply` finnes fortsatt for målrettet opprydding av eksisterende data, men ble ikke kjørt mot utviklings- eller produksjonsdata som del av dette arbeidet.
+
 ### Produksjonsaktivering — Etter 8G, 8H og 8I
 
 > **Ikke aktiv fase.** Produksjonsaktivering skjer etter at coverage/eval (8G), continuous maintainer loop (8H) **og Karpathy-lenking/inkrementelt vedlikehold (8I)** er implementert og verifisert. Eksisterende runbook fra Fase 7 brukes som teknisk grunnlag. 8I er lagt til i v0.6 fordi produksjonsaktivering av en wiki uten fungerende inline-lenker ville aktivert et system som ikke oppfyller Karpathy-premisset.
