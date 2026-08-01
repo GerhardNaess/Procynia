@@ -37,6 +37,17 @@ use Illuminate\Support\Facades\Log;
  * content/structure defect. Technical failures escalate instead, so a human can investigate
  * without the run being wrongly flagged as having a real content problem.
  *
+ * **v0.10 binding product strategy (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"):
+ * claims and their QA review are a voluntary, non-blocking quality loop, never a completion
+ * gate.** Open claim-level QA signals (findOpenClaimQaSignals()) are therefore never a reason
+ * this method returns anything other than `passed` — they are computed and reported purely as
+ * informational data (`claim_qa_signals` in the result array) for the voluntary QA workflow, the
+ * same way `coverage_summary`/`lint_summary` below are informational and never gate the verdict.
+ * `QA_STATUS_REPAIR_REQUIRED` is kept as a valid historical enum value for rows already recorded
+ * with it before this change (see EnterpriseWikiDocumentFlowService::finalizeFromExistingQaResult()
+ * for how such a historical row is now treated) — evaluate() itself never produces it going
+ * forward.
+ *
  * evaluate() is pure and read-only — it claims nothing, writes nothing, and never calls lint
  * itself (it reads whatever EnterpriseWikiLintFinding rows the continuation pipeline's own lint
  * stage already wrote). This lets a caller (e.g. wiki:recover-document-flow --dry-run) predict
@@ -182,7 +193,7 @@ class EnterpriseWikiPostIngestQaService
      *     reason: ?string,
      *     incomplete_steps: list<string>,
      *     critical_defects: list<string>,
-     *     claim_integrity_defects: list<string>,
+     *     claim_qa_signals: list<string>,
      *     checks: array{article_exists: bool, summary_exists: bool, article_has_content: bool, summary_has_content: bool},
      * }
      */
@@ -200,7 +211,7 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Run has no applied pages — cannot determine a QA result.',
                 'incomplete_steps' => [],
                 'critical_defects' => [],
-                'claim_integrity_defects' => [],
+                'claim_qa_signals' => [],
                 'checks' => $checks,
             ];
         }
@@ -215,7 +226,7 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Run has unfinished continuation step(s) or an active reservation: '.implode(', ', $incompleteSteps).'.',
                 'incomplete_steps' => $incompleteSteps,
                 'critical_defects' => [],
-                'claim_integrity_defects' => [],
+                'claim_qa_signals' => [],
                 'checks' => $checks,
             ];
         }
@@ -228,34 +239,25 @@ class EnterpriseWikiPostIngestQaService
                 'reason' => 'Critical defect(s) found: '.implode(', ', $criticalDefects).'.',
                 'incomplete_steps' => [],
                 'critical_defects' => $criticalDefects,
-                'claim_integrity_defects' => [],
+                'claim_qa_signals' => [],
                 'checks' => $checks,
             ];
         }
 
-        // Claims are guaranteed verified_at !== null at this point (findIncompleteSteps above
-        // already escalated any run with a claim still pending verification), so every claim
-        // has a final content_origin — this check distinguishes "finished and genuinely wrong"
-        // claim content from the structural defects above.
-        $claimIntegrityDefects = $this->findClaimIntegrityDefects($pageIds);
-
-        if ($claimIntegrityDefects !== []) {
-            return [
-                'verdict' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
-                'reason' => 'Unresolved claim-integrity defect(s) found: '.implode(', ', $claimIntegrityDefects).'.',
-                'incomplete_steps' => [],
-                'critical_defects' => [],
-                'claim_integrity_defects' => $claimIntegrityDefects,
-                'checks' => $checks,
-            ];
-        }
+        // v0.10: claims are a voluntary QA loop, never a completion gate. Claims are guaranteed
+        // verified_at !== null at this point (findIncompleteSteps above already escalated any run
+        // with a claim still pending verification), so every claim has a final content_origin —
+        // findOpenClaimQaSignals() reports open QA-review opportunities purely as informational
+        // data for the voluntary QA workflow. It NEVER changes the verdict: a technically sound
+        // run always passes, regardless of how many open claim QA signals exist.
+        $claimQaSignals = $this->findOpenClaimQaSignals($pageIds);
 
         return [
             'verdict' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
             'reason' => null,
             'incomplete_steps' => [],
             'critical_defects' => [],
-            'claim_integrity_defects' => [],
+            'claim_qa_signals' => $claimQaSignals,
             'checks' => $checks,
         ];
     }
@@ -376,7 +378,7 @@ class EnterpriseWikiPostIngestQaService
             'semantic_qa_post_repair' => null,
             'incomplete_steps' => $evaluation['incomplete_steps'],
             'critical_defects' => $evaluation['critical_defects'],
-            'claim_integrity_defects' => $evaluation['claim_integrity_defects'],
+            'claim_qa_signals' => $evaluation['claim_qa_signals'],
         ];
 
         $run->update([
@@ -499,36 +501,34 @@ class EnterpriseWikiPostIngestQaService
     }
 
     /**
-     * Claim-integrity defects — content that is "finished and genuinely wrong" at the claim
-     * level rather than at the page-structure level findCriticalDefects() checks above. Scoped
-     * to claims tied to the run's pages' CURRENT page versions only: a claim left over on a
-     * superseded version (e.g. after a controlled block revision) is historical record, not an
-     * active defect.
+     * Open claim-level QA signals — content that a QA specialist may want to review, reported
+     * purely as informational data for the voluntary QA workflow (docs/enterprise-llm-wiki-plan.md,
+     * "Arkitekturnotat — v0.10"). Scoped to claims tied to the run's pages' CURRENT page versions
+     * only: a claim left over on a superseded version (e.g. after a controlled block revision) is
+     * historical record, not an open signal.
      *
-     * A claim recorded as content_origin=unsupported_generated_content or internal_error is, by
-     * construction (EnterpriseWikiVerifyPageClaimsService::persist()/markInternalGenerationError()),
-     * text the run's own AI-verification step already determined is not supported by the source
-     * document, or an internal anchoring/versioning inconsistency — this text must not reach
-     * Document Owner approval as ordinary, presumed-correct Wiki content. A content_origin of
-     * source_based without a real EnterpriseWikiSourceReference row is the same underlying
-     * problem seen from the other side: the claim is presented as document-backed but the
-     * evidence that made it so is missing (e.g. wiped without a reverification pass).
+     * **Never a completion gate.** Before v0.10 this method (then named
+     * findClaimIntegrityDefects()) fed directly into the QA verdict (repair_required) and into
+     * EnterpriseWikiDocumentOwnerApprovalService's approval-requirement suppression. Both of those
+     * consumers have been corrected: a technically sound run always reaches qa_status=passed, and
+     * Document Owner approval requirements are always built from claims' actual source references,
+     * regardless of what this method reports. This method's only remaining purpose is to surface,
+     * for the voluntary QA screen, which claims a QA specialist may want to look at:
+     * - a content_origin=internal_error claim an authorized user has explicitly flagged via
+     *   blocking_override — internal_error alone is pure technical noise (a linking/anchoring
+     *   limitation, not content a human generated or should review) and stays hidden even here
+     *   unless a human decided otherwise, exactly like it stays hidden from the Kjøringer "Funn"
+     *   panel (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()); or
+     * - a content_origin=unsupported_generated_content claim that reached a genuine "not confirmed
+     *   by source" verdict (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()), or
+     * - a content_origin=source_based claim missing its EnterpriseWikiSourceReference row.
      *
-     * Legitimate best_practice suggestions are deliberately excluded — those wait for an
-     * explicit human decision (approve/edit-and-approve/reject) via the ordinary claim review
-     * flow and must not, on their own, block technical QA from passing.
-     *
-     * A claim only counts as an active defect when its EFFECTIVE blocking state is true — an
-     * authorized user's recorded EnterpriseWikiClaim::blocking_override if present, otherwise the
-     * system's own suggestion (EnterpriseWikiClaimFindingExplainer::suggestedBlocking(): false for
-     * internal_error/"technical uncertainty" such as a missing or ambiguous block/source link,
-     * true for unsupported_generated_content/"undocumented or incorrect claim"). This means a
-     * technical linking uncertainty no longer automatically keeps a run in repair_required — only
-     * a genuine content problem does, unless a human has explicitly overridden it either way.
+     * Legitimate best_practice suggestions are deliberately excluded — those are a distinct,
+     * always-non-blocking review flow (WikiClaimController).
      *
      * @return list<string>
      */
-    private function findClaimIntegrityDefects(Collection $pageIds): array
+    private function findOpenClaimQaSignals(Collection $pageIds): array
     {
         $currentVersionIds = DB::table('enterprise_wiki_page_versions')
             ->whereIn('enterprise_wiki_page_id', $pageIds)
@@ -539,16 +539,9 @@ class EnterpriseWikiPostIngestQaService
             return [];
         }
 
-        $defects = [];
+        $signals = [];
 
-        // Gate-only "blocks_gate" (EnterpriseWikiClaimFindingExplainer::blockingState()) — true
-        // when an authorized user explicitly recorded blocking_override = true, OR nobody has
-        // decided yet and the system recommends blocking (an unhandled decision need still holds
-        // up final approval, CLAUDE.md: "Før endelig godkjenning kan systemet fortsatt kreve at
-        // brukeren tar stilling til åpne innholdsavvik"). The SAME rule
-        // EnterpriseWikiRunFindingsService uses for the Funn panel, so the panel and this gate can
-        // never disagree about whether a given claim is actually holding the run back.
-        $claimIntegrityClaims = EnterpriseWikiClaim::query()
+        $claimQaClaims = EnterpriseWikiClaim::query()
             ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
             ->whereIn('content_origin', [
                 EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
@@ -558,34 +551,20 @@ class EnterpriseWikiPostIngestQaService
             ->with('canonicalFact')
             ->get(['id', 'content_origin', 'blocking_override', 'generation_issue', 'review_metadata', 'content_block_key', 'canonical_fact_id']);
 
-        $hasBlockingInternalError = $claimIntegrityClaims
+        $hasOpenInternalError = $claimQaClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR)
-            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->blockingState($claim)['blocks_gate']);
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $claim->blocking_override === true);
 
-        if ($hasBlockingInternalError) {
-            $defects[] = 'active_internal_error_claims';
+        if ($hasOpenInternalError) {
+            $signals[] = 'open_internal_error_claims';
         }
 
-        // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
-        // v0.7"): an internal comparison-mechanism signal alone (negation/modality/actor/scope/
-        // subject mismatch, or a self-reported AI check mismatch) must never set a run to
-        // repair_required by itself — only a genuine, user-facing "not confirmed by source" case
-        // (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()) does. An authorized user's
-        // explicit blocking_override = true is a real human decision, not a hidden classification,
-        // and still counts regardless of category.
-        $hasBlockingUnsupported = $claimIntegrityClaims
+        $hasOpenUnsupported = $claimQaClaims
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT)
-            ->contains(function (EnterpriseWikiClaim $claim): bool {
-                if ($claim->blocking_override === true) {
-                    return true;
-                }
+            ->contains(fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->isUserFacingAddition($claim));
 
-                return $this->claimFindingExplainer->isUserFacingAddition($claim)
-                    && $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
-            });
-
-        if ($hasBlockingUnsupported) {
-            $defects[] = 'active_unsupported_generated_content_claims';
+        if ($hasOpenUnsupported) {
+            $signals[] = 'open_unsupported_generated_content_claims';
         }
 
         $hasUnprovenSourceBased = EnterpriseWikiClaim::query()
@@ -595,10 +574,10 @@ class EnterpriseWikiPostIngestQaService
             ->exists();
 
         if ($hasUnprovenSourceBased) {
-            $defects[] = 'source_based_claims_missing_provenance';
+            $signals[] = 'source_based_claims_missing_provenance';
         }
 
-        return $defects;
+        return $signals;
     }
 
     /**

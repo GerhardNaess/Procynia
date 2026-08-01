@@ -25,12 +25,15 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
- * Run 34 fix: a run whose current page-version claims include an active
- * unsupported_generated_content / internal_error claim, or a source_based claim missing its
- * source reference, must never reach qa_status=passed / awaiting_document_owner_approval — see
- * EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(),
- * EnterpriseWikiDocumentFlowService::escalateRunForClaimIntegrityRepair(),
- * EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefects().
+ * v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claims and their QA review
+ * are a voluntary, non-blocking quality loop, never a completion gate. This test was previously
+ * "EnterpriseWikiClaimIntegrityGatingTest" and asserted the OPPOSITE — that specific claim states
+ * set qa_status=repair_required and stopped a run from reaching Document Owner approval. It now
+ * asserts the corrected behavior: a technically sound run always reaches qa_status=passed and the
+ * ordinary Document Owner approval flow, regardless of open claim QA signals
+ * (EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals(),
+ * EnterpriseWikiDocumentOwnerApprovalService::hasOpenClaimQaSignalsForVersion()) — only a genuine
+ * technical defect (missing page version, critical lint) still fails/escalates a run.
  */
 class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 {
@@ -43,15 +46,14 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
     }
 
     // =========================================================================
-    // QA gating (Del 10, items 5-9)
+    // QA never gates on claim QA signals (v0.10)
     // =========================================================================
 
-    public function test_active_internal_error_claim_does_not_block_qa_passed_by_default(): void
+    public function test_internal_error_claim_never_blocks_qa_passed(): void
     {
-        // Product rule: internal_error is a technical uncertainty (missing/ambiguous block-source
-        // link), not a confirmed content error — it no longer suggests blocking by default (see
-        // EnterpriseWikiClaimFindingExplainer::suggestedBlocking()). An authorized user can still
-        // opt back in via blocking_override — see the next test.
+        // internal_error alone (no human override) is pure technical noise — it stays hidden even
+        // from the informational claim_qa_signals, matching EnterpriseWikiClaimFindingExplainer::
+        // isUserFacingAddition(). See the next test for the explicit-override case.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
@@ -62,13 +64,17 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertNotContains('active_internal_error_claims', $result['claim_integrity_defects']);
+        $this->assertNotContains('open_internal_error_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_active_internal_error_claim_blocks_qa_passed_when_override_kept(): void
+    public function test_internal_error_claim_with_blocking_override_still_never_blocks_qa_passed(): void
     {
+        // v0.10: a human's blocking_override no longer feeds the QA gate at all — claims never
+        // block, regardless of any decision recorded on them. The claim's own decision remains
+        // visible in the voluntary QA screen (see EnterpriseWikiRunFindingsService), it just never
+        // stops the run from completing.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
@@ -79,18 +85,13 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertContains('active_internal_error_claims', $result['claim_integrity_defects']);
+        $this->assertContains('open_internal_error_claims', $result['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_unverified_unsupported_generated_content_claim_does_not_block_qa_passed_by_default(): void
+    public function test_unverified_unsupported_generated_content_claim_never_blocks_qa_passed(): void
     {
-        // Product rule (run-38 follow-up fix): a claim that never actually reached a semantic
-        // verdict (no content_block_key, no source reference, no review_metadata) is a technical
-        // linking uncertainty, not a confirmed content error — it must not suggest blocking by
-        // default even though its content_origin is unsupported_generated_content. See
-        // EnterpriseWikiClaimFindingExplainer.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
@@ -101,34 +102,17 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_unverified_unsupported_generated_content_claim_blocks_qa_passed_when_override_kept(): void
-    {
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $version = $this->currentVersion($article);
-        $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, blockingOverride: true);
-        $this->markStepsComplete($run);
-
-        $result = $this->qaService()->runForRun($run);
-
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
-    }
-
-    public function test_verified_unsupported_generated_content_claim_blocks_qa_passed(): void
+    public function test_verified_unsupported_generated_content_claim_never_blocks_qa_passed(): void
     {
         // A claim that DID reach a real semantic verdict (block key + source reference +
-        // review_metadata with a verdict) is a genuine, confirmed content error and still
-        // suggests blocking by default — the fix above only changes claims that were never
-        // actually checked.
+        // review_metadata with a verdict) is a genuine, confirmed content deviation and still
+        // surfaces as an open claim QA signal — but per v0.10 that is a voluntary QA opportunity,
+        // never a reason to keep the run from completing.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $document = EnterpriseWikiDocument::query()->find($run->source_id);
@@ -140,15 +124,10 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
-
-    // =========================================================================
-    // v0.8 fix: an internal comparison-mechanism signal alone must never set
-    // repair_required (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.8").
-    // =========================================================================
 
     /**
      * @return iterable<string, array{0: string}>
@@ -163,7 +142,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
     }
 
     #[DataProvider('dimensionMismatchReasonProvider')]
-    public function test_dimension_mismatch_claim_does_not_set_repair_required_by_default(string $deterministicReason): void
+    public function test_dimension_mismatch_claim_never_blocks_qa_passed(string $deterministicReason): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -181,110 +160,12 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_self_reported_action_mismatch_does_not_set_repair_required_by_default(): void
-    {
-        // Distinct code path from the deterministic dimension mismatches above — a self-reported
-        // AI check mismatch (no deterministic_reason, but checks.action = 'mismatch') is equally
-        // an internal comparison-mechanism signal, not a confirmed content error.
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $document = EnterpriseWikiDocument::query()->find($run->source_id);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $version = $this->currentVersion($article);
-        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
-            'classification_basis' => 'semantic_verification',
-            'verdict' => 'not_supported',
-            'checks' => ['action' => 'mismatch'],
-        ]);
-        $this->createSourceReference($claim, $document);
-        $this->markStepsComplete($run);
-
-        $result = $this->qaService()->runForRun($run);
-
-        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
-    }
-
-    public function test_dimension_mismatch_claim_still_blocks_when_a_human_explicitly_overrides_it(): void
-    {
-        // An authorized user's explicit blocking_override = true is a real human decision, not a
-        // hidden classification — it must still count regardless of the underlying category.
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $document = EnterpriseWikiDocument::query()->find($run->source_id);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $version = $this->currentVersion($article);
-        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, blockingOverride: true, contentBlockKey: 'block-0001', reviewMetadata: [
-            'classification_basis' => 'semantic_verification',
-            'verdict' => 'not_supported',
-            'deterministic_reason' => 'negation_mismatch',
-        ]);
-        $this->createSourceReference($claim, $document);
-        $this->markStepsComplete($run);
-
-        $result = $this->qaService()->runForRun($run);
-
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
-    }
-
-    public function test_document_owner_approval_gate_agrees_with_qa_gate_for_dimension_mismatch_claim(): void
-    {
-        // EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefectsForVersion()
-        // must never disagree with the QA gate above about whether a dimension-mismatch claim is
-        // effectively blocking.
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $document = EnterpriseWikiDocument::query()->find($run->source_id);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $version = $this->currentVersion($article);
-        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-0001', reviewMetadata: [
-            'classification_basis' => 'semantic_verification',
-            'verdict' => 'not_supported',
-            'deterministic_reason' => 'scope_mismatch',
-        ]);
-        $this->createSourceReference($claim, $document);
-        $this->markStepsComplete($run);
-
-        $qaResult = $this->qaService()->runForRun($run);
-        $docOwnerBlocks = app(EnterpriseWikiDocumentOwnerApprovalService::class)->hasActiveClaimIntegrityDefectsForVersion($version->fresh());
-
-        $this->assertNotContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
-        $this->assertFalse($docOwnerBlocks);
-    }
-
-    public function test_genuine_technical_flow_failure_still_stops_the_run(): void
-    {
-        // v0.8 explicitly preserves this: a real technical flow failure (here, a missing current
-        // page version for one of the run's pages) must still fail QA — unrelated to and unaffected
-        // by the claim-classification gate fixed above.
-        $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $conceptPage = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept Without Version');
-        $this->addPageToRun($run, $conceptPage);
-        // Deliberately no current version created for $conceptPage.
-        $this->markStepsComplete($run);
-
-        $result = $this->qaService()->runForRun($run);
-
-        $this->assertContains('missing_or_empty_page_version', $result['critical_defects']);
-        $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
-    }
-
-    public function test_source_based_claim_without_source_reference_blocks_qa_passed(): void
+    public function test_source_based_claim_without_source_reference_never_blocks_qa_passed(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -297,9 +178,9 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertContains('source_based_claims_missing_provenance', $result['claim_integrity_defects']);
+        $this->assertContains('source_based_claims_missing_provenance', $result['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
     public function test_source_based_claim_with_source_reference_passes(): void
@@ -316,12 +197,12 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertSame([], $result['claim_integrity_defects']);
+        $this->assertSame([], $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_pending_best_practice_claim_does_not_block_qa_passed(): void
+    public function test_pending_best_practice_claim_never_blocks_qa_passed(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -333,12 +214,12 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertSame([], $result['claim_integrity_defects']);
+        $this->assertSame([], $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_claim_on_superseded_version_does_not_block_qa_passed(): void
+    public function test_claim_on_superseded_version_does_not_surface_as_open_signal(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -347,7 +228,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
         $oldVersion = $this->currentVersion($article);
-        // A defect on a superseded (non-current) version must not count as active.
+        // A signal on a superseded (non-current) version must not count as active.
         $this->createClaim($article, $oldVersion, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
 
         $newVersion = EnterpriseWikiPageVersion::query()->create([
@@ -371,52 +252,37 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
 
         $result = $this->qaService()->runForRun($run);
 
-        $this->assertSame([], $result['claim_integrity_defects']);
+        $this->assertSame([], $result['claim_qa_signals']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    // =========================================================================
-    // Document Owner transition (Del 10, items 10-12)
-    // =========================================================================
-
-    public function test_repair_required_run_does_not_reach_awaiting_document_owner_approval(): void
+    public function test_genuine_technical_flow_failure_still_stops_the_run(): void
     {
+        // v0.10 explicitly preserves this: a real technical flow failure (here, a missing current
+        // page version for one of the run's pages) must still fail QA — unrelated to and unaffected
+        // by claim QA signals, which never gate anything.
         $customer = $this->createCustomer();
-        $document = $this->createDocument($customer);
-        $page = $this->createPendingPage($customer, 'blocked-page');
-        $version = $this->createCurrentVersion($page);
-        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
-        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $conceptPage = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept Without Version');
+        $this->addPageToRun($run, $conceptPage);
+        // Deliberately no current version created for $conceptPage.
+        $this->markStepsComplete($run);
 
-        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+        $result = $this->qaService()->runForRun($run);
 
+        $this->assertContains('missing_or_empty_page_version', $result['critical_defects']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
-        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
     }
 
-    public function test_repair_required_run_creates_no_owner_approvals(): void
-    {
-        $customer = $this->createCustomer();
-        $document = $this->createDocument($customer);
-        $page = $this->createPendingPage($customer, 'blocked-page-no-approvals');
-        $version = $this->createCurrentVersion($page);
-        // unsupported claim, no source reference at all.
-        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
-        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
+    // =========================================================================
+    // Document Owner approval is never suppressed by claim QA signals (v0.10)
+    // =========================================================================
 
-        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
-
-        $this->assertSame(
-            0,
-            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
-                ->where('enterprise_wiki_page_version_id', $version->id)
-                ->count(),
-        );
-    }
-
-    public function test_valid_run_still_reaches_awaiting_document_owner_approval(): void
+    public function test_valid_run_reaches_awaiting_document_owner_approval(): void
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer);
@@ -439,44 +305,124 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         );
     }
 
-    public function test_owner_reassignment_sync_does_not_vacuously_complete_a_non_passed_run(): void
+    public function test_run_with_open_claim_qa_signal_still_reaches_document_owner_approval(): void
     {
-        // Guards EnterpriseWikiDocumentFlowService::reconcileRunDocumentOwnerApprovalState():
-        // a page version with only an unsupported claim produces zero pending approval groups
-        // (EnterpriseWikiDocumentOwnerApprovalService never builds a requirement for it), so the
-        // gate looks vacuously "ready" — the qa_status guard must stop this from completing the
-        // run when technical QA never actually passed.
+        // v0.10: a source-linked claim's Document Owner approval requirement is built regardless
+        // of an unrelated open claim QA signal on the same page — QA review and Document Owner
+        // approval are orthogonal, and neither suppresses the other.
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer);
+        $document = $this->createDocument($customer, $owner);
+        $page = $this->createPendingPage($customer, 'mixed-page');
+        $version = $this->createCurrentVersion($page);
+        $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($goodClaim, $document);
+        $this->createVerifiedUnsupportedClaim($page, $version, $document);
+        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_PASSED);
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+    }
+
+    public function test_legacy_repair_required_run_now_proceeds_to_document_owner_approval(): void
+    {
+        // Backward compatibility (Del 7, v0.10): a historical run already recorded with the
+        // now-retired qa_status=repair_required value is treated exactly like passed — it is not
+        // rewritten, but finalizing it proceeds through the ordinary owner-approval gate instead
+        // of the removed claim-content-repair escalation path.
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
+        $owner = $this->createUser($customer);
+        $document->update(['owner_user_id' => $owner->id]);
+        $page = $this->createPendingPage($customer, 'legacy-repair-required-page');
+        $version = $this->createCurrentVersion($page);
+        $claim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($claim, $document);
+        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+    }
+
+    public function test_owner_reassignment_sync_completes_a_legacy_repair_required_run_when_ready(): void
+    {
+        // Companion to the above via the syncDocumentOwnerApprovals() entrypoint: since v0.10 no
+        // longer treats repair_required as a reason to withhold completion, a document-owner
+        // reassignment sync on such a run can now legitimately complete it once the (real,
+        // source-linked) approval requirement is satisfied. A genuine source-based claim is
+        // required here so EnterpriseWikiDocumentOwnerApprovalService::syncForDocument() actually
+        // discovers this page version for the document in the first place (it only looks at
+        // versions with at least one real source reference to that document) — the additional
+        // open claim QA signal on the same page must not stop that discovery or the completion.
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer);
+        $document = $this->createDocument($customer, $owner);
         $page = $this->createPendingPage($customer, 'reassignment-page');
         $version = $this->createCurrentVersion($page);
+        $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($goodClaim, $document);
         $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
         $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_ESCALATED, 'finished_at' => now()]);
 
         app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document);
 
+        // The good claim's approval requirement is auto-created but still pending an explicit
+        // owner decision, so the run reaches "awaiting approval" rather than completing outright
+        // — the point of this test is that it is no longer stuck at "escalated".
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+    }
+
+    public function test_owner_reassignment_sync_does_not_complete_a_technically_failed_run(): void
+    {
+        // The guard in reconcileRunDocumentOwnerApprovalState() must still refuse a run whose own
+        // technical QA genuinely failed or is still escalated for a non-claim reason.
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createPendingPage($customer, 'technical-failure-page');
+        $version = $this->createCurrentVersion($page);
+        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_FAILED, 'finished_at' => now()]);
+
+        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
     }
 
     // =========================================================================
-    // Owner-approval requirement suppression (Del 10, item 10 + Del 9 UI gating)
+    // hasOpenClaimQaSignalsForVersion() — informational only, never a gate (v0.10)
     // =========================================================================
 
-    public function test_preview_requirements_empty_for_page_with_active_defect(): void
+    public function test_requirements_are_built_from_real_source_references_even_with_an_active_signal(): void
     {
         $customer = $this->createCustomer();
-        $page = $this->createPendingPage($customer, 'preview-blocked-page');
+        $document = $this->createDocument($customer);
+        $page = $this->createPendingPage($customer, 'preview-page-with-signal');
         $version = $this->createCurrentVersion($page);
+        $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($goodClaim, $document);
         $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, blockingOverride: true);
 
         $requirements = app(EnterpriseWikiDocumentOwnerApprovalService::class)->previewRequirementsForPageVersion($version);
 
-        $this->assertTrue($requirements->isEmpty());
+        $this->assertTrue($requirements->isNotEmpty());
     }
 
-    public function test_has_active_claim_integrity_defects_for_version_true_for_verified_unsupported_claim(): void
+    public function test_has_open_claim_qa_signals_for_version_true_for_verified_unsupported_claim(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -484,68 +430,46 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $version = $this->createCurrentVersion($page);
         $this->createVerifiedUnsupportedClaim($page, $version, $document);
 
-        $hasDefects = app(EnterpriseWikiDocumentOwnerApprovalService::class)
-            ->hasActiveClaimIntegrityDefectsForVersion($version);
+        $hasSignals = app(EnterpriseWikiDocumentOwnerApprovalService::class)
+            ->hasOpenClaimQaSignalsForVersion($version);
 
-        $this->assertTrue($hasDefects);
+        $this->assertTrue($hasSignals);
     }
 
-    public function test_has_active_claim_integrity_defects_for_version_false_for_unverified_unsupported_claim(): void
+    public function test_has_open_claim_qa_signals_for_version_false_for_unverified_unsupported_claim(): void
     {
-        // Same rule as the QA gate (findClaimIntegrityDefects()) — an unsupported_generated_content
-        // claim that never actually reached a verdict is technical uncertainty, not a confirmed
-        // defect, so it must not suppress the Document Owner approval requirement either.
         $customer = $this->createCustomer();
         $page = $this->createPendingPage($customer, 'unverified-page');
         $version = $this->createCurrentVersion($page);
         $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
 
-        $hasDefects = app(EnterpriseWikiDocumentOwnerApprovalService::class)
-            ->hasActiveClaimIntegrityDefectsForVersion($version);
+        $hasSignals = app(EnterpriseWikiDocumentOwnerApprovalService::class)
+            ->hasOpenClaimQaSignalsForVersion($version);
 
-        $this->assertFalse($hasDefects);
+        $this->assertFalse($hasSignals);
     }
 
-    public function test_qa_gate_and_document_owner_approval_agree_on_effective_blocking(): void
+    public function test_has_open_claim_qa_signals_for_version_false_for_clean_source_based_claim(): void
     {
-        // The QA gate (EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()) and
-        // Document Owner approval suppression (EnterpriseWikiDocumentOwnerApprovalService::
-        // hasActiveClaimIntegrityDefects()) must never disagree about whether the same claim is
-        // effectively blocking — both consult EnterpriseWikiClaimFindingExplainer the same way.
         $customer = $this->createCustomer();
-        $run = $this->createAppliedRun($customer);
-        $document = EnterpriseWikiDocument::query()->find($run->source_id);
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
-        $unverifiedVersion = $this->currentVersion($article);
-        $this->createClaim($article, $unverifiedVersion, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
-        $this->markStepsComplete($run);
+        $document = $this->createDocument($customer);
+        $page = $this->createPendingPage($customer, 'clean-page');
+        $version = $this->createCurrentVersion($page);
+        $claim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($claim, $document);
 
-        $qaResult = $this->qaService()->runForRun($run);
-        $docOwnerService = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+        $hasSignals = app(EnterpriseWikiDocumentOwnerApprovalService::class)
+            ->hasOpenClaimQaSignalsForVersion($version);
 
-        $this->assertNotContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
-        $this->assertFalse($docOwnerService->hasActiveClaimIntegrityDefectsForVersion($unverifiedVersion));
-
-        $verifiedRun = $this->createAppliedRun($customer, $document);
-        $verifiedArticle = $this->createVersionedPage($customer, $verifiedRun, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Verified Article');
-        $this->createVersionedPage($customer, $verifiedRun, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Verified Summary');
-        $verifiedVersion = $this->currentVersion($verifiedArticle);
-        $this->createVerifiedUnsupportedClaim($verifiedArticle, $verifiedVersion, $document);
-        $this->markStepsComplete($verifiedRun);
-
-        $verifiedQaResult = $this->qaService()->runForRun($verifiedRun);
-
-        $this->assertContains('active_unsupported_generated_content_claims', $verifiedQaResult['claim_integrity_defects']);
-        $this->assertTrue($docOwnerService->hasActiveClaimIntegrityDefectsForVersion($verifiedVersion));
+        $this->assertFalse($hasSignals);
     }
 
-    public function test_qa_document_owner_and_ui_findings_panel_agree_on_effective_blocking(): void
+    // =========================================================================
+    // Funn panel: claim findings never block, but stay informative (v0.10)
+    // =========================================================================
+
+    public function test_findings_panel_never_marks_a_claim_finding_as_blocking(): void
     {
-        // Extends the QA/Document-Owner consistency check above to the Funn panel
-        // (EnterpriseWikiRunFindingsService) — the UI-facing 'blocks_run' must use the exact same
-        // gate value as the QA/document-owner services, even though the UI must present it as
-        // "requires decision", never as an already-decided block (CLAUDE.md).
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
         $run = $this->createAppliedRun($customer, $document);
@@ -556,46 +480,55 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $this->markStepsComplete($run);
 
         $qaResult = $this->qaService()->runForRun($run);
-        $docOwnerBlocks = app(EnterpriseWikiDocumentOwnerApprovalService::class)->hasActiveClaimIntegrityDefectsForVersion($version);
         $findings = app(EnterpriseWikiRunFindingsService::class)->buildForRun($run, null, false);
         $claimFinding = collect($findings['findings'])->firstWhere('claim_id', '!=', null);
 
-        $this->assertContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
-        $this->assertTrue($docOwnerBlocks);
+        $this->assertContains('open_unsupported_generated_content_claims', $qaResult['claim_qa_signals']);
         $this->assertNotNull($claimFinding);
-        $this->assertTrue($claimFinding['blocks_run']);
-        $this->assertSame('requires_decision', $claimFinding['status']);
+        $this->assertFalse($claimFinding['blocks_run']);
+        $this->assertFalse($claimFinding['blocks_page']);
+        $this->assertSame('open_for_qa_review', $claimFinding['status']);
         $this->assertSame('pending', $claimFinding['user_decision']);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_has_active_claim_integrity_defects_for_version_false_for_clean_source_based_claim(): void
+    // =========================================================================
+    // Document Owner UI (v0.10 non-blocking language)
+    // =========================================================================
+
+    public function test_document_owner_sees_qa_review_open_state_when_page_has_no_source_linked_claims(): void
     {
+        // A page whose only claim carries an open claim QA signal but no real source reference at
+        // all (an internal_error a human has explicitly flagged — never source-anchored by
+        // construction) has nothing to attribute to a document owner, so no approval requirement
+        // is built. The informational "open QA points" state is shown instead — never a message
+        // implying the page is blocked or unavailable.
         $customer = $this->createCustomer();
-        $document = $this->createDocument($customer);
-        $page = $this->createPendingPage($customer, 'clean-page');
+        $owner = $this->createUser($customer);
+        $this->createDocument($customer, $owner);
+        $page = $this->createPendingPage($customer, 'qa-review-open-ui-page');
         $version = $this->createCurrentVersion($page);
-        $claim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
-        $this->createSourceReference($claim, $document);
+        $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR, blockingOverride: true);
 
-        $hasDefects = app(EnterpriseWikiDocumentOwnerApprovalService::class)
-            ->hasActiveClaimIntegrityDefectsForVersion($version);
+        $response = $this->actingAs($owner)->get('/app/wiki/'.$page->slug);
+        $response->assertOk();
 
-        $this->assertFalse($hasDefects);
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $props = data_get($inertia, 'props');
+
+            return data_get($props, 'document_owner_summary.state') === 'qa_review_open';
+        });
     }
 
-    // =========================================================================
-    // Document Owner UI (Del 9 / Del 10 items 23, 32-33)
-    // =========================================================================
-
-    public function test_document_owner_sees_blocked_by_quality_message_not_approve_reject(): void
+    public function test_document_owner_sees_normal_approval_flow_despite_an_open_claim_qa_signal(): void
     {
-        // A page can be a mix of good and bad claims (exactly the run-34 shape) — the Document
-        // Owner legitimately tied to the page's good claim must still be able to reach the page
-        // (to see the blocked message, not a 404) even though the page as a whole is blocked.
+        // v0.10: a real source-linked claim on the same page as an open claim QA signal still
+        // produces the ordinary approve/reject flow — the signal never withholds it.
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer);
         $document = $this->createDocument($customer, $owner);
-        $page = $this->createPendingPage($customer, 'blocked-ui-page');
+        $page = $this->createPendingPage($customer, 'mixed-ui-page');
         $version = $this->createCurrentVersion($page);
         $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
         $this->createSourceReference($goodClaim, $document);
@@ -607,8 +540,8 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $props = data_get($inertia, 'props');
 
-            return data_get($props, 'document_owner_approvals', []) === []
-                && data_get($props, 'document_owner_summary.state') === 'blocked_by_quality';
+            return data_get($props, 'document_owner_summary.state') !== 'qa_review_open'
+                && count(data_get($props, 'document_owner_approvals', [])) > 0;
         });
     }
 
@@ -809,8 +742,8 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
      * A source_based-anchored unsupported_generated_content claim: content_block_key set, a real
      * source reference linked, and review_metadata carrying an actual 'verdict' — i.e. one that
      * genuinely reached a semantic verdict, as opposed to createClaim()'s plain
-     * unsupported_generated_content fixture (no block key, no metadata), which now represents a
-     * claim that never reached a verdict at all (technical uncertainty, see
+     * unsupported_generated_content fixture (no block key, no metadata), which represents a claim
+     * that never reached a verdict at all (technical uncertainty, see
      * EnterpriseWikiClaimFindingExplainer).
      */
     private function createVerifiedUnsupportedClaim(
@@ -860,7 +793,7 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
             'qa_started_at' => now()->subMinute(),
             'qa_completed_at' => now(),
             'qa_attempt_count' => 1,
-            'qa_result' => ['claim_integrity_defects' => ['active_internal_error_claims']],
+            'qa_result' => ['claim_qa_signals' => ['open_internal_error_claims']],
         ]);
 
         EnterpriseWikiIngestRunPage::query()->create([

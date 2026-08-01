@@ -83,6 +83,17 @@ return [
 
     'enterprise_wiki' => [
         'ai_enabled' => (bool) env('ENTERPRISE_WIKI_AI_ENABLED', false),
+
+        // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): a sensible run-wide
+        // ceiling on how many NEW claims one applied run's claim extraction may persist, so claims
+        // stay "few and material" rather than growing unbounded with page count. Default 60 =
+        // 3x WikiPageClaimExtractionAiClient::MAX_CLAIMS (20/page): the two mandatory pages
+        // (article + summary), which existing generation order always processes first, fit
+        // comfortably within it, leaving meaningful headroom for concept/entity pages without
+        // reaching the run-34/run-38-style overgeneration this cap exists to prevent. Reaching the
+        // cap never fails the run — remaining pages simply complete their extraction step with
+        // zero new claims (see EnterpriseWikiExtractPageClaimsService::extract()).
+        'max_new_claims_per_run' => (int) env('ENTERPRISE_WIKI_MAX_NEW_CLAIMS_PER_RUN', 60),
     ],
 
 ];

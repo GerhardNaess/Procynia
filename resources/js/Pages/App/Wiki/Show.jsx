@@ -2340,10 +2340,10 @@ export default function WikiShow({
                     )}
                 </section>
 
-                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'blocked_by_quality' && (
-                    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                        <p className="text-sm font-medium text-amber-800">
-                            {tw.document_owner_blocked_by_quality_message ?? 'Wiki-siden behandles fortsatt fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget.'}
+                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'qa_review_open' && (
+                    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-medium text-slate-700">
+                            {tw.document_owner_qa_review_open_message ?? 'Wiki-siden er tilgjengelig og kan brukes. Systemet har notert noen faglige punkter til frivillig QA-gjennomgang.'}
                         </p>
                     </section>
                 )}

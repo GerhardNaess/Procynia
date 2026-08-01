@@ -66,7 +66,7 @@ function PageTypeBadge({ type, label }) {
 
 const DOCUMENT_OWNER_SUMMARY_STYLES = {
     awaiting_sync: 'bg-slate-100 text-slate-600',
-    blocked_by_quality: 'bg-amber-100 text-amber-700',
+    qa_review_open: 'bg-slate-100 text-slate-600',
     missing_owner: 'bg-rose-100 text-rose-700',
     pending: 'bg-amber-100 text-amber-700',
     mixed: 'bg-violet-100 text-violet-700',
@@ -2223,11 +2223,15 @@ function SourcesTab({
 // ─── Runs tab ────────────────────────────────────────────────────────────────
 
 function findingsCountToneClass(run) {
+    // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): only a genuinely
+    // blocking (technical) lint finding gets the alarming rose tone. Open, voluntary claim QA
+    // signals never block the Wiki and share the neutral amber "worth a look" tone with ordinary
+    // non-blocking findings.
     if ((run.findings_open_blocking_count ?? 0) > 0) {
         return 'text-rose-600 hover:bg-rose-50 focus-visible:ring-rose-400';
     }
 
-    if ((run.findings_open_non_blocking_count ?? 0) > 0) {
+    if ((run.findings_open_non_blocking_count ?? 0) > 0 || (run.findings_open_qa_review_count ?? 0) > 0) {
         return 'text-amber-600 hover:bg-amber-50 focus-visible:ring-amber-400';
     }
 
@@ -2641,7 +2645,7 @@ const OWNER_STATUS_STYLES = {
     mixed: 'bg-amber-100 text-amber-700',
     missing_owner: 'bg-rose-100 text-rose-700',
     awaiting_sync: 'bg-slate-100 text-slate-700',
-    blocked_by_quality: 'bg-slate-100 text-slate-700',
+    qa_review_open: 'bg-slate-100 text-slate-700',
     processing: 'bg-slate-100 text-slate-700',
     processing_failed: 'bg-rose-100 text-rose-700',
     superseded: 'bg-slate-100 text-slate-600',
@@ -2695,9 +2699,9 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
         );
     }
 
-    if ((summary.blocked_by_quality ?? 0) > 0) {
+    if ((summary.pending_review ?? 0) > 0) {
         summaryParts.push(
-            (tw.runs_pages_summary_blocked ?? ':count blokkert av kvalitetskontroll').replace(':count', summary.blocked_by_quality),
+            (tw.runs_pages_summary_pending_review ?? ':count under behandling eller med åpne QA-punkter').replace(':count', summary.pending_review),
         );
     }
 
@@ -2791,6 +2795,11 @@ const FINDING_STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     approved_edited: 'bg-emerald-100 text-emerald-700',
     rejected: 'bg-slate-100 text-slate-700',
+    // Voluntary claim QA signals (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+    // v0.10") — deliberately the same neutral sky tone as best-practice suggestions, never the
+    // rose/critical styling reserved for a genuinely blocking (requires_action) technical finding.
+    open_for_qa_review: 'bg-sky-100 text-sky-700',
+    flagged_for_review: 'bg-sky-100 text-sky-700',
 };
 
 // Claim-based findings (EnterpriseWikiClaimFindingExplainer categories) carry a concrete claim
@@ -2892,6 +2901,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                     {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
                     {' · '}
                     {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
+                    {summary.open_qa_review > 0 && `${summary.open_qa_review} ${tw.runs_findings_open_qa_review ?? 'åpne QA-punkter (blokkerer ikke Wiki)'} · `}
                     {summary.open_non_blocking > 0 && `${summary.open_non_blocking} ${tw.runs_findings_open_non_blocking ?? 'åpne ikke-blokkerende'} · `}
                     {summary.best_practice_pending > 0 && `${summary.best_practice_pending} ${tw.runs_findings_best_practice_pending_label ?? 'forslag venter på vurdering'} · `}
                     {summary.resolved > 0 && `${summary.resolved} ${tw.runs_findings_resolved ?? 'løst'} · `}

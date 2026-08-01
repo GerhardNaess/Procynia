@@ -9,11 +9,10 @@ describe('matchesFindingsLocalFilter', () => {
         assert.equal(matchesFindingsLocalFilter({ status: 'open' }, 'open'), true);
         // best-practice suggestion status
         assert.equal(matchesFindingsLocalFilter({ status: 'pending_review' }, 'open'), true);
-        // claim-integrity defect statuses — previously missing, so a genuinely open, blocking
-        // claim defect silently disappeared from the "Åpne" tab despite being counted in
-        // summary.open_blocking.
-        assert.equal(matchesFindingsLocalFilter({ status: 'requires_decision' }, 'open'), true);
-        assert.equal(matchesFindingsLocalFilter({ status: 'user_blocking' }, 'open'), true);
+        // claim QA signal statuses (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.10") — voluntary, never blocking, but must still surface under "Åpne" for QA.
+        assert.equal(matchesFindingsLocalFilter({ status: 'open_for_qa_review' }, 'open'), true);
+        assert.equal(matchesFindingsLocalFilter({ status: 'flagged_for_review' }, 'open'), true);
     });
 
     test('"open" excludes resolved/informative/superseded statuses', () => {
@@ -22,8 +21,9 @@ describe('matchesFindingsLocalFilter', () => {
         }
     });
 
-    test('"blocking" matches purely on blocks_run, regardless of status', () => {
-        assert.equal(matchesFindingsLocalFilter({ status: 'requires_decision', blocks_run: true }, 'blocking'), true);
+    test('"blocking" matches purely on blocks_run, regardless of status — a claim QA signal never sets blocks_run true (v0.10)', () => {
+        assert.equal(matchesFindingsLocalFilter({ status: 'requires_action', blocks_run: true }, 'blocking'), true);
+        assert.equal(matchesFindingsLocalFilter({ status: 'open_for_qa_review', blocks_run: false }, 'blocking'), false);
         assert.equal(matchesFindingsLocalFilter({ status: 'pending_review', blocks_run: false }, 'blocking'), false);
     });
 

@@ -250,8 +250,8 @@ class WikiController extends Controller
         $requirements = $this->documentOwnerApprovalService->previewRequirementsForPageVersion($currentVersion);
 
         if ($requirements->isEmpty()) {
-            if ($this->documentOwnerApprovalService->hasActiveClaimIntegrityDefectsForVersion($currentVersion)) {
-                return $this->documentOwnerSummaryBlockedByQuality();
+            if ($this->documentOwnerApprovalService->hasOpenClaimQaSignalsForVersion($currentVersion)) {
+                return $this->documentOwnerSummaryQaReviewOpen();
             }
 
             return $this->documentOwnerSummaryAwaitingSync();
@@ -397,20 +397,19 @@ class WikiController extends Controller
     }
 
     /**
-     * A technically invalid page version (active unsupported/internal-error claims, or a
-     * source-based claim missing its provenance — see
-     * EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefectsForVersion())
-     * never generates a Document Owner approval requirement, so it always falls into the same
-     * "no requirements" branch as a page still awaiting its first sync. This distinct state
-     * keeps the two apart in the UI: a Document Owner must never be asked to approve/reject
-     * unresolved technical defects, only see an understandable "still processing" message
-     * without internal enum names (Del 9).
+     * A page version whose claims still carry an open, informational claim QA signal (see
+     * EnterpriseWikiDocumentOwnerApprovalService::hasOpenClaimQaSignalsForVersion()) but no
+     * source-linked claims yet, so there is nothing to build a Document Owner approval
+     * requirement from. Since v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10")
+     * this is never a blocking state: the Wiki page is fully generated and usable, and the open
+     * signals are a voluntary QA opportunity, not an approval prerequisite — the label must say
+     * so plainly rather than implying the page is still being processed or withheld (Del 5).
      */
-    private function documentOwnerSummaryBlockedByQuality(): array
+    private function documentOwnerSummaryQaReviewOpen(): array
     {
         return [
-            'state' => 'blocked_by_quality',
-            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
+            'state' => 'qa_review_open',
+            'label' => __('procynia.wiki.document_owner_qa_review_open'),
             'owner_count' => 0,
             'approved_count' => 0,
             'pending_count' => 0,
@@ -441,15 +440,15 @@ class WikiController extends Controller
 
     /**
      * The run hasn't finished generating this page's version yet — there is nothing to approve
-     * until it exists. Reuses the exact same user-facing wording as
-     * documentOwnerSummaryBlockedByQuality() ("Behandles fortsatt") since both are the same kind
-     * of "not actionable yet, not a decision the user can make" state (Del 5).
+     * until it exists. This is a genuine "still processing" state, distinct from
+     * documentOwnerSummaryQaReviewOpen() (page is fully generated and usable, only voluntary QA
+     * signals remain open).
      */
     private function documentOwnerSummaryProcessing(): array
     {
         return [
             'state' => 'processing',
-            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
+            'label' => __('procynia.wiki.document_owner_processing'),
             'owner_count' => 0,
             'approved_count' => 0,
             'pending_count' => 0,
@@ -805,6 +804,11 @@ class WikiController extends Controller
                     'sections_count' => (int) ($run->sections_count ?? 0),
                     'lint_count' => $summary['total'],
                     'findings_open_blocking_count' => $summary['open_blocking'],
+                    // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): open
+                    // claim QA signals are a separate, non-blocking count — never merged into
+                    // findings_open_blocking_count, which reflects only a genuinely blocking
+                    // (technical) lint finding.
+                    'findings_open_qa_review_count' => $summary['open_qa_review'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'findings_explanation' => $summary['explanation'] ?? null,
                     'created_at' => $run->created_at,
@@ -857,11 +861,15 @@ class WikiController extends Controller
         $rows = $runPages->map(fn (EnterpriseWikiIngestRunPage $runPage): array => $this->buildRunPageRow($runPage, $user))->values();
 
         $doneStates = ['approved', 'rejected', 'superseded'];
-        $blockedStates = ['blocked_by_quality', 'processing', 'processing_failed'];
+        // Not yet a final owner decision — either genuinely still processing (technical), or
+        // fully generated/usable with only voluntary QA signals still open (qa_review_open).
+        // Neither state blocks the Wiki page itself since v0.10 (docs/enterprise-llm-wiki-plan.md,
+        // "Arkitekturnotat — v0.10") — this bucket is informational only.
+        $pendingReviewStates = ['qa_review_open', 'processing', 'processing_failed'];
 
         $doneCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $doneStates, true))->count();
-        $blockedCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $blockedStates, true))->count();
-        $awaitingCount = $rows->count() - $doneCount - $blockedCount;
+        $pendingReviewCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $pendingReviewStates, true))->count();
+        $awaitingCount = $rows->count() - $doneCount - $pendingReviewCount;
 
         return response()->json([
             'pages' => $rows->all(),
@@ -869,7 +877,7 @@ class WikiController extends Controller
                 'total' => $rows->count(),
                 'done' => $doneCount,
                 'awaiting_document_owner' => $awaitingCount,
-                'blocked_by_quality' => $blockedCount,
+                'pending_review' => $pendingReviewCount,
             ],
             'stall_explanation' => $this->runStallExplanation($run, $awaitingCount),
         ]);

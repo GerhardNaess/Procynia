@@ -32,10 +32,11 @@ use Tests\TestCase;
  * WikiController::loadRunsTab().
  *
  * These tests prove the canonical collection is used consistently for: the "Funn" column
- * counter, the panel's total/summary buckets, and the QA/escalation gate
- * (EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(), already correctly gated on
- * isUserFacingAddition() prior to this fix — verified here as a regression guard, not a new
- * behavior). Internal/raw claim signals stay in the database and in
+ * counter, the panel's total/summary buckets, and the informational claim QA signal reporting
+ * (EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals(), gated on isUserFacingAddition() —
+ * verified here as a regression guard, not a new behavior). Since v0.10 (docs/enterprise-llm-wiki-plan.md,
+ * "Arkitekturnotat — v0.10") no claim QA signal ever gates the run; only a genuinely blocking lint
+ * finding can. Internal/raw claim signals stay in the database and in
  * EnterpriseWikiPostIngestQaService's own diagnostics; they are never counted or shown here.
  */
 class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
@@ -91,7 +92,7 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $qaResult = app(EnterpriseWikiPostIngestQaService::class)->runForRun($run);
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
 
-        $this->assertSame([], $qaResult['claim_integrity_defects'], 'The 16 hidden internal signals must never gate QA.');
+        $this->assertSame([], $qaResult['claim_qa_signals'], 'The 16 hidden internal signals must never surface, even informationally.');
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status, 'A run must not escalate because of hidden internal signals plus one non-blocking suggestion.');
 
@@ -134,7 +135,7 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $qaResult = app(EnterpriseWikiPostIngestQaService::class)->runForRun($run);
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
 
-        $this->assertSame([], $qaResult['claim_integrity_defects']);
+        $this->assertSame([], $qaResult['claim_qa_signals']);
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
 
@@ -146,10 +147,10 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
     }
 
     // =========================================================================
-    // Acceptance C: one genuine, user-facing blocking claim defect
+    // Acceptance C: one genuine, user-facing claim QA signal — reported, but never blocking (v0.10)
     // =========================================================================
 
-    public function test_one_genuine_blocking_claim_defect_is_counted_and_can_escalate(): void
+    public function test_one_genuine_claim_qa_signal_is_counted_but_never_escalates(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
@@ -173,18 +174,24 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $qaResult = app(EnterpriseWikiPostIngestQaService::class)->runForRun($run);
         app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
 
-        $this->assertContains('active_unsupported_generated_content_claims', $qaResult['claim_integrity_defects']);
+        $this->assertContains('open_unsupported_generated_content_claims', $qaResult['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        // This fixture's pivot rows never set generated_page_version_id, so
+        // EnterpriseWikiDocumentOwnerApprovalService::evaluateRunCompletionGate() finds no run
+        // pages to gate on and the run completes outright — the point proven here is that it no
+        // longer gets stuck at "escalated" the way the pre-v0.10 repair_required path did.
+        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
 
         [$badgeCount, $panel] = $this->fetchBadgeAndPanel($user, $run);
 
         $this->assertSame(1, $badgeCount);
         $this->assertSame(1, $panel['summary']['total']);
-        $this->assertSame(1, $panel['summary']['open_blocking']);
+        $this->assertSame(0, $panel['summary']['open_blocking']);
+        $this->assertSame(1, $panel['summary']['open_qa_review']);
         $this->assertCount(1, $panel['findings']);
-        $this->assertTrue($panel['findings'][0]['blocks_run']);
-        $this->assertSame('requires_decision', $panel['findings'][0]['status']);
+        $this->assertFalse($panel['findings'][0]['blocks_run']);
+        $this->assertSame('open_for_qa_review', $panel['findings'][0]['status']);
         $this->assertSame($badgeCount, $panel['summary']['total']);
     }
 
@@ -274,34 +281,37 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
             'detected_at' => now(),
         ]);
 
-        // User-facing, blocking:
-        $blockingClaim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-real', reviewMetadata: [
+        // User-facing claim QA signal — reported, but never blocking (v0.10):
+        $qaSignalClaim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-real', reviewMetadata: [
             'classification_basis' => 'semantic_verification',
             'verdict' => 'not_supported',
             'reason' => 'Confirmed deviation from source.',
         ]);
-        $this->createSourceReference($blockingClaim, $document);
+        $this->createSourceReference($qaSignalClaim, $document);
 
         [$badgeCount, $panel] = $this->fetchBadgeAndPanel($user, $run);
 
         // Exactly 3 user-facing rows exist: best-practice suggestion, informative lint finding,
-        // blocking claim defect — the 2 hidden signals never appear anywhere.
+        // open claim QA signal — the 2 hidden signals never appear anywhere.
         $this->assertSame(3, $badgeCount);
         $this->assertSame(3, $panel['summary']['total']);
         $this->assertCount(3, $panel['findings']);
         $this->assertSame($badgeCount, $panel['summary']['total']);
         $this->assertSame($panel['summary']['total'], count($panel['findings']), 'summary.total must always equal the number of rows actually returned.');
 
+        // No claim-based row ever blocks (v0.10) — only a genuinely blocking lint finding could,
+        // and none exists in this fixture.
         $blockingRows = array_values(array_filter($panel['findings'], fn (array $f): bool => $f['blocks_run']));
-        $this->assertCount(1, $blockingRows);
-        $this->assertSame(1, $panel['summary']['open_blocking']);
+        $this->assertCount(0, $blockingRows);
+        $this->assertSame(0, $panel['summary']['open_blocking']);
+        $this->assertSame(1, $panel['summary']['open_qa_review']);
 
         // Of the 3 user-facing rows, only the best-practice suggestion (pending_review) and the
-        // blocking claim defect (requires_decision) are "open" — the informative lint finding is
+        // open claim QA signal (open_for_qa_review) are "open" — the informative lint finding is
         // its own separate, non-open category (both here and in the frontend's matching filter).
         $openRows = array_values(array_filter(
             $panel['findings'],
-            fn (array $f): bool => in_array($f['status'], ['requires_action', 'open', 'pending_review', 'requires_decision', 'user_blocking'], true),
+            fn (array $f): bool => in_array($f['status'], ['requires_action', 'open', 'pending_review', 'open_for_qa_review', 'flagged_for_review'], true),
         ));
         $this->assertCount(2, $openRows);
         $informativeRows = array_values(array_filter($panel['findings'], fn (array $f): bool => $f['status'] === 'informative'));

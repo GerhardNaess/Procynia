@@ -520,21 +520,29 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_retry_mode_can_re_evaluate_a_passed_run_and_downgrade_it(): void
+    public function test_retry_mode_can_re_evaluate_a_passed_run_and_reports_the_new_claim_qa_signal(): void
     {
+        // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claim QA signals
+        // never downgrade qa_status away from passed — a re-evaluation still reports the newly
+        // discovered signal informationally, but the run stays passed.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
         $this->markStepsComplete($run);
 
-        // A claim-integrity defect discovered after the run was originally marked passed.
+        // A claim QA signal discovered after the run was originally marked passed.
         $version = $article->versions()->where('is_current', true)->first();
         EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $article->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Bad claim.',
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+            ],
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
@@ -544,9 +552,9 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $result = $this->service()->runForRun($run, retry: true);
 
         $this->assertNotNull($result);
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
     // =========================================================================
@@ -642,7 +650,7 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $result = $this->service()->runForRun($run->fresh());
 
         $this->assertNotNull($result);
-        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
@@ -714,13 +722,13 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $result = $this->service()->runForRun($run->fresh());
 
         $this->assertNotNull($result);
-        $this->assertNotContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
     }
 
-    public function test_run_with_an_unsupported_customer_fact_still_requires_repair_even_alongside_best_practice_content(): void
+    public function test_run_with_an_unsupported_customer_fact_still_reports_an_open_qa_signal_but_never_blocks(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -745,7 +753,8 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         ]);
 
         // No best-practice marker at all — a plain, specific, unsupported customer fact. This
-        // must still escalate the run — the fix is scoped to genuinely best-practice content only.
+        // must still surface as an open claim QA signal — the fix above is scoped to genuinely
+        // best-practice content only — but per v0.10 it never blocks the run either way.
         $unsupportedText = 'Kunden har fem godkjente eskaleringsnivåer definert i sin styringsmodell.';
 
         $claim = EnterpriseWikiClaim::query()->create([
@@ -779,12 +788,11 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $result = $this->service()->runForRun($run->fresh());
 
         $this->assertNotNull($result);
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
-        // EnterpriseWikiPostIngestQaService itself flags the run for repair — a real "escalated"
-        // outcome is a separate, later decision made by EnterpriseWikiDocumentFlowService once an
-        // automatic repair attempt has also failed to resolve the defect (see run 475/482).
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        // v0.10: the open claim QA signal is reported for the voluntary QA screen, but never
+        // gates qa_status — the run is technically sound and passes.
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
     public function test_find_pending_runs_and_find_retryable_runs_never_include_passed(): void

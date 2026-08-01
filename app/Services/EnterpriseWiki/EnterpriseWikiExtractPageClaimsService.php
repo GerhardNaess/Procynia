@@ -12,7 +12,9 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -71,7 +73,7 @@ class EnterpriseWikiExtractPageClaimsService
     ) {}
 
     /**
-     * @return array{pages: int, claims: int, skipped: int, busy: int}
+     * @return array{pages: int, claims: int, skipped: int, busy: int, capped_pages: int}
      *
      * @throws \InvalidArgumentException if the run is not in a state that permits extraction
      * @throws \RuntimeException if AI is unavailable or extraction fails
@@ -91,10 +93,14 @@ class EnterpriseWikiExtractPageClaimsService
             ->with('page')
             ->get();
 
+        $maxNewClaims = (int) config('services.enterprise_wiki.max_new_claims_per_run', 60);
+        $persistedClaimCount = $this->existingClaimCountForPages($pivotRows->pluck('page.id')->filter()->values());
+
         $pages = 0;
         $claims = 0;
         $skipped = 0;
         $busy = 0;
+        $cappedPages = 0;
 
         foreach ($pivotRows as $row) {
             $page = $row->page;
@@ -132,6 +138,29 @@ class EnterpriseWikiExtractPageClaimsService
             if ($hasExistingClaims) {
                 $row->update(['claims_extracted_at' => now()]);
                 $skipped++;
+
+                continue;
+            }
+
+            // Del 4 (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): a
+            // sensible, run-wide ceiling on new claims — never a failure. Existing generation
+            // order (article/summary first, then concept/entity — see
+            // EnterpriseWikiGenerateAppliedPagesService) already prioritizes the two mandatory
+            // pages ahead of the pages most likely to restate the same facts, so reaching the cap
+            // here naturally omits the least material candidates first. The page's own extraction
+            // checkpoint is still recorded so this never re-appears as an incomplete step
+            // (EnterpriseWikiPostIngestQaService::findIncompleteSteps()) and the run still
+            // completes normally.
+            if (($persistedClaimCount + $claims) >= $maxNewClaims) {
+                $row->update(['claims_extracted_at' => now()]);
+                $cappedPages++;
+                $skipped++;
+
+                Log::info('[WIKI_CLAIM_EXTRACTION] Run-level claim cap reached — omitting further claim candidates for this page.', [
+                    'run_id' => $run->id,
+                    'page_id' => $page->id,
+                    'cap' => $maxNewClaims,
+                ]);
 
                 continue;
             }
@@ -178,7 +207,46 @@ class EnterpriseWikiExtractPageClaimsService
             $pages++;
         }
 
-        return compact('pages', 'claims', 'skipped', 'busy');
+        if ($cappedPages > 0) {
+            Log::info('[WIKI_CLAIM_EXTRACTION] Run-level claim cap reached for this run.', [
+                'run_id' => $run->id,
+                'pages_capped' => $cappedPages,
+                'cap' => $maxNewClaims,
+            ]);
+        }
+
+        return [
+            'pages' => $pages,
+            'claims' => $claims,
+            'skipped' => $skipped,
+            'busy' => $busy,
+            'capped_pages' => $cappedPages,
+        ];
+    }
+
+    /**
+     * Total claims already persisted for this run's pages' CURRENT versions — the baseline the
+     * run-level cap (Del 4, v0.10) is measured against, so a busy/retry re-entry into extract()
+     * never allows more than max_new_claims_per_run claims cumulatively across multiple calls.
+     */
+    private function existingClaimCountForPages(Collection $pageIds): int
+    {
+        if ($pageIds->isEmpty()) {
+            return 0;
+        }
+
+        $currentVersionIds = EnterpriseWikiPageVersion::query()
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->where('is_current', true)
+            ->pluck('id');
+
+        if ($currentVersionIds->isEmpty()) {
+            return 0;
+        }
+
+        return EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $currentVersionIds)
+            ->count();
     }
 
     /**

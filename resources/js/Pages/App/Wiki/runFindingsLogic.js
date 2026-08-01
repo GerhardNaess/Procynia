@@ -19,10 +19,12 @@ export const RUN_TIMELINE_STEPS = [
 
 /**
  * A finding's `status` is set by EnterpriseWikiRunFindingsService from one of three sources (lint
- * finding, claim-integrity defect, or best-practice suggestion), and each source has its own status
- * vocabulary — 'open' filter must match ALL of them, not just the lint-finding ones. Missing
- * 'requires_decision'/'user_blocking' here previously made a genuinely open, blocking claim defect
- * disappear from the "Åpne" tab even though it was correctly counted in summary.open_blocking.
+ * finding, claim QA signal, or best-practice suggestion), and each source has its own status
+ * vocabulary — 'open' filter must match ALL of them, not just the lint-finding ones.
+ * 'open_for_qa_review'/'flagged_for_review' (claim QA signals, v0.10 — docs/enterprise-llm-wiki-plan.md,
+ * "Arkitekturnotat — v0.10") are voluntary, never blocking — they must still appear under "Åpne" so a
+ * QA specialist can find them, but the 'blocking' filter below correctly never matches them since
+ * finding.blocks_run is always false for a claim QA signal.
  */
 export function matchesFindingsLocalFilter(finding, filterKey) {
     switch (filterKey) {
@@ -30,8 +32,8 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
             return finding.status === 'requires_action'
                 || finding.status === 'open'
                 || finding.status === 'pending_review'
-                || finding.status === 'requires_decision'
-                || finding.status === 'user_blocking';
+                || finding.status === 'open_for_qa_review'
+                || finding.status === 'flagged_for_review';
         case 'blocking':
             return finding.blocks_run;
         case 'resolved':
@@ -48,11 +50,12 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
  * matches any RUN_TIMELINE_STEPS key, so a naive "find the step matching run.status" lookup
  * always misses for it — and previously fell back to marking the LAST step (Dokumenteier) as the
  * error location for every escalated run, regardless of why it escalated. In the current
- * architecture 'escalated' is only ever set from EnterpriseWikiDocumentFlowService::escalateRun()/
- * escalateRunForClaimIntegrityRepair(), both called exclusively from finalizeFromExistingQaResult()
- * reacting to qa_status escalated/repair_required — i.e. a run in this state ALWAYS stopped at the
- * QA step and NEVER reached Document Owner review, so the QA step (not Dokumenteier) is where the
- * error belongs.
+ * architecture 'escalated' is only ever set from EnterpriseWikiDocumentFlowService::escalateRun(),
+ * called from finalizeFromExistingQaResult() reacting to qa_status=escalated (a genuine technical
+ * QA outcome — since v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10", claim QA
+ * signals never reach qa_status=repair_required/escalated on their own) — i.e. a run in this state
+ * ALWAYS stopped at the QA step and NEVER reached Document Owner review, so the QA step (not
+ * Dokumenteier) is where the error belongs.
  *
  * 'failed' is deliberately NOT given the same treatment: it can originate from many different
  * pipeline stages (maintainer decision, apply, page generation, wikilink materialization, or a QA
@@ -115,8 +118,8 @@ export function getRunTimelineState(run, stepIndex) {
  * computed on every run row:
  *
  *   - run.error_message: the specific technical reason the run was escalated in the first place
- *     (only set by EnterpriseWikiDocumentFlowService::escalateRunForClaimIntegrityRepair(); plain
- *     escalateRun() calls clear it), e.g. "unverifiable content found against the source material".
+ *     (markRunFailed() sets it for a genuine pipeline exception; plain escalateRun() calls clear
+ *     it since v0.10 removed the claim-content-specific escalation path).
  *   - run.findings_explanation: EnterpriseWikiRunFindingsService::buildExplanation()'s live
  *     comparison of qa_status against the actual open-blocking-findings count — this is what
  *     catches (and plainly states) the maintenance-cycle drift where qa_status has since moved to

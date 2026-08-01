@@ -157,6 +157,68 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
+    // Del 4 (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): a run-wide cap
+    // on new claims, configured via services.enterprise_wiki.max_new_claims_per_run — the run
+    // still completes normally once the cap is reached, it is never a failure.
+    // =========================================================================
+
+    public function test_run_level_cap_stops_creating_new_claims_once_reached(): void
+    {
+        config(['services.enterprise_wiki.max_new_claims_per_run' => 3]);
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $pages = [
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Page One'),
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Page Two'),
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Page Three'),
+        ];
+
+        // FAKE_CLAIMS returns 2 claims per page: with a cap of 3, the first 2 pages processed
+        // (2 + 2 = 4 claims, checked before each page's AI call) exhaust the cap and the 3rd page
+        // is skipped entirely — regardless of which specific page that turns out to be.
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $versionIds = array_map(fn (array $p) => $p['version']->id, $pages);
+        $totalClaims = EnterpriseWikiClaim::query()->whereIn('enterprise_wiki_page_version_id', $versionIds)->count();
+        $pagesWithNoClaims = collect($versionIds)
+            ->filter(fn (int $versionId): bool => EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $versionId)->doesntExist())
+            ->count();
+
+        $this->assertSame(4, $totalClaims, 'Exactly 2 of the 3 pages (2 claims each) fit under the cap of 3.');
+        $this->assertSame(1, $pagesWithNoClaims, 'Exactly one page must be fully capped out.');
+    }
+
+    public function test_run_level_cap_still_completes_the_extraction_step_for_capped_pages(): void
+    {
+        // A capped page must still record its claims_extracted_at checkpoint so
+        // EnterpriseWikiPostIngestQaService::findIncompleteSteps() never treats it as an
+        // unfinished step — the cap is never a failure state (Del 4).
+        config(['services.enterprise_wiki.max_new_claims_per_run' => 1]);
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $pageOne = $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Page One');
+        $pageTwo = $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Page Two');
+
+        $exitCode = Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $this->assertSame(0, $exitCode, 'Reaching the cap must never fail the command/run.');
+
+        $pageTwoPivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $pageTwo['page']->id)
+            ->firstOrFail();
+
+        $this->assertNotNull($pageTwoPivot->claims_extracted_at, 'A capped page must still be marked as having completed its extraction step.');
+    }
+
+    public function test_run_level_cap_default_is_configurable_via_env_pattern(): void
+    {
+        $this->assertSame(60, config('services.enterprise_wiki.max_new_claims_per_run'));
+    }
+
+    // =========================================================================
     // Wiki run-34 fix: exact-duplicate claims within one extraction response are deduplicated
     // =========================================================================
 
@@ -988,6 +1050,36 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
         ]);
+    }
+
+    /**
+     * A page (of the given type) attached to an EXISTING run's pivot, with a current version
+     * whose content matches FAKE_CLAIMS' excerpts closely enough for the mocked AI client's
+     * default response to persist without erroring — deliberately no content_blocks_json, so
+     * claims land as content_origin=internal_error (irrelevant for cap tests, which only assert
+     * on claim ROW counts, never content_origin).
+     *
+     * @return array{page: EnterpriseWikiPage, version: EnterpriseWikiPageVersion}
+     */
+    private function createPageWithVersion(Customer $customer, EnterpriseWikiIngestRun $run, string $pageType, string $title): array
+    {
+        $page = $this->createPage($customer, $pageType, $title);
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# {$title}\n\nSupporting excerpt alpha.\n\nSupporting excerpt beta.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        return ['page' => $page, 'version' => $version];
     }
 
     /**
