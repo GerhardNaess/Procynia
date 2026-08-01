@@ -267,8 +267,9 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 'title' => 'ITIL',
                 'proposed_slug' => $concept->slug,
                 'reason' => 'Overordnet rammeverk.',
-                'content_responsibility' => ['Definer ITIL som rammeverk for tjenestestyring.'],
-                'must_not_repeat' => ['Detaljert Incident Management-arbeidsflyt.'],
+                'owned_topics' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+                'reference_only_topics' => ['Bruk av prosessillustrasjonen.'],
+                'excluded_topics' => ['Detaljert Incident Management-arbeidsflyt.', 'Detaljerte KPI-kataloger.'],
                 'related_page_guidance' => [
                     ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
                 ],
@@ -303,7 +304,9 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         );
 
         $this->assertStringContainsString('Definer ITIL som rammeverk for tjenestestyring.', $capturedContext);
+        $this->assertStringContainsString('Bruk av prosessillustrasjonen.', $capturedContext);
         $this->assertStringContainsString('Detaljert Incident Management-arbeidsflyt.', $capturedContext);
+        $this->assertStringContainsString('Detaljerte KPI-kataloger.', $capturedContext);
         $this->assertStringContainsString('Incident Management: Lenk hit for detaljert hendelseshåndtering.', $capturedContext);
     }
 
@@ -321,8 +324,9 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 'title' => $article->title,
                 'proposed_slug' => $article->slug,
                 'reason' => 'r',
-                'content_responsibility' => ['Beskriv hva illustrasjonen viser og bruksområder for den.'],
-                'must_not_repeat' => ['Full generell definisjon av ITIL.'],
+                'owned_topics' => ['Beskriv hva illustrasjonen viser og bruksområder for den.'],
+                'reference_only_topics' => ['ITIL som overordnet rammeverk.'],
+                'excluded_topics' => ['Full generell definisjon av ITIL.'],
                 'related_page_guidance' => [
                     ['page_title' => 'ITIL', 'relationship' => 'Lenk hit for rammeverksforklaring.'],
                 ],
@@ -359,6 +363,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         );
 
         $this->assertStringContainsString('Beskriv hva illustrasjonen viser og bruksområder for den.', $capturedContext);
+        $this->assertStringContainsString('ITIL som overordnet rammeverk.', $capturedContext);
         $this->assertStringContainsString('Full generell definisjon av ITIL.', $capturedContext);
         $this->assertStringContainsString('ITIL: Lenk hit for rammeverksforklaring.', $capturedContext);
     }

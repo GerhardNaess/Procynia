@@ -119,7 +119,55 @@ class WikiPageContentAiClientTest extends TestCase
             $developerPrompt = $this->developerPromptTextFromPayload($payload);
 
             $this->assertStringContainsString('PAGE RESPONSIBILITY', $developerPrompt, "page type: {$pageType}");
-            $this->assertStringContainsString('must not repeat', mb_strtolower($developerPrompt), "page type: {$pageType}");
+            $this->assertStringContainsString('excluded', mb_strtolower($developerPrompt), "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_treats_excluded_topics_as_a_hard_binding_boundary(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('hard, binding boundary', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_caps_reference_only_topics_to_one_sentence(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('at most one short sentence', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_concept_and_entity_structure_caps_section_count_to_owned_topics(): void
+    {
+        foreach (['concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('at most one ## section per item', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_best_practice_rule_requires_necessity_not_just_accuracy(): void
+    {
+        $payload = $this->capturePayload(pageType: 'concept');
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+        $this->assertStringContainsString('a thin source document justifies a thin page', $developerPrompt);
+    }
+
+    public function test_developer_prompt_forbids_repeating_the_same_sentence(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('never restate the same sentence', $developerPrompt, "page type: {$pageType}");
         }
     }
 
@@ -139,13 +187,13 @@ class WikiPageContentAiClientTest extends TestCase
             $payload = $this->capturePayload(pageType: $pageType);
             $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
 
-            $this->assertStringContainsString('do not restate its content in full', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('never a repeated or newly-invented explanation', $developerPrompt, "page type: {$pageType}");
         }
     }
 
     public function test_additional_context_with_responsibility_guidance_reaches_the_user_prompt(): void
     {
-        $context = "This page's own content responsibility:\n- Definer ITIL som rammeverk.\n\nDo NOT explain these in full — another page already owns them (give at most a short mention and link there instead):\n- Detaljert Incident Management-flyt.";
+        $context = "This page's own content responsibility — explain ONLY these in depth, nothing beyond them:\n- Definer ITIL som rammeverk.\n\nEXCLUDED — do not mention these at all on this page, in any depth:\n- Detaljert Incident Management-flyt.";
 
         $payload = $this->capturePayload(pageType: 'concept', additionalContext: $context);
         $userPrompt = $this->userPromptTextFromPayload($payload);

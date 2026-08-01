@@ -48,7 +48,7 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         $sourceArticleSchema = $this->schemaProps()['source_article'];
 
-        foreach (['content_responsibility', 'must_not_repeat', 'related_page_guidance'] as $field) {
+        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'] as $field) {
             $this->assertContains($field, $sourceArticleSchema['required']);
             $this->assertArrayHasKey($field, $sourceArticleSchema['properties']);
         }
@@ -58,7 +58,7 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     {
         $items = $this->schemaProps()['concept_pages']['items'];
 
-        foreach (['content_responsibility', 'must_not_repeat', 'related_page_guidance'] as $field) {
+        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'] as $field) {
             $this->assertContains($field, $items['required']);
         }
     }
@@ -118,10 +118,11 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     }
 
     // =========================================================================
-    // validate() — page responsibility fields (content_responsibility / must_not_repeat /
-    // related_page_guidance) — required in the OpenAI schema (strict-mode constraint) but
-    // deliberately optional in the PHP validator, exactly like concept_pages/entity_pages/
-    // warnings, so a decision predating this field (or a hand-built fixture) stays valid.
+    // validate() — page responsibility fields (owned_topics / reference_only_topics /
+    // excluded_topics / related_page_guidance) — required in the OpenAI schema (strict-mode
+    // constraint) but deliberately optional in the PHP validator, exactly like
+    // concept_pages/entity_pages/warnings, so a decision predating this field (or a hand-built
+    // fixture) stays valid.
     // =========================================================================
 
     public function test_responsibility_fields_absent_is_not_an_error(): void
@@ -130,51 +131,92 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertEmpty($errors);
     }
 
-    public function test_content_responsibility_with_valid_strings_is_accepted(): void
+    public function test_owned_topics_with_valid_strings_is_accepted(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['content_responsibility'] = ['Definer ITIL som rammeverk.', 'Forklar sentrale prinsipper.'];
+        $decision['source_article']['owned_topics'] = ['Definer ITIL som rammeverk.', 'Forklar sentrale prinsipper.'];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
     }
 
-    public function test_content_responsibility_with_non_string_item_is_rejected(): void
+    public function test_owned_topics_with_non_string_item_is_rejected(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['content_responsibility'] = [123];
+        $decision['source_article']['owned_topics'] = [123];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
-        $this->assertStringContainsString('content_responsibility', implode(' ', $errors));
+        $this->assertStringContainsString('owned_topics', implode(' ', $errors));
     }
 
-    public function test_content_responsibility_with_empty_string_item_is_rejected(): void
+    public function test_owned_topics_with_empty_string_item_is_rejected(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['content_responsibility'] = [''];
+        $decision['source_article']['owned_topics'] = [''];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
     }
 
-    public function test_must_not_repeat_can_be_an_empty_array(): void
+    public function test_reference_only_topics_can_be_an_empty_array(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['must_not_repeat'] = [];
+        $decision['source_article']['reference_only_topics'] = [];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
     }
 
-    public function test_must_not_repeat_with_non_array_value_is_rejected(): void
+    public function test_reference_only_topics_with_non_array_value_is_rejected(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['must_not_repeat'] = 'not an array';
+        $decision['source_article']['reference_only_topics'] = 'not an array';
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
-        $this->assertStringContainsString('must_not_repeat', implode(' ', $errors));
+        $this->assertStringContainsString('reference_only_topics', implode(' ', $errors));
+    }
+
+    public function test_excluded_topics_can_be_an_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_excluded_topics_with_valid_strings_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [
+            'Detaljerte KPI-kataloger.',
+            'Full beskrivelse av Problem Management.',
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_excluded_topics_with_non_array_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = 'not an array';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('excluded_topics', implode(' ', $errors));
+    }
+
+    public function test_excluded_topics_with_empty_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [''];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('excluded_topics', implode(' ', $errors));
     }
 
     public function test_related_page_guidance_with_valid_entry_is_accepted(): void
@@ -221,10 +263,10 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertNotEmpty($errors);
     }
 
-    public function test_control_character_in_must_not_repeat_item_is_rejected(): void
+    public function test_control_character_in_excluded_topics_item_is_rejected(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['must_not_repeat'] = ["Detaljert \x0Fflyt."];
+        $decision['source_article']['excluded_topics'] = ["Detaljert \x0Fflyt."];
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
@@ -240,8 +282,9 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
             'title' => 'ITIL',
             'proposed_slug' => 'itil',
             'reason' => 'Overordnet rammeverk.',
-            'content_responsibility' => ['Definer ITIL som rammeverk for tjenestestyring.'],
-            'must_not_repeat' => ['Detaljert Incident Management-arbeidsflyt.'],
+            'owned_topics' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+            'reference_only_topics' => ['Bruk av prosessillustrasjonen.'],
+            'excluded_topics' => ['Detaljert Incident Management-arbeidsflyt.', 'Detaljerte KPI-kataloger.'],
             'related_page_guidance' => [
                 ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
             ],
@@ -472,16 +515,18 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     public function test_parse_preserves_responsibility_fields_when_present(): void
     {
         $decision = $this->validDecision();
-        $decision['source_article']['content_responsibility'] = ['Definer ITIL som rammeverk.'];
-        $decision['source_article']['must_not_repeat'] = ['Detaljert Incident Management-flyt.'];
+        $decision['source_article']['owned_topics'] = ['Definer ITIL som rammeverk.'];
+        $decision['source_article']['reference_only_topics'] = ['Bruk av illustrasjonen.'];
+        $decision['source_article']['excluded_topics'] = ['Detaljert Incident Management-flyt.'];
         $decision['source_article']['related_page_guidance'] = [
             ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit.'],
         ];
 
         $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
 
-        $this->assertSame(['Definer ITIL som rammeverk.'], $parsed['source_article']['content_responsibility']);
-        $this->assertSame(['Detaljert Incident Management-flyt.'], $parsed['source_article']['must_not_repeat']);
+        $this->assertSame(['Definer ITIL som rammeverk.'], $parsed['source_article']['owned_topics']);
+        $this->assertSame(['Bruk av illustrasjonen.'], $parsed['source_article']['reference_only_topics']);
+        $this->assertSame(['Detaljert Incident Management-flyt.'], $parsed['source_article']['excluded_topics']);
         $this->assertSame('Incident Management', $parsed['source_article']['related_page_guidance'][0]['page_title']);
     }
 

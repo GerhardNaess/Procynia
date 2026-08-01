@@ -20,11 +20,21 @@ namespace App\Services\EnterpriseWiki;
  *  - title must not be a raw filename (e.g. "Masterdata.pdf").
  *  - output is a decision only — no article content, no OpenAI calls in this class.
  *
- * content_responsibility/must_not_repeat/related_page_guidance (added to reduce cross-page
- * repetition — see docs/enterprise-llm-wiki-plan.md, the section on page responsibility): the
- * maintainer sees every planned page for this source document in one decision, so it is the one
- * place that can assign non-overlapping faglig ansvar between them before any page content is
- * generated. Required in the OpenAI strict JSON schema (every property must be, per the API's own
+ * owned_topics/reference_only_topics/excluded_topics/related_page_guidance (added to reduce
+ * cross-page repetition AND unbounded page breadth — see docs/enterprise-llm-wiki-plan.md, the
+ * section on page responsibility): the maintainer sees every planned page for this source
+ * document in one decision, so it is the one place that can assign non-overlapping, deliberately
+ * NARROW faglig ansvar between them before any page content is generated. Three tiers, not two:
+ *   - owned_topics: what this page explains in depth — its full scope, nothing beyond it.
+ *   - reference_only_topics: topics this page may mention briefly (a short sentence + a link),
+ *     never explain.
+ *   - excluded_topics: topics this page must never mention at all, typically because they are a
+ *     wider domain area the source document does not itself require (e.g. a full KPI catalog, an
+ *     adjacent process area) — the deliberate mechanism against a concept/entity page silently
+ *     growing into "a complete textbook page" merely because the topic is related.
+ * A superseded, two-tier predecessor of this (content_responsibility/must_not_repeat) existed
+ * briefly and is replaced here — see the git history for that iteration.
+ * Required in the OpenAI strict JSON schema (every property must be, per the API's own
  * strict-mode constraint — see the existing concept_pages/entity_pages/warnings top-level fields
  * for the same pattern), but treated as OPTIONAL by the PHP validator/parser, defaulting to an
  * empty list when absent — exactly like every other optional top-level field in this contract —
@@ -43,8 +53,9 @@ class EnterpriseWikiMaintainerDecisionPrompt
     public static function jsonSchema(): array
     {
         $responsibilityProperties = [
-            'content_responsibility' => ['type' => 'array', 'items' => ['type' => 'string']],
-            'must_not_repeat' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'owned_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'reference_only_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'excluded_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
             'related_page_guidance' => [
                 'type' => 'array',
                 'items' => [
@@ -67,7 +78,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
             ], $responsibilityProperties),
-            'required' => ['action', 'title', 'proposed_slug', 'reason', 'content_responsibility', 'must_not_repeat', 'related_page_guidance'],
+            'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
 
@@ -80,7 +91,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
             ], $responsibilityProperties),
-            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'content_responsibility', 'must_not_repeat', 'related_page_guidance'],
+            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
 
@@ -221,7 +232,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
             $errors = array_merge($errors, self::validateNoFileExtensionInSlug($entry['proposed_slug'], "{$ctx}.proposed_slug"));
         }
 
-        foreach (['content_responsibility', 'must_not_repeat'] as $field) {
+        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics'] as $field) {
             if (! array_key_exists($field, $entry)) {
                 continue;
             }

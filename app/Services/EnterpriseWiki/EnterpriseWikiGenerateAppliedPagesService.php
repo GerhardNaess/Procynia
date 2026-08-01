@@ -669,21 +669,30 @@ class EnterpriseWikiGenerateAppliedPagesService
             $lines[] = "Maintainer note for this page: {$reason}";
         }
 
-        $responsibility = $this->nonEmptyStringList($entry['content_responsibility'] ?? []);
+        $ownedTopics = $this->nonEmptyStringList($entry['owned_topics'] ?? []);
 
-        if ($responsibility !== []) {
-            $lines[] = "This page's own content responsibility:\n".implode("\n", array_map(
+        if ($ownedTopics !== []) {
+            $lines[] = "This page's own content responsibility — explain ONLY these in depth, nothing beyond them:\n".implode("\n", array_map(
                 fn (string $item): string => "- {$item}",
-                $responsibility,
+                $ownedTopics,
             ));
         }
 
-        $mustNotRepeat = $this->nonEmptyStringList($entry['must_not_repeat'] ?? []);
+        $referenceOnlyTopics = $this->nonEmptyStringList($entry['reference_only_topics'] ?? []);
 
-        if ($mustNotRepeat !== []) {
-            $lines[] = "Do NOT explain these in full — another page already owns them (give at most a short mention and link there instead):\n".implode("\n", array_map(
+        if ($referenceOnlyTopics !== []) {
+            $lines[] = "Reference only — at most one short sentence plus a link, never an explanation or a subsection:\n".implode("\n", array_map(
                 fn (string $item): string => "- {$item}",
-                $mustNotRepeat,
+                $referenceOnlyTopics,
+            ));
+        }
+
+        $excludedTopics = $this->nonEmptyStringList($entry['excluded_topics'] ?? []);
+
+        if ($excludedTopics !== []) {
+            $lines[] = "EXCLUDED — do not mention these at all on this page, in any depth:\n".implode("\n", array_map(
+                fn (string $item): string => "- {$item}",
+                $excludedTopics,
             ));
         }
 
