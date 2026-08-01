@@ -2379,7 +2379,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 >
                     <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
                     <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
-                    <option value="applied">{tw.run_decision_applied ?? 'Anvendt'}</option>
+                    <option value="applied">{tw.run_decision_applied ?? 'Sidestruktur opprettet'}</option>
                     <option value="none">{tw.runs_filter_decision_none ?? 'Ingen beslutning'}</option>
                 </select>
 
@@ -2484,7 +2484,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                             <td className="px-4 py-3">
                                                 {run.maintainer_decision_status === 'applied' ? (
                                                     <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>
-                                                        {tw.run_decision_applied ?? 'Anvendt'}
+                                                        {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
                                                     </span>
                                                 ) : run.maintainer_decision_status === 'pending' ? (
                                                     <span className={`${BADGE} bg-slate-100 text-slate-500`}>

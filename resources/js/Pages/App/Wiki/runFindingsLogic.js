@@ -39,7 +39,7 @@ export function formatFindingUserId(id) {
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
     { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
-    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Anvendelse' },
+    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Oppretter sidestruktur' },
     { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
     { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
     { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },

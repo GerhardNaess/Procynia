@@ -91,13 +91,13 @@ test.describe.serial('Kjøringer run row readability', () => {
         expect(await stalledPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
     });
 
-    test('step timeline chips (Kø/Beslutning/Anvendelse/Sider/Verifisering/QA/Dokumenteier) are readable', async ({ page }) => {
+    test('step timeline chips (Kø/Beslutning/Oppretter sidestruktur/Sider/Verifisering/QA/Dokumenteier) are readable', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${runId}")`).first();
-        for (const label of ['Kø', 'Beslutning', 'Anvendelse', 'Sider', 'Verifisering', 'QA', 'Dokumenteier']) {
+        for (const label of ['Kø', 'Beslutning', 'Oppretter sidestruktur', 'Sider', 'Verifisering', 'QA', 'Dokumenteier']) {
             const chip = row.getByText(label, { exact: true });
             await expect(chip).toBeVisible();
             const size = await chip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
