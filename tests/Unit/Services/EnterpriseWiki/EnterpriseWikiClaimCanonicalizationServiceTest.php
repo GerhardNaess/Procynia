@@ -5,7 +5,6 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimAnchorTextNormalizer;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkParser;
-use App\Services\EnterpriseWiki\EnterpriseWikiNavigationReferenceDetector;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -19,10 +18,7 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
 {
     private function service(): EnterpriseWikiClaimCanonicalizationService
     {
-        return new EnterpriseWikiClaimCanonicalizationService(
-            new EnterpriseWikiClaimAnchorTextNormalizer(new EnterpriseWikiLinkParser),
-            new EnterpriseWikiNavigationReferenceDetector(new EnterpriseWikiLinkParser),
-        );
+        return new EnterpriseWikiClaimCanonicalizationService(new EnterpriseWikiClaimAnchorTextNormalizer(new EnterpriseWikiLinkParser));
     }
 
     public function test_identical_text_is_equivalent(): void
@@ -197,54 +193,6 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
 
         $this->assertTrue($this->service()->isEligibleForBestPractice($general));
         $this->assertFalse($this->service()->isEligibleForBestPractice($customerSpecific));
-    }
-
-    // =========================================================================
-    // isEligibleForBestPractice() — run 575's finding #5587: a pure internal Wiki navigation
-    // reference (anchorText retains [[wikilink]] markup) must never be eligible, in either
-    // language, but the anchorText gate must never hide a genuine professional claim that also
-    // happens to contain a link.
-    // =========================================================================
-
-    public function test_pure_norwegian_navigation_reference_is_not_eligible(): void
-    {
-        $this->assertFalse($this->service()->isEligibleForBestPractice(
-            'Begreper og rammeverk er omtalt på ITIL Incident Management.',
-            'Begreper og rammeverk er omtalt på [[itil-incident-management|ITIL Incident Management]].',
-        ));
-    }
-
-    public function test_pure_english_navigation_reference_is_not_eligible(): void
-    {
-        $this->assertFalse($this->service()->isEligibleForBestPractice(
-            'Terms and frameworks are covered on ITIL Incident Management.',
-            'Terms and frameworks are covered on [[itil-incident-management|ITIL Incident Management]].',
-        ));
-    }
-
-    public function test_claim_before_link_still_eligible_when_it_carries_its_own_assertion(): void
-    {
-        $this->assertTrue($this->service()->isEligibleForBestPractice(
-            'Incident Management skal alltid ha en tydelig sakseier.',
-            'Incident Management skal alltid ha én tydelig sakseier. Se [[itil-incident-management|ITIL Incident Management]].',
-        ));
-    }
-
-    public function test_claim_after_link_still_eligible_when_it_carries_its_own_assertion(): void
-    {
-        $this->assertTrue($this->service()->isEligibleForBestPractice(
-            'Incident Management skal alltid ha en tydelig sakseier.',
-            'Se [[itil-incident-management|ITIL Incident Management]]. Incident Management skal alltid ha én tydelig sakseier.',
-        ));
-    }
-
-    public function test_missing_anchor_text_does_not_affect_eligibility(): void
-    {
-        // A caller with no excerpt/markdown on hand (empty anchorText) gets exactly the same
-        // result as before this fix — the new gate never activates without structural evidence.
-        $this->assertTrue($this->service()->isEligibleForBestPractice(
-            'Tydelig rolle- og ansvarsfordeling gir klare eskaleringslinjer.',
-        ));
     }
 
     // =========================================================================

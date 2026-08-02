@@ -100,7 +100,7 @@ class EnterpriseWikiRunBestPracticeReevaluationService
                 continue;
             }
 
-            if (! $this->canonicalizationService->isEligibleForBestPractice((string) $claim->claim_text, (string) ($claim->page_excerpt ?? ''))) {
+            if (! $this->canonicalizationService->isEligibleForBestPractice((string) $claim->claim_text)) {
                 $skippedNotGenuine++;
 
                 continue;
