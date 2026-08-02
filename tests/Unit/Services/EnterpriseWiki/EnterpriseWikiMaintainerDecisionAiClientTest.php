@@ -2,6 +2,9 @@
 
 namespace Tests\Unit\Services\EnterpriseWiki;
 
+use App\Data\Ai\Capacity\AiCapacityRequest;
+use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
@@ -44,11 +47,29 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame('gpt-5', $payload['model']);
     }
 
-    public function test_payload_uses_updated_max_output_tokens(): void
+    public function test_payload_uses_capacity_planner_derived_max_output_tokens(): void
     {
         $payload = $this->capturePayload();
 
-        $this->assertSame(3000, $payload['max_output_tokens']);
+        $userPromptText = $this->userMessageText($payload);
+
+        $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            inputSizeChars: mb_strlen($userPromptText),
+            expectedResultObjects: 2,
+        ));
+
+        $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
+        $this->assertGreaterThan(0, $payload['max_output_tokens']);
+    }
+
+    public function test_larger_source_text_produces_a_larger_max_output_tokens_than_a_small_document(): void
+    {
+        $smallPayload = $this->capturePayload(sourceText: 'Kort tekst.');
+        $largePayload = $this->capturePayload(sourceText: str_repeat('ITIL Incident Management prosessbeskrivelse. ', 400));
+
+        $this->assertGreaterThan($smallPayload['max_output_tokens'], $largePayload['max_output_tokens']);
     }
 
     public function test_payload_uses_low_reasoning_effort(): void
@@ -235,35 +256,129 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
     }
 
-    public function test_decide_throws_when_response_is_incomplete_and_logs_safe_diagnostics(): void
-    {
-        Log::spy();
+    // =========================================================================
+    // decide() — capacity retry (Wiki run-583 fix: status=incomplete/reason=max_output_tokens)
+    // =========================================================================
 
-        $client = $this->clientWithRawResponse([
+    /**
+     * First attempt truncated at the computed budget; the capacity retry uses a strictly higher,
+     * still-capped budget and succeeds — the client returns the parsed decision from the SECOND
+     * attempt, never touching the first (partial) response text.
+     */
+    public function test_decide_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
+    {
+        $decision = $this->validDecision();
+        $capturedPayloads = [];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->twice()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayloads, $decision): array {
+                $capturedPayloads[] = $payload;
+
+                if (count($capturedPayloads) === 1) {
+                    return [
+                        'id' => 'resp_incomplete_1',
+                        'status' => 'incomplete',
+                        'incomplete_details' => ['reason' => 'max_output_tokens'],
+                        'output_text' => '',
+                        'output' => [],
+                    ];
+                }
+
+                return ['id' => 'resp_completed_2', 'status' => 'completed', 'output_text' => json_encode($decision)];
+            });
+
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
+            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+        $this->assertCount(2, $capturedPayloads);
+        $this->assertGreaterThan($capturedPayloads[0]['max_output_tokens'], $capturedPayloads[1]['max_output_tokens']);
+    }
+
+    /**
+     * Both attempts hit max_output_tokens — exactly one capacity retry is allowed, so the client
+     * throws a dedicated, traceable exception instead of silently giving up or retrying forever.
+     * No partial decision is ever parsed or returned.
+     */
+    public function test_decide_throws_capacity_exceeded_when_both_attempts_hit_max_output_tokens(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->twice()->andReturn([
             'id' => 'resp_incomplete',
             'status' => 'incomplete',
-            'incomplete_details' => [
-                'reason' => 'max_output_tokens',
-            ],
+            'incomplete_details' => ['reason' => 'max_output_tokens'],
+            'output_text' => '',
+            'output' => [],
+            'usage' => ['output_tokens' => 20],
+        ]);
+
+        $this->expectException(EnterpriseWikiAiOutputCapacityExceededException::class);
+        $this->expectExceptionMessageMatches('/exhausted capacity retry/');
+        $this->expectExceptionMessageMatches('/retry level 1/');
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)
+            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+    }
+
+    /**
+     * A non-token incomplete reason must never be treated as a capacity problem — the client
+     * makes exactly one attempt and lets the original exception propagate untouched.
+     */
+    public function test_decide_does_not_retry_on_non_token_incomplete_reason(): void
+    {
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_content_filter',
+            'status' => 'incomplete',
+            'incomplete_details' => ['reason' => 'content_filter'],
             'output_text' => '',
             'output' => [],
         ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*max_output_tokens/s');
+        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*content_filter/s');
 
         $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+    }
 
-        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
-            return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
-                && ($context['response_id'] ?? null) === 'resp_incomplete'
-                && ($context['http_status'] ?? null) === 200
-                && ($context['response_status'] ?? null) === 'incomplete'
-                && ($context['incomplete_details']['reason'] ?? null) === 'max_output_tokens'
-                && ($context['output_text_length'] ?? null) === 0
-                && ($context['output_item_types'] ?? null) === []
-                && ($context['content_item_types'] ?? null) === []
-                && ($context['has_refusal'] ?? null) === false;
+    /**
+     * The consistency-repair pass (a separate, existing mechanism) must still work normally after
+     * a fully completed response — capacity retry logic must never interfere with a call that
+     * simply succeeds.
+     */
+    public function test_decide_does_not_retry_on_a_completed_response(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->once()->andReturn([
+            'status' => 'completed',
+            'output_text' => json_encode($this->validDecision()),
+        ]);
+
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
+            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+    }
+
+    public function test_capacity_decision_is_logged_without_raw_document_text(): void
+    {
+        Log::spy();
+
+        $client = $this->clientReturning($this->validDecision());
+        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'Hemmelig kildetekst som aldri skal logges.', [], 'no');
+
+        Log::shouldHaveReceived('info')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION_CAPACITY] Capacity decision for AI call.'
+                && ($context['operation_type'] ?? null) === 'enterprise_wiki_maintainer_decision'
+                && ($context['model'] ?? null) === 'gpt-5'
+                && ($context['retry_level'] ?? null) === 0
+                && is_int($context['chosen_max_output_tokens'] ?? null)
+                && is_string($context['basis'] ?? null)
+                && ! str_contains(json_encode($context), 'Hemmelig kildetekst');
         });
     }
 
@@ -483,6 +598,43 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectExceptionMessageMatches('/not enabled/');
 
         $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+    }
+
+    /**
+     * repair() shares the same capacity-retry mechanism as decide() (both go through
+     * executeWithCapacityRetry) — its prompt is larger (it echoes the full previous decision), so
+     * it independently benefits from the same one-bounded-retry behaviour.
+     */
+    public function test_repair_also_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
+    {
+        $corrected = $this->validDecision();
+        $capturedPayloads = [];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->twice()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayloads, $corrected): array {
+                $capturedPayloads[] = $payload;
+
+                if (count($capturedPayloads) === 1) {
+                    return [
+                        'status' => 'incomplete',
+                        'incomplete_details' => ['reason' => 'max_output_tokens'],
+                        'output_text' => '',
+                        'output' => [],
+                    ];
+                }
+
+                return ['status' => 'completed', 'output_text' => json_encode($corrected)];
+            });
+
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
+            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
+        );
+
+        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+        $this->assertGreaterThan($capturedPayloads[0]['max_output_tokens'], $capturedPayloads[1]['max_output_tokens']);
     }
 
     public function test_repair_throws_on_schema_violation(): void

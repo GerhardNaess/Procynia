@@ -2,8 +2,14 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\Capacity\AiCapacityPlan;
+use App\Data\Ai\Capacity\AiCapacityRequest;
+use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
+use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseIncompleteException;
 use App\Services\OpenAi\OpenAiClient;
+use Closure;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -14,12 +20,20 @@ use RuntimeException;
  *
  * Returns a validated decision array (see EnterpriseWikiMaintainerDecisionPrompt).
  * Does NOT generate page content and is NOT wired into the ingest pipeline yet.
+ *
+ * Output-token budgeting is delegated to EnterpriseWikiAiCapacityPlanner instead of a fixed
+ * local constant (see the Wiki run-583 incident: a fixed 3000-token budget did not grow when
+ * commit 353aa98 added the concept_candidates field, truncating a content-rich document's
+ * response). Both decide() and repair() get at most one bounded "capacity retry" — a second
+ * attempt at a higher, still-capped budget — ONLY when the first attempt's response was
+ * status=incomplete/reason=max_output_tokens. This is deliberately separate from
+ * EnterpriseWikiMaintainerDecisionConsistencyValidator's repair pass: a capacity retry reacts to
+ * an INCOMPLETE API response (never parses or reuses the partial JSON); consistency repair reacts
+ * to a COMPLETE but logically inconsistent decision. The two must never be conflated.
  */
 class EnterpriseWikiMaintainerDecisionAiClient
 {
     private const MODEL = 'gpt-5';
-
-    private const MAX_OUTPUT_TOKENS = 3000;
 
     private const REASONING_EFFORT = 'low';
 
@@ -27,9 +41,18 @@ class EnterpriseWikiMaintainerDecisionAiClient
     // the system prompt, index context, and the schema output.
     private const MAX_SOURCE_TEXT_CHARS = 12000;
 
+    /** Selects this operation's profile in config('ai_capacity.operations'). */
+    private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_maintainer_decision';
+
+    // source_article + source_summary are always attempted; concept/entity page count is not
+    // known before the AI responds, so it is captured by the capacity planner's input-size-driven
+    // term instead of a guessed object count here.
+    private const EXPECTED_RESULT_OBJECTS = 2;
+
     public function __construct(
         private readonly OpenAiClient $openAiClient,
         private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
+        private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
     ) {}
 
     public static function isAvailable(): bool
@@ -47,6 +70,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
      * @return array<string, mixed> Validated maintainer decision.
      *
      * @throws RuntimeException when AI is disabled, the API fails, the response is empty or invalid.
+     * @throws EnterpriseWikiAiOutputCapacityExceededException when the response is still
+     *                                                         incomplete/max_output_tokens after one capacity retry.
      */
     public function decide(
         array $sourceMeta,
@@ -60,9 +85,14 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
-        $payload = $this->buildPayload($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
-        $decoded = $this->responsesDecoder->decode($response, 'EnterpriseWikiMaintainerDecisionAiClient');
+        $languageName = $this->languageName($languageCode);
+        $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext);
+
+        $decoded = $this->executeWithCapacityRetry(
+            'EnterpriseWikiMaintainerDecisionAiClient',
+            mb_strlen($userPromptText),
+            fn (int $maxOutputTokens): array => $this->buildPayload($languageName, $userPromptText, $maxOutputTokens),
+        );
 
         try {
             return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
@@ -84,6 +114,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
      * self-healing correction keeps the ingest run moving instead of failing outright for a
      * mistake this same model can usually fix when the specific problem is pointed out.
      *
+     * This is a consistency repair, not a capacity retry: it can itself still hit
+     * status=incomplete/max_output_tokens (it echoes the full previous decision back to the
+     * model, so its prompt is larger than decide()'s), and gets its own independent capacity-retry
+     * budget for that — entirely separate from the consistency-repair semantics described above.
+     *
      * @param  array{title: string, filename: string}  $sourceMeta
      * @param  array<int, array<string, mixed>>  $indexContext
      * @param  array<string, mixed>  $decision  The previous, inconsistent decision.
@@ -91,6 +126,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
      * @return array<string, mixed> Validated, corrected maintainer decision.
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is invalid.
+     * @throws EnterpriseWikiAiOutputCapacityExceededException when the response is still
+     *                                                         incomplete/max_output_tokens after one capacity retry.
      */
     public function repair(
         array $sourceMeta,
@@ -106,16 +143,14 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
-        $payload = $this->buildRepairPayload(
-            $sourceMeta,
-            $sourceText,
-            $indexContext,
-            $this->languageName($languageCode),
-            $decision,
-            $issues,
+        $languageName = $this->languageName($languageCode);
+        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues);
+
+        $decoded = $this->executeWithCapacityRetry(
+            'EnterpriseWikiMaintainerDecisionAiClient:repair',
+            mb_strlen($repairPromptText),
+            fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
         );
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
-        $decoded = $this->responsesDecoder->decode($response, 'EnterpriseWikiMaintainerDecisionAiClient:repair');
 
         try {
             return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
@@ -128,14 +163,102 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
     }
 
-    private function buildRepairPayload(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
-        string $languageName,
-        array $decision,
-        array $issues,
-    ): array {
+    /**
+     * Runs one AI call attempt, and — only when it comes back status=incomplete with
+     * reason=max_output_tokens — exactly one further attempt at a higher, capacity-planner-chosen
+     * budget. Never re-parses or reuses the first attempt's (possibly partial) response text;
+     * the retry is a brand-new call with the identical semantic input and schema, just a bigger
+     * max_output_tokens. Any other exception (schema violation, refusal, malformed envelope, a
+     * non-token incomplete reason, timeout/API error) propagates immediately, untouched — only
+     * this one specific signal ever triggers a capacity retry.
+     *
+     * @param  Closure(int): array  $buildPayload
+     * @return array<string, mixed> The decoded (but not yet schema-parsed) response body.
+     */
+    private function executeWithCapacityRetry(string $operationLabel, int $inputSizeChars, Closure $buildPayload): array
+    {
+        $plan = $this->planCapacity($inputSizeChars, retryAttempt: 0);
+
+        try {
+            return $this->attemptCall($buildPayload($plan->chosenMaxOutputTokens), $operationLabel, $plan, $inputSizeChars);
+        } catch (EnterpriseWikiResponseIncompleteException $e) {
+            if (! $e->reachedMaxOutputTokens()) {
+                throw $e;
+            }
+
+            $retryPlan = $this->planCapacity($inputSizeChars, retryAttempt: 1);
+
+            try {
+                return $this->attemptCall($buildPayload($retryPlan->chosenMaxOutputTokens), $operationLabel, $retryPlan, $inputSizeChars);
+            } catch (EnterpriseWikiResponseIncompleteException $e2) {
+                if (! $e2->reachedMaxOutputTokens()) {
+                    throw $e2;
+                }
+
+                throw new EnterpriseWikiAiOutputCapacityExceededException(
+                    $operationLabel,
+                    $retryPlan,
+                    $e2->diagnostics['output_tokens'] ?? null,
+                    $e2->diagnostics['response_id'] ?? null,
+                );
+            }
+        }
+    }
+
+    private function planCapacity(int $inputSizeChars, int $retryAttempt): AiCapacityPlan
+    {
+        return $this->capacityPlanner->plan(new AiCapacityRequest(
+            operationType: self::CAPACITY_OPERATION_TYPE,
+            model: self::MODEL,
+            inputSizeChars: $inputSizeChars,
+            expectedResultObjects: self::EXPECTED_RESULT_OBJECTS,
+            retryAttempt: $retryAttempt,
+        ));
+    }
+
+    /** @return array<string, mixed> */
+    private function attemptCall(array $payload, string $operationLabel, AiCapacityPlan $plan, int $inputSizeChars): array
+    {
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
+
+        $this->logCapacityDecision($operationLabel, $plan, $inputSizeChars, $response);
+
+        return $this->responsesDecoder->decode($response, $operationLabel);
+    }
+
+    /**
+     * One structured log line per attempt covering the capacity decision and the actual usage
+     * OpenAI reports — reuses EnterpriseWikiResponsesDecoder::diagnostics() (the same data the
+     * decoder's own "Response rejected" warning uses on failure) rather than duplicating a raw
+     * response dump. Never logs document text, secrets, or full raw AI output.
+     */
+    private function logCapacityDecision(string $operationLabel, AiCapacityPlan $plan, int $inputSizeChars, array $response): void
+    {
+        $diagnostics = $this->responsesDecoder->diagnostics($response, $operationLabel);
+
+        Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_CAPACITY] Capacity decision for AI call.', [
+            'operation' => $operationLabel,
+            'operation_type' => $plan->operationType,
+            'model' => $plan->model,
+            'input_size_chars' => $inputSizeChars,
+            'retry_level' => $plan->retryLevel,
+            'chosen_max_output_tokens' => $plan->chosenMaxOutputTokens,
+            'estimated_minimum_tokens' => $plan->estimatedMinimumTokens,
+            'estimated_need_tokens' => $plan->estimatedNeedTokens,
+            'max_allowed_tokens' => $plan->maxAllowedTokens,
+            'was_clamped' => $plan->wasClamped,
+            'basis' => $plan->basis,
+            'response_id' => $diagnostics['response_id'] ?? null,
+            'response_status' => $diagnostics['response_status'] ?? null,
+            'incomplete_reason' => $diagnostics['incomplete_reason'] ?? null,
+            'output_tokens' => $diagnostics['output_tokens'] ?? null,
+            'reasoning_tokens' => $diagnostics['reasoning_tokens'] ?? null,
+            'total_tokens' => $diagnostics['total_tokens'] ?? null,
+        ]);
+    }
+
+    private function buildRepairPayload(string $languageName, string $repairPromptText, int $maxOutputTokens): array
+    {
         $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
 
         return [
@@ -155,7 +278,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues),
+                            'text' => $repairPromptText,
                         ],
                     ],
                 ],
@@ -170,7 +293,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 'effort' => self::REASONING_EFFORT,
             ],
             'store' => false,
-            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+            'max_output_tokens' => $maxOutputTokens,
         ];
     }
 
@@ -192,6 +315,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'by revising the reference — remove the dangling related_page_guidance entry, or change the',
             'concept candidate decision to "exclude" with a justification for why the article does not',
             'need to point the reader there after all.',
+            '',
+            'Keep every free-text field short and decision-oriented (see CONCEPT CANDIDATES rules) —',
+            'do not turn a fix into an opportunity to lengthen unrelated fields.',
             '',
             'Return the complete corrected decision as JSON only, conforming to the same schema as',
             'before. Do not include any text outside the JSON.',
@@ -237,12 +363,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
         ]);
     }
 
-    private function buildPayload(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
-        string $languageName,
-    ): array {
+    private function buildPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
+    {
         $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
 
         return [
@@ -262,7 +384,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($sourceMeta, $sourceText, $indexContext),
+                            'text' => $userPromptText,
                         ],
                     ],
                 ],
@@ -278,7 +400,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 'effort' => self::REASONING_EFFORT,
             ],
             'store' => false,
-            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+            'max_output_tokens' => $maxOutputTokens,
         ];
     }
 
@@ -352,6 +474,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  Each concept_candidates entry has: name, concept_type, independent_reason,',
             '  mentioned_context, existing_page_title (nullable), decision, justification,',
             '  owning_page_title (nullable), necessary_for_article (boolean).',
+            '  KEEP FREE-TEXT FIELDS SHORT — this is a planning decision, not a report:',
+            '    independent_reason: ONE short sentence (roughly 15 words or fewer).',
+            '    mentioned_context: a short phrase naming WHERE it is mentioned (e.g. "document title",',
+            '    "section 2") — never a quote or a paraphrase of what the document says.',
+            '    justification: ONE short sentence. Do not repeat independent_reason or',
+            '    mentioned_context in different words — each field states something the others do not.',
             '  decision is exactly one of:',
             '    "create": a NEW concept page is needed. Add a matching entry to concept_pages.',
             '    "reuse": an existing page in the wiki index already covers it. Set existing_page_title',
