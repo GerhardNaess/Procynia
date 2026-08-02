@@ -42,6 +42,7 @@ class EnterpriseWikiReevaluateRunBestPracticeClaims extends Command
         $this->line(sprintf('  Skipped — no matching best_practice block:      %d', $result['skipped_no_matching_best_practice_block']));
         $this->line(sprintf('  Skipped — block missing best_practice_reason:   %d', $result['skipped_missing_best_practice_reason']));
         $this->line(sprintf('  Skipped — text not a genuine recommendation:    %d', $result['skipped_not_genuine_recommendation']));
+        $this->line(sprintf('  Skipped — already authoritatively verified:     %d', $result['skipped_authoritative']));
 
         if ($result['candidates'] !== []) {
             $this->newLine();

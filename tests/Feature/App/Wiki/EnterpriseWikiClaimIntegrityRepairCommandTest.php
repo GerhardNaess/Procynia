@@ -75,6 +75,41 @@ class EnterpriseWikiClaimIntegrityRepairCommandTest extends TestCase
         $this->assertSame($page->customer_id, $customer->id);
     }
 
+    /**
+     * The documented bug scenario: a claim already authoritatively verified best_practice (a
+     * not_supported verdict was rescued), which still carries a source reference from extraction
+     * time — repair's own weaker "a reference exists" rule must not be allowed to flip it back to
+     * source_based. The console output reports it as kept, never as reclassified.
+     */
+    public function test_apply_does_not_reclassify_an_authoritative_claim_with_a_stale_source_reference(): void
+    {
+        $customer = $this->createCustomer();
+        [, , $claim] = $this->createPageVersionAndClaim($customer, 'Virksomheten bør følge etablert beste praksis.', [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'verified_at' => now(),
+            'review_metadata' => [
+                'classification_basis' => 'normative_language',
+                'verification_verdict' => 'not_supported',
+                'decision_source' => 'verification',
+            ],
+        ]);
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => 123,
+            'source_label' => 'kilde.docx',
+            'excerpt' => 'Virksomheten bør følge etablert beste praksis.',
+        ]);
+
+        $this->artisan('wiki:repair-claim-integrity', ['--customer-id' => $customer->id, '--apply' => true])
+            ->expectsOutputToContain('Authoritative, kept: 1')
+            ->assertExitCode(0);
+
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $fresh->content_origin);
+        $this->assertSame('verification', $fresh->review_metadata['decision_source'] ?? null);
+    }
+
     public function test_apply_backfills_stable_blocks_for_legacy_page_versions(): void
     {
         $customer = $this->createCustomer();

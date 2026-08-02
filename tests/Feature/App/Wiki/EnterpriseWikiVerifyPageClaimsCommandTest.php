@@ -1315,6 +1315,37 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
     }
 
     /**
+     * Task rule 9: reusing a canonical fact's outcome must never be indistinguishable from a
+     * fresh verification of the reusing claim's OWN excerpt — the claim ends up authoritative
+     * (verified_at set, since this is genuinely this claim's first real decision), but
+     * review_metadata explicitly records that it came from a REUSE, naming the exact fact reused
+     * and that fact's own verification_status, not just a generic "verified" tag.
+     */
+    public function test_canonical_fact_reuse_is_explicitly_tagged_and_distinct_from_fresh_verification(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $claim, , $fact] = $this->createClaimWithStaleReusableFact(
+            $customer,
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $fresh->content_origin);
+        $this->assertNotNull($fresh->verified_at);
+        $this->assertSame($fact->id, $fresh->canonical_fact_id);
+        $this->assertSame('canonical_fact_reuse', $fresh->review_metadata['classification_basis'] ?? null);
+        $this->assertSame($fact->id, $fresh->review_metadata['reused_canonical_fact_id'] ?? null);
+        $this->assertSame(
+            EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED,
+            $fresh->review_metadata['reused_canonical_fact_verification_status'] ?? null,
+        );
+    }
+
+    /**
      * A claim anchored to a structured source block, already carrying its OWN
      * EnterpriseWikiSourceReference (e.g. from extraction-time candidate discovery, before this
      * claim was ever individually verified — verified_at is still null), plus a pre-existing

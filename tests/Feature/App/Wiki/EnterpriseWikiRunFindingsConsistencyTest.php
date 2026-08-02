@@ -109,6 +109,48 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $this->assertSame($badgeCount, $panel['summary']['total'], 'The badge and the panel total must never disagree.');
     }
 
+    /**
+     * Task test 9 / rule 7: a claim legitimately rescued to best_practice after a not_supported
+     * verification verdict — carrying BOTH classification_basis: normative_language and an
+     * explicit verification_verdict: not_supported in review_metadata, plus a (historical,
+     * pre-rescue) source reference still attached — must surface as exactly ONE best-practice
+     * suggestion, never additionally or alternately as a claim QA defect. content_origin is the
+     * sole, authoritative signal this panel reads; the extra metadata/source-reference never
+     * pulls the same claim into a second, contradictory category.
+     */
+    public function test_legitimate_best_practice_rescue_with_not_supported_verdict_shows_as_one_consistent_suggestion(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        $claim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, contentBlockKey: 'block-rescued', reviewMetadata: [
+            'statement_kind' => 'recommendation',
+            'classification_basis' => 'normative_language',
+            'verification_verdict' => 'not_supported',
+            'decision_source' => 'verification',
+        ]);
+        // Historical provenance from extraction, kept deliberately — must not create a second,
+        // contradictory "source_based" reading of this same claim anywhere in the panel.
+        $this->createSourceReference($claim, $document);
+
+        $this->markStepsComplete($run);
+        $qaResult = app(EnterpriseWikiPostIngestQaService::class)->runForRun($run);
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
+
+        $this->assertSame([], $qaResult['claim_qa_signals'], 'A best_practice claim must never also surface as a claim QA defect.');
+
+        [$badgeCount, $panel] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertSame(1, $badgeCount);
+        $this->assertCount(1, $panel['findings']);
+        $this->assertSame('best_practice_suggestion', $panel['findings'][0]['category']);
+    }
+
     // =========================================================================
     // Acceptance B: only hidden internal findings, nothing user-facing at all
     // =========================================================================

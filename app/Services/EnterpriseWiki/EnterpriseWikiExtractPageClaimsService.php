@@ -406,6 +406,11 @@ class EnterpriseWikiExtractPageClaimsService
                         ? [
                             'statement_kind' => 'recommendation',
                             'classification_basis' => 'ai_block_content_origin',
+                            // Provisional only (verified_at stays null on create) — this is
+                            // extraction's own inheritance from the generation block, not yet an
+                            // authoritative decision. EnterpriseWikiVerifyPageClaimsService is the
+                            // next, authoritative writer for this claim.
+                            'decision_source' => EnterpriseWikiClaimClassificationService::SOURCE_EXTRACTION,
                             'suggested_placement' => $block['block_key'] ?? null,
                             'visible_wiki_link_recommendation' => ($block['link_intents'] ?? []) !== [] ? 'recommended' : 'not_needed',
                             'link_intents' => $block['link_intents'] ?? [],
@@ -577,6 +582,7 @@ class EnterpriseWikiExtractPageClaimsService
                         ? [
                             'statement_kind' => 'recommendation',
                             'classification_basis' => 'ai_manual_mixed_block_claim_origin',
+                            'decision_source' => EnterpriseWikiClaimClassificationService::SOURCE_EXTRACTION,
                             'suggested_placement' => $blockKey,
                             'visible_wiki_link_recommendation' => 'auto_evaluate',
                         ]

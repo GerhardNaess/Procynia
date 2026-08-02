@@ -39,6 +39,15 @@ use Illuminate\Support\Collection;
  * suggestion, and any human decision recorded on the claim, both useful context for the voluntary
  * QA screen, never a gate). Lint findings are the one exception: a genuinely blocking lint error
  * (`blocks_run`/`blocks_page` true) reflects a real structural defect and is unrelated to claim QA.
+ *
+ * Reads content_origin directly and only ever as one of exactly four mutually-exclusive values —
+ * never a heuristic reconstructed from a combination of other fields, and never both (2) and (3)
+ * for the same claim, since a single content_origin value can only ever match one of the two
+ * query filters above. EnterpriseWikiClaimClassificationService is what keeps that one value
+ * trustworthy across a claim's whole lifecycle (extraction's provisional origin can be overwritten
+ * by anything; verification's authoritative one cannot be silently overwritten by repair or
+ * reevaluation) — this service does not itself need to know that history, only that content_origin
+ * is always the current, authoritative answer.
  */
 class EnterpriseWikiRunFindingsService
 {

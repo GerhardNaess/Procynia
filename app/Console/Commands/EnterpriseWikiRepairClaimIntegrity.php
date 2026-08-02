@@ -29,6 +29,7 @@ class EnterpriseWikiRepairClaimIntegrity extends Command
         $this->line(sprintf('  Internal errors:     %d', $result['internal_error']));
         $this->line(sprintf('  Wrong version:       %d', $result['wrong_version']));
         $this->line(sprintf('  Missing anchor:      %d', $result['missing_anchor']));
+        $this->line(sprintf('  Authoritative, kept: %d', $result['authoritative_kept']));
         $this->line(sprintf('  Unchanged/unknown:   %d', $result['unchanged']));
 
         if (! $apply) {

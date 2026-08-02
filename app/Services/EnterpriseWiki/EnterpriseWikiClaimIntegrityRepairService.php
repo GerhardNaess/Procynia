@@ -10,10 +10,11 @@ class EnterpriseWikiClaimIntegrityRepairService
 {
     public function __construct(
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiClaimClassificationService $classificationService,
     ) {}
 
     /**
-     * @return array{checked: int, source_based: int, best_practice: int, unsupported_generated_content: int, internal_error: int, wrong_version: int, missing_anchor: int, unchanged: int, applied: bool}
+     * @return array{checked: int, source_based: int, best_practice: int, unsupported_generated_content: int, internal_error: int, wrong_version: int, missing_anchor: int, authoritative_kept: int, unchanged: int, applied: bool}
      */
     public function repair(?int $customerId = null, bool $apply = false): array
     {
@@ -25,6 +26,11 @@ class EnterpriseWikiClaimIntegrityRepairService
             'internal_error' => 0,
             'wrong_version' => 0,
             'missing_anchor' => 0,
+            // A claim already carrying an authoritative verification decision (verified_at set) —
+            // repair's own structural-integrity classification computed a DIFFERENT content_origin
+            // for it, but was not allowed to overwrite the existing authoritative one. The claim is
+            // reported here, kept exactly as verification left it, never silently reclassified.
+            'authoritative_kept' => 0,
             'unchanged' => 0,
             'applied' => $apply,
         ];
@@ -43,7 +49,6 @@ class EnterpriseWikiClaimIntegrityRepairService
                         default => 'unchanged',
                     };
 
-                    $counts[$bucket]++;
                     $issue = $classification['generation_issue'] ?? null;
                     if ($issue === 'claim_not_tied_to_current_page_version') {
                         $counts['wrong_version']++;
@@ -62,11 +67,33 @@ class EnterpriseWikiClaimIntegrityRepairService
                         $claim->version->update(['content_blocks_json' => $legacyBlocks]);
                     }
 
-                    if (! $apply || ! $this->claimNeedsUpdate($claim, $classification)) {
+                    if (! $apply) {
+                        if ($this->classificationService->wouldBeRejectedAsAuthoritative(
+                            $claim,
+                            EnterpriseWikiClaimClassificationService::SOURCE_INTEGRITY_REPAIR,
+                            (string) $classification['content_origin'],
+                        )) {
+                            $counts['authoritative_kept']++;
+                        } else {
+                            $counts[$bucket]++;
+                        }
+
                         continue;
                     }
 
-                    $claim->update($classification);
+                    $outcome = $this->classificationService->classifyClaim(
+                        $claim->id,
+                        EnterpriseWikiClaimClassificationService::SOURCE_INTEGRITY_REPAIR,
+                        $classification,
+                    );
+
+                    if ($outcome['result'] === EnterpriseWikiClaimClassificationService::RESULT_REJECTED_AUTHORITATIVE) {
+                        $counts['authoritative_kept']++;
+
+                        continue;
+                    }
+
+                    $counts[$bucket]++;
                 }
             });
 
@@ -226,30 +253,6 @@ class EnterpriseWikiClaimIntegrityRepairService
         }
 
         return $blocks;
-    }
-
-    /**
-     * @param  array<string, mixed>  $classification
-     */
-    private function claimNeedsUpdate(EnterpriseWikiClaim $claim, array $classification): bool
-    {
-        foreach ($classification as $key => $value) {
-            $current = $claim->{$key};
-
-            if (is_array($current) || is_array($value)) {
-                if ($current != $value) {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if ($current !== $value) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
