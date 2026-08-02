@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiPageVersion;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -36,6 +37,18 @@ use Illuminate\Support\Facades\DB;
  * still decides what its structural-integrity rule would classify a claim as. Both simply hand
  * that decision to apply()/classifyClaim() instead of writing it directly, so the SAME rule about
  * whether the write is actually allowed applies everywhere, in one place.
+ *
+ * Finding #5646: a proposal of content_origin=best_practice is additionally checked here — the
+ * ONE place every such proposal passes through, regardless of which of the five sources made it —
+ * against EnterpriseWikiNavigationReferenceDetector. A claim whose anchor text is nothing but a
+ * bare pointer to another Wiki page ("For detaljert flyt og rollebeskrivelser, se [[...]].") is
+ * never a professional recommendation, never a documented fact, and never an unsupported
+ * assertion — it does not semantically fit any of the three real content_origin categories, so it
+ * is resolved to the existing, currently-unused CONTENT_ORIGIN_UNCLASSIFIED instead of forcing it
+ * into one. That value is already excluded from every finding/QA-signal query (see
+ * EnterpriseWikiRunFindingsService, EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals())
+ * and from EnterpriseWikiClaim::needsSourceWarning() — a navigation-only claim simply produces no
+ * finding at all, rather than a correctly-labeled but still-visible one. See resolveContentOrigin().
  */
 class EnterpriseWikiClaimClassificationService
 {
@@ -78,6 +91,10 @@ class EnterpriseWikiClaimClassificationService
     /** No claim exists with the given id. */
     public const RESULT_NOT_FOUND = 'not_found';
 
+    public function __construct(
+        private readonly EnterpriseWikiNavigationReferenceDetector $navigationReferenceDetector,
+    ) {}
+
     /**
      * Read-only preview of the authority gate in apply(), for a dry-run report (--apply not
      * passed) that still needs to tell an operator accurately which claims WOULD be protected
@@ -85,6 +102,7 @@ class EnterpriseWikiClaimClassificationService
      */
     public function wouldBeRejectedAsAuthoritative(EnterpriseWikiClaim $claim, string $source, string $proposedContentOrigin): bool
     {
+        $proposedContentOrigin = $this->resolveContentOrigin($claim, $proposedContentOrigin);
         $hasAuthoritativeDecision = $claim->verified_at !== null;
         $mayOverrideAuthoritative = in_array($source, self::SOURCES_THAT_MAY_OVERRIDE_AUTHORITATIVE, true);
         $proposesClassificationChange = $proposedContentOrigin !== $claim->content_origin;
@@ -144,6 +162,10 @@ class EnterpriseWikiClaimClassificationService
             && ! $this->verifiedAtMatches($claim, $proposed['expected_verified_at'])
         ) {
             return $this->result(self::RESULT_STALE, $claim);
+        }
+
+        if (array_key_exists('content_origin', $proposed)) {
+            $proposed = $this->applyNavigationOnlyDowngrade($claim, $proposed);
         }
 
         $hasAuthoritativeDecision = $claim->verified_at !== null;
@@ -212,6 +234,94 @@ class EnterpriseWikiClaimClassificationService
         $claim->update($fields);
 
         return $this->result(self::RESULT_APPLIED, $claim->fresh());
+    }
+
+    /**
+     * Finding #5646: rewrites a best_practice proposal to CONTENT_ORIGIN_UNCLASSIFIED when the
+     * claim's own anchor text is nothing but a bare Wiki-navigation pointer — see the class
+     * docblock. Only ever changes something when the incoming proposal is best_practice; every
+     * other proposed content_origin passes through this method completely untouched.
+     *
+     * @param  array<string, mixed>  $proposed
+     * @return array<string, mixed>
+     */
+    private function applyNavigationOnlyDowngrade(EnterpriseWikiClaim $claim, array $proposed): array
+    {
+        $proposedOrigin = (string) $proposed['content_origin'];
+        $resolvedOrigin = $this->resolveContentOrigin($claim, $proposedOrigin);
+
+        if ($resolvedOrigin === $proposedOrigin) {
+            return $proposed;
+        }
+
+        $proposed['content_origin'] = $resolvedOrigin;
+        $proposed['review_reason'] = null;
+        $proposed['generation_issue'] = null;
+
+        $metadata = is_array($proposed['review_metadata'] ?? null) ? $proposed['review_metadata'] : [];
+        $metadata['classification_basis'] = 'navigation_reference_only';
+        $proposed['review_metadata'] = $metadata;
+
+        return $proposed;
+    }
+
+    /**
+     * The single place a best_practice proposal is checked against the navigation-reference
+     * detector — used both by the real write path (applyNavigationOnlyDowngrade()) and by
+     * wouldBeRejectedAsAuthoritative()'s read-only dry-run preview, so a dry-run report can never
+     * say "would become best_practice" for a claim that would actually resolve to unclassified.
+     * Only ever downgrades FROM best_practice; every other proposed origin is returned unchanged.
+     */
+    private function resolveContentOrigin(EnterpriseWikiClaim $claim, string $proposedContentOrigin): string
+    {
+        if ($proposedContentOrigin !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            return $proposedContentOrigin;
+        }
+
+        $anchorText = $this->navigationAnchorText($claim);
+
+        if ($anchorText === '' || ! $this->navigationReferenceDetector->isPureNavigationReference($anchorText)) {
+            return $proposedContentOrigin;
+        }
+
+        return EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED;
+    }
+
+    /**
+     * Prefers the claim's own page_excerpt — the verbatim source text a normally-extracted claim
+     * always carries, still retaining [[wikilink]] markup. Falls back to the claim's own anchored
+     * block's markdown (identified by content_block_key, already the same block link_intents
+     * lives on) only when page_excerpt is unavailable, so block-level structural metadata is
+     * still consulted when it is the only signal on hand — never a required input, since most
+     * claims never need the fallback at all.
+     */
+    private function navigationAnchorText(EnterpriseWikiClaim $claim): string
+    {
+        $excerpt = trim((string) ($claim->page_excerpt ?? ''));
+
+        if ($excerpt !== '') {
+            return $excerpt;
+        }
+
+        $blockKey = trim((string) ($claim->content_block_key ?? ''));
+
+        if ($blockKey === '') {
+            return '';
+        }
+
+        $version = $claim->version;
+
+        if (! $version instanceof EnterpriseWikiPageVersion) {
+            return '';
+        }
+
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (is_array($block) && (string) ($block['block_key'] ?? '') === $blockKey) {
+                return trim((string) ($block['markdown'] ?? ''));
+            }
+        }
+
+        return '';
     }
 
     /**

@@ -236,6 +236,10 @@ class EnterpriseWikiClaim extends Model
             self::CONTENT_ORIGIN_BEST_PRACTICE,
             self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             self::CONTENT_ORIGIN_INTERNAL_ERROR,
+            // An unclassified claim (e.g. a navigation-only reference that does not semantically
+            // fit any of the three real categories — see EnterpriseWikiClaimClassificationService)
+            // was never meant to require a source citation in the first place.
+            self::CONTENT_ORIGIN_UNCLASSIFIED,
         ], true)) {
             return false;
         }

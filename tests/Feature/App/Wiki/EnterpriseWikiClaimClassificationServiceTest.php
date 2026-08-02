@@ -264,6 +264,219 @@ class EnterpriseWikiClaimClassificationServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Finding #5646: a best_practice proposal for a pure navigation-only claim is resolved to
+    // CONTENT_ORIGIN_UNCLASSIFIED instead — the one, central point every proposal passes through,
+    // regardless of source.
+    // =========================================================================
+
+    public function test_pure_navigation_reference_is_resolved_to_unclassified_not_best_practice(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'For detaljert flyt og rollebeskrivelser, se [[incident-management-illustrasjon-3f9a1|Illustrasjon av Incident Management]].',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'review_reason' => 'Cross-reference to the finished article, per maintainer note.',
+            'review_metadata' => ['classification_basis' => 'ai_block_content_origin'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $fresh->content_origin);
+        $this->assertNotNull($fresh->verified_at, 'Still an authoritative decision — just not best_practice.');
+        $this->assertNull($fresh->review_reason);
+        $this->assertSame('navigation_reference_only', $fresh->review_metadata['classification_basis'] ?? null);
+        $this->assertSame(EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, $fresh->review_metadata['decision_source'] ?? null);
+    }
+
+    public function test_english_pure_navigation_reference_is_resolved_to_unclassified(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'See [[itil-incident-management|ITIL Incident Management]] for details.',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Cross-reference.',
+            'review_metadata' => ['classification_basis' => 'ai_block_content_origin'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
+    }
+
+    /**
+     * When page_excerpt is unavailable, the claim's own anchored block's markdown (identified by
+     * content_block_key) is used as a fallback — block-level structural metadata is still
+     * consulted when it is the only signal on hand.
+     */
+    public function test_block_markdown_is_used_as_fallback_anchor_when_page_excerpt_is_empty(): void
+    {
+        $customer = $this->createCustomer();
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'page-'.Str::lower(Str::random(8)),
+            'title' => 'Test Page',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Test Page\n\nSe [[itil-incident-management|ITIL Incident Management]].",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0002',
+                'position' => 1,
+                'markdown' => 'Se [[itil-incident-management|ITIL Incident Management]].',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Cross-reference.',
+                'link_intents' => [
+                    ['target_slug' => 'itil-incident-management', 'reason' => 'Points the reader to the owning page.'],
+                ],
+            ]],
+            'generated_by_model' => 'gpt-5',
+        ]);
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Se ITIL Incident Management.',
+            'page_excerpt' => null,
+            'content_block_key' => 'block-0002',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Cross-reference.',
+            'review_metadata' => ['classification_basis' => 'ai_block_content_origin'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
+    }
+
+    public function test_professional_claim_before_a_wiki_reference_still_becomes_best_practice(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'Incident Management skal ha tydelig sakseierskap. Se [[itil-incident-management|ITIL Incident Management]].',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Genuine recommendation.',
+            'review_metadata' => ['classification_basis' => 'normative_language'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
+        $this->assertSame('Genuine recommendation.', $claim->fresh()->review_reason);
+    }
+
+    public function test_professional_claim_after_a_wiki_reference_still_becomes_best_practice(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'Se [[itil-incident-management|ITIL Incident Management]]. Incident Management skal alltid ha én tydelig sakseier.',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Genuine recommendation.',
+            'review_metadata' => ['classification_basis' => 'normative_language'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
+    }
+
+    public function test_professional_claim_in_the_same_sentence_as_the_reference_still_becomes_best_practice(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'Normal tjenesteleveranse skal gjenopprettes så raskt som mulig; se [[itil-incident-management|ITIL Incident Management]].',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Genuine recommendation.',
+            'review_metadata' => ['classification_basis' => 'normative_language'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
+    }
+
+    public function test_short_text_without_a_wikilink_is_unaffected_by_the_navigation_check(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'Se dokumentasjonen.',
+        ]);
+
+        $outcome = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Genuine recommendation.',
+            'review_metadata' => ['classification_basis' => 'normative_language'],
+            'generation_issue' => null,
+        ]);
+
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $outcome['result']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
+    }
+
+    public function test_repeated_application_of_the_same_navigation_proposal_is_idempotent(): void
+    {
+        $claim = $this->createClaim([
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'verified_at' => null,
+            'page_excerpt' => 'Se [[itil-incident-management|ITIL Incident Management]].',
+        ]);
+
+        $proposal = [
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'review_reason' => 'Cross-reference.',
+            'review_metadata' => ['classification_basis' => 'ai_block_content_origin'],
+            'generation_issue' => null,
+        ];
+
+        $first = $this->service()->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, $proposal);
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_APPLIED, $first['result']);
+        $verifiedAtAfterFirst = $claim->fresh()->verified_at;
+
+        $second = $this->service()->apply($claim->fresh(), EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, $proposal);
+        $this->assertSame(EnterpriseWikiClaimClassificationService::RESULT_ALREADY_CORRECT, $second['result']);
+        $this->assertSame(
+            $verifiedAtAfterFirst->format('Y-m-d H:i:s.u'),
+            $claim->fresh()->verified_at->format('Y-m-d H:i:s.u'),
+        );
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

@@ -18,6 +18,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiClaimClassificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimIntegrityRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunBestPracticeReevaluationService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -134,6 +135,62 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
         $this->assertNotNull($final->verified_at);
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $final->content_origin);
         $this->assertSame('normative_language', $final->review_metadata['classification_basis'] ?? null);
+    }
+
+    /**
+     * Task test 3 / 13 / 15 — the finding #5646 pattern, run through the REAL extraction,
+     * verification, repair, reevaluation, and findings services end to end:
+     *  1. Extraction inherits content_origin=best_practice from a block the AI itself tagged that
+     *     way (a link-only cross-reference, no cited source elements — exactly block-0004's real
+     *     shape).
+     *  2. Verification's reconfirm path (the claim is already best_practice and still passes the
+     *     party-specificity check) would normally leave it best_practice — but the claim's own
+     *     anchor text is nothing but a bare Wiki pointer, so EnterpriseWikiClaimClassificationService
+     *     resolves it to CONTENT_ORIGIN_UNCLASSIFIED instead (still authoritative — verified_at set).
+     *  3. Repair and reevaluation do not change this result.
+     *  4. EnterpriseWikiRunFindingsService never surfaces it as a best-practice suggestion.
+     */
+    public function test_pure_navigation_claim_never_becomes_a_best_practice_finding_through_the_real_pipeline(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $blockMarkdown = 'For detaljert flyt og rollebeskrivelser, se [[incident-management-illustrasjon-3f9a1|Illustrasjon av Incident Management]].';
+        [$page, $version] = $this->createPageWithBestPracticeNavigationBlock($customer, $run, $blockMarkdown, 'incident-management-illustrasjon-3f9a1');
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => [
+                ['text' => 'For detaljert flyt og rollebeskrivelser, se Illustrasjon av Incident Management.', 'confidence' => 'uncertain', 'excerpt' => $blockMarkdown, 'conflict_note' => null],
+            ]]);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+        $claim = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->firstOrFail();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNull($claim->verified_at);
+
+        // Verification: the claim is already best_practice and its text asserts nothing about a
+        // named party, so it takes the reconfirm path — never calls the verification AI at all.
+        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $verified = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $verified->content_origin);
+        $this->assertNotNull($verified->verified_at, 'Still an authoritative decision.');
+        $this->assertSame('navigation_reference_only', $verified->review_metadata['classification_basis'] ?? null);
+
+        app(EnterpriseWikiClaimIntegrityRepairService::class)->repair($customer->id, apply: true);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
+
+        $reevalResult = app(EnterpriseWikiRunBestPracticeReevaluationService::class)->reevaluate($run->fresh(), apply: true);
+        $this->assertSame(0, $reevalResult['reclassified']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, $claim->fresh()->content_origin);
+
+        $findings = app(EnterpriseWikiRunFindingsService::class)->buildForRun($run->fresh(), null, false);
+        $this->assertSame([], $findings['findings'], 'A pure navigation reference must never surface as a finding of any kind.');
     }
 
     /**
@@ -422,6 +479,59 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
                     'page_reference' => 'Løpende tekst',
                 ]],
                 'best_practice_reason' => null,
+            ]],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        return [$page, $version];
+    }
+
+    /**
+     * A block the AI itself tagged best_practice at generation time (no cited source elements —
+     * just a link-only cross-reference sentence, per the maintainer's "reference only" page-
+     * responsibility instruction), mirroring finding #5646's real block-0004 exactly.
+     *
+     * @return array{0: EnterpriseWikiPage, 1: EnterpriseWikiPageVersion}
+     */
+    private function createPageWithBestPracticeNavigationBlock(Customer $customer, EnterpriseWikiIngestRun $run, string $blockMarkdown, string $targetSlug): array
+    {
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'page-'.Str::lower(Str::random(8)),
+            'title' => 'Incident Management Illustration',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Incident Management Illustration\n\n{$blockMarkdown}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0004',
+                'position' => 3,
+                'markdown' => $blockMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'source_type' => null,
+                'source_id' => null,
+                'source_label' => null,
+                'source_hash' => null,
+                'source_element_key' => null,
+                'source_element_type' => null,
+                'source_elements' => [],
+                'best_practice_reason' => 'Cross-reference to the finished article that owns the detailed explanation, per maintainer note and page scoping.',
+                'link_intents' => [
+                    ['target_slug' => $targetSlug, 'reason' => 'Sends the reader to the page that describes this in detail.'],
+                ],
             ]],
             'generated_by_model' => 'gpt-5',
         ]);

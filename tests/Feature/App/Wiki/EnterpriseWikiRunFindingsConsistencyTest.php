@@ -151,6 +151,56 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $this->assertSame('best_practice_suggestion', $panel['findings'][0]['category']);
     }
 
+    /**
+     * Task tests 10/11/12: a pure navigation-only claim (content_origin=unclassified, per
+     * EnterpriseWikiClaimClassificationService's finding-#5646 fix) never surfaces as ANY finding,
+     * while a genuine best-practice suggestion and a genuine claim QA defect on the SAME run are
+     * both still shown correctly — the fix filters exactly the navigation-only claim, nothing else.
+     */
+    public function test_navigation_only_claim_is_invisible_while_real_best_practice_and_real_deviation_still_show(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $version = $this->currentVersion($article);
+
+        // The navigation-only claim — must be invisible.
+        $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNCLASSIFIED, contentBlockKey: 'block-nav', reviewMetadata: [
+            'classification_basis' => 'navigation_reference_only',
+            'decision_source' => 'verification',
+        ]);
+
+        // A genuine best-practice suggestion — must still show.
+        $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, contentBlockKey: 'block-bp', reviewMetadata: [
+            'statement_kind' => 'recommendation',
+            'classification_basis' => 'normative_language',
+        ]);
+
+        // A genuine claim QA defect — must still show.
+        $deviationClaim = $this->createClaim($article, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, contentBlockKey: 'block-dev', reviewMetadata: [
+            'classification_basis' => 'semantic_verification',
+            'verdict' => 'not_supported',
+            'reason' => 'The source describes a different process than the one claimed.',
+        ]);
+        $this->createSourceReference($deviationClaim, $document);
+
+        $this->markStepsComplete($run);
+        $qaResult = app(EnterpriseWikiPostIngestQaService::class)->runForRun($run);
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
+
+        $this->assertContains('open_unsupported_generated_content_claims', $qaResult['claim_qa_signals']);
+
+        [$badgeCount, $panel] = $this->fetchBadgeAndPanel($user, $run);
+
+        $this->assertSame(2, $badgeCount, 'Exactly the best-practice suggestion and the real deviation — never the navigation-only claim.');
+        $this->assertCount(2, $panel['findings']);
+        $categories = collect($panel['findings'])->pluck('category')->sort()->values()->all();
+        $this->assertSame(['best_practice_suggestion', 'possible_content_deviation'], $categories);
+    }
+
     // =========================================================================
     // Acceptance B: only hidden internal findings, nothing user-facing at all
     // =========================================================================
