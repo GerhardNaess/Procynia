@@ -500,6 +500,105 @@ class WikiPageContentAiClientTest extends TestCase
     }
 
     // =========================================================================
+    // Wiki run-586: planned section repair
+    // =========================================================================
+
+    public function test_repair_planned_sections_includes_existing_markdown_and_issues_in_the_user_prompt(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'page' => ['blocks' => [$this->sourceBasedBlock("# Test Page\n\nRepaired content.")]],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: "# Test Page\n\n## En tom seksjon",
+            issues: [
+                ['type' => 'planned_section_empty', 'planned_topic' => 'En tom seksjon', 'heading' => 'En tom seksjon'],
+            ],
+            sourceText: 'Kildetekst med relevant informasjon.',
+            languageCode: 'no',
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($capturedPayload);
+        $developerPrompt = $this->developerPromptTextFromPayload($capturedPayload);
+
+        $this->assertStringContainsString('## En tom seksjon', $userPrompt);
+        $this->assertStringContainsString('SECTIONS TO REPAIR', $userPrompt);
+        $this->assertStringContainsString('En tom seksjon', $userPrompt);
+        $this->assertStringContainsString('Kildetekst med relevant informasjon.', $userPrompt);
+        $this->assertStringContainsString('repairing a previously generated', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('never leave', mb_strtolower($developerPrompt));
+    }
+
+    public function test_repair_planned_sections_uses_the_same_strict_schema(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload): array {
+                $this->assertSame('json_schema', $payload['text']['format']['type']);
+                $this->assertTrue($payload['text']['format']['strict']);
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'page' => ['blocks' => [$this->sourceBasedBlock('# Test Page')]],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        $result = app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+
+        $this->assertSame('# Test Page', $result['markdown']);
+    }
+
+    public function test_repair_planned_sections_throws_when_response_still_has_empty_blocks(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode(['page' => []]),
+            ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/generated page blocks were empty/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

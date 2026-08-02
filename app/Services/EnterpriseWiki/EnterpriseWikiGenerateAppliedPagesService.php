@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
+use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -11,6 +12,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 /**
@@ -34,6 +36,13 @@ class EnterpriseWikiGenerateAppliedPagesService
         EnterpriseWikiPage::PAGE_TYPE_ENTITY,
     ];
 
+    /** Page types whose prompt maps owned_topics onto `## ` sections — see WikiPageContentAiClient. */
+    private const SECTION_COVERAGE_CHECKED_TYPES = [
+        EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+        EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+        EnterpriseWikiPage::PAGE_TYPE_ENTITY,
+    ];
+
     public function __construct(
         private readonly WikiPageContentAiClient $aiClient,
         private readonly EnterpriseWikiLinkCatalogService $linkCatalogService,
@@ -47,6 +56,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
         private readonly EnterpriseWikiImageBlockBuilder $imageBlockBuilder,
         private readonly EnterpriseWikiDuplicateContentRemover $duplicateContentRemover,
+        private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
     ) {}
 
     /**
@@ -382,6 +392,20 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
+        if (in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
+            [$markdown, $generated['blocks']] = $this->ensurePlannedSectionCoverage(
+                $run,
+                $page,
+                $markdown,
+                $generated['blocks'],
+                $sourceText,
+                $languageCode,
+                $additionalContext,
+                $catalogResult,
+                $sourceElements,
+            );
+        }
+
         $contentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
             $document,
             $generated['blocks'],
@@ -414,6 +438,137 @@ class EnterpriseWikiGenerateAppliedPagesService
                 'generation_error' => null,
             ]);
         });
+    }
+
+    /**
+     * Enforces the planned-section-coverage contract (Wiki run-586 incident): validates the
+     * generated markdown's `## ` sections against the page's own owned_topics, attempts exactly
+     * ONE bounded AI repair if any planned section is missing (with source grounding), empty, or
+     * link-only, re-validates the repair, and throws EnterpriseWikiPageGenerationIncompleteException
+     * if problems remain — the job's existing exception handling
+     * (GenerateEnterpriseWikiAppliedPage::markPivotFailed()) then marks the pivot failed without
+     * any further wiring here, so the run never reaches qa_status=passed with an incomplete page
+     * (EnterpriseWikiPostIngestQaService::findIncompleteSteps()'s page_generation_incomplete).
+     *
+     * A no-op (no repair call, no exception) when the page has no owned_topics at all — a page
+     * with no planned sections was never going to be checked in the first place.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     * @return array{0: string, 1: list<array<string, mixed>>} [markdown, blocks]
+     *
+     * @throws EnterpriseWikiPageGenerationIncompleteException
+     */
+    private function ensurePlannedSectionCoverage(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        string $markdown,
+        array $blocks,
+        string $sourceText,
+        string $languageCode,
+        string $additionalContext,
+        array $catalogResult,
+        array $sourceElements,
+    ): array {
+        $plannedTopics = $this->plannedOwnedTopicsForPage($run, $page);
+
+        if ($plannedTopics === []) {
+            return [$markdown, $blocks];
+        }
+
+        $issues = $this->sectionCoverageValidator->validate($plannedTopics, $markdown, $page->page_type, $sourceText);
+        $blocking = array_values(array_filter($issues, [EnterpriseWikiPlannedSectionCoverageValidator::class, 'isBlocking']));
+
+        if ($blocking === []) {
+            return [$markdown, $blocks];
+        }
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned section coverage issue(s) detected — attempting one bounded repair.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'planned_section_count' => count($plannedTopics),
+            'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'planned_topic' => $i['planned_topic']], $blocking),
+        ]);
+
+        $repaired = $this->aiClient->repairPlannedSections(
+            pageTitle: $page->title,
+            pageType: $page->page_type,
+            existingMarkdown: $markdown,
+            issues: $blocking,
+            sourceText: $sourceText,
+            languageCode: $languageCode,
+            additionalContext: $additionalContext,
+            linkCatalog: $catalogResult['catalog'],
+            sourceElements: $sourceElements,
+        );
+
+        $repaired['blocks'] = array_map(function (array $block) use ($catalogResult): array {
+            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+            return $block;
+        }, $repaired['blocks']);
+        $repaired['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($repaired['blocks']);
+
+        $repairedMarkdown = trim(implode("\n\n", array_column($repaired['blocks'], 'markdown')));
+
+        $this->validateWikilinks($run, $page, $repairedMarkdown, $catalogResult['run_page_count']);
+
+        $issuesAfterRepair = $this->sectionCoverageValidator->validate($plannedTopics, $repairedMarkdown, $page->page_type, $sourceText);
+        $blockingAfterRepair = array_values(array_filter($issuesAfterRepair, [EnterpriseWikiPlannedSectionCoverageValidator::class, 'isBlocking']));
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned section coverage repair attempted.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'issues_before' => count($blocking),
+            'issues_resolved' => count($blocking) - count($blockingAfterRepair),
+            'issues_remaining' => count($blockingAfterRepair),
+        ]);
+
+        if ($blockingAfterRepair !== []) {
+            throw new EnterpriseWikiPageGenerationIncompleteException(
+                runId: $run->id,
+                pageId: $page->id,
+                pageType: $page->page_type,
+                missingOrEmptySections: array_map(fn (array $i): string => $i['planned_topic'], $blockingAfterRepair),
+                repairAttempted: true,
+            );
+        }
+
+        return [$repairedMarkdown, $repaired['blocks']];
+    }
+
+    /**
+     * Raw owned_topics list for a page from maintainer_decision_json — the same lookup
+     * responsibilityGuidance()'s callers already perform, but returning the plain topic strings
+     * rather than formatted prompt text, for EnterpriseWikiPlannedSectionCoverageValidator.
+     *
+     * @return list<string>
+     */
+    private function plannedOwnedTopicsForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        if (in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)) {
+            $entries = array_merge(
+                (array) data_get($decisionJson, 'concept_pages', []),
+                (array) data_get($decisionJson, 'entity_pages', []),
+            );
+
+            $match = collect($entries)->firstWhere('title', $page->title);
+
+            return $match !== null ? $this->nonEmptyStringList($match['owned_topics'] ?? []) : [];
+        }
+
+        $decisionKey = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 'source_article' : null;
+
+        if ($decisionKey === null) {
+            return [];
+        }
+
+        $entry = (array) data_get($decisionJson, $decisionKey, []);
+
+        return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
     }
 
     /**

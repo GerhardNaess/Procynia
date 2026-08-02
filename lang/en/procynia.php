@@ -3941,6 +3941,22 @@ return [
                 'label' => 'Stale wiki link in graph',
                 'description' => 'The graph shows a link that no longer exists in the current page version.',
             ],
+            'planned_section_missing' => [
+                'label' => 'Planned section missing',
+                'description' => 'A section planned for this page has no matching heading in the generated content.',
+            ],
+            'planned_section_empty' => [
+                'label' => 'Planned section is empty',
+                'description' => 'A planned heading exists but has no body content underneath it.',
+            ],
+            'planned_section_only_links' => [
+                'label' => 'Planned section contains only links',
+                'description' => 'A planned section contains only wiki links or punctuation, no real text.',
+            ],
+            'planned_section_below_minimum_substance' => [
+                'label' => 'Planned section has too little content',
+                'description' => 'A planned section has body text, but it is so short it does not amount to real substance.',
+            ],
             'summary_without_article_link' => [
                 'label' => 'Summary is missing an article link',
                 'description' => 'The summary page does not link back to the article.',

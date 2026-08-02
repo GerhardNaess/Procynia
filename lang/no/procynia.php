@@ -3941,6 +3941,22 @@ return [
                 'label' => 'Utdatert wikilenke i grafen',
                 'description' => 'Grafen viser en lenke som ikke lenger finnes i gjeldende sideversjon.',
             ],
+            'planned_section_missing' => [
+                'label' => 'Planlagt seksjon mangler',
+                'description' => 'En seksjon som var planlagt for denne siden har ingen tilhørende overskrift i det genererte innholdet.',
+            ],
+            'planned_section_empty' => [
+                'label' => 'Planlagt seksjon er tom',
+                'description' => 'En planlagt overskrift finnes, men har ingen brødtekst under seg.',
+            ],
+            'planned_section_only_links' => [
+                'label' => 'Planlagt seksjon inneholder bare lenker',
+                'description' => 'En planlagt seksjon inneholder kun wikilenker eller skilletegn, ingen reell tekst.',
+            ],
+            'planned_section_below_minimum_substance' => [
+                'label' => 'Planlagt seksjon har for lite innhold',
+                'description' => 'En planlagt seksjon har brødtekst, men innholdet er så kort at det ikke utgjør reell substans.',
+            ],
             'summary_without_article_link' => [
                 'label' => 'Sammendrag mangler lenke til artikkel',
                 'description' => 'Sammendragssiden mangler en lenke tilbake til artikkelen.',

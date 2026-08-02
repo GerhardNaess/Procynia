@@ -80,6 +80,61 @@ class WikiPageContentAiClient
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient');
 
+        return $this->parseBlocksResponse($decoded);
+    }
+
+    /**
+     * Single bounded repair attempt for a page whose planned/owned-topic sections were found
+     * missing, empty, or link-only by EnterpriseWikiPlannedSectionCoverageValidator (Wiki run-586
+     * incident). Receives the already-generated markdown as explicit context — unlike
+     * generatePageFromSource(), this is a targeted correction of specific named sections, not an
+     * independent regeneration, so everything already good in $existingMarkdown is preserved by
+     * instruction rather than re-derived from scratch.
+     *
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     *
+     * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
+     */
+    public function repairPlannedSections(
+        string $pageTitle,
+        string $pageType,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $languageCode,
+        string $additionalContext = '',
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): array {
+        if (! self::isAvailable()) {
+            throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
+        }
+
+        $payload = $this->buildRepairPayload(
+            $pageTitle,
+            $pageType,
+            $existingMarkdown,
+            $issues,
+            $sourceText,
+            $additionalContext,
+            $this->languageName($languageCode),
+            $linkCatalog,
+            $sourceElements,
+        );
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
+        $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient(repair)');
+
+        return $this->parseBlocksResponse($decoded);
+    }
+
+    /**
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     */
+    private function parseBlocksResponse(array $decoded): array
+    {
         $blocks = data_get($decoded, 'page.blocks', []);
 
         if (! is_array($blocks) || $blocks === []) {
@@ -147,6 +202,161 @@ class WikiPageContentAiClient
         if (preg_match_all('/^>/m', $markdown) >= 3) {
             throw new RuntimeException('WikiPageContentAiClient: generated content contains blockquote lines — rejected.');
         }
+    }
+
+    /**
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function buildRepairPayload(
+        string $pageTitle,
+        string $pageType,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $additionalContext,
+        string $languageName,
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): array {
+        return [
+            'model' => self::MODEL,
+            'input' => [
+                [
+                    'role' => 'developer',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->repairDeveloperPrompt($pageType, $languageName),
+                        ],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => self::PROMPT_NAME,
+                    'strict' => true,
+                    'schema' => self::schema(),
+                ],
+            ],
+            'reasoning' => [
+                'effort' => self::REASONING_EFFORT,
+            ],
+            'store' => false,
+            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+        ];
+    }
+
+    private function repairDeveloperPrompt(string $pageType, string $languageName): string
+    {
+        return implode("\n", [
+            "You are an editorial wiki writer repairing a previously generated {$pageType} page in {$languageName} that has one or more planned sections left empty, missing real content, or containing only a link.",
+            '',
+            'REPAIR RULES (mandatory):',
+            '- Return the FULL corrected page as page.blocks, using the exact same block schema as ordinary generation (one block per heading, paragraph, or heading+paragraph group).',
+            '- Keep everything from the previously generated page that is already good — do not rewrite or remove content that is not part of a listed broken section.',
+            '- For each broken section named in "SECTIONS TO REPAIR" below, add a real, substantial paragraph of flowing prose under its heading — grounded in the source document. Never leave a listed heading empty, and never leave it with only a wikilink or a bare punctuation mark.',
+            '- Preserve concrete details the source document actually states for each repaired section — roles, responsibilities, agenda items, participants, frequency, and decision flow — when the source material describes them.',
+            '- Do not invent facts not supported by the source document; if the source genuinely says nothing more about a listed section, write the fullest accurate paragraph the source material supports rather than leaving the heading empty.',
+            '- Do not add any new heading beyond what the previously generated page already had.',
+            '',
+            'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
+            '- No HTML comments (<!-- ... -->)',
+            '- No lines starting with "Kilde:", "Source:", "Ref:" or any citation marker',
+            '- No quoted source excerpts or blockquote lines (lines starting with >)',
+            '- No filenames, document IDs, run IDs, or internal technical identifiers',
+            '- No mention of AI generation, confidence levels, or approval status',
+            '',
+            'Every ordinary content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
+            '',
+            'Return only JSON matching the schema. No text before or after JSON.',
+        ]);
+    }
+
+    /**
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function repairUserPrompt(
+        string $pageTitle,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $additionalContext,
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): string {
+        $parts = [
+            "Page title: {$pageTitle}",
+            '',
+            'PREVIOUSLY GENERATED PAGE (needs repair — keep what is good, fix only the sections listed below):',
+            '',
+            $existingMarkdown,
+            '',
+            '---',
+            '',
+            'SECTIONS TO REPAIR:',
+            '',
+        ];
+
+        foreach ($issues as $issue) {
+            $heading = $issue['heading'] ?? $issue['planned_topic'];
+            $parts[] = sprintf('- "%s" — planned topic: %s (%s)', $heading, $issue['planned_topic'], $issue['type']);
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'Source document:';
+        $parts[] = '';
+        $parts[] = $sourceText;
+
+        if (trim($additionalContext) !== '') {
+            $parts[] = '';
+            $parts[] = '---';
+            $parts[] = '';
+            $parts[] = 'Additional context:';
+            $parts[] = '';
+            $parts[] = $additionalContext;
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'ALLOWED WIKILINK TARGETS ('.count($linkCatalog).' pages):';
+        $parts[] = '';
+
+        if ($linkCatalog !== []) {
+            foreach ($linkCatalog as $entry) {
+                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
+            }
+        } else {
+            $parts[] = 'No other pages available to link to.';
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'SOURCE ELEMENTS ('.count($sourceElements).' elements):';
+        $parts[] = '';
+        $parts[] = 'Every source_based block must cite one or more source_element_key values from this list.';
+        $parts[] = 'Do not invent source_element_key values.';
+        $parts[] = '';
+        $parts[] = (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return implode("\n", $parts);
     }
 
     private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog = [], array $sourceElements = []): array

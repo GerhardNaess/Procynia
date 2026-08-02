@@ -73,6 +73,15 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_STALE_WIKILINK_GRAPH_EDGE = 'stale_wikilink_graph_edge';
 
+    // --- Wiki run-586: planned section coverage (wiki:lint-applied-run) ---
+    public const CODE_PLANNED_SECTION_MISSING = 'planned_section_missing';
+
+    public const CODE_PLANNED_SECTION_EMPTY = 'planned_section_empty';
+
+    public const CODE_PLANNED_SECTION_ONLY_LINKS = 'planned_section_only_links';
+
+    public const CODE_PLANNED_SECTION_BELOW_MINIMUM_SUBSTANCE = 'planned_section_below_minimum_substance';
+
     public const CODES = [
         self::CODE_CLAIM_MISSING_SOURCE,
         self::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
@@ -103,6 +112,10 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_MISSING_WIKILINK_MATERIALIZATION,
         self::CODE_WIKILINK_PROJECTION_MISMATCH,
         self::CODE_STALE_WIKILINK_GRAPH_EDGE,
+        self::CODE_PLANNED_SECTION_MISSING,
+        self::CODE_PLANNED_SECTION_EMPTY,
+        self::CODE_PLANNED_SECTION_ONLY_LINKS,
+        self::CODE_PLANNED_SECTION_BELOW_MINIMUM_SUBSTANCE,
     ];
 
     public const SEVERITY_INFO = 'info';
@@ -134,7 +147,7 @@ class EnterpriseWikiLintFinding extends Model
     protected function casts(): array
     {
         return [
-            'metadata'    => 'array',
+            'metadata' => 'array',
             'detected_at' => 'datetime',
             'resolved_at' => 'datetime',
         ];

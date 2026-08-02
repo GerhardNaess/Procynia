@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
@@ -589,6 +590,267 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertStringNotContainsString($repeatedSentence, $secondBlock['markdown']);
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $secondBlock['content_origin']);
         $this->assertSame('Generell fagkunnskap om hendelseshåndtering.', $secondBlock['best_practice_reason']);
+    }
+
+    // =========================================================================
+    // Wiki run-586: planned section coverage — repair and hard block
+    // =========================================================================
+
+    /**
+     * The exact run-586 shape: a concept page with two owned_topics, both headings present in
+     * the AI's first response but with zero body text under either. Confirms today's contract:
+     * without this task's fix, this response would have been accepted and persisted as a
+     * successfully completed page (there was no check anywhere for heading/body pairing) — see
+     * the "no repair available" test below for the same shape with AI unavailable, which
+     * reproduces exactly that historical acceptance.
+     */
+    public function test_repair_fills_empty_planned_sections_and_the_page_is_accepted(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlings- og styringsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Roller i styringsmodellen', 'Møtefora og beslutningsflyt'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $emptySectionsMarkdown = "# Samhandlings- og styringsmodell\n\nInnledende avsnitt.\n\n## Roller i styringsmodellen\n\n## Møtefora og beslutningsflyt\n\nSee [[{$article->slug}]] for details.";
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($article): array {
+                $this->assertCount(2, $issues);
+                $this->assertStringContainsString('Roller i styringsmodellen', $existingMarkdown);
+
+                $repairedMarkdown = "# Samhandlings- og styringsmodell\n\nInnledende avsnitt.\n\n"
+                    ."## Roller i styringsmodellen\n\nDelivery Executive har overordnet ansvar for leveransen.\n\n"
+                    ."## Møtefora og beslutningsflyt\n\nStrategisk forum møtes årlig og behandler prioriteringer. See [[{$article->slug}]] for details.";
+
+                return $this->structuredPageResult($repairedMarkdown, $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+        $this->assertStringContainsString('Delivery Executive har overordnet ansvar', $version->content_markdown);
+        $this->assertStringContainsString('Strategisk forum møtes årlig', $version->content_markdown);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+        $this->assertSame($version->id, $pivot->generated_page_version_id);
+    }
+
+    public function test_repair_that_still_leaves_empty_sections_stops_generation_with_a_domain_exception(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlings- og styringsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Roller i styringsmodellen', 'Møtefora og beslutningsflyt'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $emptySectionsMarkdown = "# Samhandlings- og styringsmodell\n\nInnledende avsnitt.\n\n## Roller i styringsmodellen\n\n## Møtefora og beslutningsflyt\n\nSee [[{$article->slug}]] for details.";
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements))
+            // The repair attempt returns exactly the same broken shape — still empty.
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements));
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+                app(EnterpriseWikiGenerateAppliedPagesService::class)
+            );
+            $this->fail('Expected EnterpriseWikiPageGenerationIncompleteException to propagate.');
+        } catch (EnterpriseWikiPageGenerationIncompleteException $e) {
+            $this->assertSame($run->id, $e->runId);
+            $this->assertSame($concept->id, $e->pageId);
+            $this->assertTrue($e->repairAttempted);
+            $this->assertContains('Roller i styringsmodellen', $e->missingOrEmptySections);
+            $this->assertContains('Møtefora og beslutningsflyt', $e->missingOrEmptySections);
+        }
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+
+        // The job's existing exception handling (markPivotFailed()) does all of this — no new
+        // wiring was needed for the pivot/run to correctly reflect the failure.
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertStringContainsString('EnterpriseWikiPageGenerationIncompleteException', $pivot->generation_error);
+        $this->assertNull($pivot->generated_page_version_id);
+        $this->assertFalse(
+            EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists(),
+            'An incomplete page must never be persisted as a version.',
+        );
+
+        Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
+    }
+
+    public function test_page_with_no_owned_topics_is_never_checked_or_repaired(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $article, $summary] = $this->createAppliedRunWithTwoPages($customer);
+
+        // No maintainer_decision_json owned_topics set for this page — repairPlannedSections
+        // must never be called regardless of what the AI returns.
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.", $sourceElements))
+            ->shouldNotReceive('repairPlannedSections');
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+    }
+
+    public function test_planned_sections_with_real_substance_never_trigger_a_repair_call(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'ITIL');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Rammeverk for tjenestestyring'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $goodMarkdown = "# ITIL\n\nInnledende avsnitt.\n\n## Rammeverk for tjenestestyring\n\nITIL er et rammeverk med definerte prosesser. See [[{$article->slug}]] for details.";
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($goodMarkdown, $sourceElements))
+            ->shouldNotReceive('repairPlannedSections');
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
     private function createDocxDocumentWithOneImage(Customer $customer): EnterpriseWikiDocument
