@@ -55,6 +55,7 @@ class EnterpriseWikiRunFindingsService
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiBestPracticeSectionService $sectionService,
+        private readonly EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
     ) {}
 
     /**
@@ -777,9 +778,37 @@ class EnterpriseWikiRunFindingsService
             EnterpriseWikiIngestRun::QA_STATUS_FAILED,
             EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
         ], true)) {
-            return __('procynia.wiki.runs_findings_explanation_needs_resync');
+            return $this->buildEscalatedOrFailedExplanation($run);
         }
 
         return __('procynia.wiki.runs_findings_explanation_qa_pending');
+    }
+
+    /**
+     * Distinguishes a genuinely stale status (no open blocking findings, and — critically — no
+     * actual incomplete technical step either, e.g. verification is really done and only the
+     * status field lags behind) from a run that is still blocked by a real, non-finding-based
+     * technical gate: EnterpriseWikiPostIngestQaService::findIncompleteSteps()'s
+     * `verification_incomplete` (see the Wiki run-585 incident — the previous, single generic
+     * "needs resync" message claimed no blockers remained even while 14 claims were still
+     * unverified, because it only ever checked the lint findings table, never incomplete_steps).
+     *
+     * Uses EnterpriseWikiEscalatedRunRecoveryService::evaluate() (read-only, no lock, no
+     * mutation) to also say whether the system will attempt to resume this automatically, or
+     * whether it requires new/manual processing — never claims automatic recovery will happen
+     * when it actually won't (e.g. a non-transient error, or a genuinely stale/already-terminal
+     * status that recovery correctly declines to touch).
+     */
+    private function buildEscalatedOrFailedExplanation(EnterpriseWikiIngestRun $run): string
+    {
+        $recovery = $this->recoveryService->evaluate($run->id);
+
+        if (! in_array('verification_incomplete', $recovery->incompleteSteps, true)) {
+            return __('procynia.wiki.runs_findings_explanation_needs_resync');
+        }
+
+        return $recovery->outcome === EnterpriseWikiRunRecoveryResult::OUTCOME_RESUMED
+            ? __('procynia.wiki.runs_findings_explanation_verification_incomplete_auto')
+            : __('procynia.wiki.runs_findings_explanation_verification_incomplete_manual');
     }
 }

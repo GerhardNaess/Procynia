@@ -299,6 +299,59 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
     }
 
     // =========================================================================
+    // Escalated runs (Wiki run-585) — delegated entirely to
+    // EnterpriseWikiEscalatedRunRecoveryService; the command holds no parallel logic.
+    // =========================================================================
+
+    public function test_resumes_an_escalated_run_with_unverified_claims_and_no_lease(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer());
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->expectsOutputToContain('outcome=resumed')
+            ->assertExitCode(0);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $fresh->status);
+        $this->assertNull($fresh->finished_at);
+
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
+    }
+
+    public function test_escalated_dry_run_does_not_change_anything(): void
+    {
+        Queue::fake();
+
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer());
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id, '--dry-run' => true])
+            ->expectsOutputToContain('outcome=resumed')
+            ->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->fresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_escalated_run_not_actually_recoverable_is_skipped_with_a_clear_reason(): void
+    {
+        Queue::fake();
+
+        // Every claim already verified and content intact — genuinely stale, not blocked.
+        $run = $this->createEscalatedRunWithUnverifiedClaims($this->createCustomer(), unverifiedClaims: 0);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->expectsOutputToContain('outcome=stale_state')
+            ->assertExitCode(1);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->fresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    // =========================================================================
     // Legacy guard
     // =========================================================================
 
@@ -434,6 +487,86 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
                 'conflict_flag' => false,
                 'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 'verified_at' => now(),
+            ]);
+        }
+
+        return $run;
+    }
+
+    /**
+     * Builds a synthetic run at status=escalated with extraction complete and a configurable
+     * number of unverified claims — the Wiki run-585 shape (verification_incomplete, no active
+     * lease). Synthetic fixture only; run 585's real data/IDs are never used.
+     */
+    private function createEscalatedRunWithUnverifiedClaims(Customer $customer, int $unverifiedClaims = 2): EnterpriseWikiIngestRun
+    {
+        $document = $this->createDocument($customer);
+
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+            'qa_attempt_count' => 1,
+            'error_message' => 'Interrupted before all claims were verified.',
+            'finished_at' => now(),
+        ]);
+
+        $article = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'artikkel-'.Str::lower(Str::random(6)),
+            'title' => 'Artikkel',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+        $summary = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'sammendrag-'.Str::lower(Str::random(6)),
+            'title' => 'Sammendrag',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        foreach ([$article, $summary] as $page) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $page->id,
+                'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+                'claims_extracted_at' => now(),
+            ]);
+        }
+
+        $articleVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Artikkel\n\nInnhold.",
+        ]);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $summary->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Sammendrag\n\nInnhold.",
+        ]);
+
+        for ($i = 0; $i < $unverifiedClaims; $i++) {
+            EnterpriseWikiClaim::query()->create([
+                'enterprise_wiki_page_id' => $article->id,
+                'enterprise_wiki_page_version_id' => $articleVersion->id,
+                'claim_text' => 'Uverifisert påstand '.$i,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'conflict_flag' => false,
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'verified_at' => null,
             ]);
         }
 

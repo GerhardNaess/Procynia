@@ -6,15 +6,26 @@ use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiEscalatedRunRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
+use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
 use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Recovers a run stuck at status=failed by computing a deterministic resume plan from
- * existing checkpoints and artifacts, rather than always restarting the pipeline from
+ * Recovers a run stuck at status=failed OR status=escalated by computing a deterministic resume
+ * plan from existing checkpoints and artifacts, rather than always restarting the pipeline from
  * verification_linking.
+ *
+ * Two entirely separate paths, each owning its own eligibility rules:
+ *
+ *  - status=failed (unchanged since before the Wiki run-585 recovery work): handled entirely
+ *    inline below, exactly as before — computes revalidate_and_finalize vs resume_continuation
+ *    from EnterpriseWikiPostIngestQaService::evaluate() and acts directly.
+ *  - status=escalated (added for run-585): delegated ENTIRELY to
+ *    EnterpriseWikiEscalatedRunRecoveryService — this command holds no parallel eligibility
+ *    logic for that path; it only prints the service's own result and maps it to an exit code.
  *
  * Post-ingest QA (EnterpriseWikiPostIngestQaService) is a pure, deterministic end check — it
  * calls no AI, generates nothing, and re-runs no page generation/linking/claim work. That makes
@@ -24,7 +35,7 @@ use Illuminate\Support\Facades\Log;
  * AI-based QA, or any other unexpected exception — must never be mistaken for a real content
  * verdict; see EnterpriseWikiPostIngestQaService's own class docs).
  *
- * The command picks exactly one of two safe outcomes:
+ * For status=failed, the command picks exactly one of two safe outcomes:
  *
  *   - revalidate_and_finalize: every continuation step (page generation, claim extraction,
  *     claim verification) is recorded complete and no lease is active — QA can be safely
@@ -45,10 +56,13 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
                             {--run-id= : The ingest run to recover}
                             {--dry-run : Report the observed checkpoints and resume plan without changing anything}';
 
-    protected $description = 'Recover an Enterprise Wiki ingest run stuck at status=failed by resuming or re-evaluating QA deterministically from its already-recorded artifacts.';
+    protected $description = 'Recover an Enterprise Wiki ingest run stuck at status=failed or status=escalated, deterministically from its already-recorded artifacts.';
 
-    public function handle(EnterpriseWikiDocumentFlowService $flowService, EnterpriseWikiPostIngestQaService $qaService): int
-    {
+    public function handle(
+        EnterpriseWikiDocumentFlowService $flowService,
+        EnterpriseWikiPostIngestQaService $qaService,
+        EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
+    ): int {
         $runIdOption = $this->option('run-id');
 
         if (! $runIdOption) {
@@ -68,7 +82,11 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             return self::FAILURE;
         }
 
-        if (in_array($run->status, [EnterpriseWikiIngestRun::STATUS_COMPLETED, EnterpriseWikiIngestRun::STATUS_ESCALATED], true)) {
+        if ($run->status === EnterpriseWikiIngestRun::STATUS_ESCALATED) {
+            return $this->handleEscalatedRun($runId, $dryRun, $recoveryService);
+        }
+
+        if ($run->status === EnterpriseWikiIngestRun::STATUS_COMPLETED) {
             $this->error("[WIKI_RECOVERY] Run [{$runId}] has status [{$run->status}] — already terminal, nothing to recover.");
 
             return self::FAILURE;
@@ -194,5 +212,43 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
         if ($evaluation['reason'] !== null) {
             $this->line("[WIKI_RECOVERY]   reason: {$evaluation['reason']}");
         }
+    }
+
+    /**
+     * Delegates the entire status=escalated eligibility decision to
+     * EnterpriseWikiEscalatedRunRecoveryService — this command holds no parallel business logic
+     * for this path, it only reports the service's own result and maps it to an exit code.
+     *
+     * --dry-run uses the service's read-only evaluate() (no lock, no mutation, no dispatch);
+     * without it, attempt() performs the real, locked, idempotent recovery.
+     */
+    private function handleEscalatedRun(int $runId, bool $dryRun, EnterpriseWikiEscalatedRunRecoveryService $recoveryService): int
+    {
+        $result = $dryRun
+            ? $recoveryService->evaluate($runId)
+            : $recoveryService->attempt($runId, caller: 'command');
+
+        $this->line("[WIKI_RECOVERY] Escalated run [{$runId}]: outcome={$result->outcome}");
+        $this->line("[WIKI_RECOVERY]   reason: {$result->reason}");
+
+        if ($result->incompleteSteps !== []) {
+            $this->line('[WIKI_RECOVERY]   incomplete_steps=['.implode(', ', $result->incompleteSteps).']');
+        }
+
+        if ($dryRun) {
+            $this->info('[WIKI_RECOVERY] --dry-run: no changes made, no job dispatched.');
+
+            return self::SUCCESS;
+        }
+
+        if ($result->outcome === EnterpriseWikiRunRecoveryResult::OUTCOME_RESUMED) {
+            $this->info("[WIKI_RECOVERY] Run [{$runId}] resumed — continuation job dispatched.");
+
+            return self::SUCCESS;
+        }
+
+        $this->warn("[WIKI_RECOVERY] Run [{$runId}] was not resumed ({$result->outcome}).");
+
+        return self::FAILURE;
     }
 }

@@ -3,9 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintenanceCycleService;
+use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 
-#[\Illuminate\Console\Attribute\AsCommand(name: 'wiki:maintenance-cycle')]
+#[AsCommand(name: 'wiki:maintenance-cycle')]
 class EnterpriseWikiMaintenanceCycle extends Command
 {
     protected $signature = 'wiki:maintenance-cycle';
@@ -17,6 +18,8 @@ class EnterpriseWikiMaintenanceCycle extends Command
         $summary = $service->run();
 
         $this->line("[WIKI_MAINTENANCE] Retried: {$summary['retried']}, Skipped: {$summary['skipped']}, Failed: {$summary['failed']}.");
+        $this->line('[WIKI_MAINTENANCE] Verification-incomplete recovery — candidates: '.
+            "{$summary['verification_recovery_candidates']}, resumed: {$summary['verification_recovery_resumed']}.");
 
         return self::SUCCESS;
     }

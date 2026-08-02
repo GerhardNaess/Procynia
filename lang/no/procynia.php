@@ -4030,6 +4030,8 @@ return [
         'runs_findings_explanation_inconsistent_passed' => '{1} Kjøringen har ett åpent blokkerende teknisk funn, men står som bestått. Statusen må synkroniseres.|[2,*] Kjøringen har :count åpne blokkerende tekniske funn, men står som bestått. Statusen må synkroniseres.',
         'runs_findings_explanation_qa_review_open' => '{1} Kjøringen er fullført og Wiki er tilgjengelig. Ett faglig QA-punkt er åpent for frivillig gjennomgang.|[2,*] Kjøringen er fullført og Wiki er tilgjengelig. :count faglige QA-punkter er åpne for frivillig gjennomgang.',
         'runs_findings_explanation_needs_resync' => 'Ingen åpne blokkerende tekniske funn lenger, men kjøringens status er ikke oppdatert ennå.',
+        'runs_findings_explanation_verification_incomplete_auto' => 'Kjøringen ble avbrutt før alle påstander var verifisert. Systemet vil forsøke å gjenoppta behandlingen automatisk.',
+        'runs_findings_explanation_verification_incomplete_manual' => 'Kjøringen ble avbrutt før alle påstander var verifisert og krever ny behandling.',
         'runs_findings_explanation_qa_pending' => 'Teknisk kvalitetskontroll er ikke fullført ennå.',
         'runs_findings_status_requires_action' => 'Krever handling',
         'runs_findings_status_open' => 'Åpent',

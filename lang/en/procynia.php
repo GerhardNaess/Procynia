@@ -4030,6 +4030,8 @@ return [
         'runs_findings_explanation_inconsistent_passed' => '{1} The run has one open blocking technical finding, but is shown as passed. The status needs to be resynced.|[2,*] The run has :count open blocking technical findings, but is shown as passed. The status needs to be resynced.',
         'runs_findings_explanation_qa_review_open' => '{1} The run is complete and the Wiki is available. One professional QA point is open for voluntary review.|[2,*] The run is complete and the Wiki is available. :count professional QA points are open for voluntary review.',
         'runs_findings_explanation_needs_resync' => 'No open blocking technical findings remain, but the run status has not been updated yet.',
+        'runs_findings_explanation_verification_incomplete_auto' => 'The run was interrupted before all claims were verified. The system will attempt to resume processing automatically.',
+        'runs_findings_explanation_verification_incomplete_manual' => 'The run was interrupted before all claims were verified and requires new processing.',
         'runs_findings_explanation_qa_pending' => 'Technical quality control has not finished yet.',
         'runs_findings_status_requires_action' => 'Requires action',
         'runs_findings_status_open' => 'Open',
