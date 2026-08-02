@@ -46,6 +46,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiArticleSummaryLinkService $articleSummaryLinkService,
         private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
         private readonly EnterpriseWikiImageBlockBuilder $imageBlockBuilder,
+        private readonly EnterpriseWikiDuplicateContentRemover $duplicateContentRemover,
     ) {}
 
     /**
@@ -206,6 +207,9 @@ class EnterpriseWikiGenerateAppliedPagesService
                 sourceElements: $sourceElements,
             );
 
+            $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
+            $generated['markdown'] = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
+
             $contentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
                 $generated['blocks'],
@@ -252,6 +256,9 @@ class EnterpriseWikiGenerateAppliedPagesService
                 additionalContext: $additionalContext,
                 sourceElements: $sourceElements,
             );
+
+            $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
+            $generated['markdown'] = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
             $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
@@ -364,6 +371,13 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             return $block;
         }, $generated['blocks']);
+
+        // Removes a verbatim-repeated sentence or paragraph anywhere earlier in this same page
+        // (run 574's finding #5560) before block metadata is built — see
+        // EnterpriseWikiDuplicateContentRemover for the exact, narrow rules (first occurrence
+        // always kept, only later identical text dropped, never a semantic/fuzzy match).
+        $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
+
         $markdown = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);

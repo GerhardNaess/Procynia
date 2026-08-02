@@ -505,6 +505,92 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertSame('img0', $imageBlocks[0]['image_data']['source_image_key']);
     }
 
+    /**
+     * Regression for run 574's finding #5560: a sentence the model returns as its own leading
+     * paragraph and then repeats verbatim as the opening sentence of a later block must be
+     * removed at generation time, on the real per-page production path this job drives.
+     */
+    public function test_job_removes_a_verbatim_duplicate_sentence_across_generated_blocks(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustrasjon');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustrasjon');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        $repeatedSentence = 'Som oversiktsbilde over en Incident-prosess viser illustrasjoner et løp fra innmelding til avslutning.';
+        $usedSourceElementKey = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($repeatedSentence, $summary, &$usedSourceElementKey): array {
+                $sourceElement = $sourceElements[0] ?? [
+                    'source_element_key' => 'document-1-full-text',
+                    'source_element_type' => 'manual',
+                ];
+                $usedSourceElementKey = (string) $sourceElement['source_element_key'];
+
+                $blocks = [
+                    [
+                        'markdown' => "# Incident Management Illustrasjon\n\n{$repeatedSentence}",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                        'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                        'source_element_types' => [(string) $sourceElement['source_element_type']],
+                        'best_practice_reason' => null,
+                        'link_intents' => [],
+                    ],
+                    [
+                        'markdown' => "{$repeatedSentence} Se også [[{$summary->slug}]] for detaljer.",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                        'source_element_keys' => [],
+                        'source_element_types' => [],
+                        'best_practice_reason' => 'Generell fagkunnskap om hendelseshåndtering.',
+                        'link_intents' => [],
+                    ],
+                ];
+
+                return [
+                    'markdown' => trim(implode("\n\n", array_column($blocks, 'markdown'))),
+                    'blocks' => $blocks,
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail();
+
+        // The repeated sentence survives exactly once in the persisted content_markdown — the
+        // duplicate is not merely hidden by the frontend, it is not stored a second time at all.
+        $this->assertSame(1, substr_count($version->content_markdown, $repeatedSentence));
+        $this->assertStringContainsString('# Incident Management Illustrasjon', $version->content_markdown);
+
+        $blocks = collect($version->content_blocks_json);
+
+        $firstBlock = $blocks->first(fn (array $b): bool => str_contains($b['markdown'] ?? '', $repeatedSentence));
+        $this->assertNotNull($firstBlock, 'Expected the first, kept occurrence of the sentence.');
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $firstBlock['content_origin']);
+        $this->assertSame($usedSourceElementKey, $firstBlock['source_element_key']);
+
+        $secondBlock = $blocks->first(fn (array $b): bool => str_contains($b['markdown'] ?? '', 'Se også'));
+        $this->assertNotNull($secondBlock, 'Expected the second block to survive with its unique tail.');
+        $this->assertStringNotContainsString($repeatedSentence, $secondBlock['markdown']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $secondBlock['content_origin']);
+        $this->assertSame('Generell fagkunnskap om hendelseshåndtering.', $secondBlock['best_practice_reason']);
+    }
+
     private function createDocxDocumentWithOneImage(Customer $customer): EnterpriseWikiDocument
     {
         $documentXml = <<<'XML'
