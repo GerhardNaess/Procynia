@@ -39,10 +39,23 @@ namespace App\Services\EnterpriseWiki;
  * for the same pattern), but treated as OPTIONAL by the PHP validator/parser, defaulting to an
  * empty list when absent — exactly like every other optional top-level field in this contract —
  * so a hand-built decision (tests, or a legacy stored run predating this field) remains valid.
+ *
+ * concept_candidates (added to stabilise whether a central, explicitly-referenced concept gets a
+ * page — see the Wiki run-581 "ITIL Incident Management" incident: concept_pages came back empty
+ * even though the article/summary both pointed the reader onward to that concept): before
+ * finalising concept_pages, the maintainer must enumerate every central concept candidate it
+ * considered and record one explicit, structural decision per candidate (create/reuse/
+ * reference_only/exclude) plus why. This turns "the AI silently didn't propose a page" into a
+ * checkable claim — EnterpriseWikiMaintainerDecisionConsistencyValidator cross-checks these
+ * candidates (and related_page_guidance) against concept_pages/entity_pages/the existing wiki
+ * index and flags the specific self-contradiction where a concept is necessary for the article but
+ * neither created, reused, nor given an owning page. Same optional-in-PHP treatment as above.
  */
 class EnterpriseWikiMaintainerDecisionPrompt
 {
     public const ACTIONS = ['create', 'update'];
+
+    public const CONCEPT_CANDIDATE_DECISIONS = ['create', 'reuse', 'reference_only', 'exclude'];
 
     private const FILE_EXTENSIONS = ['pdf', 'docx', 'xlsx', 'txt', 'doc', 'pptx', 'odt', 'csv'];
 
@@ -95,6 +108,33 @@ class EnterpriseWikiMaintainerDecisionPrompt
             'additionalProperties' => false,
         ];
 
+        $conceptCandidateSchema = [
+            'type' => 'object',
+            'properties' => [
+                'name' => ['type' => 'string'],
+                'concept_type' => ['type' => 'string'],
+                'independent_reason' => ['type' => 'string'],
+                'mentioned_context' => ['type' => 'string'],
+                'existing_page_title' => ['type' => ['string', 'null']],
+                'decision' => ['type' => 'string', 'enum' => self::CONCEPT_CANDIDATE_DECISIONS],
+                'justification' => ['type' => 'string'],
+                'owning_page_title' => ['type' => ['string', 'null']],
+                'necessary_for_article' => ['type' => 'boolean'],
+            ],
+            'required' => [
+                'name',
+                'concept_type',
+                'independent_reason',
+                'mentioned_context',
+                'existing_page_title',
+                'decision',
+                'justification',
+                'owning_page_title',
+                'necessary_for_article',
+            ],
+            'additionalProperties' => false,
+        ];
+
         return [
             'type' => 'json_schema',
             'json_schema' => [
@@ -105,6 +145,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'properties' => [
                         'source_article' => $sourcePageSchema,
                         'source_summary' => $sourcePageSchema,
+                        'concept_candidates' => ['type' => 'array', 'items' => $conceptCandidateSchema],
                         'concept_pages' => ['type' => 'array', 'items' => $sharedPageSchema],
                         'entity_pages' => ['type' => 'array', 'items' => $sharedPageSchema],
                         'no_action_reason' => ['type' => ['string', 'null']],
@@ -113,6 +154,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'required' => [
                         'source_article',
                         'source_summary',
+                        'concept_candidates',
                         'concept_pages',
                         'entity_pages',
                         'no_action_reason',
@@ -157,6 +199,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
+        if (array_key_exists('concept_candidates', $raw)) {
+            if (! is_array($raw['concept_candidates'])) {
+                $errors[] = 'concept_candidates must be an array.';
+            } else {
+                foreach ($raw['concept_candidates'] as $i => $entry) {
+                    $errors = array_merge($errors, self::validateConceptCandidateEntry($entry, "concept_candidates[{$i}]"));
+                }
+            }
+        }
+
         if (
             array_key_exists('no_action_reason', $raw)
             && $raw['no_action_reason'] !== null
@@ -194,6 +246,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
         return [
             'source_article' => $raw['source_article'],
             'source_summary' => $raw['source_summary'],
+            'concept_candidates' => $raw['concept_candidates'] ?? [],
             'concept_pages' => $raw['concept_pages'] ?? [],
             'entity_pages' => $raw['entity_pages'] ?? [],
             'no_action_reason' => $raw['no_action_reason'] ?? null,
@@ -284,6 +337,42 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
 
             $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    private static function validateConceptCandidateEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = [];
+
+        foreach (['name', 'concept_type', 'independent_reason', 'mentioned_context', 'justification'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        foreach (['existing_page_title', 'owning_page_title'] as $field) {
+            if (array_key_exists($field, $entry) && $entry[$field] !== null && ! is_string($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be a string or null.";
+            }
+        }
+
+        if (! isset($entry['decision']) || ! in_array($entry['decision'], self::CONCEPT_CANDIDATE_DECISIONS, true)) {
+            $errors[] = "{$ctx}.decision must be one of: ".implode(', ', self::CONCEPT_CANDIDATE_DECISIONS).'.';
+        }
+
+        if (array_key_exists('necessary_for_article', $entry) && ! is_bool($entry['necessary_for_article'])) {
+            $errors[] = "{$ctx}.necessary_for_article must be a boolean.";
         }
 
         return $errors;

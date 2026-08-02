@@ -13,6 +13,7 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -113,6 +114,37 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $this->assertSame('Entitet X', $page->title);
     }
 
+    /**
+     * concept_candidates (Wiki run-581 fix) is planning metadata for the maintainer-decision
+     * consistency check only — it must never itself create a page. Only concept_pages/entity_pages
+     * entries in collectEntries() are ever applied.
+     */
+    public function test_concept_candidates_field_is_ignored_by_apply(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision([
+            'concept_candidates' => [[
+                'name' => 'ITIL Incident Management',
+                'concept_type' => 'framework process',
+                'independent_reason' => 'Independent ITIL process.',
+                'mentioned_context' => 'Named in the source document.',
+                'existing_page_title' => null,
+                'decision' => 'create',
+                'justification' => 'Central to understanding the article.',
+                'owning_page_title' => null,
+                'necessary_for_article' => true,
+            ]],
+        ]);
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $result = $this->service->apply($run);
+
+        // Only source_article + source_summary from baseDecision() — the candidate itself
+        // never becomes a page.
+        $this->assertSame(['created' => 2, 'updated' => 0], $result);
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('page_type', EnterpriseWikiPage::PAGE_TYPE_CONCEPT)->count());
+    }
+
     // =========================================================================
     // update action
     // =========================================================================
@@ -126,11 +158,11 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $decision = $this->baseDecision([
             'concept_pages' => [
                 [
-                    'action'        => 'update',
-                    'page_id'       => $existingPage->id,
-                    'title'         => 'Eksisterende Konsept',
+                    'action' => 'update',
+                    'page_id' => $existingPage->id,
+                    'title' => 'Eksisterende Konsept',
                     'proposed_slug' => 'eksisterende-konsept-xy1z',
-                    'reason'        => 'Updating.',
+                    'reason' => 'Updating.',
                 ],
             ],
         ]);
@@ -189,11 +221,11 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $decision = $this->baseDecision([
             'concept_pages' => [
                 [
-                    'action'        => 'update',
-                    'page_id'       => $existingPage->id,
-                    'title'         => 'Delt Konsept',
+                    'action' => 'update',
+                    'page_id' => $existingPage->id,
+                    'title' => 'Delt Konsept',
                     'proposed_slug' => 'delt-konsept-xy1z',
-                    'reason'        => 'Updating.',
+                    'reason' => 'Updating.',
                 ],
             ],
         ]);
@@ -223,11 +255,11 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $decision = $this->baseDecision([
             'concept_pages' => [
                 [
-                    'action'        => 'update',
-                    'page_id'       => $foreignPage->id,
-                    'title'         => 'Fremmed Konsept',
+                    'action' => 'update',
+                    'page_id' => $foreignPage->id,
+                    'title' => 'Fremmed Konsept',
                     'proposed_slug' => 'fremmed-konsept-xy1z',
-                    'reason'        => 'Trying cross-customer update.',
+                    'reason' => 'Trying cross-customer update.',
                 ],
             ],
         ]);
@@ -314,12 +346,12 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid'         => Str::uuid()->toString(),
-            'customer_id'  => $customer->id,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'    => $document->id,
-            'status'       => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
         ]);
 
         $this->expectException(\InvalidArgumentException::class);
@@ -349,12 +381,12 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid'                       => Str::uuid()->toString(),
-            'customer_id'                => $customer->id,
-            'trigger_type'               => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                  => $document->id,
-            'status'                     => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
         ]);
 
@@ -372,11 +404,11 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $decision = $this->baseDecision([
             'concept_pages' => [
                 [
-                    'action'        => 'update',
-                    'page_id'       => $existingPage->id,
-                    'title'         => 'Delt Konsept',
+                    'action' => 'update',
+                    'page_id' => $existingPage->id,
+                    'title' => 'Delt Konsept',
                     'proposed_slug' => 'delt-konsept-xy1z',
-                    'reason'        => 'Updating.',
+                    'reason' => 'Updating.',
                 ],
             ],
             'entity_pages' => [
@@ -724,7 +756,7 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $customer = $this->createCustomer();
         $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Første', 'samme-slug-ab1c2d');
 
-        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->expectException(QueryException::class);
 
         // Bypasses the apply service entirely — proves the migration-level constraint itself
         // is untouched, independent of the service's own idempotency logic.
@@ -775,35 +807,35 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'test.pdf',
-            'file_path'         => 'customers/' . $customer->id . '/wiki/' . Str::random(8) . '.pdf',
-            'file_hash_sha256'  => hash('sha256', Str::random(32)),
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ]);
     }
 
     private function createPage(Customer $customer, string $pageType, string $title): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => Str::slug($title) . '-' . Str::lower(Str::random(4)),
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
     }
@@ -816,12 +848,12 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
     private function createPageWithSlug(Customer $customer, string $pageType, string $title, string $slug): EnterpriseWikiPage
     {
         return EnterpriseWikiPage::query()->create([
-            'customer_id'      => $customer->id,
-            'slug'             => $slug,
-            'title'            => $title,
-            'page_type'        => $pageType,
-            'status'           => EnterpriseWikiPage::STATUS_DRAFT,
-            'generated_by'     => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'customer_id' => $customer->id,
+            'slug' => $slug,
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
     }
@@ -830,19 +862,18 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         Customer $customer,
         array $decision,
         string $status = EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-    ): EnterpriseWikiIngestRun
-    {
+    ): EnterpriseWikiIngestRun {
         $document = $this->createDocument($customer);
 
         return EnterpriseWikiIngestRun::query()->create([
-            'uuid'                             => Str::uuid()->toString(),
-            'customer_id'                      => $customer->id,
-            'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                        => $document->id,
-            'status'                           => $status,
-            'maintainer_decision_json'         => $decision,
-            'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => $status,
+            'maintainer_decision_json' => $decision,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
             'maintainer_decision_generated_at' => now(),
         ]);
     }
@@ -851,21 +882,21 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
     {
         return array_merge([
             'source_article' => [
-                'action'        => 'create',
-                'title'         => 'Test Artikkel',
+                'action' => 'create',
+                'title' => 'Test Artikkel',
                 'proposed_slug' => 'test-artikkel-ab1c2d',
-                'reason'        => 'New article.',
+                'reason' => 'New article.',
             ],
             'source_summary' => [
-                'action'        => 'create',
-                'title'         => 'Sammendrag: Test Artikkel',
+                'action' => 'create',
+                'title' => 'Sammendrag: Test Artikkel',
                 'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d',
-                'reason'        => 'Companion summary.',
+                'reason' => 'Companion summary.',
             ],
-            'concept_pages'    => [],
-            'entity_pages'     => [],
+            'concept_pages' => [],
+            'entity_pages' => [],
             'no_action_reason' => null,
-            'warnings'         => [],
+            'warnings' => [],
         ], $overrides);
     }
 }

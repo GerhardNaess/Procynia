@@ -71,6 +71,48 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     }
 
     // =========================================================================
+    // JSON schema — concept_candidates (Wiki run-581 fix: explicit, structural per-concept
+    // decision so "the AI silently didn't propose a page" becomes a checkable claim)
+    // =========================================================================
+
+    public function test_schema_requires_concept_candidates(): void
+    {
+        $this->assertContains('concept_candidates', $this->schemaRequired());
+    }
+
+    public function test_schema_concept_candidate_items_require_all_nine_fields(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        foreach ([
+            'name', 'concept_type', 'independent_reason', 'mentioned_context',
+            'existing_page_title', 'decision', 'justification', 'owning_page_title',
+            'necessary_for_article',
+        ] as $field) {
+            $this->assertContains($field, $items['required']);
+            $this->assertArrayHasKey($field, $items['properties']);
+        }
+    }
+
+    public function test_schema_concept_candidate_decision_enum_matches_constant(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        $this->assertSame(
+            EnterpriseWikiMaintainerDecisionPrompt::CONCEPT_CANDIDATE_DECISIONS,
+            $items['properties']['decision']['enum'],
+        );
+    }
+
+    public function test_schema_concept_candidate_existing_and_owning_page_title_are_nullable(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        $this->assertContains('null', $items['properties']['existing_page_title']['type']);
+        $this->assertContains('null', $items['properties']['owning_page_title']['type']);
+    }
+
+    // =========================================================================
     // validate() — structure
     // =========================================================================
 
@@ -292,6 +334,109 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
+    }
+
+    // =========================================================================
+    // validate() — concept_candidates
+    // =========================================================================
+
+    public function test_concept_candidates_absent_is_not_an_error(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($this->validDecision());
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidates_can_be_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_valid_concept_candidate_entry_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->validConceptCandidate()];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidate_missing_name_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        unset($candidate['name']);
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('name', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_missing_justification_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        unset($candidate['justification']);
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('justification', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_invalid_decision_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['decision'] = 'maybe';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('decision', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_null_existing_and_owning_page_title_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['existing_page_title'] = null;
+        $candidate['owning_page_title'] = null;
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidate_non_boolean_necessary_for_article_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['necessary_for_article'] = 'yes';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('necessary_for_article', implode(' ', $errors));
+    }
+
+    public function test_parse_normalises_missing_concept_candidates_to_empty_array(): void
+    {
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($this->validDecision());
+        $this->assertSame([], $parsed['concept_candidates']);
+    }
+
+    public function test_parse_preserves_concept_candidates_when_present(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->validConceptCandidate()];
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
+        $this->assertSame('ITIL Incident Management', $parsed['concept_candidates'][0]['name']);
     }
 
     // =========================================================================
@@ -573,6 +718,21 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
             'entity_pages' => [],
             'no_action_reason' => null,
             'warnings' => [],
+        ];
+    }
+
+    private function validConceptCandidate(): array
+    {
+        return [
+            'name' => 'ITIL Incident Management',
+            'concept_type' => 'framework process',
+            'independent_reason' => 'A named ITIL process referenced independently of the illustration.',
+            'mentioned_context' => 'Named in the document body and in the planned article structure.',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Central to understanding the article; no existing page covers it.',
+            'owning_page_title' => null,
+            'necessary_for_article' => true,
         ];
     }
 

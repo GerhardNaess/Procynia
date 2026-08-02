@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
@@ -106,11 +107,11 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $document = $this->createDocument($customer);
 
         EnterpriseWikiPage::query()->create([
-            'customer_id'  => $customer->id,
-            'slug'         => 'bestaende-side',
-            'title'        => 'Bestående Side',
-            'page_type'    => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
-            'status'       => EnterpriseWikiPage::STATUS_APPROVED,
+            'customer_id' => $customer->id,
+            'slug' => 'bestaende-side',
+            'title' => 'Bestående Side',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+            'status' => EnterpriseWikiPage::STATUS_APPROVED,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
         ]);
 
@@ -139,15 +140,15 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
     public function test_service_index_context_excludes_pages_from_other_customers(): void
     {
         $customer = $this->createCustomer('Mine');
-        $other    = $this->createCustomer('Theirs');
+        $other = $this->createCustomer('Theirs');
         $document = $this->createDocument($customer);
 
         EnterpriseWikiPage::query()->create([
-            'customer_id'  => $other->id,
-            'slug'         => 'their-page',
-            'title'        => 'Other Customer Page',
-            'page_type'    => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-            'status'       => EnterpriseWikiPage::STATUS_DRAFT,
+            'customer_id' => $other->id,
+            'slug' => 'their-page',
+            'title' => 'Other Customer Page',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
         ]);
 
@@ -179,11 +180,91 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $document = $this->createDocument($customer);
         $this->mockAiClient($this->validDecision());
 
-        $pagesBefore    = EnterpriseWikiPage::query()->count();
+        $pagesBefore = EnterpriseWikiPage::query()->count();
         $this->service()->runForDocument($customer->id, $document->id, 'no');
-        $pagesAfter     = EnterpriseWikiPage::query()->count();
+        $pagesAfter = EnterpriseWikiPage::query()->count();
 
         $this->assertSame($pagesBefore, $pagesAfter);
+    }
+
+    // =========================================================================
+    // Consistency validation + bounded repair pass (Wiki run-581 fix: "ITIL Incident
+    // Management" concept page never proposed even though the article/summary pointed the
+    // reader onward to it).
+    // =========================================================================
+
+    public function test_consistent_decision_never_triggers_a_repair_call(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($this->validDecision());
+        $mock->shouldNotReceive('repair');
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
+    public function test_inconsistent_decision_triggers_one_bounded_repair_pass(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $inconsistent = $this->validDecision();
+        $inconsistent['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
+        ];
+
+        $repaired = $this->validDecision();
+        $repaired['source_article']['related_page_guidance'] = $inconsistent['source_article']['related_page_guidance'];
+        $repaired['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'ITIL Incident Management',
+            'proposed_slug' => 'itil-incident-management',
+            'reason' => 'Central concept the article points to.',
+        ]];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
+        $mock->shouldReceive('repair')
+            ->once()
+            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $issues) use ($inconsistent): bool {
+                return $decision === $inconsistent
+                    && $issues !== []
+                    && str_contains(implode(' ', $issues), 'ITIL Incident Management');
+            })
+            ->andReturn($repaired);
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertCount(1, $result['concept_pages']);
+        $this->assertSame('ITIL Incident Management', $result['concept_pages'][0]['title']);
+    }
+
+    public function test_decision_still_inconsistent_after_repair_throws(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $inconsistent = $this->validDecision();
+        $inconsistent['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
+        ];
+
+        // Repair pass returns a decision with the exact same unresolved contradiction.
+        $stillInconsistent = $inconsistent;
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
+        $mock->shouldReceive('repair')->once()->andReturn($stillInconsistent);
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionInconsistentException::class);
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
 
     // =========================================================================
@@ -216,6 +297,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
                     string $languageCode,
                 ) use (&$captured): array {
                     $captured = compact('sourceMeta', 'sourceText', 'indexContext', 'languageCode');
+
                     return $this->validDecision();
                 }
             );
@@ -225,21 +307,21 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
     {
         return [
             'source_article' => [
-                'action'        => 'create',
-                'title'         => 'Test Artikkel',
+                'action' => 'create',
+                'title' => 'Test Artikkel',
                 'proposed_slug' => 'test-artikkel-ab1c2d',
-                'reason'        => 'New.',
+                'reason' => 'New.',
             ],
             'source_summary' => [
-                'action'        => 'create',
-                'title'         => 'Sammendrag: Test Artikkel',
+                'action' => 'create',
+                'title' => 'Sammendrag: Test Artikkel',
                 'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d',
-                'reason'        => 'Companion.',
+                'reason' => 'Companion.',
             ],
-            'concept_pages'    => [],
-            'entity_pages'     => [],
+            'concept_pages' => [],
+            'entity_pages' => [],
             'no_action_reason' => null,
-            'warnings'         => [],
+            'warnings' => [],
         ];
     }
 
@@ -256,24 +338,24 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         );
 
         return Customer::query()->create([
-            'name'             => $name,
-            'slug'             => Str::slug($name) . '-' . Str::lower(Str::random(6)),
-            'language_id'      => $language->id,
-            'nationality_id'   => $nationality->id,
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active'        => true,
+            'is_active' => true,
         ]);
     }
 
     private function createDocument(Customer $customer, array $overrides = []): EnterpriseWikiDocument
     {
         return EnterpriseWikiDocument::query()->create(array_merge([
-            'customer_id'       => $customer->id,
+            'customer_id' => $customer->id,
             'original_filename' => 'selskapsinfo.docx',
-            'file_path'         => 'wiki/' . Str::random(12) . '.docx',
-            'file_hash_sha256'  => Str::random(64),
-            'extracted_text'    => 'Standardinnhold.',
-            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'file_path' => 'wiki/'.Str::random(12).'.docx',
+            'file_hash_sha256' => Str::random(64),
+            'extracted_text' => 'Standardinnhold.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
         ], $overrides));
     }
 }

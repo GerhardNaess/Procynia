@@ -75,6 +75,168 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
     }
 
+    /**
+     * Ask the AI to correct a decision that EnterpriseWikiMaintainerDecisionConsistencyValidator
+     * found logically inconsistent — a single bounded pass, not a general re-decision. Preferred
+     * over deterministically inventing a fix in PHP because resolving an issue (e.g. deciding
+     * whether a missing concept genuinely needs its own page) requires reading the source text
+     * again, which only the model can do; preferred over silently rejecting the decision because a
+     * self-healing correction keeps the ingest run moving instead of failing outright for a
+     * mistake this same model can usually fix when the specific problem is pointed out.
+     *
+     * @param  array{title: string, filename: string}  $sourceMeta
+     * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  array<string, mixed>  $decision  The previous, inconsistent decision.
+     * @param  string[]  $issues  Human-readable issues from the consistency validator.
+     * @return array<string, mixed> Validated, corrected maintainer decision.
+     *
+     * @throws RuntimeException when AI is disabled, the API fails, or the response is invalid.
+     */
+    public function repair(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        string $languageCode,
+        array $decision,
+        array $issues,
+    ): array {
+        if (! self::isAvailable()) {
+            throw new RuntimeException(
+                'EnterpriseWikiMaintainerDecisionAiClient: wiki AI is not enabled.'
+            );
+        }
+
+        $payload = $this->buildRepairPayload(
+            $sourceMeta,
+            $sourceText,
+            $indexContext,
+            $this->languageName($languageCode),
+            $decision,
+            $issues,
+        );
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
+        $decoded = $this->responsesDecoder->decode($response, 'EnterpriseWikiMaintainerDecisionAiClient:repair');
+
+        try {
+            return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
+        } catch (\InvalidArgumentException $e) {
+            throw new RuntimeException(
+                'EnterpriseWikiMaintainerDecisionAiClient: repaired decision failed schema validation: '.$e->getMessage(),
+                0,
+                $e,
+            );
+        }
+    }
+
+    private function buildRepairPayload(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        string $languageName,
+        array $decision,
+        array $issues,
+    ): array {
+        $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
+
+        return [
+            'model' => self::MODEL,
+            'input' => [
+                [
+                    'role' => 'developer',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->repairDeveloperPrompt($languageName),
+                        ],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues),
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => array_merge(
+                    ['type' => $schemaBlock['type']],
+                    $schemaBlock['json_schema'],
+                ),
+            ],
+            'reasoning' => [
+                'effort' => self::REASONING_EFFORT,
+            ],
+            'store' => false,
+            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+        ];
+    }
+
+    private function repairDeveloperPrompt(string $languageName): string
+    {
+        return implode("\n", [
+            "You are an enterprise wiki maintainer correcting a previous planning decision. Output language: {$languageName}.",
+            'You already produced a decision for this source document. A deterministic check found',
+            'specific logical inconsistencies in it, listed below as ISSUES TO FIX.',
+            '',
+            'Fix ONLY the listed issues. Do not change anything else in the decision that the issues do',
+            'not require you to change — keep the same pages, actions, slugs, and wording otherwise.',
+            '',
+            'For an issue about a missing owning page (a page_title referenced in',
+            'related_page_guidance, or a concept_candidates entry marked necessary_for_article, that',
+            'matches no existing or planned page): resolve it either by adding a concept_pages entry',
+            'that creates that page (action "create", page_id null, with its own short owned_topics),',
+            'or, if the topic genuinely does not need its own page after reconsidering the source text,',
+            'by revising the reference — remove the dangling related_page_guidance entry, or change the',
+            'concept candidate decision to "exclude" with a justification for why the article does not',
+            'need to point the reader there after all.',
+            '',
+            'Return the complete corrected decision as JSON only, conforming to the same schema as',
+            'before. Do not include any text outside the JSON.',
+        ]);
+    }
+
+    private function repairUserPrompt(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        array $decision,
+        array $issues,
+    ): string {
+        $title = (string) ($sourceMeta['title'] ?? '');
+        $text = trim($sourceText);
+
+        if (mb_strlen($text) > self::MAX_SOURCE_TEXT_CHARS) {
+            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS)."\n[... text truncated ...]";
+        }
+
+        $indexJson = $indexContext !== []
+            ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : 'No pages yet.';
+
+        $decisionJson = (string) json_encode($decision, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $issuesText = implode("\n", array_map(static fn (string $issue): string => "- {$issue}", $issues));
+
+        return implode("\n", [
+            'SOURCE METADATA:',
+            "Title: {$title}",
+            '',
+            'SOURCE TEXT:',
+            $text !== '' ? $text : '(empty)',
+            '',
+            'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
+            $indexJson,
+            '',
+            'PREVIOUS DECISION:',
+            $decisionJson,
+            '',
+            'ISSUES TO FIX:',
+            $issuesText,
+        ]);
+    }
+
     private function buildPayload(
         array $sourceMeta,
         string $sourceText,
@@ -181,6 +343,53 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  The source_article and source_summary are about the same source document — give summary',
             '  a narrow owned_topics (a short orientation and the main points) and instruct it, via',
             '  related_page_guidance, to point to the article for detail rather than repeating it.',
+            '',
+            'CONCEPT CANDIDATES (identify before finalizing concept_pages):',
+            '  Before deciding concept_pages, list every central concept candidate this source document',
+            '  points to: an independent subject-matter term, process, practice, methodology, or',
+            '  framework — not a mere mention of a random word, and not the document\'s own filename, an',
+            '  illustration title, or a purely local label used only inside this document.',
+            '  Each concept_candidates entry has: name, concept_type, independent_reason,',
+            '  mentioned_context, existing_page_title (nullable), decision, justification,',
+            '  owning_page_title (nullable), necessary_for_article (boolean).',
+            '  decision is exactly one of:',
+            '    "create": a NEW concept page is needed. Add a matching entry to concept_pages.',
+            '    "reuse": an existing page in the wiki index already covers it. Set existing_page_title',
+            '    to that page\'s title and reference it (page_id + action "update") in concept_pages.',
+            '    "reference_only": the article/summary may mention it briefly and link onward, but it',
+            '    does not need its own page yet — usually because it is not central enough, or because',
+            '    another already-existing or already-planned page owns it (name that page in',
+            '    owning_page_title).',
+            '    "exclude": it must not be mentioned at all — usually a document name, filename,',
+            '    illustration title, local label, or a topic explicitly out of scope for every planned',
+            '    page.',
+            '  Decide "create" only when ALL of the following hold:',
+            '    1. The concept is explicitly named in the source document or in the planned',
+            '       article/summary.',
+            '    2. It is an independent subject-matter term, process, practice, or framework — not an',
+            '       arbitrary word or a passing reference mentioned once.',
+            '    3. It is necessary to understand the article\'s professional context.',
+            '    4. The article or summary otherwise needs to point the reader onward to it.',
+            '    5. No existing page in the wiki index already covers it (check by meaning, not exact',
+            '       string — e.g. "ITIL Incident Management", "Incident Management", and "Incident',
+            '       management (ITIL)" are the same concept, not three different ones).',
+            '    6. It is not a topic this decision itself excludes.',
+            '    7. There is enough basis in the source (or, failing that, clearly-markable general',
+            '       best practice) to write a scoped page — not just a bare mention.',
+            '  Do NOT create a concept page when: it is mentioned only once in passing; it is not an',
+            '  independent concept; a suitable page already exists; it only belongs inside another page',
+            '  as a reference_only topic; it is excluded; a separate page would only duplicate the',
+            '  article without adding independent value; there is not enough information to give it a',
+            '  clear scope; or it is only a document name, filename, illustration title, or local label.',
+            '  Consistency requirement: if a concept candidate is "reference_only" or "exclude" AND',
+            '  necessary_for_article is true, you MUST name a page in owning_page_title that either',
+            '  already exists in the wiki index or is itself being created in this same decision. It is',
+            '  never correct to point the reader onward to a concept in related_page_guidance while also',
+            '  deciding not to create or reuse that same page — if no owning page can be named,',
+            '  reconsider and create it instead.',
+            '  Every concept_candidates entry with decision "reference_only" or "exclude" must justify,',
+            '  in justification, specifically why no page is warranted — not just repeat that it is out',
+            '  of scope.',
             '',
             'Return JSON only. No text outside JSON.',
         ]);

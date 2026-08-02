@@ -383,6 +383,126 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     }
 
     // =========================================================================
+    // repair() — Wiki run-581 fix: a single bounded pass to fix a decision that
+    // EnterpriseWikiMaintainerDecisionConsistencyValidator found logically inconsistent.
+    // =========================================================================
+
+    public function test_repair_returns_valid_corrected_decision(): void
+    {
+        $corrected = $this->validDecision();
+        $corrected['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'ITIL Incident Management',
+            'proposed_slug' => 'itil-incident-management',
+            'reason' => 'Central concept the article points to.',
+        ]];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->once()->andReturn([
+            'status' => 'completed',
+            'output_text' => json_encode($corrected),
+        ]);
+
+        $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
+
+        $result = $client->repair(
+            sourceMeta: ['title' => 'Test Dokument', 'filename' => 'test.docx'],
+            sourceText: 'Innhold.',
+            indexContext: [],
+            languageCode: 'no',
+            decision: $this->validDecision(),
+            issues: ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'],
+        );
+
+        $this->assertCount(1, $result['concept_pages']);
+        $this->assertSame('ITIL Incident Management', $result['concept_pages'][0]['title']);
+    }
+
+    public function test_repair_payload_includes_previous_decision_and_issues_in_user_message(): void
+    {
+        $previousDecision = $this->validDecision();
+        $issues = ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'];
+
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
+            ['title' => 'Test Dokument', 'filename' => 'test.docx'],
+            'Innhold.',
+            [],
+            'no',
+            $previousDecision,
+            $issues,
+        );
+
+        $userText = $this->userMessageText($capturedPayload);
+        $this->assertStringContainsString('ITIL Incident Management', $userText);
+        $this->assertStringContainsString('ISSUES TO FIX', $userText);
+        $this->assertStringContainsString('Test Artikkel', $userText);
+    }
+
+    public function test_repair_uses_the_same_strict_schema_as_decide(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
+            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
+        );
+
+        $this->assertSame('maintainer_decision', $capturedPayload['text']['format']['name']);
+        $this->assertTrue($capturedPayload['text']['format']['strict']);
+    }
+
+    public function test_repair_throws_when_ai_is_disabled(): void
+    {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+        $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not enabled/');
+
+        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+    }
+
+    public function test_repair_throws_on_schema_violation(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->once()->andReturn([
+            'status' => 'completed',
+            'output_text' => json_encode(['source_summary' => ['action' => 'create', 'title' => 'T', 'proposed_slug' => 'test', 'reason' => 'ok']]),
+        ]);
+
+        $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/repaired decision failed schema validation/');
+
+        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
