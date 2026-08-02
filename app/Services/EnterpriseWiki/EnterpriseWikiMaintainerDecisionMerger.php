@@ -94,7 +94,7 @@ class EnterpriseWikiMaintainerDecisionMerger
             }
         }
 
-        return [
+        $merged = [
             'source_article' => $globalPlan['source_article'],
             'source_summary' => $globalPlan['source_summary'],
             'concept_candidates' => $conceptCandidates,
@@ -103,6 +103,98 @@ class EnterpriseWikiMaintainerDecisionMerger
             'no_action_reason' => $globalPlan['no_action_reason'] ?? null,
             'warnings' => $globalPlan['warnings'] ?? [],
         ];
+
+        return $this->deduplicateAndValidateFigures($merged);
+    }
+
+    /**
+     * Wiki run-587: figures are offered identically to the global plan and every batch (see
+     * EnterpriseWikiMaintainerDecisionSplitCoordinator's class docblock — all batches see the same
+     * truncated source text), so two independent batches — or a batch and the global plan — can
+     * each plan the same source_element_key onto a different page without either side ever seeing
+     * the other's decision. This pass runs once, on the fully assembled decision, across every
+     * page-bearing field: an exact repeat of the same key on the SAME page is silently deduped
+     * (keeping the first occurrence); the same key claimed by two DIFFERENT pages is a hard
+     * failure, never "last writer wins" — identical philosophy to the candidate/page conflict
+     * checks above, just keyed on source_element_key instead of name/title.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array<string, mixed>
+     *
+     * @throws EnterpriseWikiMaintainerDecisionMergeConflictException
+     */
+    private function deduplicateAndValidateFigures(array $decision): array
+    {
+        /** @var array<string, string> $seenBySourceKey source_element_key => owning page title */
+        $seenBySourceKey = [];
+
+        foreach (['source_article', 'source_summary'] as $key) {
+            $decision[$key]['planned_figures'] = $this->dedupeAndCheckFiguresForPage(
+                (array) ($decision[$key]['planned_figures'] ?? []),
+                (string) ($decision[$key]['title'] ?? ''),
+                $seenBySourceKey,
+            );
+        }
+
+        foreach (['concept_pages', 'entity_pages'] as $listKey) {
+            foreach ($decision[$listKey] as $i => $page) {
+                $decision[$listKey][$i]['planned_figures'] = $this->dedupeAndCheckFiguresForPage(
+                    (array) ($page['planned_figures'] ?? []),
+                    (string) ($page['title'] ?? ''),
+                    $seenBySourceKey,
+                );
+            }
+        }
+
+        return $decision;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $plannedFigures
+     * @param  array<string, string>  $seenBySourceKey  source_element_key => owning page title,
+     *                                                  shared and mutated across every page processed by
+     *                                                  deduplicateAndValidateFigures() in this merge() call
+     * @return list<array<string, mixed>>
+     *
+     * @throws EnterpriseWikiMaintainerDecisionMergeConflictException
+     */
+    private function dedupeAndCheckFiguresForPage(array $plannedFigures, string $pageTitle, array &$seenBySourceKey): array
+    {
+        $deduped = [];
+        $seenOnThisPage = [];
+
+        foreach ($plannedFigures as $figure) {
+            if (! is_array($figure)) {
+                continue;
+            }
+
+            $sourceElementKey = (string) ($figure['source_element_key'] ?? '');
+
+            if ($sourceElementKey === '') {
+                continue;
+            }
+
+            if (in_array($sourceElementKey, $seenOnThisPage, true)) {
+                // Exact repeat on the same page (e.g. listed twice within one batch's own
+                // response) — silently deduped, keeping the first occurrence.
+                continue;
+            }
+
+            $seenOnThisPage[] = $sourceElementKey;
+
+            if (isset($seenBySourceKey[$sourceElementKey]) && $seenBySourceKey[$sourceElementKey] !== $pageTitle) {
+                throw EnterpriseWikiMaintainerDecisionMergeConflictException::conflictingFigureAssignment(
+                    $sourceElementKey,
+                    $seenBySourceKey[$sourceElementKey],
+                    $pageTitle,
+                );
+            }
+
+            $seenBySourceKey[$sourceElementKey] = $pageTitle;
+            $deduped[] = $figure;
+        }
+
+        return $deduped;
     }
 
     /**

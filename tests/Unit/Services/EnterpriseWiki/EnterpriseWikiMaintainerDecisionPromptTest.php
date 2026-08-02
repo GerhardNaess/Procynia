@@ -71,6 +71,37 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
     }
 
     // =========================================================================
+    // JSON schema — planned_figures (Wiki run-587 fix: figures extracted/classified/citable but
+    // never explicitly planned onto any page)
+    // =========================================================================
+
+    public function test_schema_requires_planned_figures_on_source_article(): void
+    {
+        $sourceArticleSchema = $this->schemaProps()['source_article'];
+
+        $this->assertContains('planned_figures', $sourceArticleSchema['required']);
+        $this->assertArrayHasKey('planned_figures', $sourceArticleSchema['properties']);
+    }
+
+    public function test_schema_requires_planned_figures_on_concept_page_items(): void
+    {
+        $items = $this->schemaProps()['concept_pages']['items'];
+
+        $this->assertContains('planned_figures', $items['required']);
+        $this->assertArrayHasKey('planned_figures', $items['properties']);
+    }
+
+    public function test_schema_planned_figures_items_require_all_six_fields(): void
+    {
+        $plannedFigureItems = $this->schemaProps()['source_article']['properties']['planned_figures']['items'];
+
+        foreach (['source_element_key', 'classification', 'section_placement', 'purpose', 'required', 'caption_hint'] as $field) {
+            $this->assertContains($field, $plannedFigureItems['required']);
+            $this->assertArrayHasKey($field, $plannedFigureItems['properties']);
+        }
+    }
+
+    // =========================================================================
     // JSON schema — concept_candidates (Wiki run-581 fix: explicit, structural per-concept
     // decision so "the AI silently didn't propose a page" becomes a checkable claim)
     // =========================================================================
@@ -303,6 +334,99 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
+    }
+
+    public function test_planned_figures_with_valid_entry_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['planned_figures'] = [
+            [
+                'source_element_key' => 'img1',
+                'classification' => 'diagram',
+                'section_placement' => 'Roller',
+                'purpose' => 'Viser styringsmodellen.',
+                'required' => true,
+                'caption_hint' => 'Styringsmodell',
+            ],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_planned_figures_missing_source_element_key_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['planned_figures'] = [
+            [
+                'source_element_key' => '',
+                'classification' => 'diagram',
+                'section_placement' => null,
+                'purpose' => 'Viser styringsmodellen.',
+                'required' => true,
+                'caption_hint' => null,
+            ],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('source_element_key', implode(' ', $errors));
+    }
+
+    public function test_planned_figures_non_boolean_required_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['planned_figures'] = [
+            [
+                'source_element_key' => 'img1',
+                'classification' => 'diagram',
+                'section_placement' => null,
+                'purpose' => 'Viser styringsmodellen.',
+                'required' => 'yes',
+                'caption_hint' => null,
+            ],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('required', implode(' ', $errors));
+    }
+
+    public function test_planned_figures_null_section_placement_and_caption_hint_are_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['planned_figures'] = [
+            [
+                'source_element_key' => 'img1',
+                'classification' => 'diagram',
+                'section_placement' => null,
+                'purpose' => 'Viser styringsmodellen.',
+                'required' => false,
+                'caption_hint' => null,
+            ],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_planned_figures_non_array_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['planned_figures'] = 'not an array';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('planned_figures', implode(' ', $errors));
+    }
+
+    public function test_planned_figures_absent_is_not_an_error(): void
+    {
+        $decision = $this->validDecision();
+        unset($decision['source_article']['planned_figures']);
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
     }
 
     public function test_control_character_in_excluded_topics_item_is_rejected(): void

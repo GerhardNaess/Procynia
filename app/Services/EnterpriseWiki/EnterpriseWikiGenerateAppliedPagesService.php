@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
 use App\Models\Customer;
@@ -10,6 +11,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -57,6 +59,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiImageBlockBuilder $imageBlockBuilder,
         private readonly EnterpriseWikiDuplicateContentRemover $duplicateContentRemover,
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
+        private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
     ) {}
 
     /**
@@ -98,37 +101,264 @@ class EnterpriseWikiGenerateAppliedPagesService
     /**
      * Appends a genuine, deterministic "image" figure block (never AI-authored/interpreted) for
      * each Word image whose citable source element the AI-generated blocks actually referenced —
-     * only for article/summary pages, mirroring appendTableBlocksIfRelevant() exactly (see
-     * EnterpriseWikiImageBlockBuilder for why attachment is keyed off citation rather than "every
-     * image in the document").
+     * mirroring appendTableBlocksIfRelevant() (see EnterpriseWikiImageBlockBuilder for why
+     * attachment is keyed off citation rather than "every image in the document").
+     *
+     * Wiki run-587: article/summary pages keep the pre-existing, unrestricted behavior (any cited
+     * image is materialized, for full backward compatibility with documents predating figure
+     * planning). Concept/entity pages are abstract synthesis, not a figure's default home — an
+     * image is only materialized there when THIS page's own maintainer-decision planned_figures
+     * explicitly assigned it here; a concept/entity page citing an image the maintainer decision
+     * never planned onto it is silently dropped rather than materialized.
+     *
+     * Placement is deterministic (see placeImageBlocksMarkdown()): a planned figure is inserted
+     * under its planned `## ` section (fuzzy-matched) or right after the page introduction when no
+     * section was given; only an image with no planned_figures entry at all (a legacy/unplanned
+     * citation) keeps the old "always appended at the very end" placement.
      *
      * @param  list<array<string, mixed>>  $contentBlocks
      * @return array{0: string, 1: list<array<string, mixed>>} [markdown, contentBlocks] with any
      *                                                         image blocks appended
      */
-    private function appendImageBlocksIfRelevant(EnterpriseWikiDocument $document, EnterpriseWikiPage $page, string $markdown, array $contentBlocks): array
+    private function appendImageBlocksIfRelevant(EnterpriseWikiIngestRun $run, EnterpriseWikiDocument $document, EnterpriseWikiPage $page, string $markdown, array $contentBlocks): array
     {
+        $plannedFigures = $this->plannedFiguresForPage($run, $page);
+        $citedIndexes = $this->imageBlockBuilder->referencedImageIndexes($contentBlocks);
+        $imageIndexes = $citedIndexes;
+        $skippedNotPlanned = [];
+
         if (! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
-            return [$markdown, $contentBlocks];
+            $plannedKeys = array_column($plannedFigures, 'source_element_key');
+
+            foreach ($citedIndexes as $index) {
+                if (! in_array(sprintf('img%d', $index), $plannedKeys, true)) {
+                    $skippedNotPlanned[] = sprintf('img%d', $index);
+                }
+            }
+
+            $imageIndexes = array_values(array_filter(
+                $citedIndexes,
+                fn (int $index): bool => in_array(sprintf('img%d', $index), $plannedKeys, true),
+            ));
         }
 
-        $imageIndexes = $this->imageBlockBuilder->referencedImageIndexes($contentBlocks);
+        $imageBlocks = [];
 
-        if ($imageIndexes === []) {
-            return [$markdown, $contentBlocks];
+        if ($imageIndexes !== []) {
+            $images = $this->sourceElementService->imagesForDocument($document);
+            $imageBlocks = $this->imageBlockBuilder->buildImageBlocks($document, $images, $imageIndexes, count($contentBlocks));
+
+            if ($imageBlocks !== []) {
+                $contentBlocks = [...$contentBlocks, ...$imageBlocks];
+                $markdown = $this->placeImageBlocksMarkdown($markdown, $imageBlocks, $plannedFigures);
+            }
         }
 
-        $images = $this->sourceElementService->imagesForDocument($document);
-        $imageBlocks = $this->imageBlockBuilder->buildImageBlocks($document, $images, $imageIndexes, count($contentBlocks));
-
-        if ($imageBlocks === []) {
-            return [$markdown, $contentBlocks];
+        if ($plannedFigures !== []) {
+            $this->logPlannedFigureMaterialization($run, $page, $plannedFigures, $imageBlocks, $skippedNotPlanned);
         }
-
-        $contentBlocks = [...$contentBlocks, ...$imageBlocks];
-        $markdown = trim($markdown."\n\n".implode("\n\n", array_column($imageBlocks, 'markdown')));
 
         return [$markdown, $contentBlocks];
+    }
+
+    /**
+     * Observability (Wiki run-587 OBSERVABILITY requirement): structured, per-page log of what the
+     * maintainer decision planned vs. what actually got materialized — run_id, page_id, page_type,
+     * planned/required counts, the planned source_element_keys, how many were materialized vs.
+     * skipped, and a human-readable skip reason per skipped figure. Never logs raw image bytes, the
+     * full prompt, or the full AI response — only the same small metadata fields already present in
+     * maintainer_decision_json's planned_figures.
+     *
+     * @param  list<array<string, mixed>>  $plannedFigures
+     * @param  list<array<string, mixed>>  $imageBlocks  Blocks actually materialized this call.
+     * @param  list<string>  $skippedNotPlanned  Cited by the AI but excluded by the concept/entity
+     *                                           planned-figures gate (appendImageBlocksIfRelevant()'s own filter) — reported for
+     *                                           visibility even though these were never planned onto this page in the first place.
+     */
+    private function logPlannedFigureMaterialization(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $plannedFigures,
+        array $imageBlocks,
+        array $skippedNotPlanned,
+    ): void {
+        $plannedKeys = array_column($plannedFigures, 'source_element_key');
+        $materializedKeys = array_column($imageBlocks, 'source_element_key');
+        $notMaterialized = array_values(array_diff($plannedKeys, $materializedKeys));
+
+        $skipReasons = array_merge(
+            array_map(fn (string $key): string => "{$key}: planned but not cited/materialized on this page", $notMaterialized),
+            array_map(fn (string $key): string => "{$key}: cited by the AI but not planned onto this concept/entity page", $skippedNotPlanned),
+        );
+
+        $selectedPlacements = array_map(fn (array $figure): array => [
+            'source_element_key' => $figure['source_element_key'] ?? '',
+            'section' => trim((string) ($figure['section_placement'] ?? '')) !== '' ? $figure['section_placement'] : 'after introduction',
+        ], $plannedFigures);
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned figure materialization.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'planned_figure_count' => count($plannedFigures),
+            'required_figure_count' => count(array_filter($plannedFigures, fn (array $f): bool => (bool) ($f['required'] ?? false))),
+            'source_element_keys' => $plannedKeys,
+            'selected_placements' => $selectedPlacements,
+            'materialized_count' => count($imageBlocks),
+            'materialized_source_element_keys' => $materializedKeys,
+            'skipped_count' => count($notMaterialized) + count($skippedNotPlanned),
+            'skip_reasons' => $skipReasons,
+        ]);
+    }
+
+    /**
+     * Deterministic figure placement (Wiki run-587 PLASSERING requirement): a planned figure's
+     * markdown is inserted directly under its planned section's `## ` heading (fuzzy-matched, same
+     * normalization convention as EnterpriseWikiPlannedFigureCoverageValidator), or right after the
+     * page introduction when the figure was planned with no section_placement. A figure with no
+     * planned_figures entry at all (legacy/unplanned citation) keeps the pre-existing "always
+     * appended at the end" placement — this only changes placement for EXPLICITLY planned figures.
+     *
+     * Falls back to appending at the end when a section was named but does not actually exist in
+     * this markdown; EnterpriseWikiPlannedFigureCoverageValidator's planned_figure_wrong_section
+     * check then catches a REQUIRED figure left in that state and triggers the bounded repair, so
+     * this fallback never silently hides a required figure without a QA-visible finding.
+     *
+     * @param  list<array<string, mixed>>  $imageBlocks
+     * @param  list<array<string, mixed>>  $plannedFigures
+     */
+    private function placeImageBlocksMarkdown(string $markdown, array $imageBlocks, array $plannedFigures): string
+    {
+        $plannedByKey = [];
+
+        foreach ($plannedFigures as $figure) {
+            $key = (string) ($figure['source_element_key'] ?? '');
+
+            if ($key !== '') {
+                $plannedByKey[$key] = $figure;
+            }
+        }
+
+        $appendAtEnd = [];
+
+        foreach ($imageBlocks as $imageBlock) {
+            $key = (string) ($imageBlock['source_element_key'] ?? '');
+            $figure = $plannedByKey[$key] ?? null;
+
+            if ($figure === null) {
+                $appendAtEnd[] = $imageBlock['markdown'];
+
+                continue;
+            }
+
+            $section = trim((string) ($figure['section_placement'] ?? ''));
+
+            $inserted = $section !== ''
+                ? $this->insertMarkdownUnderHeading($markdown, $section, $imageBlock['markdown'])
+                : $this->insertMarkdownAfterIntroduction($markdown, $imageBlock['markdown']);
+
+            if ($inserted !== null) {
+                $markdown = $inserted;
+
+                continue;
+            }
+
+            $appendAtEnd[] = $imageBlock['markdown'];
+        }
+
+        if ($appendAtEnd !== []) {
+            $markdown = trim($markdown."\n\n".implode("\n\n", $appendAtEnd));
+        }
+
+        return trim($markdown);
+    }
+
+    /**
+     * Inserts $blockMarkdown directly under the first `## ` heading whose text fuzzy-matches
+     * $sectionPlacement, right before the next `#`/`##` heading (or at the end of the document when
+     * the matched section is the last one). Returns null when no heading matches at all.
+     */
+    private function insertMarkdownUnderHeading(string $markdown, string $sectionPlacement, string $blockMarkdown): ?string
+    {
+        $normalizedTarget = $this->normalizeHeadingText($sectionPlacement);
+        $lines = preg_split('/\R/', $markdown) ?: [];
+        $headingIndex = null;
+        $nextBoundaryIndex = null;
+
+        foreach ($lines as $i => $line) {
+            if ($headingIndex === null && preg_match('/^##\s+(.+?)\s*$/', $line, $matches) === 1) {
+                $normalizedHeading = $this->normalizeHeadingText($matches[1]);
+
+                if ($normalizedHeading !== '' && (str_contains($normalizedTarget, $normalizedHeading) || str_contains($normalizedHeading, $normalizedTarget))) {
+                    $headingIndex = $i;
+                }
+
+                continue;
+            }
+
+            if ($headingIndex !== null && preg_match('/^#{1,2}\s+/', $line) === 1) {
+                $nextBoundaryIndex = $i;
+
+                break;
+            }
+        }
+
+        if ($headingIndex === null) {
+            return null;
+        }
+
+        $insertAt = $nextBoundaryIndex ?? count($lines);
+
+        return $this->spliceMarkdownAt($lines, $insertAt, $blockMarkdown);
+    }
+
+    /**
+     * Inserts $blockMarkdown right after the page's introduction — i.e. right before the second
+     * heading (`#` or `##`) found in the document, skipping the page's own H1 title. When there is
+     * no second heading (a very short page, or one with only its title), the block is appended at
+     * the end, which for a heading-less document is exactly the same place appendAtEnd would put it.
+     */
+    private function insertMarkdownAfterIntroduction(string $markdown, string $blockMarkdown): string
+    {
+        $lines = preg_split('/\R/', $markdown) ?: [];
+        $boundaryIndex = null;
+
+        foreach ($lines as $i => $line) {
+            if ($i === 0) {
+                continue; // the page's own H1 title is never itself a boundary
+            }
+
+            if (preg_match('/^#{1,2}\s+/', $line) === 1) {
+                $boundaryIndex = $i;
+
+                break;
+            }
+        }
+
+        return $this->spliceMarkdownAt($lines, $boundaryIndex ?? count($lines), $blockMarkdown);
+    }
+
+    /** @param  list<string>  $lines */
+    private function spliceMarkdownAt(array $lines, int $insertAt, string $blockMarkdown): string
+    {
+        $before = array_slice($lines, 0, $insertAt);
+
+        while ($before !== [] && trim((string) end($before)) === '') {
+            array_pop($before);
+        }
+
+        $after = array_slice($lines, $insertAt);
+
+        return trim(implode("\n", array_merge($before, ['', $blockMarkdown, ''], $after)));
+    }
+
+    private function normalizeHeadingText(string $text): string
+    {
+        $withoutParens = preg_replace('/\([^)]*\)/', '', $text) ?? $text;
+        $lower = mb_strtolower($withoutParens);
+        $lettersOnly = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $lower) ?? $lower;
+
+        return trim(preg_replace('/\s+/', ' ', $lettersOnly) ?? $lettersOnly);
     }
 
     /**
@@ -227,7 +457,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
 
             [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $generated['markdown'], $contentBlocks);
-            [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
+            [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $markdown, $contentBlocks);
             [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
             $this->writeVersion($page->id, $markdown, $contentBlocks);
@@ -413,7 +643,21 @@ class EnterpriseWikiGenerateAppliedPagesService
         );
 
         [$markdown, $contentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
-        [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($document, $page, $markdown, $contentBlocks);
+        [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $markdown, $contentBlocks);
+
+        [$markdown, $contentBlocks] = $this->ensurePlannedFigureCoverage(
+            $run,
+            $page,
+            $document,
+            $markdown,
+            $contentBlocks,
+            $sourceText,
+            $languageCode,
+            $additionalContext,
+            $catalogResult,
+            $sourceElements,
+        );
+
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
@@ -539,6 +783,123 @@ class EnterpriseWikiGenerateAppliedPagesService
     }
 
     /**
+     * Enforces the planned-figure-coverage contract (Wiki run-587 incident): validates the page's
+     * actually-persisted image blocks against its own planned_figures, attempts exactly ONE bounded
+     * AI repair when a REQUIRED figure is missing/duplicated/wrongly-sectioned/missing its
+     * caption or alt-text, re-validates the repair, and throws
+     * EnterpriseWikiFigureMaterializationException if problems remain — the job's existing
+     * exception handling (GenerateEnterpriseWikiAppliedPage::markPivotFailed()) then marks the
+     * pivot failed without any further wiring here, so the run never reaches qa_status=passed with
+     * a missing required figure (EnterpriseWikiAppliedRunLintService's planned_figure_* findings).
+     *
+     * A no-op (no repair call, no exception) when the page has no planned_figures at all — mirrors
+     * ensurePlannedSectionCoverage()'s same "nothing planned, nothing to check" rule, so documents
+     * without figures and pages the maintainer decision never assigned any figure to are completely
+     * unaffected (backward compatibility).
+     *
+     * @param  list<array<string, mixed>>  $contentBlocks  The page's FINAL content blocks (i.e.
+     *                                                     already including appendTableBlocksIfRelevant()/appendImageBlocksIfRelevant()).
+     * @return array{0: string, 1: list<array<string, mixed>>} [markdown, contentBlocks]
+     *
+     * @throws EnterpriseWikiFigureMaterializationException
+     */
+    private function ensurePlannedFigureCoverage(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiDocument $document,
+        string $markdown,
+        array $contentBlocks,
+        string $sourceText,
+        string $languageCode,
+        string $additionalContext,
+        array $catalogResult,
+        array $sourceElements,
+    ): array {
+        $plannedFigures = $this->plannedFiguresForPage($run, $page);
+
+        if ($plannedFigures === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        $validFigureKeys = $this->imageSourceElementKeysForDocument($document);
+
+        $issues = $this->figureCoverageValidator->validate($plannedFigures, $markdown, $contentBlocks, $validFigureKeys);
+        $blocking = array_values(array_filter($issues, [EnterpriseWikiPlannedFigureCoverageValidator::class, 'isBlocking']));
+
+        if ($blocking === []) {
+            return [$markdown, $contentBlocks];
+        }
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned figure coverage issue(s) detected — attempting one bounded repair.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'planned_figure_count' => count($plannedFigures),
+            'required_figure_count' => count(array_filter($plannedFigures, fn (array $f): bool => (bool) ($f['required'] ?? false))),
+            'source_element_keys' => array_column($plannedFigures, 'source_element_key'),
+            'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'source_element_key' => $i['source_element_key'], 'required' => $i['required']], $blocking),
+        ]);
+
+        $repaired = $this->aiClient->repairPlannedFigures(
+            pageTitle: $page->title,
+            pageType: $page->page_type,
+            existingMarkdown: $markdown,
+            issues: $blocking,
+            sourceText: $sourceText,
+            languageCode: $languageCode,
+            additionalContext: $additionalContext,
+            linkCatalog: $catalogResult['catalog'],
+            sourceElements: $sourceElements,
+        );
+
+        $repaired['blocks'] = array_map(function (array $block) use ($catalogResult): array {
+            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+            return $block;
+        }, $repaired['blocks']);
+        $repaired['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($repaired['blocks']);
+
+        $repairedMarkdown = trim(implode("\n\n", array_column($repaired['blocks'], 'markdown')));
+
+        $this->validateWikilinks($run, $page, $repairedMarkdown, $catalogResult['run_page_count']);
+
+        $repairedContentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
+            $document,
+            $repaired['blocks'],
+            $sourceElements,
+        );
+
+        [$repairedMarkdown, $repairedContentBlocks] = $this->appendTableBlocksIfRelevant($document, $page, $repairedMarkdown, $repairedContentBlocks);
+        [$repairedMarkdown, $repairedContentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $repairedMarkdown, $repairedContentBlocks);
+
+        $issuesAfterRepair = $this->figureCoverageValidator->validate($plannedFigures, $repairedMarkdown, $repairedContentBlocks, $validFigureKeys);
+        $blockingAfterRepair = array_values(array_filter($issuesAfterRepair, [EnterpriseWikiPlannedFigureCoverageValidator::class, 'isBlocking']));
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned figure coverage repair attempted.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'issues_before' => count($blocking),
+            'issues_resolved' => count($blocking) - count($blockingAfterRepair),
+            'issues_remaining' => count($blockingAfterRepair),
+            'repair_attempted' => true,
+        ]);
+
+        if ($blockingAfterRepair !== []) {
+            throw new EnterpriseWikiFigureMaterializationException(
+                runId: $run->id,
+                pageId: $page->id,
+                pageType: $page->page_type,
+                failedSourceElementKeys: array_values(array_unique(array_column($blockingAfterRepair, 'source_element_key'))),
+                repairAttempted: true,
+                reason: implode('; ', array_unique(array_map(fn (array $i): string => $i['type'], $blockingAfterRepair))),
+            );
+        }
+
+        return [$repairedMarkdown, $repairedContentBlocks];
+    }
+
+    /**
      * Raw owned_topics list for a page from maintainer_decision_json — the same lookup
      * responsibilityGuidance()'s callers already perform, but returning the plain topic strings
      * rather than formatted prompt text, for EnterpriseWikiPlannedSectionCoverageValidator.
@@ -569,6 +930,84 @@ class EnterpriseWikiGenerateAppliedPagesService
         $entry = (array) data_get($decisionJson, $decisionKey, []);
 
         return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+    }
+
+    /**
+     * This page's own planned_figures list from maintainer_decision_json — same page-entry lookup
+     * pattern as plannedOwnedTopicsForPage(), but returning the raw planned_figures entries (each
+     * with source_element_key/classification/section_placement/purpose/required/caption_hint)
+     * rather than formatted prompt text, for appendImageBlocksIfRelevant()'s per-page materialization
+     * gate/placement and ensurePlannedFigureCoverage()'s validator input.
+     *
+     * Unlike plannedOwnedTopicsForPage() (article-only for the source_* branch, since only article
+     * is in SECTION_COVERAGE_CHECKED_TYPES), this covers BOTH source_article and source_summary —
+     * a figure can be planned onto either.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function plannedFiguresForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        if (in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)) {
+            $entries = array_merge(
+                (array) data_get($decisionJson, 'concept_pages', []),
+                (array) data_get($decisionJson, 'entity_pages', []),
+            );
+
+            $match = collect($entries)->firstWhere('title', $page->title);
+
+            return $match !== null ? $this->validPlannedFigureList($match['planned_figures'] ?? []) : [];
+        }
+
+        $decisionKey = match ($page->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => 'source_article',
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => 'source_summary',
+            default => null,
+        };
+
+        if ($decisionKey === null) {
+            return [];
+        }
+
+        $entry = (array) data_get($decisionJson, $decisionKey, []);
+
+        return $this->validPlannedFigureList($entry['planned_figures'] ?? []);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function validPlannedFigureList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $value,
+            fn (mixed $item): bool => is_array($item) && trim((string) ($item['source_element_key'] ?? '')) !== '',
+        ));
+    }
+
+    /**
+     * Every real, currently-extractable image source_element_key for this document — matches
+     * EnterpriseWikiMaintainerDecisionService::figureCandidatesForDocument()'s same filter, so a
+     * planned_figures entry pointing at a stale/nonexistent key is told apart from a genuinely
+     * missing one (EnterpriseWikiPlannedFigureCoverageValidator's planned_figure_source_missing).
+     *
+     * @return list<string>
+     */
+    private function imageSourceElementKeysForDocument(EnterpriseWikiDocument $document): array
+    {
+        $elements = $this->sourceElementService->inspect($document)['elements'];
+
+        return array_values(array_filter(array_map(
+            fn (array $element): string => ($element['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE
+                ? (string) ($element['source_element_key'] ?? '')
+                : '',
+            $elements,
+        )));
     }
 
     /**
@@ -876,6 +1315,31 @@ class EnterpriseWikiGenerateAppliedPagesService
             $lines[] = "Related pages and how to reference them:\n".implode("\n", array_map(
                 fn (array $item): string => sprintf('- %s: %s', $item['page_title'], $item['relationship']),
                 $relatedGuidance,
+            ));
+        }
+
+        $plannedFigures = $this->validPlannedFigureList($entry['planned_figures'] ?? []);
+
+        if ($plannedFigures !== []) {
+            $lines[] = "PLANNED FIGURES FOR THIS PAGE — cite each source_element_key in a source_based block per the figure rules in your instructions:\n".implode("\n", array_map(
+                function (array $figure): string {
+                    $required = ($figure['required'] ?? false) ? 'required' : 'optional';
+                    $section = trim((string) ($figure['section_placement'] ?? '')) !== ''
+                        ? (string) $figure['section_placement']
+                        : 'no specific section — place right after the introduction';
+                    $captionHint = trim((string) ($figure['caption_hint'] ?? ''));
+
+                    return sprintf(
+                        '- %s (%s, %s): %s — section: %s%s',
+                        $figure['source_element_key'] ?? '',
+                        $figure['classification'] ?? 'figure',
+                        $required,
+                        $figure['purpose'] ?? '',
+                        $section,
+                        $captionHint !== '' ? "; caption hint: {$captionHint}" : '',
+                    );
+                },
+                $plannedFigures,
             ));
         }
 

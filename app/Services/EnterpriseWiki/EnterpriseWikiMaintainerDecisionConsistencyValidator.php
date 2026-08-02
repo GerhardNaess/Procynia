@@ -34,9 +34,15 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
     /**
      * @param  array<string, mixed>  $decision
      * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  string[]  $validFigureSourceElementKeys  Real, currently-extractable figure keys
+     *                                                  (EnterpriseWikiDocumentSourceElementService, filtered to showable images) — passed by
+     *                                                  the caller (EnterpriseWikiMaintainerDecisionService) so a dangling planned_figures
+     *                                                  reference can be told apart from a genuinely nonexistent one. An empty list means the
+     *                                                  caller did not supply a known set (e.g. a hand-built decision in a test) — the dangling-
+     *                                                  key check is skipped entirely rather than flagging every figure as unknown.
      * @return string[] Empty when the decision is internally consistent.
      */
-    public function findIssues(array $decision, array $indexContext): array
+    public function findIssues(array $decision, array $indexContext, array $validFigureSourceElementKeys = []): array
     {
         $knownTitles = array_merge(
             $this->indexTitles($indexContext),
@@ -46,6 +52,8 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         return array_merge(
             $this->findDanglingRelatedPageGuidance($decision, $knownTitles),
             $this->findConceptCandidateContradictions($decision, $knownTitles),
+            $this->findDanglingPlannedFigures($decision, $validFigureSourceElementKeys),
+            $this->findConflictingPlannedFigureAssignments($decision),
         );
     }
 
@@ -174,6 +182,85 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
                     $issues[] = "Concept candidate \"{$name}\" is marked necessary for the article but ".
                         "decided \"{$candidateDecision}\" without an existing or planned owning page.";
                 }
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Wiki run-587: a figure must not be planned without a valid, currently-extractable source
+     * element — this is the "En figur skal ikke planlegges uten gyldig kildeelement" requirement,
+     * enforced here (triggering the existing bounded AI repair pass) rather than only failing
+     * outright at generation time.
+     *
+     * @param  string[]  $validFigureSourceElementKeys
+     * @return string[]
+     */
+    private function findDanglingPlannedFigures(array $decision, array $validFigureSourceElementKeys): array
+    {
+        if ($validFigureSourceElementKeys === []) {
+            return [];
+        }
+
+        $issues = [];
+
+        foreach ($this->entriesWithGuidance($decision) as [$label, $entry]) {
+            foreach ((array) ($entry['planned_figures'] ?? []) as $figure) {
+                if (! is_array($figure)) {
+                    continue;
+                }
+
+                $sourceElementKey = (string) ($figure['source_element_key'] ?? '');
+
+                if ($sourceElementKey === '' || in_array($sourceElementKey, $validFigureSourceElementKeys, true)) {
+                    continue;
+                }
+
+                $issues[] = "{$label} plans figure \"{$sourceElementKey}\" via planned_figures, but no ".
+                    'such figure was extracted from the source document.';
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Defense-in-depth companion to EnterpriseWikiMaintainerDecisionMerger's harder, split-flow-
+     * specific figure-conflict check: catches the same shape of problem (one figure planned onto
+     * two different pages) within a single, already-assembled decision — including a plain
+     * single_call decision, which never goes through the merger at all.
+     *
+     * @return string[]
+     */
+    private function findConflictingPlannedFigureAssignments(array $decision): array
+    {
+        $issues = [];
+        $seenBySourceKey = [];
+
+        foreach ($this->entriesWithGuidance($decision) as [$label, $entry]) {
+            $pageTitle = (string) ($entry['title'] ?? $label);
+
+            foreach ((array) ($entry['planned_figures'] ?? []) as $figure) {
+                if (! is_array($figure)) {
+                    continue;
+                }
+
+                $sourceElementKey = (string) ($figure['source_element_key'] ?? '');
+
+                if ($sourceElementKey === '') {
+                    continue;
+                }
+
+                if (isset($seenBySourceKey[$sourceElementKey]) && $seenBySourceKey[$sourceElementKey] !== $pageTitle) {
+                    $issues[] = "Figure \"{$sourceElementKey}\" is planned onto both ".
+                        "\"{$seenBySourceKey[$sourceElementKey]}\" and \"{$pageTitle}\" — a figure must ".
+                        'belong to at most one page.';
+
+                    continue;
+                }
+
+                $seenBySourceKey[$sourceElementKey] = $pageTitle;
             }
         }
 

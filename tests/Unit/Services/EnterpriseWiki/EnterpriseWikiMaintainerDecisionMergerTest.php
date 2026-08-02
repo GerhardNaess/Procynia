@@ -200,6 +200,65 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
         $this->assertTrue($merged['concept_candidates'][0]['necessary_for_article']);
     }
 
+    // =========================================================================
+    // Wiki run-587: planned_figures conflict detection
+    // =========================================================================
+
+    // A figure planned onto two different pages across batches must not be silently
+    // "last-writer-wins" — it is a genuine conflict, same philosophy as page slug/candidate conflicts.
+    public function test_same_figure_planned_onto_two_different_pages_throws_merge_conflict(): void
+    {
+        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+
+        $this->merger()->merge($this->globalPlan(), [
+            $this->batch(
+                [$this->candidate('Incident Management', 'create')],
+                [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: true)])],
+            ),
+            $this->batch(
+                [$this->candidate('Problem Management', 'create')],
+                [$this->pageWithFigures('Problem Management', figures: [$this->figure('img1', required: false)])],
+            ),
+        ]);
+    }
+
+    // The exact same figure key appearing twice within one page's OWN planned_figures list (e.g.
+    // a batch response that happened to list it twice) is deduped, not treated as a conflict —
+    // conflicts only concern the SAME figure landing on DIFFERENT pages.
+    public function test_same_figure_key_twice_within_one_pages_own_planned_figures_is_deduped(): void
+    {
+        $merged = $this->merger()->merge($this->globalPlan(), [
+            $this->batch(
+                [$this->candidate('Incident Management', 'create')],
+                [$this->pageWithFigures('Incident Management', figures: [
+                    $this->figure('img1', required: true),
+                    $this->figure('img1', required: true),
+                ])],
+            ),
+        ]);
+
+        $this->assertCount(1, $merged['concept_pages'][0]['planned_figures']);
+    }
+
+    public function test_figure_conflict_message_identifies_the_source_element_key(): void
+    {
+        try {
+            $this->merger()->merge($this->globalPlan(), [
+                $this->batch(
+                    [$this->candidate('Incident Management', 'create')],
+                    [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: true)])],
+                ),
+                $this->batch(
+                    [$this->candidate('Problem Management', 'create')],
+                    [$this->pageWithFigures('Problem Management', figures: [$this->figure('img1', required: false)])],
+                ),
+            ]);
+            $this->fail('Expected EnterpriseWikiMaintainerDecisionMergeConflictException.');
+        } catch (EnterpriseWikiMaintainerDecisionMergeConflictException $e) {
+            $this->assertStringContainsString('img1', $e->getMessage());
+        }
+    }
+
     // No batches at all (global plan alone) still produces a complete, valid-shaped decision.
     public function test_empty_batch_list_produces_a_complete_decision_with_no_candidates(): void
     {
@@ -279,6 +338,23 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
             'title' => $title,
             'proposed_slug' => $slug ?? strtolower(str_replace(' ', '-', $title)),
             'reason' => 'Concept page.',
+        ];
+    }
+
+    private function pageWithFigures(string $title, array $figures, ?string $slug = null): array
+    {
+        return array_merge($this->page($title, $slug), ['planned_figures' => $figures]);
+    }
+
+    private function figure(string $sourceElementKey, bool $required = false): array
+    {
+        return [
+            'source_element_key' => $sourceElementKey,
+            'classification' => 'diagram',
+            'section_placement' => null,
+            'purpose' => 'Illustrates the governance model.',
+            'required' => $required,
+            'caption_hint' => null,
         ];
     }
 }

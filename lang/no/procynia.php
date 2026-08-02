@@ -3957,6 +3957,26 @@ return [
                 'label' => 'Planlagt seksjon har for lite innhold',
                 'description' => 'En planlagt seksjon har brødtekst, men innholdet er så kort at det ikke utgjør reell substans.',
             ],
+            'planned_figure_missing' => [
+                'label' => 'Planlagt figur mangler',
+                'description' => 'En figur som var planlagt for denne siden finnes ikke som en bildeblokk i det genererte innholdet.',
+            ],
+            'planned_figure_wrong_section' => [
+                'label' => 'Planlagt figur er feil plassert',
+                'description' => 'Figuren finnes, men er ikke plassert under seksjonen den var planlagt for.',
+            ],
+            'planned_figure_wrong_page' => [
+                'label' => 'Planlagt figur er materialisert på feil side',
+                'description' => 'Figuren er materialisert på en annen side enn den maintainer-beslutningen planla den for.',
+            ],
+            'planned_figure_source_missing' => [
+                'label' => 'Planlagt figur mangler gyldig kildeelement',
+                'description' => 'Figuren viser til et kildeelement som ikke lenger finnes i dokumentet.',
+            ],
+            'planned_figure_duplicate' => [
+                'label' => 'Planlagt figur er duplisert',
+                'description' => 'Samme figur forekommer som mer enn én bildeblokk på denne siden.',
+            ],
             'summary_without_article_link' => [
                 'label' => 'Sammendrag mangler lenke til artikkel',
                 'description' => 'Sammendragssiden mangler en lenke tilbake til artikkelen.',

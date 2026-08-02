@@ -36,6 +36,8 @@ class EnterpriseWikiAppliedRunLintService
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
+        private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     /** Expected reverse link type for each forward link type. */
@@ -126,6 +128,7 @@ class EnterpriseWikiAppliedRunLintService
         $runPageIds = array_map(fn (array $entry) => $entry['page']->id, $allPages);
         $sourceText = $this->sourceTextForRun($run);
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+        $validFigureKeys = $this->figureSourceElementKeysForRun($run);
 
         foreach ($allPages as $entry) {
             $counts['pages_checked']++;
@@ -139,8 +142,11 @@ class EnterpriseWikiAppliedRunLintService
                 $this->checkPageLinks($run, $page, $touchedIds, $counts);
                 $this->checkWikilinkIntegrity($run, $page, $version, $runPageIds, $touchedIds, $counts);
                 $this->checkPlannedSectionCoverage($run, $page, $version, $decisionJson, $sourceText, $touchedIds, $counts);
+                $this->checkPlannedFigureCoverage($run, $page, $version, $decisionJson, $validFigureKeys, $touchedIds, $counts);
             }
         }
+
+        $this->checkPlannedFigureCrossPageAssignment($run, $allPages, $decisionJson, $touchedIds, $counts);
 
         // ----------------------------------------------------------------
         // Close stale open findings for this run that were not touched
@@ -438,6 +444,233 @@ class EnterpriseWikiAppliedRunLintService
             ->first();
 
         return (string) ($document->extracted_text ?? '');
+    }
+
+    /**
+     * Wiki run-587: deterministically re-checks whatever image blocks actually persisted against
+     * the page's own planned_figures — same defense-in-depth relationship to
+     * EnterpriseWikiGenerateAppliedPagesService::ensurePlannedFigureCoverage()'s generation-time
+     * check as checkPlannedSectionCoverage() has to its own generation-time counterpart.
+     *
+     * Unlike checkPlannedSectionCoverage() (which only ever reports blocking issues), every issue
+     * type is reported here — a code is raised as SEVERITY_ERROR (blocking) when at least one of
+     * its issues concerns a REQUIRED figure or is a duplicate (matching
+     * EnterpriseWikiPlannedFigureCoverageValidator::isBlocking()'s own rule), otherwise
+     * SEVERITY_WARNING — so an optional figure gap is still visible without blocking qa_status.
+     */
+    private function checkPlannedFigureCoverage(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        array $decisionJson,
+        array $validFigureKeys,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $plannedFigures = $this->plannedFiguresForPage($page, $decisionJson);
+
+        if ($plannedFigures === []) {
+            return;
+        }
+
+        $contentBlocks = (array) ($version->content_blocks_json ?? []);
+        $issues = $this->figureCoverageValidator->validate($plannedFigures, (string) $version->content_markdown, $contentBlocks, $validFigureKeys);
+
+        $byCode = [];
+
+        foreach ($issues as $issue) {
+            $code = match ($issue['type']) {
+                EnterpriseWikiPlannedFigureCoverageValidator::TYPE_MISSING => EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_MISSING,
+                EnterpriseWikiPlannedFigureCoverageValidator::TYPE_WRONG_SECTION => EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_WRONG_SECTION,
+                EnterpriseWikiPlannedFigureCoverageValidator::TYPE_SOURCE_MISSING => EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_SOURCE_MISSING,
+                EnterpriseWikiPlannedFigureCoverageValidator::TYPE_DUPLICATE => EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_DUPLICATE,
+                // caption/alt-text-missing are surfaced only via the bounded repair at generation
+                // time (EnterpriseWikiGenerateAppliedPagesService), not their own standalone lint code.
+                default => null,
+            };
+
+            if ($code === null) {
+                continue;
+            }
+
+            $byCode[$code][] = $issue;
+        }
+
+        foreach ($byCode as $code => $codeIssues) {
+            $hasBlocking = array_filter($codeIssues, [EnterpriseWikiPlannedFigureCoverageValidator::class, 'isBlocking']) !== [];
+            $severity = $hasBlocking ? EnterpriseWikiLintFinding::SEVERITY_ERROR : EnterpriseWikiLintFinding::SEVERITY_WARNING;
+            $keys = implode(', ', array_map(fn (array $i): string => '"'.$i['source_element_key'].'"', $codeIssues));
+
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, $code),
+                $severity,
+                sprintf('Planned figure(s) %s %s.', $keys, $this->figureIssueDescription($codeIssues[0]['type'])),
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function figureIssueDescription(string $issueType): string
+    {
+        return match ($issueType) {
+            EnterpriseWikiPlannedFigureCoverageValidator::TYPE_MISSING => 'were planned for this page but no matching image block was found',
+            EnterpriseWikiPlannedFigureCoverageValidator::TYPE_WRONG_SECTION => 'were planned under a specific section but the persisted image block is not there',
+            EnterpriseWikiPlannedFigureCoverageValidator::TYPE_SOURCE_MISSING => 'reference a source_element_key that no longer exists in the document',
+            default => 'appear more than once as an image block on this page',
+        };
+    }
+
+    /**
+     * Wiki run-587: cross-page counterpart to checkPlannedFigureCoverage() — that check only ever
+     * sees one page's own planned_figures, so it cannot detect a figure planned onto page A that
+     * ended up materialized as a real image block on page B instead. This is most likely on an
+     * article/summary page, since — unlike concept/entity — those still materialize ANY image the
+     * AI happens to cite, not only ones this page's own plan assigned to it. Requires run-wide
+     * visibility across all pages, so this runs once per run rather than once per page.
+     *
+     * @param  list<array{page: EnterpriseWikiPage, version: ?EnterpriseWikiPageVersion}>  $allPages
+     */
+    private function checkPlannedFigureCrossPageAssignment(
+        EnterpriseWikiIngestRun $run,
+        array $allPages,
+        array $decisionJson,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $plannedPageIdByKey = [];
+
+        foreach ($allPages as $entry) {
+            foreach ($this->plannedFiguresForPage($entry['page'], $decisionJson) as $figure) {
+                $key = (string) ($figure['source_element_key'] ?? '');
+
+                if ($key !== '') {
+                    $plannedPageIdByKey[$key] = $entry['page']->id;
+                }
+            }
+        }
+
+        if ($plannedPageIdByKey === []) {
+            return;
+        }
+
+        foreach ($allPages as $entry) {
+            $page = $entry['page'];
+            $version = $entry['version'];
+
+            if ($version === null) {
+                continue;
+            }
+
+            foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+                if (! is_array($block) || ($block['block_type'] ?? null) !== 'image') {
+                    continue;
+                }
+
+                $key = (string) ($block['source_element_key'] ?? ($block['image_data']['source_image_key'] ?? ''));
+                $plannedPageId = $plannedPageIdByKey[$key] ?? null;
+
+                if ($key === '' || $plannedPageId === null || $plannedPageId === $page->id) {
+                    continue;
+                }
+
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_WRONG_PAGE),
+                    EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                    sprintf(
+                        'Figure "%s" was materialized on this page, but planned_figures assigned it to a different page (page id %d).',
+                        $key,
+                        $plannedPageId,
+                    ),
+                    $touchedIds,
+                    $counts,
+                );
+            }
+        }
+    }
+
+    /**
+     * Same planned_figures lookup as
+     * EnterpriseWikiGenerateAppliedPagesService::plannedFiguresForPage() (duplicated rather than
+     * shared — same reason as plannedOwnedTopicsForPage() above: the two call sites read from
+     * different inputs, a fresh $run.maintainer_decision_json here vs. one already loaded during
+     * generation).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function plannedFiguresForPage(EnterpriseWikiPage $page, array $decisionJson): array
+    {
+        if (in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_CONCEPT, EnterpriseWikiPage::PAGE_TYPE_ENTITY], true)) {
+            $entries = array_merge(
+                (array) data_get($decisionJson, 'concept_pages', []),
+                (array) data_get($decisionJson, 'entity_pages', []),
+            );
+
+            $match = collect($entries)->firstWhere('title', $page->title);
+
+            return $match !== null ? $this->validPlannedFigureList($match['planned_figures'] ?? []) : [];
+        }
+
+        $decisionKey = match ($page->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => 'source_article',
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => 'source_summary',
+            default => null,
+        };
+
+        if ($decisionKey === null) {
+            return [];
+        }
+
+        $entry = (array) data_get($decisionJson, $decisionKey, []);
+
+        return $this->validPlannedFigureList($entry['planned_figures'] ?? []);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function validPlannedFigureList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $value,
+            fn (mixed $item): bool => is_array($item) && trim((string) ($item['source_element_key'] ?? '')) !== '',
+        ));
+    }
+
+    /**
+     * Every real, currently-extractable image source_element_key for this run's document — matches
+     * EnterpriseWikiMaintainerDecisionService::figureCandidatesForDocument()'s same filter. Returns
+     * [] for a non-document-sourced run (mirrors sourceTextForRun()), which
+     * EnterpriseWikiPlannedFigureCoverageValidator treats as "unknown, skip the source_missing check"
+     * rather than flagging every figure as unknown.
+     *
+     * @return list<string>
+     */
+    private function figureSourceElementKeysForRun(EnterpriseWikiIngestRun $run): array
+    {
+        if ($run->source_type !== EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+            return [];
+        }
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('id', $run->source_id)
+            ->first();
+
+        if ($document === null) {
+            return [];
+        }
+
+        $elements = $this->sourceElementService->inspect($document)['elements'];
+
+        return array_values(array_filter(array_map(
+            fn (array $element): string => ($element['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE
+                ? (string) ($element['source_element_key'] ?? '')
+                : '',
+            $elements,
+        )));
     }
 
     private function checkPageClaims(

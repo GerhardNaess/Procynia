@@ -58,6 +58,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     /**
      * @param  array{title: string, filename: string}  $sourceMeta
      * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  list<array<string, mixed>>  $figureCandidates  Same shape as
+     *                                                        EnterpriseWikiMaintainerDecisionAiClient::decide()'s parameter — offered identically
+     *                                                        to the global plan AND every candidate batch (all batches see the same truncated
+     *                                                        source text, so no batch is any more or less entitled to plan a given figure; the
+     *                                                        merger is what catches two batches planning the same figure onto different pages).
      * @return array<string, mixed> A raw (not yet EnterpriseWikiMaintainerDecisionPrompt::parse()d)
      *                              decision, in the exact same shape a single decide() call would produce.
      *
@@ -68,10 +73,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $sourceText,
         array $indexContext,
         string $languageCode,
+        array $figureCandidates = [],
     ): array {
         $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName);
+        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates);
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
 
         $mentions = $globalPlan['concept_candidate_mentions'];
@@ -109,6 +115,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                     $globalPlan,
                     $batchMentions,
                     $batchIndex,
+                    $figureCandidates,
                 );
                 $batchResults[] = EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($batchRaw);
             } catch (Throwable $e) {
@@ -133,9 +140,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /** @return array<string, mixed> */
-    private function decideGlobalPlan(array $sourceMeta, string $sourceText, array $indexContext, string $languageName): array
+    private function decideGlobalPlan(array $sourceMeta, string $sourceText, array $indexContext, string $languageName, array $figureCandidates = []): array
     {
-        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext);
+        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
         $inputSizeChars = mb_strlen($userPromptText);
 
         return $this->capacityRetryExecutor->execute(
@@ -165,8 +172,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $globalPlan,
         array $batchMentions,
         int $batchIndex,
+        array $figureCandidates = [],
     ): array {
-        $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions);
+        $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions, $figureCandidates);
         $inputSizeChars = mb_strlen($userPromptText);
         $candidateCount = count($batchMentions);
 
@@ -266,6 +274,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             ...$this->pageResponsibilityInstructionLines(),
             '',
+            EnterpriseWikiMaintainerDecisionAiClient::figurePlanningRules(),
+            '',
             'CONCEPT CANDIDATE MENTIONS (identification only — do not decide anything about them yet):',
             '  List every central concept candidate this source document points to: an independent',
             '  subject-matter term, process, practice, methodology, or framework — not a mere mention of',
@@ -298,6 +308,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'For each candidate decided "create", add a matching entry to concept_pages (action "create",',
             'page_id null, proposed_slug, reason, and a short owned_topics/reference_only_topics/',
             'excluded_topics/related_page_guidance — same rules as any other concept page).',
+            '',
+            EnterpriseWikiMaintainerDecisionAiClient::figurePlanningRules(),
             '',
             'SLUG AND TITLE RULES:',
             '  proposed_slug: lowercase, hyphens only. No dots, spaces, or file extensions.',
@@ -372,7 +384,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ];
     }
 
-    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext): string
+    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
@@ -387,12 +399,15 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
+            '',
+            EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
         ]);
     }
 
     /**
      * @param  array<string, mixed>  $globalPlan
      * @param  list<array<string, mixed>>  $batchMentions
+     * @param  list<array<string, mixed>>  $figureCandidates
      */
     private function candidateBatchUserPrompt(
         array $sourceMeta,
@@ -400,6 +415,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $indexContext,
         array $globalPlan,
         array $batchMentions,
+        array $figureCandidates = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
 
@@ -427,6 +443,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             'CANDIDATES TO DECIDE IN THIS BATCH ('.count($batchMentions).'):',
             (string) json_encode($batchMentions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            '',
+            EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
         ]);
     }
 

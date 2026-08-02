@@ -62,6 +62,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
      * @param  string  $sourceText  Extracted text from the document.
      * @param  array<int, array<string, mixed>>  $indexContext  From EnterpriseWikiIndexContextService::buildForCustomer().
      * @param  string  $languageCode  'no' | 'en'
+     * @param  list<array<string, mixed>>  $figureCandidates  Showable image source elements
+     *                                                        (EnterpriseWikiDocumentSourceElementService::inspect(), filtered to
+     *                                                        source_element_type=image — decorative/logo images are never included, since
+     *                                                        isShowable() already excluded them upstream) — Wiki run-587: figures were extracted
+     *                                                        and classified correctly but never once considered by this planning step.
      * @return array<string, mixed> Validated maintainer decision.
      *
      * @throws RuntimeException when AI is disabled, the API fails, the response is empty or invalid.
@@ -73,6 +78,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         string $sourceText,
         array $indexContext,
         string $languageCode,
+        array $figureCandidates = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -96,9 +102,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
         if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
-            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode);
+            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates);
         } else {
-            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext);
+            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
 
             $decoded = $this->capacityRetryExecutor->execute(
                 'EnterpriseWikiMaintainerDecisionAiClient',
@@ -137,6 +143,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
      * @param  array<int, array<string, mixed>>  $indexContext
      * @param  array<string, mixed>  $decision  The previous, inconsistent decision.
      * @param  string[]  $issues  Human-readable issues from the consistency validator.
+     * @param  list<array<string, mixed>>  $figureCandidates  Same shape as decide()'s parameter.
      * @return array<string, mixed> Validated, corrected maintainer decision.
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is invalid.
@@ -150,6 +157,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         string $languageCode,
         array $decision,
         array $issues,
+        array $figureCandidates = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -158,7 +166,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
 
         $languageName = $this->languageName($languageCode);
-        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues);
+        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues, $figureCandidates);
         $inputSizeChars = mb_strlen($repairPromptText);
 
         $decoded = $this->capacityRetryExecutor->execute(
@@ -252,6 +260,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'Keep every free-text field short and decision-oriented (see CONCEPT CANDIDATES rules) —',
             'do not turn a fix into an opportunity to lengthen unrelated fields.',
             '',
+            'For an issue about a planned figure with no matching FIGURE CANDIDATES entry: remove that',
+            'planned_figures entry, or correct its source_element_key to a real candidate if the intent',
+            'is clear. Do not invent a new source_element_key.',
+            '',
+            self::figurePlanningRules(),
+            '',
             'Return the complete corrected decision as JSON only, conforming to the same schema as',
             'before. Do not include any text outside the JSON.',
         ]);
@@ -263,6 +277,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $indexContext,
         array $decision,
         array $issues,
+        array $figureCandidates = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
         $text = trim($sourceText);
@@ -287,6 +302,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexJson,
+            '',
+            self::figureCandidatesBlock($figureCandidates),
             '',
             'PREVIOUS DECISION:',
             $decisionJson,
@@ -452,11 +469,53 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  in justification, specifically why no page is warranted — not just repeat that it is out',
             '  of scope.',
             '',
+            self::figurePlanningRules(),
+            '',
             'Return JSON only. No text outside JSON.',
         ]);
     }
 
-    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext): string
+    /**
+     * Shared figure-planning instructions for the single-call developer prompt, the repair
+     * developer prompt, and (via EnterpriseWikiMaintainerDecisionSplitCoordinator) the split-flow
+     * global-plan/candidate-batch developer prompts.
+     */
+    public static function figurePlanningRules(): string
+    {
+        return implode("\n", [
+            'PLANNED FIGURES (planned_figures on every page — source_article, source_summary,',
+            'concept_pages, entity_pages):',
+            '  You are given FIGURE CANDIDATES — every figure the document extraction already found,',
+            '  classified, and made citable. For EACH figure candidate, explicitly decide one of:',
+            '    use_on_page: the figure is professionally significant and belongs on a specific',
+            '    planned or existing page — add one planned_figures entry to that page.',
+            '    reference_only: the figure exists but is not central enough to place on any page —',
+            '    do not add a planned_figures entry for it anywhere.',
+            '    exclude: the figure is decorative/branding despite having reached this list, or is',
+            '    otherwise irrelevant — do not add a planned_figures entry for it anywhere.',
+            '  Weigh this deliberately for governance/process models, organisation charts, and formal',
+            '  meeting/decision structures — these are exactly the figure types most likely to be',
+            '  professionally significant and most likely to be silently dropped if not planned',
+            '  explicitly. Do not plan a decorative image, a cover photo, or a figure with no clear',
+            '  professional content.',
+            '  Each planned_figures entry has: source_element_key (copy EXACTLY from the FIGURE',
+            '  CANDIDATES list — never invent one), classification (copy from the candidate),',
+            '  section_placement (the heading text of the owned_topics section this figure belongs',
+            '  under, or null to place it right after the page introduction), purpose (ONE short',
+            '  sentence — why this figure belongs on this page), required (true only when the page',
+            '  would be materially incomplete without it; false when it would help but is not',
+            '  essential), caption_hint (a short suggested caption, or null to use the figure\'s own',
+            '  existing caption/description).',
+            '  A figure must be planned onto AT MOST ONE page unless there is an explicit, different',
+            '  professional reason for it to appear on more than one (e.g. a summary and its full',
+            '  article both showing the same key diagram) — never plan the same figure onto two',
+            '  unrelated pages out of ambiguity.',
+            '  Never plan a figure that is not in the FIGURE CANDIDATES list, and never alter its',
+            '  source_element_key or classification.',
+        ]);
+    }
+
+    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
@@ -480,7 +539,39 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexJson,
+            '',
+            self::figureCandidatesBlock($figureCandidates),
         ]);
+    }
+
+    /**
+     * Renders the "FIGURE CANDIDATES" prompt block shared by the single-call, repair, and (via
+     * EnterpriseWikiMaintainerDecisionSplitCoordinator) split-flow prompts — every figure the
+     * document extraction pipeline already found, classified, and made citable
+     * (EnterpriseWikiDocumentSourceElementService — decorative/logo images are never in this list,
+     * isShowable() already excluded them upstream of this class).
+     *
+     * @param  list<array<string, mixed>>  $figureCandidates
+     */
+    public static function figureCandidatesBlock(array $figureCandidates): string
+    {
+        if ($figureCandidates === []) {
+            return "FIGURE CANDIDATES (0 figures):\nNo figures were extracted from this document.";
+        }
+
+        $parts = [
+            'FIGURE CANDIDATES ('.count($figureCandidates).' figures):',
+            'Each of these was already extracted from the source document and classified as a genuine,',
+            'showable figure (never a logo/decorative element) — decide for each one whether it is',
+            'professionally significant enough to plan onto a page.',
+            '',
+        ];
+
+        foreach ($figureCandidates as $figure) {
+            $parts[] = (string) json_encode($figure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        return implode("\n", $parts);
     }
 
     private function languageName(string $code): string

@@ -131,6 +131,54 @@ class WikiPageContentAiClient
     }
 
     /**
+     * Single bounded repair attempt for a page whose required planned_figures were found
+     * missing/invalid by EnterpriseWikiPlannedFigureCoverageValidator (Wiki run-587 incident: 4 of
+     * 4 professionally significant figures were extracted, classified, and made citable, but never
+     * once cited). Deliberately a SEPARATE repair from repairPlannedSections() — a missing figure
+     * citation and an empty prose section are different defects with different fixes, and mixing
+     * them into one repair call would blur "the section-coverage repair is untouched by this task"
+     * from "the figure-coverage repair this task adds".
+     *
+     * @param  list<array{type: string, source_element_key: string, required: bool, planned_section: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     *
+     * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
+     */
+    public function repairPlannedFigures(
+        string $pageTitle,
+        string $pageType,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $languageCode,
+        string $additionalContext = '',
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): array {
+        if (! self::isAvailable()) {
+            throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
+        }
+
+        $payload = $this->buildFigureRepairPayload(
+            $pageTitle,
+            $pageType,
+            $existingMarkdown,
+            $issues,
+            $sourceText,
+            $additionalContext,
+            $this->languageName($languageCode),
+            $linkCatalog,
+            $sourceElements,
+        );
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
+        $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient(figure_repair)');
+
+        return $this->parseBlocksResponse($decoded);
+    }
+
+    /**
      * @return array{markdown: string, blocks: list<array<string, mixed>>}
      */
     private function parseBlocksResponse(array $decoded): array
@@ -359,6 +407,167 @@ class WikiPageContentAiClient
         return implode("\n", $parts);
     }
 
+    /**
+     * @param  list<array{type: string, source_element_key: string, required: bool, planned_section: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function buildFigureRepairPayload(
+        string $pageTitle,
+        string $pageType,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $additionalContext,
+        string $languageName,
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): array {
+        return [
+            'model' => self::MODEL,
+            'input' => [
+                [
+                    'role' => 'developer',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->figureRepairDeveloperPrompt($pageType, $languageName),
+                        ],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->figureRepairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => self::PROMPT_NAME,
+                    'strict' => true,
+                    'schema' => self::schema(),
+                ],
+            ],
+            'reasoning' => [
+                'effort' => self::REASONING_EFFORT,
+            ],
+            'store' => false,
+            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+        ];
+    }
+
+    private function figureRepairDeveloperPrompt(string $pageType, string $languageName): string
+    {
+        return implode("\n", [
+            "You are an editorial wiki writer repairing a previously generated {$pageType} page in {$languageName} that failed to cite one or more of its planned figures.",
+            '',
+            'REPAIR RULES (mandatory):',
+            '- Return the FULL corrected page as page.blocks, using the exact same block schema as ordinary generation.',
+            '- Keep everything from the previously generated page that is already good — do not rewrite or remove content unrelated to the figures listed below.',
+            '- For each figure named in "FIGURES TO REPAIR" below, add (or correct) a source_based block whose source_element_keys includes that figure\'s exact source_element_key, with source_element_types including "image". Write real, specific prose describing what the figure shows and why it matters here — never a vague summary sentence, and never omit it.',
+            '- Place the citing block near the figure\'s given section placement when one is given.',
+            '- Do not invent visual details the figure\'s description does not support.',
+            '',
+            'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
+            '- No HTML comments (<!-- ... -->)',
+            '- No lines starting with "Kilde:", "Source:", "Ref:" or any citation marker',
+            '- No quoted source excerpts or blockquote lines (lines starting with >)',
+            '- No filenames, document IDs, run IDs, or internal technical identifiers',
+            '- No mention of AI generation, confidence levels, or approval status',
+            '',
+            'Every ordinary content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
+            '',
+            'Return only JSON matching the schema. No text before or after JSON.',
+        ]);
+    }
+
+    /**
+     * @param  list<array{type: string, source_element_key: string, required: bool, planned_section: ?string}>  $issues
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function figureRepairUserPrompt(
+        string $pageTitle,
+        string $existingMarkdown,
+        array $issues,
+        string $sourceText,
+        string $additionalContext,
+        array $linkCatalog = [],
+        array $sourceElements = [],
+    ): string {
+        $parts = [
+            "Page title: {$pageTitle}",
+            '',
+            'PREVIOUSLY GENERATED PAGE (needs repair — keep what is good, fix only the figures listed below):',
+            '',
+            $existingMarkdown,
+            '',
+            '---',
+            '',
+            'FIGURES TO REPAIR:',
+            '',
+        ];
+
+        foreach ($issues as $issue) {
+            $section = $issue['planned_section'] ?? '(page introduction — no section given)';
+            $requiredLabel = ($issue['required'] ?? false) ? 'required' : 'optional';
+            $parts[] = sprintf(
+                '- source_element_key "%s" — section placement: %s (%s, issue: %s)',
+                $issue['source_element_key'],
+                $section,
+                $requiredLabel,
+                $issue['type'],
+            );
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'Source document:';
+        $parts[] = '';
+        $parts[] = $sourceText;
+
+        if (trim($additionalContext) !== '') {
+            $parts[] = '';
+            $parts[] = '---';
+            $parts[] = '';
+            $parts[] = 'Additional context:';
+            $parts[] = '';
+            $parts[] = $additionalContext;
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'ALLOWED WIKILINK TARGETS ('.count($linkCatalog).' pages):';
+        $parts[] = '';
+
+        if ($linkCatalog !== []) {
+            foreach ($linkCatalog as $entry) {
+                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
+            }
+        } else {
+            $parts[] = 'No other pages available to link to.';
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+        $parts[] = 'SOURCE ELEMENTS ('.count($sourceElements).' elements):';
+        $parts[] = '';
+        $parts[] = 'Every source_based block must cite one or more source_element_key values from this list.';
+        $parts[] = 'Do not invent source_element_key values.';
+        $parts[] = '';
+        $parts[] = (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return implode("\n", $parts);
+    }
+
     private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog = [], array $sourceElements = []): array
     {
         return [
@@ -439,6 +648,16 @@ class WikiPageContentAiClient
             '- Never restate the same sentence, fact, or near-identical wording more than once on this page, and never copy wording verbatim from another page\'s content given as context — express a shared idea once, in your own words, in the place it actually belongs.',
         ]);
 
+        $figureRules = implode("\n", [
+            'PLANNED FIGURES:',
+            '- "Additional context" may include a "PLANNED FIGURES FOR THIS PAGE" section — figures the maintainer decision assigned to this page specifically, each with a source_element_key, classification, section placement, purpose, required/optional flag, and an optional caption hint.',
+            '- For each figure marked required: you MUST cite its exact source_element_key in a source_based block\'s source_element_keys, with source_element_types including "image". Write real, specific prose for that block describing what the figure shows and why it matters — never replace the figure with a vague summary sentence, and never omit it.',
+            '- For each figure marked optional: cite it the same way when it fits naturally within this page\'s own content responsibility; it is not an error to leave an optional figure out when there is no natural place for it.',
+            '- Place the citing block near the figure\'s given section placement — if the block belongs under one of this page\'s own ## sections, put it there, not at the very end of the page.',
+            '- Use the figure\'s caption hint (if given) or its existing description to write the citing text — never invent visual details the source description does not support.',
+            '- Never cite a source_element_key of type image that is not listed in SOURCE ELEMENTS or in PLANNED FIGURES.',
+        ]);
+
         $wikilinkRules = implode("\n", [
             'INLINE WIKILINKS:',
             '- content_markdown is wiki content — reference other pages inline the way a wiki article does.',
@@ -469,6 +688,8 @@ class WikiPageContentAiClient
                 '',
                 $responsibilityRules,
                 '',
+                $figureRules,
+                '',
                 $blockRules,
                 '',
                 $wikilinkRules,
@@ -492,6 +713,8 @@ class WikiPageContentAiClient
                 '',
                 $responsibilityRules,
                 '',
+                $figureRules,
+                '',
                 $blockRules,
                 '',
                 $wikilinkRules,
@@ -514,6 +737,8 @@ class WikiPageContentAiClient
                 '- Related article or summary content, when provided, is background for understanding context ONLY — it is never itself a license to explain a topic in depth. Use it to decide what this page is responsible for, then write strictly within that responsibility (see PAGE RESPONSIBILITY below); a topic another page owns, or that is not one of this page\'s own responsibility items, belongs behind a short mention and a link at most, never a repeated or newly-invented explanation',
                 '',
                 $responsibilityRules,
+                '',
+                $figureRules,
                 '',
                 $blockRules,
                 '',
@@ -539,6 +764,8 @@ class WikiPageContentAiClient
                 '- Do not expand into general background on the wider subject beyond what this page\'s own content responsibility calls for — a short source document justifies a short article',
                 '',
                 $responsibilityRules,
+                '',
+                $figureRules,
                 '',
                 $blockRules,
                 '',

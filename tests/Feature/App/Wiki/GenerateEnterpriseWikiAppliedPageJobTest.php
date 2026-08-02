@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
@@ -853,6 +854,408 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
+    // =========================================================================
+    // Wiki run-587: planned figure coverage — gating, placement, repair, and hard block
+    // =========================================================================
+
+    /**
+     * The run-587 fix itself: a figure explicitly planned onto a CONCEPT page (previously
+     * structurally impossible — appendImageBlocksIfRelevant() was hardcoded to article/summary
+     * only) is materialized as a real image block once the AI cites it.
+     */
+    public function test_figure_planned_onto_a_concept_page_is_materialized_as_an_image_block(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlingsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => [],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+                'planned_figures' => [$this->plannedFigure('img0', required: true)],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($article): array {
+                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", [$imageElement]);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+
+        $imageBlocks = collect($version->content_blocks_json)
+            ->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')
+            ->values();
+
+        $this->assertCount(1, $imageBlocks);
+        $this->assertSame('img0', $imageBlocks[0]['image_data']['source_image_key']);
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+    }
+
+    /**
+     * The other half of the run-587 fix: a concept/entity page only gets an image the maintainer
+     * decision explicitly planned onto it — an image the AI cites but that was never planned onto
+     * this page is silently dropped, not materialized.
+     */
+    public function test_figure_cited_by_ai_but_not_planned_onto_a_concept_page_is_not_materialized(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlingsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => [],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+                // No planned_figures at all for this page — the AI citing the image below must
+                // not be enough to materialize it here.
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($article): array {
+                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", [$imageElement]);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+
+        $this->assertSame(
+            0,
+            collect($version->content_blocks_json)->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')->count(),
+        );
+    }
+
+    /**
+     * Backward compatibility: article/summary pages keep the pre-existing, unrestricted "any cited
+     * image is materialized" behavior regardless of planned_figures — this is not a new gate.
+     */
+    public function test_article_page_still_materializes_any_cited_image_without_being_planned(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array {
+                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN, [$imageElement]);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail();
+
+        $this->assertSame(
+            1,
+            collect($version->content_blocks_json)->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')->count(),
+        );
+    }
+
+    /**
+     * A required planned figure the AI's first response fails to cite triggers exactly one bounded
+     * repair (repairPlannedFigures()) — when the repair cites it, generation succeeds normally.
+     */
+    public function test_required_figure_missing_from_first_response_is_recovered_by_one_bounded_repair(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlingsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => $this->decisionWithPlannedFigure($article, $concept, required: true)]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $this->nonImageSourceElements($sourceElements)))
+            ->shouldReceive('repairPlannedFigures')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($article): array {
+                $this->assertNotEmpty($issues);
+                $this->assertSame('img0', $issues[0]['source_element_key']);
+
+                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", [$imageElement]);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+
+        $this->assertSame(
+            1,
+            collect($version->content_blocks_json)->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')->count(),
+        );
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+    }
+
+    /**
+     * When even the bounded repair still fails to materialize a REQUIRED figure, generation stops
+     * with EnterpriseWikiFigureMaterializationException and the pivot is marked failed — no
+     * unlimited retry, no page silently accepted without its required figure.
+     */
+    public function test_required_figure_still_missing_after_repair_throws_and_marks_pivot_failed(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlingsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => $this->decisionWithPlannedFigure($article, $concept, required: true)]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $this->nonImageSourceElements($sourceElements)))
+            // The repair attempt still never cites the image.
+            ->shouldReceive('repairPlannedFigures')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $this->nonImageSourceElements($sourceElements)));
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+                app(EnterpriseWikiGenerateAppliedPagesService::class)
+            );
+            $this->fail('Expected EnterpriseWikiFigureMaterializationException to propagate.');
+        } catch (EnterpriseWikiFigureMaterializationException $e) {
+            $this->assertSame($run->id, $e->runId);
+            $this->assertSame($concept->id, $e->pageId);
+            $this->assertTrue($e->repairAttempted);
+            $this->assertContains('img0', $e->failedSourceElementKeys);
+        }
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertStringContainsString('EnterpriseWikiFigureMaterializationException', $pivot->generation_error);
+        $this->assertNull($pivot->generated_page_version_id);
+        $this->assertFalse(
+            EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists(),
+            'A page with a still-missing required figure must never be persisted as a version.',
+        );
+
+        Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
+    }
+
+    /**
+     * An OPTIONAL planned figure the AI never cites is not blocking — generation completes
+     * normally, with no repair call at all.
+     */
+    public function test_missing_optional_figure_does_not_block_generation_or_trigger_repair(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Samhandlingsmodell');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => $this->decisionWithPlannedFigure($article, $concept, required: false)]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $this->nonImageSourceElements($sourceElements)))
+            ->shouldNotReceive('repairPlannedFigures');
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+    }
+
+    private function plannedFigure(string $sourceElementKey, bool $required): array
+    {
+        return [
+            'source_element_key' => $sourceElementKey,
+            'classification' => 'diagram',
+            'section_placement' => null,
+            'purpose' => 'Illustrates the collaboration model between customer and supplier.',
+            'required' => $required,
+            'caption_hint' => null,
+        ];
+    }
+
+    private function decisionWithPlannedFigure(EnterpriseWikiPage $article, EnterpriseWikiPage $concept, bool $required): array
+    {
+        return [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => [],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+                'planned_figures' => [$this->plannedFigure('img0', required: $required)],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ];
+    }
+
     private function createDocxDocumentWithOneImage(Customer $customer): EnterpriseWikiDocument
     {
         $documentXml = <<<'XML'
@@ -1026,6 +1429,18 @@ XML;
         }
 
         return $run;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return list<array<string, mixed>>
+     */
+    private function nonImageSourceElements(array $sourceElements): array
+    {
+        return array_values(array_filter(
+            $sourceElements,
+            fn (array $element): bool => ($element['source_element_type'] ?? null) !== 'image',
+        ));
     }
 
     /**

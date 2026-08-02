@@ -82,6 +82,17 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_PLANNED_SECTION_BELOW_MINIMUM_SUBSTANCE = 'planned_section_below_minimum_substance';
 
+    // --- Wiki run-587: planned figure coverage (wiki:lint-applied-run) ---
+    public const CODE_PLANNED_FIGURE_MISSING = 'planned_figure_missing';
+
+    public const CODE_PLANNED_FIGURE_WRONG_SECTION = 'planned_figure_wrong_section';
+
+    public const CODE_PLANNED_FIGURE_WRONG_PAGE = 'planned_figure_wrong_page';
+
+    public const CODE_PLANNED_FIGURE_SOURCE_MISSING = 'planned_figure_source_missing';
+
+    public const CODE_PLANNED_FIGURE_DUPLICATE = 'planned_figure_duplicate';
+
     public const CODES = [
         self::CODE_CLAIM_MISSING_SOURCE,
         self::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
@@ -116,6 +127,11 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_PLANNED_SECTION_EMPTY,
         self::CODE_PLANNED_SECTION_ONLY_LINKS,
         self::CODE_PLANNED_SECTION_BELOW_MINIMUM_SUBSTANCE,
+        self::CODE_PLANNED_FIGURE_MISSING,
+        self::CODE_PLANNED_FIGURE_WRONG_SECTION,
+        self::CODE_PLANNED_FIGURE_WRONG_PAGE,
+        self::CODE_PLANNED_FIGURE_SOURCE_MISSING,
+        self::CODE_PLANNED_FIGURE_DUPLICATE,
     ];
 
     public const SEVERITY_INFO = 'info';

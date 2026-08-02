@@ -40,6 +40,15 @@ namespace App\Services\EnterpriseWiki;
  * empty list when absent — exactly like every other optional top-level field in this contract —
  * so a hand-built decision (tests, or a legacy stored run predating this field) remains valid.
  *
+ * planned_figures (Wiki run-587: 4 of 4 professionally significant figures were extracted,
+ * classified, and made citable, but never once cited by any page — the maintainer decision itself
+ * had no concept of figures existing at all): a page's own list of source-document figures it is
+ * responsible for materializing, each naming the figure's real source_element_key (from
+ * EnterpriseWikiDocumentSourceElementService — never invented), a classification, an optional
+ * section_placement (matched against this page's own owned_topics/headings), a short purpose, a
+ * required/optional flag, and an optional caption_hint. Same optional-in-PHP treatment as the
+ * other responsibility fields above — a decision predating this field parses with an empty list.
+ *
  * concept_candidates (added to stabilise whether a central, explicitly-referenced concept gets a
  * page — see the Wiki run-581 "ITIL Incident Management" incident: concept_pages came back empty
  * even though the article/summary both pointed the reader onward to that concept): before
@@ -191,6 +200,22 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'additionalProperties' => false,
                 ],
             ],
+            'planned_figures' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_element_key' => ['type' => 'string'],
+                        'classification' => ['type' => 'string'],
+                        'section_placement' => ['type' => ['string', 'null']],
+                        'purpose' => ['type' => 'string'],
+                        'required' => ['type' => 'boolean'],
+                        'caption_hint' => ['type' => ['string', 'null']],
+                    ],
+                    'required' => ['source_element_key', 'classification', 'section_placement', 'purpose', 'required', 'caption_hint'],
+                    'additionalProperties' => false,
+                ],
+            ],
         ];
     }
 
@@ -205,7 +230,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
             ], self::responsibilityProperties()),
-            'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
+            'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance', 'planned_figures'],
             'additionalProperties' => false,
         ];
     }
@@ -222,7 +247,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
             ], self::responsibilityProperties()),
-            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
+            'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance', 'planned_figures'],
             'additionalProperties' => false,
         ];
     }
@@ -566,6 +591,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
+        if (array_key_exists('planned_figures', $entry)) {
+            if (! is_array($entry['planned_figures'])) {
+                $errors[] = "{$ctx}.planned_figures must be an array.";
+            } else {
+                foreach ($entry['planned_figures'] as $i => $item) {
+                    $errors = array_merge($errors, self::validatePlannedFigureEntry($item, "{$ctx}.planned_figures[{$i}]"));
+                }
+            }
+        }
+
         return $errors;
     }
 
@@ -586,6 +621,46 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
 
             $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Schema-level validation only — this does NOT confirm source_element_key resolves to a real,
+     * showable image (that requires the document's actual extracted figure inventory, which this
+     * pure-schema class has no access to). That check belongs to
+     * EnterpriseWikiMaintainerDecisionConsistencyValidator (given the real candidate key list) and,
+     * as a final backstop, EnterpriseWikiPlannedFigureCoverageValidator at generation time.
+     *
+     * @return string[]
+     */
+    private static function validatePlannedFigureEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = [];
+
+        foreach (['source_element_key', 'classification', 'purpose'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        foreach (['section_placement', 'caption_hint'] as $field) {
+            if (array_key_exists($field, $entry) && $entry[$field] !== null && ! is_string($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be a string or null.";
+            }
+        }
+
+        if (! array_key_exists('required', $entry) || ! is_bool($entry['required'])) {
+            $errors[] = "{$ctx}.required is required and must be a boolean.";
         }
 
         return $errors;

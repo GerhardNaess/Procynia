@@ -203,6 +203,64 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
     }
 
     // =========================================================================
+    // Wiki run-587: planned_figures dangling source-key / cross-page-conflict checks
+    // =========================================================================
+
+    public function test_planned_figure_with_a_known_source_element_key_has_no_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1')];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, [], ['img1', 'img2']));
+    }
+
+    public function test_planned_figure_with_an_unknown_source_element_key_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img9')];
+
+        $issues = $this->validator()->findIssues($decision, [], ['img1', 'img2']);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img9', implode(' ', $issues));
+    }
+
+    public function test_empty_valid_figure_keys_list_skips_the_dangling_figure_check(): void
+    {
+        // Matches the same "empty means unknown, not nothing is valid" convention as
+        // findDanglingRelatedPageGuidance()'s own $indexContext handling.
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img9')];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, [], []));
+    }
+
+    public function test_same_figure_planned_onto_two_pages_in_a_single_decision_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1')];
+        $decision['concept_pages'] = [
+            array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    public function test_same_figure_planned_onto_the_same_page_twice_has_no_conflict_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [
+            $this->plannedFigure('img1'),
+            $this->plannedFigure('img1'),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -264,6 +322,18 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
             'justification' => 'Test justification.',
             'owning_page_title' => $owningPageTitle,
             'necessary_for_article' => $necessary,
+        ];
+    }
+
+    private function plannedFigure(string $sourceElementKey, bool $required = false): array
+    {
+        return [
+            'source_element_key' => $sourceElementKey,
+            'classification' => 'diagram',
+            'section_placement' => null,
+            'purpose' => 'Illustrates the governance model.',
+            'required' => $required,
+            'caption_hint' => null,
         ];
     }
 }

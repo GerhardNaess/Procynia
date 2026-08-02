@@ -4,6 +4,7 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\EnterpriseWikiIndexContextService;
 use Illuminate\Support\Facades\Log;
 
@@ -25,6 +26,7 @@ class EnterpriseWikiMaintainerDecisionService
         private readonly EnterpriseWikiIndexContextService $indexContextService,
         private readonly EnterpriseWikiMaintainerDecisionAiClient $aiClient,
         private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     /**
@@ -58,9 +60,11 @@ class EnterpriseWikiMaintainerDecisionService
 
         $sourceText = (string) ($document->extracted_text ?? '');
         $indexContext = $this->indexContextService->buildForCustomer($customerId);
+        $figureCandidates = $this->figureCandidatesForDocument($document);
+        $validFigureKeys = array_column($figureCandidates, 'source_element_key');
 
-        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode);
-        $issues = $this->consistencyValidator->findIssues($decision, $indexContext);
+        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates);
+        $issues = $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys);
 
         if ($issues === []) {
             return $decision;
@@ -72,8 +76,8 @@ class EnterpriseWikiMaintainerDecisionService
             'issues' => $issues,
         ]);
 
-        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues);
-        $remainingIssues = $this->consistencyValidator->findIssues($repaired, $indexContext);
+        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates);
+        $remainingIssues = $this->consistencyValidator->findIssues($repaired, $indexContext, $validFigureKeys);
 
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
@@ -91,5 +95,24 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         return $repaired;
+    }
+
+    /**
+     * Every showable (non-decorative/logo) figure already extracted and classified from this
+     * document — EnterpriseWikiDocumentSourceElementService::inspect() has already excluded
+     * decorative/logo images (isShowable()) before this ever sees them, so every candidate here is
+     * a genuine planning candidate. Shape matches what
+     * EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock() renders into the prompt.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function figureCandidatesForDocument(EnterpriseWikiDocument $document): array
+    {
+        $elements = $this->sourceElementService->inspect($document)['elements'];
+
+        return array_values(array_filter(
+            $elements,
+            fn (array $element): bool => ($element['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE,
+        ));
     }
 }
