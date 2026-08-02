@@ -44,6 +44,74 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertContains('null', $items['properties']['page_id']['type']);
     }
 
+    public function test_schema_requires_responsibility_fields_on_source_article(): void
+    {
+        $sourceArticleSchema = $this->schemaProps()['source_article'];
+
+        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'] as $field) {
+            $this->assertContains($field, $sourceArticleSchema['required']);
+            $this->assertArrayHasKey($field, $sourceArticleSchema['properties']);
+        }
+    }
+
+    public function test_schema_requires_responsibility_fields_on_concept_page_items(): void
+    {
+        $items = $this->schemaProps()['concept_pages']['items'];
+
+        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'] as $field) {
+            $this->assertContains($field, $items['required']);
+        }
+    }
+
+    public function test_schema_related_page_guidance_items_require_page_title_and_relationship(): void
+    {
+        $relatedPageGuidanceItems = $this->schemaProps()['source_article']['properties']['related_page_guidance']['items'];
+
+        $this->assertSame(['page_title', 'relationship'], $relatedPageGuidanceItems['required']);
+    }
+
+    // =========================================================================
+    // JSON schema — concept_candidates (Wiki run-581 fix: explicit, structural per-concept
+    // decision so "the AI silently didn't propose a page" becomes a checkable claim)
+    // =========================================================================
+
+    public function test_schema_requires_concept_candidates(): void
+    {
+        $this->assertContains('concept_candidates', $this->schemaRequired());
+    }
+
+    public function test_schema_concept_candidate_items_require_all_nine_fields(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        foreach ([
+            'name', 'concept_type', 'independent_reason', 'mentioned_context',
+            'existing_page_title', 'decision', 'justification', 'owning_page_title',
+            'necessary_for_article',
+        ] as $field) {
+            $this->assertContains($field, $items['required']);
+            $this->assertArrayHasKey($field, $items['properties']);
+        }
+    }
+
+    public function test_schema_concept_candidate_decision_enum_matches_constant(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        $this->assertSame(
+            EnterpriseWikiMaintainerDecisionPrompt::CONCEPT_CANDIDATE_DECISIONS,
+            $items['properties']['decision']['enum'],
+        );
+    }
+
+    public function test_schema_concept_candidate_existing_and_owning_page_title_are_nullable(): void
+    {
+        $items = $this->schemaProps()['concept_candidates']['items'];
+
+        $this->assertContains('null', $items['properties']['existing_page_title']['type']);
+        $this->assertContains('null', $items['properties']['owning_page_title']['type']);
+    }
+
     // =========================================================================
     // validate() — structure
     // =========================================================================
@@ -89,6 +157,286 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
 
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertEmpty($errors);
+    }
+
+    // =========================================================================
+    // validate() — page responsibility fields (owned_topics / reference_only_topics /
+    // excluded_topics / related_page_guidance) — required in the OpenAI schema (strict-mode
+    // constraint) but deliberately optional in the PHP validator, exactly like
+    // concept_pages/entity_pages/warnings, so a decision predating this field (or a hand-built
+    // fixture) stays valid.
+    // =========================================================================
+
+    public function test_responsibility_fields_absent_is_not_an_error(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($this->validDecision());
+        $this->assertEmpty($errors);
+    }
+
+    public function test_owned_topics_with_valid_strings_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['owned_topics'] = ['Definer ITIL som rammeverk.', 'Forklar sentrale prinsipper.'];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_owned_topics_with_non_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['owned_topics'] = [123];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('owned_topics', implode(' ', $errors));
+    }
+
+    public function test_owned_topics_with_empty_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['owned_topics'] = [''];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_reference_only_topics_can_be_an_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['reference_only_topics'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_reference_only_topics_with_non_array_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['reference_only_topics'] = 'not an array';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('reference_only_topics', implode(' ', $errors));
+    }
+
+    public function test_excluded_topics_can_be_an_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_excluded_topics_with_valid_strings_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [
+            'Detaljerte KPI-kataloger.',
+            'Full beskrivelse av Problem Management.',
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_excluded_topics_with_non_array_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = 'not an array';
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('excluded_topics', implode(' ', $errors));
+    }
+
+    public function test_excluded_topics_with_empty_string_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = [''];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('excluded_topics', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_with_valid_entry_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL', 'relationship' => 'Lenk hit for rammeverksforklaring.'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_related_page_guidance_missing_page_title_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['relationship' => 'Lenk hit for rammeverksforklaring.'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('page_title', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_missing_relationship_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL'],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('relationship', implode(' ', $errors));
+    }
+
+    public function test_related_page_guidance_non_object_entry_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = ['not an object'];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_control_character_in_excluded_topics_item_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['excluded_topics'] = ["Detaljert \x0Fflyt."];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('control character', implode(' ', $errors));
+    }
+
+    public function test_responsibility_fields_on_concept_page_entry_are_validated_too(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'ITIL',
+            'proposed_slug' => 'itil',
+            'reason' => 'Overordnet rammeverk.',
+            'owned_topics' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+            'reference_only_topics' => ['Bruk av prosessillustrasjonen.'],
+            'excluded_topics' => ['Detaljert Incident Management-arbeidsflyt.', 'Detaljerte KPI-kataloger.'],
+            'related_page_guidance' => [
+                ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
+            ],
+        ]];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    // =========================================================================
+    // validate() — concept_candidates
+    // =========================================================================
+
+    public function test_concept_candidates_absent_is_not_an_error(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($this->validDecision());
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidates_can_be_empty_array(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_valid_concept_candidate_entry_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->validConceptCandidate()];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidate_missing_name_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        unset($candidate['name']);
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('name', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_missing_justification_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        unset($candidate['justification']);
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('justification', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_invalid_decision_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['decision'] = 'maybe';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('decision', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_null_existing_and_owning_page_title_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['existing_page_title'] = null;
+        $candidate['owning_page_title'] = null;
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidate_non_boolean_necessary_for_article_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['necessary_for_article'] = 'yes';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('necessary_for_article', implode(' ', $errors));
+    }
+
+    public function test_parse_normalises_missing_concept_candidates_to_empty_array(): void
+    {
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($this->validDecision());
+        $this->assertSame([], $parsed['concept_candidates']);
+    }
+
+    public function test_parse_preserves_concept_candidates_when_present(): void
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->validConceptCandidate()];
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
+        $this->assertSame('ITIL Incident Management', $parsed['concept_candidates'][0]['name']);
     }
 
     // =========================================================================
@@ -309,6 +657,24 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertNull($parsed['no_action_reason']);
     }
 
+    public function test_parse_preserves_responsibility_fields_when_present(): void
+    {
+        $decision = $this->validDecision();
+        $decision['source_article']['owned_topics'] = ['Definer ITIL som rammeverk.'];
+        $decision['source_article']['reference_only_topics'] = ['Bruk av illustrasjonen.'];
+        $decision['source_article']['excluded_topics'] = ['Detaljert Incident Management-flyt.'];
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit.'],
+        ];
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
+
+        $this->assertSame(['Definer ITIL som rammeverk.'], $parsed['source_article']['owned_topics']);
+        $this->assertSame(['Bruk av illustrasjonen.'], $parsed['source_article']['reference_only_topics']);
+        $this->assertSame(['Detaljert Incident Management-flyt.'], $parsed['source_article']['excluded_topics']);
+        $this->assertSame('Incident Management', $parsed['source_article']['related_page_guidance'][0]['page_title']);
+    }
+
     public function test_parse_throws_on_invalid_decision(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -352,6 +718,21 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
             'entity_pages' => [],
             'no_action_reason' => null,
             'warnings' => [],
+        ];
+    }
+
+    private function validConceptCandidate(): array
+    {
+        return [
+            'name' => 'ITIL Incident Management',
+            'concept_type' => 'framework process',
+            'independent_reason' => 'A named ITIL process referenced independently of the illustration.',
+            'mentioned_context' => 'Named in the document body and in the planned article structure.',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Central to understanding the article; no existing page covers it.',
+            'owning_page_title' => null,
+            'necessary_for_article' => true,
         ];
     }
 

@@ -63,6 +63,7 @@ class EnterpriseWikiVerifyPageClaimsService
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiClaimClassificationService $classificationService,
     ) {}
 
     /**
@@ -524,7 +525,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'reevaluated_from_content_origin' => $originalContentOrigin,
                 'reevaluated_run_id' => $run->id,
                 'deterministic_reason' => $safetyNet['deterministic_reason'],
-            ], static fn ($value): bool => $value !== null));
+            ], static fn ($value): bool => $value !== null), source: EnterpriseWikiClaimClassificationService::SOURCE_MANUAL_REVERIFICATION);
 
             return $locked->fresh()->content_origin;
         });
@@ -683,7 +684,7 @@ class EnterpriseWikiVerifyPageClaimsService
         // to source_based on a coincidental partial text match). Only re-validate that it
         // is still genuinely normative and still anchored — never prove source support.
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-            && $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)
+            && $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)
         ) {
             $outcome = $this->persistBestPracticeVerification(
                 $claim->id,
@@ -1206,14 +1207,11 @@ class EnterpriseWikiVerifyPageClaimsService
             $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
 
             if ($anchorFailure !== null) {
-                $claim->update([
+                $this->classificationService->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
                     'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                     'review_reason' => null,
                     'generation_issue' => $anchorFailure,
-                    'verified_at' => now(),
-                    'verification_claimed_at' => null,
-                    'verification_claim_token' => null,
                 ]);
 
                 return $this->verificationPersistenceResult('unsupported');
@@ -1289,14 +1287,11 @@ class EnterpriseWikiVerifyPageClaimsService
             $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
 
             if ($anchorFailure !== null) {
-                $claim->update([
+                $this->classificationService->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
                     'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                     'review_reason' => null,
                     'generation_issue' => $anchorFailure,
-                    'verified_at' => now(),
-                    'verification_claimed_at' => null,
-                    'verification_claim_token' => null,
                 ]);
 
                 return $this->verificationPersistenceResult('unsupported');
@@ -1354,13 +1349,14 @@ class EnterpriseWikiVerifyPageClaimsService
         bool $allowClaimDecisionReset = true,
         bool $allowBestPracticePromotion = true,
         bool $allowCanonicalRecording = true,
+        string $source = EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION,
     ): array {
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_CONTRADICTED
             || $verdict === WikiClaimVerificationAiClient::VERDICT_PARTIALLY_SUPPORTED
         ) {
             $recordingReason = $this->nullableString($result['reason'] ?? null);
 
-            $claim->update([
+            $this->classificationService->apply($claim, $source, [
                 'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                 'review_reason' => trim((string) ($result['unsupported_parts'] ?? '')) !== ''
@@ -1375,9 +1371,6 @@ class EnterpriseWikiVerifyPageClaimsService
                 'generation_issue' => $verdict === WikiClaimVerificationAiClient::VERDICT_CONTRADICTED
                     ? 'claim_contradicted_by_source'
                     : 'claim_partially_supported',
-                'verified_at' => now(),
-                'verification_claimed_at' => null,
-                'verification_claim_token' => null,
             ]);
 
             if ($allowCanonicalRecording) {
@@ -1405,7 +1398,15 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         if ($verdict === WikiClaimVerificationAiClient::VERDICT_NOT_SUPPORTED) {
-            $bestPractice = $allowBestPracticePromotion && $this->isPositiveBestPracticeSuggestion($claim);
+            // A deterministic conflict (number/date/negation/modality/actor/scope/currency/subject
+            // mismatch — applyDeterministicSafetyNet()) is concrete, checkable evidence that this
+            // claim describes a specific fact, never a general professional statement — it must
+            // never be waved through to best_practice just because its own wording is party-
+            // agnostic.
+            $hasDeterministicConflict = ($extraReviewMetadata['deterministic_reason'] ?? null) !== null;
+            $bestPractice = $allowBestPracticePromotion
+                && ! $hasDeterministicConflict
+                && $this->isPositiveBestPracticeSuggestion($claim);
 
             // Run-38 fix: a plain not_supported verdict used to store review_reason/review_metadata
             // as null — leaving no trace of why AI rejected the claim, unlike the contradicted/
@@ -1416,7 +1417,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 ? $result['reason']
                 : 'Ingen kildeutdrag støtter påstanden.';
 
-            $claim->update([
+            $this->classificationService->apply($claim, $source, [
                 'content_origin' => $bestPractice
                     ? EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
                     : EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
@@ -1428,6 +1429,11 @@ class EnterpriseWikiVerifyPageClaimsService
                     ? array_merge([
                         'statement_kind' => 'recommendation',
                         'classification_basis' => 'normative_language',
+                        // Explicit, self-consistent record of the legitimate rescue (task rule 7):
+                        // this claim's verification verdict against the customer's own source was
+                        // not_supported, and it is DELIBERATELY still kept as best_practice — never
+                        // left implicit or inferable only from classification_basis.
+                        'verification_verdict' => $verdict,
                         'suggested_placement' => $claim->content_block_key,
                         'visible_wiki_link_recommendation' => 'auto_evaluate',
                     ], $extraReviewMetadata)
@@ -1438,9 +1444,6 @@ class EnterpriseWikiVerifyPageClaimsService
                         'checks' => $result['checks'] ?? [],
                     ], $extraReviewMetadata),
                 'generation_issue' => $bestPractice ? null : 'unsupported_generated_content',
-                'verified_at' => now(),
-                'verification_claimed_at' => null,
-                'verification_claim_token' => null,
             ]);
 
             $recordingReason = $bestPractice ? null : $notSupportedReason;
@@ -1497,14 +1500,11 @@ class EnterpriseWikiVerifyPageClaimsService
             }
         }
 
-        $claim->update([
+        $this->classificationService->apply($claim, $source, [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'review_reason' => null,
             'generation_issue' => null,
             'review_metadata' => $extraReviewMetadata !== [] ? $extraReviewMetadata : null,
-            'verified_at' => now(),
-            'verification_claimed_at' => null,
-            'verification_claim_token' => null,
         ]);
 
         Log::info('[WIKI_CLAIM_VERIFICATION] Claim verified as supported via semantic (cross-language/paraphrase) match.', [
@@ -1795,14 +1795,11 @@ class EnterpriseWikiVerifyPageClaimsService
             $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
 
             if ($anchorFailure !== null) {
-                $claim->update([
+                $this->classificationService->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
                     'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                     'review_reason' => null,
                     'generation_issue' => $anchorFailure,
-                    'verified_at' => now(),
-                    'verification_claimed_at' => null,
-                    'verification_claim_token' => null,
                 ]);
 
                 return $this->verificationPersistenceResult('unsupported');
@@ -1813,14 +1810,11 @@ class EnterpriseWikiVerifyPageClaimsService
                 ? $claim->review_reason
                 : 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.';
 
-            $claim->update([
+            $this->classificationService->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
                 'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                 'review_reason' => $reviewReason,
                 'generation_issue' => null,
-                'verified_at' => now(),
-                'verification_claimed_at' => null,
-                'verification_claim_token' => null,
             ]);
 
             if ($allowCanonicalRecording) {
@@ -1873,17 +1867,23 @@ class EnterpriseWikiVerifyPageClaimsService
             $bestPractice = $finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
             $unsupported = $finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT;
 
-            $claim->update([
+            // Explicitly tagged as a REUSE of an already-verified canonical fact, never left to be
+            // confused with a fresh verification of this claim's own excerpt (task rule 9) — the
+            // fact's own id and verification_status are recorded alongside so this claim's
+            // authoritative decision stays traceable to exactly which prior decision it reused.
+            $this->classificationService->apply($claim, EnterpriseWikiClaimClassificationService::SOURCE_VERIFICATION, [
                 'content_origin' => $finalOrigin,
                 'canonical_fact_id' => $fact->id,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                 'review_reason' => $bestPractice
                     ? 'Innholdet er formulert som en anbefaling eller etablert praksis uten direkte kildegrunnlag. Vurder om det skal beholdes som beste praksis.'
                     : null,
+                'review_metadata' => [
+                    'classification_basis' => 'canonical_fact_reuse',
+                    'reused_canonical_fact_id' => $fact->id,
+                    'reused_canonical_fact_verification_status' => $fact->verification_status,
+                ],
                 'generation_issue' => $unsupported ? 'unsupported_generated_content' : null,
-                'verified_at' => now(),
-                'verification_claimed_at' => null,
-                'verification_claim_token' => null,
             ]);
 
             if ($finalOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
@@ -2000,26 +2000,49 @@ class EnterpriseWikiVerifyPageClaimsService
 
     /**
      * Only reached for a claim that did NOT take the best-practice fast path above — either it
-     * was never best_practice, or it was but its wording had already drifted into an unverified
-     * factual assertion (Del 4 test: "bør" → "har" requires re-classification). In both cases the
-     * text must still genuinely read as a recommendation now, under the AI verdict this method
-     * gates — a stale content_origin/review_metadata tag is never trusted on its own.
+     * was never best_practice, or its block never declared best_practice at all, or a prior
+     * reconfirm found it had drifted into a party/agreement-specific current-state assertion.
+     *
+     * Run-482 fix: this used to ALSO require the claim's own content_origin/review_metadata to
+     * already say best_practice (i.e. only ever "reconfirming" a tag the AI got right at
+     * generation time) — so a genuinely general-practice sentence the model mis-tagged
+     * source_based (a real, observed generation-time inconsistency, not a hypothetical) had no
+     * path to rescue: it failed source verification and was recorded as
+     * unsupported_generated_content — a blocking claim-integrity defect — purely because of the
+     * model's own labeling mistake, not because the text was actually presented as a customer
+     * fact.
+     *
+     * Run-486-follow-up fix: this used to also require the claim's own extracted sentence to
+     * carry an explicit recommendation marker ("bør"/"anbefales"/...) — but Procynia's best-
+     * practice text is written in the same formal, declarative register as any other Wiki text
+     * (CLAUDE.md: the distinction is content_origin plus UI labeling, never wording), so a marker
+     * requirement rejected genuine, plainly-stated professional content just because it wasn't
+     * phrased as advice. isEligibleForBestPractice() (party-/agreement-specific drift check only)
+     * is now the deterministic content criterion, replacing the marker requirement in either
+     * direction.
+     *
+     * A second, structural requirement guards against the failure mode a text-only check cannot
+     * see: a decontextualized, never-anchored claim (no content_block_key, or one that no longer
+     * resolves to a real block on the page's CURRENT version) has no page content it is actually
+     * part of — "blokktilhørighet" (item 3/5 of the Del 3 spec) — so it is never eligible for
+     * rescue regardless of how general its wording reads. This is what still correctly blocks an
+     * arbitrary undocumented factual claim with generic phrasing and no block anchor at all, while
+     * still rescuing a genuinely general-practice sentence anchored to a real (if mis-tagged)
+     * content block.
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        if (! $this->canonicalizationService->isGenuineBestPracticeText($claim->claim_text)) {
+        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)) {
             return false;
         }
 
-        if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
-            return true;
+        $blockKey = trim((string) ($claim->content_block_key ?? ''));
+        $version = $claim->version;
+
+        if ($blockKey === '' || ! $version instanceof EnterpriseWikiPageVersion) {
+            return false;
         }
 
-        $metadata = (array) ($claim->review_metadata ?? []);
-
-        return in_array(($metadata['classification_basis'] ?? null), [
-            'ai_block_content_origin',
-            'approved_best_practice',
-        ], true);
+        return $this->findBlockByKey($version, $blockKey) !== null;
     }
 }

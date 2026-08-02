@@ -51,6 +51,7 @@ class EnterpriseWikiLinkSemanticRepairService
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
+        private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
     ) {}
 
     /**
@@ -346,21 +347,61 @@ class EnterpriseWikiLinkSemanticRepairService
 
     private function writeNewCurrentVersion(int $pageId, string $markdown): EnterpriseWikiPageVersion
     {
-        $next = ((int) EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->max('version_number')) + 1;
+        return DB::transaction(function () use ($pageId, $markdown): EnterpriseWikiPageVersion {
+            $next = ((int) EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->max('version_number')) + 1;
 
-        EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->where('is_current', true)
-            ->update(['is_current' => false]);
+            EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->where('is_current', true)
+                ->update(['is_current' => false]);
 
-        return EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $pageId,
-            'version_number' => $next,
-            'is_current' => true,
-            'content_markdown' => $markdown,
-            'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
+            $version = EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $pageId,
+                'version_number' => $next,
+                'is_current' => true,
+                'content_markdown' => $markdown,
+                'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
+            ]);
+
+            $this->restoreBlockProvenance($pageId, $version);
+
+            return $version;
+        });
+    }
+
+    /**
+     * The revised markdown just persisted above never carries content_blocks_json — reuses
+     * EnterpriseWikiPageVersionBlockProvenanceRepairService (the same reconstruction/matching
+     * rules as wiki:repair-page-version-block-provenance) to restore it immediately from the
+     * superseded version's blocks, and re-link any already-existing unanchored claims, instead of
+     * leaving this version anchor-less until a later manual sweep. Never guesses: an ambiguous or
+     * impossible reconstruction is logged and left for the manual command — it must never block
+     * or fail this otherwise-successful link repair.
+     */
+    private function restoreBlockProvenance(int $pageId, EnterpriseWikiPageVersion $version): void
+    {
+        $result = $this->blockProvenanceRepairService->repairPageVersion($pageId, $version);
+
+        if ($result['status'] === 'repaired') {
+            Log::info('[WIKI_LINK_SEMANTIC_REPAIR] Block provenance restored for new version.', [
+                'page_id' => $pageId,
+                'page_version_id' => $version->id,
+                'claims_linked' => $result['claims_linked'],
+            ]);
+
+            return;
+        }
+
+        if ($result['status'] === 'skipped_already_has_blocks') {
+            return;
+        }
+
+        Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Block provenance could not be restored for new version — claims on it will remain unanchored until a targeted repair runs.', [
+            'page_id' => $pageId,
+            'page_version_id' => $version->id,
+            'status' => $result['status'],
         ]);
     }
 

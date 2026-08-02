@@ -35,6 +35,7 @@ class WikiPageContentAiClient
      * other wiki pages via inline [[slug]]/[[slug|anchor]] wikilinks without inventing slugs.
      *
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
      */
     public function generateFromSource(
@@ -208,11 +209,24 @@ class WikiPageContentAiClient
             '- Every ordinary content block must explicitly choose content_origin: source_based or best_practice. There is no third option and no default — choose deliberately for each block.',
             '- For source_based blocks, copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
             '- A source_based block without source_element_keys is invalid. Never mark a block source_based just because it sounds plausible or reads like something the source document would say — only when you can cite the specific source_element_keys it is drawn from.',
-            '- A block is best_practice when it deliberately goes beyond the source document with advice, a recommendation, or a possible improvement — and does NOT claim the customer or supplier already has, does, or follows the thing being suggested. It must be phrased as advice ("could", "should consider", "a recommended approach is..."), never as a statement of the customer\'s or supplier\'s current state ("the customer has...", "the service uses...", "the supplier follows...").',
+            '- A block is best_practice when it deliberately goes beyond the source document with general professional/industry knowledge or an established practice — and does NOT claim the named customer or supplier already has, does, or follows the thing described, and does NOT state a fact specific to this particular customer\'s/supplier\'s actual agreement, system, or process.',
+            '- Write best_practice sentences in the SAME formal, neutral, declarative register as ordinary Wiki text — a plain statement of professional fact, not a suggestion. Do NOT open or mark a best_practice sentence with an advisory/recommendation phrase — never "bør", "kan", "anbefales", "det anbefales", "som beste praksis", "en vanlig tilnærming er", "faglig anbefaling", "it is recommended", "as a best practice", "a common approach is", "could", "should consider", or any similar hedging/advisory wording. For example, write "Tydelig rolle- og ansvarsfordeling gir klare eskaleringslinjer og konsistent prosessutførelse." — never "Det anbefales å ha tydelig rolle- og ansvarsfordeling...". The reader must be able to tell best_practice content apart from source_based content ONLY through the page\'s own content_origin/UI labeling, never through a difference in wording, tone, or confidence.',
+            '- Do not soften a best_practice sentence into advice or add a hedging opener just because it goes beyond the source document — state the professional fact directly and confidently, exactly as you would phrase a source_based sentence.',
             '- General industry/framework knowledge that elaborates on a concept beyond what the source document literally states (e.g. explaining what a standard practice typically involves) is best_practice, not source_based — even if it uses similar terminology to the source. Only mark it source_based if you can cite the exact source_element_keys that state those specific facts.',
             '- For best_practice blocks, explain the positive basis in best_practice_reason and leave source_element_keys/source_element_types empty.',
             '- Do not classify factual statements, uncertain source facts, rewritten source facts, statements about the customer\'s or supplier\'s current/actual state, or likely hallucinations as best_practice — those must be source_based (if genuinely grounded, with real source_element_keys) or omitted.',
+            '- A best_practice block must be necessary to understand or use this page\'s own owned topics (see PAGE RESPONSIBILITY below) for what the source material actually describes — never add general professional/industry elaboration of the wider subject area just because it is true and related. A thin source document justifies a thin page: when in doubt whether a piece of best_practice content is actually necessary here, leave it out rather than include it because it is technically accurate.',
             '- link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
+        ]);
+
+        $responsibilityRules = implode("\n", [
+            'PAGE RESPONSIBILITY:',
+            '- "Additional context" (if present) states this page\'s own content responsibility in three tiers: what to explain in depth ("own content responsibility"), what to mention only briefly ("Reference only"), and what to never mention ("EXCLUDED").',
+            '- Treat every EXCLUDED topic as a hard, binding boundary: do not mention it, allude to it, or give it a section, list, or even one sentence — not even to note that it exists or that it is covered elsewhere.',
+            '- For a "Reference only" topic, write AT MOST one short sentence plus an inline [[wikilink]] to the page that owns it — never its own heading, paragraph, or list of sub-points.',
+            '- Stay strictly inside this page\'s own content responsibility for everything else. The number of sections this page contains should track directly with the number of items in its own content responsibility — do not add or expand a section to cover something that is not one of those items, even if it is topically related.',
+            '- When no such guidance is given at all, fall back to writing only what the source material actually supports for this specific page — a short, thin source document justifies a short, thin page; do not expand into a comprehensive treatment of the wider subject just because more could technically be said about it.',
+            '- Never restate the same sentence, fact, or near-identical wording more than once on this page, and never copy wording verbatim from another page\'s content given as context — express a shared idea once, in your own words, in the place it actually belongs.',
         ]);
 
         $wikilinkRules = implode("\n", [
@@ -231,13 +245,19 @@ class WikiPageContentAiClient
 
         return match ($pageType) {
             'summary' => implode("\n", [
-                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName} based on the provided source document.",
+                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName}.",
                 '',
                 'SUMMARY STRUCTURE (mandatory):',
                 '- First line must be a # heading containing the page title',
-                '- Follow with 2-4 paragraphs summarising the key points of the source document',
+                '- Follow with 2-4 paragraphs summarising the key points',
                 '- Write flowing prose — no bullet lists, no headings beyond the title',
                 '- Inline-link the most important concept/entity pages from the allowed targets; keep the summary short and natural',
+                '',
+                'SOURCE FOR THIS SUMMARY:',
+                '- If "Additional context" provides the finished article for this same source document, base this summary on that article\'s actual content and structure — condense what the article covers and link to it and other detail pages, rather than independently re-deriving the summary from the raw source document.',
+                '- If no finished article is provided, summarise the source document directly.',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -251,14 +271,16 @@ class WikiPageContentAiClient
                 'CONCEPT PAGE STRUCTURE (mandatory):',
                 '- First line must be a # heading containing the concept name',
                 '- Follow with a definition paragraph (2-4 sentences) explaining what the concept is',
-                '- Add one or two ## sections describing how the concept is used or relevant in context',
+                '- Add AT MOST one ## section per item in this page\'s own content responsibility (see PAGE RESPONSIBILITY below) — never a section for a reference-only or excluded topic, and never more sections than that list has items. When no content-responsibility guidance is given, add at most one or two sections and only for what the source material itself supports.',
                 '- Write flowing prose — no bullet lists',
                 '- Inline-link relevant article, concept, and entity pages from the allowed targets',
                 '',
                 'SYNTHESIS RULES:',
                 '- Derive meaning from the provided source text and related page content',
                 '- Do not invent facts not supported by the provided material',
-                '- If related article or summary content is provided, use it to enrich the explanation',
+                '- Related article or summary content, when provided, is background for understanding context ONLY — it is never itself a license to explain a topic in depth. Use it to decide what this page is responsible for, then write strictly within that responsibility (see PAGE RESPONSIBILITY below); a topic another page owns, or that is not one of this page\'s own responsibility items, belongs behind a short mention and a link at most, never a repeated or newly-invented explanation',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -272,14 +294,16 @@ class WikiPageContentAiClient
                 'ENTITY PAGE STRUCTURE (mandatory):',
                 '- First line must be a # heading containing the entity name',
                 '- Follow with an identification paragraph (2-4 sentences) stating what the entity is',
-                '- Add one or two ## sections covering relevant roles, relationships, or context',
+                '- Add AT MOST one ## section per item in this page\'s own content responsibility (see PAGE RESPONSIBILITY below) — never a section for a reference-only or excluded topic, and never more sections than that list has items. When no content-responsibility guidance is given, add at most one or two sections and only for what the source material itself supports.',
                 '- Write flowing prose — no bullet lists',
                 '- Inline-link relevant article and concept pages from the allowed targets; avoid speculative relationships',
                 '',
                 'SYNTHESIS RULES:',
                 '- Derive all facts from the provided source text and related page content',
                 '- Do not invent roles, relationships, or attributes not present in the material',
-                '- If related article or summary content is provided, use it to enrich the description',
+                '- Related article or summary content, when provided, is background for understanding context ONLY — it is never itself a license to explain a topic in depth. Use it to decide what this page is responsible for, then write strictly within that responsibility (see PAGE RESPONSIBILITY below); a topic another page owns, or that is not one of this page\'s own responsibility items, belongs behind a short mention and a link at most, never a repeated or newly-invented explanation',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',
@@ -293,7 +317,7 @@ class WikiPageContentAiClient
                 'ARTICLE STRUCTURE (mandatory):',
                 '- First line must be a # heading containing the page title',
                 '- Follow with a short introductory paragraph (2-4 sentences) summarising the topic',
-                '- Organise the body using ## subheadings for logical sections',
+                '- Organise the body using ## subheadings for logical sections. When this page\'s own content responsibility is given (see PAGE RESPONSIBILITY below), add at most one subheading per item in it — do not add a subheading for a reference-only or excluded topic',
                 '- Write flowing prose paragraphs within each section — no bullet lists',
                 '- End the article naturally, without a separate summary or conclusion heading',
                 '- Inline-link central concept and entity pages, and any other allowed target the text clearly relates to',
@@ -302,6 +326,9 @@ class WikiPageContentAiClient
                 '- Synthesise the source material into coherent prose',
                 '- Do not repeat the same fact across multiple sections',
                 '- Do not invent facts not present in the source document',
+                '- Do not expand into general background on the wider subject beyond what this page\'s own content responsibility calls for — a short source document justifies a short article',
+                '',
+                $responsibilityRules,
                 '',
                 $blockRules,
                 '',

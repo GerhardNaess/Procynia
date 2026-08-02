@@ -2,29 +2,41 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\EnterpriseWikiDocument;
 use App\Services\Ai\Wiki\EnterpriseWikiIndexContextService;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Orchestrates a dry-run maintainer decision for a single wiki document.
  *
  * Fetches the document (customer-scoped), builds the page index, calls the AI
  * client, and returns the validated decision array. Nothing is written to the DB.
+ *
+ * After the AI decision passes schema validation, EnterpriseWikiMaintainerDecisionConsistencyValidator
+ * checks it for logical self-contradictions (e.g. the run-581 "ITIL Incident Management" incident:
+ * the article/summary pointed the reader onward to a concept that concept_pages never created).
+ * When found, one bounded AI repair pass is attempted; if the repaired decision is still
+ * inconsistent, this throws rather than silently applying an unresolved contradiction.
  */
 class EnterpriseWikiMaintainerDecisionService
 {
     public function __construct(
         private readonly EnterpriseWikiIndexContextService $indexContextService,
         private readonly EnterpriseWikiMaintainerDecisionAiClient $aiClient,
+        private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
     ) {}
 
     /**
      * Run a maintainer decision for the given document, scoped to the customer.
      * No pages, versions, claims, or pivot rows are created.
      *
-     * @return array<string, mixed>  Validated maintainer decision.
-     * @throws \InvalidArgumentException  If the document is not found for this customer.
-     * @throws \RuntimeException          If the AI call fails.
+     * @return array<string, mixed> Validated, internally-consistent maintainer decision.
+     *
+     * @throws \InvalidArgumentException If the document is not found for this customer.
+     * @throws \RuntimeException If the AI call fails.
+     * @throws EnterpriseWikiMaintainerDecisionInconsistentException If the decision is still
+     *                                                               logically inconsistent after one bounded repair pass.
      */
     public function runForDocument(int $customerId, int $documentId, string $languageCode = 'no'): array
     {
@@ -40,13 +52,44 @@ class EnterpriseWikiMaintainerDecisionService
         }
 
         $sourceMeta = [
-            'title'    => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown',
+            'title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown',
             'filename' => (string) $document->original_filename,
         ];
 
-        $sourceText   = (string) ($document->extracted_text ?? '');
+        $sourceText = (string) ($document->extracted_text ?? '');
         $indexContext = $this->indexContextService->buildForCustomer($customerId);
 
-        return $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode);
+        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode);
+        $issues = $this->consistencyValidator->findIssues($decision, $indexContext);
+
+        if ($issues === []) {
+            return $decision;
+        }
+
+        Log::warning('[WIKI_MAINTAINER_DECISION] Inconsistent decision detected — attempting one bounded repair pass.', [
+            'customer_id' => $customerId,
+            'document_id' => $documentId,
+            'issues' => $issues,
+        ]);
+
+        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues);
+        $remainingIssues = $this->consistencyValidator->findIssues($repaired, $indexContext);
+
+        if ($remainingIssues !== []) {
+            Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
+                'customer_id' => $customerId,
+                'document_id' => $documentId,
+                'issues' => $remainingIssues,
+            ]);
+
+            throw new EnterpriseWikiMaintainerDecisionInconsistentException($remainingIssues);
+        }
+
+        Log::info('[WIKI_MAINTAINER_DECISION] Repair pass resolved all detected inconsistencies.', [
+            'customer_id' => $customerId,
+            'document_id' => $documentId,
+        ]);
+
+        return $repaired;
     }
 }

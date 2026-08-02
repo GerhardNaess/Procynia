@@ -18,37 +18,43 @@ use Illuminate\Support\Collection;
  *   1. EnterpriseWikiLintFinding rows for this run (all statuses — the panel is the one place
  *      that must show resolved/historical findings too, not just open ones; see
  *      buildSummary()/countsForItems() for how the run list's own displayed count is kept
- *      consistent with this).
- *   2. "Claim integrity defects" — EnterpriseWikiClaim rows with content_origin
- *      internal_error/unsupported_generated_content on the run's pages' CURRENT versions. These
- *      are exactly what EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects() checks to
- *      decide qa_status=repair_required, but they are computed live and never persisted as a
- *      finding row — so today's lint-only "Funn" count silently excludes the very things that
- *      can block a run. A source_based claim missing its source reference is deliberately NOT
- *      duplicated here: EnterpriseWikiAppliedRunLintService already writes a real
- *      CODE_CLAIM_MISSING_SOURCE lint finding for that exact case (see
- *      resolveClaimMissingSourceFinding()/reopenClaimMissingSourceFindingIfStillMissing()), so
- *      folding it in again here would count the same underlying problem twice.
+ *      consistent with this). A genuine structural lint error is the one category here that can
+ *      still legitimately gate qa_status=failed (EnterpriseWikiPostIngestQaService::
+ *      findCriticalDefects()) — that is a real technical defect, not a claim/QA matter, and v0.10
+ *      does not change it.
+ *   2. "Claim QA signals" — EnterpriseWikiClaim rows with content_origin
+ *      internal_error/unsupported_generated_content on the run's pages' CURRENT versions,
+ *      grouped by canonical_fact_id (Del 4) so the same underlying fact repeated across several
+ *      Wiki pages surfaces as ONE QA case listing every page it occurs on, not one case per page.
+ *      These are exactly what EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals() reports
+ *      — computed live, never persisted as a finding row.
  *   3. "Best-practice suggestions" — EnterpriseWikiClaim rows with content_origin best_practice on
- *      the run's pages' CURRENT versions, in any approval_status. Unlike (2), this is
- *      deliberately NEVER blocking and NEVER "critical" — it is a legitimate, human-reviewable
- *      suggestion beyond the source document, not a defect. findClaimIntegrityDefects() already
- *      excludes best_practice from QA gating entirely (see its own doc comment); this class must
- *      never contradict that by treating it as a quality error.
+ *      the run's pages' CURRENT versions, in any approval_status. Like (2), this is a voluntary
+ *      QA opportunity, never a defect.
  *
- * Blocking is a SUGGESTION the system computes (EnterpriseWikiClaimFindingExplainer), never a
- * silent redecision — an authorized user's recorded override (EnterpriseWikiClaim::blocking_override)
- * always wins when present. EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects() applies
- * the exact same effective-blocking rule, so this panel and the QA gate can never disagree about
- * whether a given claim is actually holding the run back. Lint findings and best-practice
- * suggestions are unaffected by this — the former's isBlocking() is unconditional by design, and
- * the latter never blocks at all.
+ * **v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claims and their QA
+ * review are a voluntary, non-blocking quality loop.** `blocks_run`/`blocks_page` on a claim-based
+ * item are therefore always `false` — claims never hold a run back, regardless of
+ * `system_recommends_blocking`/`user_decision` (which remain informational: the system's own
+ * suggestion, and any human decision recorded on the claim, both useful context for the voluntary
+ * QA screen, never a gate). Lint findings are the one exception: a genuinely blocking lint error
+ * (`blocks_run`/`blocks_page` true) reflects a real structural defect and is unrelated to claim QA.
+ *
+ * Reads content_origin directly and only ever as one of exactly four mutually-exclusive values —
+ * never a heuristic reconstructed from a combination of other fields, and never both (2) and (3)
+ * for the same claim, since a single content_origin value can only ever match one of the two
+ * query filters above. EnterpriseWikiClaimClassificationService is what keeps that one value
+ * trustworthy across a claim's whole lifecycle (extraction's provisional origin can be overwritten
+ * by anything; verification's authoritative one cannot be silently overwritten by repair or
+ * reevaluation) — this service does not itself need to know that history, only that content_origin
+ * is always the current, authoritative answer.
  */
 class EnterpriseWikiRunFindingsService
 {
     public function __construct(
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
+        private readonly EnterpriseWikiBestPracticeSectionService $sectionService,
     ) {}
 
     /**
@@ -113,24 +119,44 @@ class EnterpriseWikiRunFindingsService
         // never a user-facing case — see EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()
         // for the single-source-of-truth predicate. It stays available as raw claim data for
         // technical diagnostics, just never surfaces here.
-        foreach ($claimDefects as $claim) {
-            if (! $this->claimFindingExplainer->isUserFacingAddition($claim)) {
-                continue;
-            }
+        $userFacingClaimDefects = $claimDefects->filter(
+            fn (EnterpriseWikiClaim $claim): bool => $this->claimFindingExplainer->isUserFacingAddition($claim),
+        );
 
-            $items[] = $this->normalizeClaimDefect($claim, $pagesById, $user, $includeTechnical, $returnUrl);
+        // Del 4 (v0.10): the same underlying fact repeated across several Wiki pages (article,
+        // summary, concept/entity pages restating the same statement) is ONE QA case, not one per
+        // page — reuses the existing EnterpriseWikiCanonicalFact link (canonical_fact_id) rather
+        // than inventing a parallel dedup mechanism or comparing claim text. A claim not (yet)
+        // linked to a canonical fact falls back to its own claim id, so it is never incorrectly
+        // merged with an unrelated claim.
+        $claimDefectGroups = $userFacingClaimDefects->groupBy(
+            fn (EnterpriseWikiClaim $claim): string => $this->claimDefectGroupKey($claim),
+        );
+
+        foreach ($claimDefectGroups as $groupClaims) {
+            $items[] = $this->normalizeClaimDefect($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
         }
 
-        // Grouped by (page, content_block_key) — several best-practice claims anchored to the
-        // same contiguous text block are ONE user-facing case, never one per claim (v0.7 rule
-        // #4). A claim with no stable block anchor falls back to its own claim id as the group
-        // key, so it is never incorrectly merged with an unrelated claim.
+        // Grouped by faglig seksjon (heading block + its immediately-following best-practice
+        // blocks, see EnterpriseWikiBestPracticeSectionService) rather than raw content_block_key
+        // — several best-practice blocks that together form one coherent section (a heading plus
+        // its paragraph(s)/list, not just one paragraph) are ONE user-facing QA case, never one
+        // per paragraph or per claim. A claim with no resolvable section falls back to its own
+        // claim id as the group key, so it is never incorrectly merged with an unrelated claim.
+        $sectionMapsByVersionId = $bestPracticeSuggestions
+            ->pluck('version')
+            ->filter()
+            ->unique('id')
+            ->mapWithKeys(fn (EnterpriseWikiPageVersion $version): array => [
+                $version->id => $this->sectionService->mapBlocksToSections($version),
+            ]);
+
         $bestPracticeGroups = $bestPracticeSuggestions->groupBy(
-            fn (EnterpriseWikiClaim $claim): string => $this->additionGroupKey($claim),
+            fn (EnterpriseWikiClaim $claim): string => $this->additionGroupKey($claim, $sectionMapsByVersionId),
         );
 
         foreach ($bestPracticeGroups as $groupClaims) {
-            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
+            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $sectionMapsByVersionId, $user, $includeTechnical, $returnUrl);
         }
 
         usort($items, $this->sortComparator());
@@ -221,8 +247,8 @@ class EnterpriseWikiRunFindingsService
 
     /**
      * No supersession check is needed here — unlike lint findings, the caller's query already
-     * scopes $claim to the page's CURRENT version only (see buildForRun()), matching
-     * EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()'s own scoping.
+     * scopes claims to the page's CURRENT version only (see buildForRun()), matching
+     * EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals()'s own scoping.
      *
      * Every finding gets a concrete, per-case title/explanation/recommended action from
      * EnterpriseWikiClaimFindingExplainer — never the one-size-fits-all "unsupported_generated_content"/
@@ -234,26 +260,33 @@ class EnterpriseWikiRunFindingsService
      * says (CLAUDE.md: "Ikke bruk den generelle kategoriteksten som erstatning for claim og
      * kilde").
      *
-     * Severity and blocking are genuinely separate, and blocking itself is genuinely split into
-     * the system's suggestion versus the user's actual decision
-     * (EnterpriseWikiClaimFindingExplainer::blockingState()) — this item never shows a bare
-     * "blocking" boolean as if it were a settled fact before an authorized user has actually
-     * decided (CLAUDE.md: "Systemforslag er ikke brukerbeslutning"). `blocks_run`/`blocks_page`
-     * remain the exact same gate-level value EnterpriseWikiPostIngestQaService::
-     * findClaimIntegrityDefects() uses, so the QA gate and this panel can never disagree about
-     * whether a given claim is actually holding the run back — but the UI must read
-     * `system_recommends_blocking` and `user_decision` instead of `blocks_run` to decide what
-     * text to show.
+     * **v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claims never block.**
+     * `blocks_run`/`blocks_page` are always `false` here — the system's own suggestion
+     * (`system_recommends_blocking`) and any recorded human decision (`user_decision`) remain
+     * informational context for the voluntary QA screen, never a gate. `status` reflects the same
+     * distinction without blocking language: `flagged_for_review` (a human explicitly flagged it),
+     * `open_for_qa_review` (system suggests review, no decision yet), or `open` (a plain, undecided
+     * QA signal).
      *
+     * Del 4: $claims is every claim sharing the same underlying fact (grouped by canonical_fact_id
+     * in buildForRun(), usually exactly one). The PRIMARY claim (lowest page id, then lowest claim
+     * id, for a stable/deterministic pick) drives title/explanation/url/claim_id; every claim in
+     * the group is listed in `occurrences` so a QA specialist can see every page/text location the
+     * same underlying fact appears on, without the group ever becoming more than one QA case.
+     *
+     * @param  Collection<int, EnterpriseWikiClaim>  $claims
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
      */
     private function normalizeClaimDefect(
-        EnterpriseWikiClaim $claim,
+        Collection $claims,
         Collection $pagesById,
         ?User $user,
         bool $includeTechnical,
         ?string $returnUrl,
     ): array {
+        $claim = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->enterprise_wiki_page_id, $a->id] <=> [$b->enterprise_wiki_page_id, $b->id]
+        )->first();
+
         $page = $pagesById->get($claim->enterprise_wiki_page_id);
         $explanation = $this->claimFindingExplainer->explain($claim);
         $blockingState = $this->claimFindingExplainer->blockingState($claim);
@@ -263,8 +296,8 @@ class EnterpriseWikiRunFindingsService
         };
 
         $status = match (true) {
-            $blockingState['user_decision'] === EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING => 'user_blocking',
-            $blockingState['requires_decision'] => 'requires_decision',
+            $blockingState['user_decision'] === EnterpriseWikiClaimFindingExplainer::USER_DECISION_BLOCKING => 'flagged_for_review',
+            $blockingState['requires_decision'] => 'open_for_qa_review',
             default => 'open',
         };
 
@@ -288,6 +321,22 @@ class EnterpriseWikiRunFindingsService
             ->values()
             ->all();
 
+        $occurrences = $claims
+            ->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->enterprise_wiki_page_id, $a->id] <=> [$b->enterprise_wiki_page_id, $b->id])
+            ->map(function (EnterpriseWikiClaim $occurrence) use ($pagesById, $returnUrl): array {
+                $occurrencePage = $pagesById->get($occurrence->enterprise_wiki_page_id);
+
+                return [
+                    'claim_id' => $occurrence->id,
+                    'page_id' => $occurrencePage?->id,
+                    'page_title' => $occurrencePage?->title,
+                    'claim_text' => $occurrence->claim_text,
+                    'url' => $this->pageUrl($occurrencePage, $occurrence->id, $returnUrl),
+                ];
+            })
+            ->values()
+            ->all();
+
         $item = [
             'id' => 'claim-defect-'.$claim->id,
             'title' => $explanation['title'],
@@ -299,8 +348,8 @@ class EnterpriseWikiRunFindingsService
             'severity_label' => $this->severityLabel($severity),
             'status' => $status,
             'status_label' => __('procynia.wiki.runs_findings_status_'.$status),
-            'blocks_run' => $blockingState['blocks_gate'],
-            'blocks_page' => $blockingState['blocks_gate'] && $page !== null,
+            'blocks_run' => false,
+            'blocks_page' => false,
             'system_recommends_blocking' => $blockingState['system_recommends_blocking'],
             'user_decision' => $blockingState['user_decision'],
             'requires_decision' => $blockingState['requires_decision'],
@@ -317,6 +366,8 @@ class EnterpriseWikiRunFindingsService
             'page_version_id' => $claim->enterprise_wiki_page_version_id,
             'page_version_number' => $claim->version?->version_number,
             'claim_id' => $claim->id,
+            'claim_count' => $claims->count(),
+            'occurrences' => $occurrences,
             'created_at' => $claim->created_at?->toIso8601String(),
             'resolved_at' => null,
             'url' => $url,
@@ -327,15 +378,30 @@ class EnterpriseWikiRunFindingsService
 
         if ($includeTechnical) {
             $item['technical'] = [
-                'source' => 'claim_integrity',
+                'source' => 'claim_qa_signal',
                 'code' => $claim->content_origin,
                 'generation_issue' => $claim->generation_issue,
                 'raw_severity' => null,
                 'raw_status' => null,
+                'claim_ids' => $claims->pluck('id')->all(),
             ];
         }
 
         return $item;
+    }
+
+    /**
+     * Grouping key for Del 4 (v0.10): several claims sharing the same underlying canonical fact
+     * (EnterpriseWikiCanonicalFact, set by EnterpriseWikiVerifyPageClaimsService) — typically the
+     * same statement repeated across article/summary/concept/entity pages — are one QA case, not
+     * one per page/claim. A claim not (yet) linked to a canonical fact falls back to its own claim
+     * id, so it is never incorrectly merged with an unrelated claim purely on text similarity.
+     */
+    private function claimDefectGroupKey(EnterpriseWikiClaim $claim): string
+    {
+        return $claim->canonical_fact_id !== null
+            ? 'fact-'.$claim->canonical_fact_id
+            : 'claim-'.$claim->id;
     }
 
     /**
@@ -362,26 +428,45 @@ class EnterpriseWikiRunFindingsService
      * panel, but WikiController::show() resolves it into a validated review_reference that scrolls
      * to and highlights the actual suggested text block, not just the top of the page.
      *
-     * v0.7 rule #4: several claims anchored to the same content_block_key are ONE case, not one
-     * per claim — $claims is every claim in the group (usually exactly one). The PRIMARY claim
-     * (lowest position_order, then lowest id — the same tie-break WikiClaimController's cascade
-     * uses) drives title/url/claim_id; the group's status is "still pending" as long as ANY claim
-     * in it is undecided (WikiClaimController::cascadeBlockDecision() keeps siblings in sync when
-     * a decision is recorded, so this is normally never observed mid-way, but the aggregate check
-     * is the honest source of truth regardless of whether the cascade ran).
+     * Grouped by faglig seksjon (EnterpriseWikiBestPracticeSectionService), not raw
+     * content_block_key: several claims anchored across the section's blocks — a heading plus its
+     * paragraph(s)/list — are ONE case, not one per paragraph or per claim. $claims is every claim
+     * in the group. The PRIMARY claim (lowest position_order, then lowest id — the same tie-break
+     * WikiClaimController's cascade uses) drives id/url/claim_id — this is itself an existing,
+     * stable domain id (Del 7): it never changes across a reload of the same run/claim set, and is
+     * never an array index or a per-render random value. The group's status is "still pending" as
+     * long as ANY claim in it is undecided (WikiClaimController::cascadeBlockDecision() keeps
+     * siblings in sync when a decision is recorded, so this is normally never observed mid-way,
+     * but the aggregate check is the honest source of truth regardless of whether the cascade
+     * ran).
+     *
+     * `title` is the section's own heading text when EnterpriseWikiBestPracticeSectionService
+     * found one (e.g. "Begrepsramme: ITIL og Incident management") — this is what makes a QA
+     * specialist see one faglig seksjon, not the primary claim's own single, arbitrary sentence.
+     * Falls back to the primary claim's text when no heading was detected (a single unheaded
+     * best-practice block), matching the pre-existing behavior exactly. `section_text` is every
+     * claim's text in the group, in reading order, for "et lesbart utdrag eller samlet tekst"
+     * (Del 6) — approving/editing/rejecting still acts on the single primary claim only
+     * (WikiClaimController is unchanged); the other claims in the section remain individually
+     * traceable via `technical.claim_ids` and `block_keys`, exactly like claim-defect grouping's
+     * `occurrences` (Del 4: "dagens behandling kan bare håndtere ett claim om gangen" — this is
+     * the minimal extension needed to represent the section as one QA unit, not a new workflow).
      *
      * @param  Collection<int, EnterpriseWikiClaim>  $claims
      * @param  Collection<int, EnterpriseWikiPage>  $pagesById
+     * @param  Collection<int, array<string, array{section_key: string, heading_text: ?string, heading_block_key: ?string}>>  $sectionMapsByVersionId
      */
     private function normalizeBestPracticeSuggestion(
         Collection $claims,
         Collection $pagesById,
+        Collection $sectionMapsByVersionId,
         ?User $user,
         bool $includeTechnical,
         ?string $returnUrl,
     ): array {
-        $primary = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
-        )->first();
+        $orderedClaims = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
+        )->values();
+        $primary = $orderedClaims->first();
 
         $page = $pagesById->get($primary->enterprise_wiki_page_id);
         $editedBeforeApproval = (bool) data_get($primary->review_metadata, 'edited_before_approval', false);
@@ -405,9 +490,20 @@ class EnterpriseWikiRunFindingsService
             default => 'view_page',
         };
 
+        $sectionMap = $sectionMapsByVersionId->get($primary->enterprise_wiki_page_version_id, []);
+        $headingText = $sectionMap[trim((string) $primary->content_block_key)]['heading_text'] ?? null;
+        $sectionText = $orderedClaims->pluck('claim_text')->implode(' ');
+        $blockKeys = $orderedClaims
+            ->map(fn (EnterpriseWikiClaim $c): string => trim((string) $c->content_block_key))
+            ->filter(fn (string $key): bool => $key !== '')
+            ->unique()
+            ->values()
+            ->all();
+
         $item = [
             'id' => 'best-practice-'.$primary->id,
-            'title' => $primary->claim_text,
+            'title' => $headingText ?? $primary->claim_text,
+            'section_text' => $sectionText,
             'explanation' => (string) ($primary->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
             'category' => 'best_practice_suggestion',
             'category_label' => __('procynia.wiki.runs_findings_best_practice_category'),
@@ -424,6 +520,7 @@ class EnterpriseWikiRunFindingsService
             'page_version_number' => $primary->version?->version_number,
             'claim_id' => $primary->id,
             'claim_count' => $claims->count(),
+            'block_keys' => $blockKeys,
             'created_at' => $primary->created_at?->toIso8601String(),
             'resolved_at' => $primary->approved_at?->toIso8601String(),
             'decided_by_name' => $primary->approvedBy?->name,
@@ -447,18 +544,28 @@ class EnterpriseWikiRunFindingsService
     }
 
     /**
-     * Grouping key for v0.7 rule #4 — several claims anchored to the same contiguous text block
-     * (content_block_key) on the same page version are one case. A claim with no stable block
-     * anchor (content_block_key empty/null) falls back to its own claim id, so it is never
-     * incorrectly merged with an unrelated claim that also happens to lack one.
+     * Grouping key: every best-practice claim in the same faglig seksjon (heading block plus its
+     * following best-practice blocks — EnterpriseWikiBestPracticeSectionService) is one case, not
+     * one per paragraph/content_block_key (superseding the narrower v0.7 rule #4 grouping). A
+     * claim whose block cannot be resolved to a section (e.g. legacy content_blocks_json with no
+     * detectable heading structure at all) falls back to its raw content_block_key, and one with
+     * no stable block anchor at all falls back to its own claim id — either way it is never
+     * incorrectly merged with an unrelated claim.
+     *
+     * @param  Collection<int, array<string, array{section_key: string, heading_text: ?string, heading_block_key: ?string}>>  $sectionMapsByVersionId
      */
-    private function additionGroupKey(EnterpriseWikiClaim $claim): string
+    private function additionGroupKey(EnterpriseWikiClaim $claim, Collection $sectionMapsByVersionId): string
     {
         $blockKey = trim((string) $claim->content_block_key);
 
-        return $blockKey !== ''
-            ? $claim->enterprise_wiki_page_version_id.'|'.$blockKey
-            : 'claim-'.$claim->id;
+        if ($blockKey === '') {
+            return 'claim-'.$claim->id;
+        }
+
+        $sectionMap = $sectionMapsByVersionId->get($claim->enterprise_wiki_page_version_id, []);
+        $sectionKey = $sectionMap[$blockKey]['section_key'] ?? null;
+
+        return $sectionKey ?? $claim->enterprise_wiki_page_version_id.'|'.$blockKey;
     }
 
     private function pageUrl(
@@ -550,8 +657,8 @@ class EnterpriseWikiRunFindingsService
     {
         $rank = [
             'requires_action' => 0,
-            'user_blocking' => 0,
-            'requires_decision' => 0,
+            'flagged_for_review' => 1,
+            'open_for_qa_review' => 1,
             'open' => 1,
             'pending_review' => 1,
             'resolved' => 2,
@@ -593,25 +700,27 @@ class EnterpriseWikiRunFindingsService
     {
         $total = count($items);
         $openBlocking = 0;
+        $openQaReview = 0;
         $openNonBlocking = 0;
         $resolved = 0;
         $informative = 0;
         $superseded = 0;
         $bestPracticePending = 0;
 
-        // 'requires_action' (lint) / 'user_blocking' / 'requires_decision' (claim defects) are
-        // the three statuses that gate the run (see normalizeLintFinding()/normalizeClaimDefect()),
-        // so these six buckets are mutually exclusive and always sum to $total — that is the
-        // invariant the "Funn" count in the main table must also honor. A decided best-practice
-        // suggestion (approved/approved_edited/rejected) counts as $resolved — it is closed,
-        // historical, and no longer needs a decision — while a pending one gets its own bucket so
-        // the UI can visibly separate "waiting for a human suggestion decision" from "an actual
-        // quality defect" (Del 1). 'requires_decision' is still counted as $openBlocking here —
-        // an unhandled decision need still holds up final approval — but the UI must show it as
-        // "awaiting decision", never as an already-decided block (CLAUDE.md).
+        // 'requires_action' is the ONLY status that gates the run (a genuinely blocking, open
+        // lint finding — see normalizeLintFinding()/EnterpriseWikiPostIngestQaService::
+        // findCriticalDefects()). 'flagged_for_review'/'open_for_qa_review' (claim QA signals,
+        // see normalizeClaimDefect()) are voluntary QA opportunities, never a gate (v0.10,
+        // docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10") — they get their own,
+        // clearly non-blocking bucket. A decided best-practice suggestion (approved/
+        // approved_edited/rejected) counts as $resolved — it is closed, historical, and no longer
+        // needs a decision — while a pending one gets its own bucket so the UI can visibly
+        // separate "waiting for a human suggestion decision" from "an actual quality defect"
+        // (Del 1).
         foreach ($items as $item) {
             match ($item['status']) {
-                'requires_action', 'user_blocking', 'requires_decision' => $openBlocking++,
+                'requires_action' => $openBlocking++,
+                'flagged_for_review', 'open_for_qa_review' => $openQaReview++,
                 'open' => $openNonBlocking++,
                 'resolved', 'approved', 'approved_edited', 'rejected' => $resolved++,
                 'informative' => $informative++,
@@ -624,12 +733,13 @@ class EnterpriseWikiRunFindingsService
         return [
             'total' => $total,
             'open_blocking' => $openBlocking,
+            'open_qa_review' => $openQaReview,
             'open_non_blocking' => $openNonBlocking,
             'resolved' => $resolved,
             'informative' => $informative,
             'superseded' => $superseded,
             'best_practice_pending' => $bestPracticePending,
-            'explanation' => $this->buildExplanation($run, $total, $openBlocking),
+            'explanation' => $this->buildExplanation($run, $total, $openBlocking, $openQaReview),
         ];
     }
 
@@ -637,8 +747,12 @@ class EnterpriseWikiRunFindingsService
      * Del 5: never trust qa_status blindly — compare it against the ACTUAL open-blocking count
      * just computed, and say so plainly when they disagree instead of fabricating a reason. Never
      * triggers a reconciliation write from this read-only endpoint.
+     *
+     * v0.10: open claim QA signals ($openQaReviewCount) never imply the run could not complete —
+     * that language is reserved for $openBlockingCount, which now only reflects a genuinely
+     * blocking (open, error-severity) lint finding.
      */
-    private function buildExplanation(EnterpriseWikiIngestRun $run, int $total, int $openBlockingCount): string
+    private function buildExplanation(EnterpriseWikiIngestRun $run, int $total, int $openBlockingCount, int $openQaReviewCount): string
     {
         if ($openBlockingCount > 0) {
             if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
@@ -648,12 +762,18 @@ class EnterpriseWikiRunFindingsService
             return trans_choice('procynia.wiki.runs_findings_explanation_has_blocking', $openBlockingCount, ['count' => $openBlockingCount]);
         }
 
-        if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
+        if ($openQaReviewCount > 0) {
+            return trans_choice('procynia.wiki.runs_findings_explanation_qa_review_open', $openQaReviewCount, ['count' => $openQaReviewCount]);
+        }
+
+        if (in_array($run->qa_status, [
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+        ], true)) {
             return __('procynia.wiki.runs_findings_explanation_passed_no_blocking', ['count' => $total]);
         }
 
         if (in_array($run->qa_status, [
-            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
             EnterpriseWikiIngestRun::QA_STATUS_FAILED,
             EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
         ], true)) {

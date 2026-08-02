@@ -1,6 +1,37 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy } from './runFindingsLogic.js';
+import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy, isRunStalled, formatFindingUserId } from './runFindingsLogic.js';
+
+describe('formatFindingUserId', () => {
+    test('strips the claim-defect prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('claim-defect-5378'), '5378');
+    });
+
+    test('strips the best-practice prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('best-practice-5390'), '5390');
+    });
+
+    test('strips the lint prefix, leaving only the stable numeric id', () => {
+        assert.equal(formatFindingUserId('lint-82'), '82');
+    });
+
+    test('same input always produces the same output (list and detail view use identical formatting)', () => {
+        assert.equal(formatFindingUserId('claim-defect-5378'), formatFindingUserId('claim-defect-5378'));
+    });
+
+    test('falls back to the full original id for an unrecognized prefix, never an empty value', () => {
+        assert.equal(formatFindingUserId('unknown-format-123'), 'unknown-format-123');
+    });
+
+    test('falls back to the full original id when a known prefix is followed by a non-numeric remainder', () => {
+        assert.equal(formatFindingUserId('claim-defect-abc'), 'claim-defect-abc');
+    });
+
+    test('handles null/undefined without throwing, never returning an empty-looking value silently', () => {
+        assert.equal(formatFindingUserId(null), '');
+        assert.equal(formatFindingUserId(undefined), '');
+    });
+});
 
 describe('matchesFindingsLocalFilter', () => {
     test('"open" matches every open status a finding can carry, from every source', () => {
@@ -9,11 +40,10 @@ describe('matchesFindingsLocalFilter', () => {
         assert.equal(matchesFindingsLocalFilter({ status: 'open' }, 'open'), true);
         // best-practice suggestion status
         assert.equal(matchesFindingsLocalFilter({ status: 'pending_review' }, 'open'), true);
-        // claim-integrity defect statuses — previously missing, so a genuinely open, blocking
-        // claim defect silently disappeared from the "Åpne" tab despite being counted in
-        // summary.open_blocking.
-        assert.equal(matchesFindingsLocalFilter({ status: 'requires_decision' }, 'open'), true);
-        assert.equal(matchesFindingsLocalFilter({ status: 'user_blocking' }, 'open'), true);
+        // claim QA signal statuses (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+        // v0.10") — voluntary, never blocking, but must still surface under "Åpne" for QA.
+        assert.equal(matchesFindingsLocalFilter({ status: 'open_for_qa_review' }, 'open'), true);
+        assert.equal(matchesFindingsLocalFilter({ status: 'flagged_for_review' }, 'open'), true);
     });
 
     test('"open" excludes resolved/informative/superseded statuses', () => {
@@ -22,8 +52,9 @@ describe('matchesFindingsLocalFilter', () => {
         }
     });
 
-    test('"blocking" matches purely on blocks_run, regardless of status', () => {
-        assert.equal(matchesFindingsLocalFilter({ status: 'requires_decision', blocks_run: true }, 'blocking'), true);
+    test('"blocking" matches purely on blocks_run, regardless of status — a claim QA signal never sets blocks_run true (v0.10)', () => {
+        assert.equal(matchesFindingsLocalFilter({ status: 'requires_action', blocks_run: true }, 'blocking'), true);
+        assert.equal(matchesFindingsLocalFilter({ status: 'open_for_qa_review', blocks_run: false }, 'blocking'), false);
         assert.equal(matchesFindingsLocalFilter({ status: 'pending_review', blocks_run: false }, 'blocking'), false);
     });
 
@@ -90,6 +121,64 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
 
         assert.equal(getRunTimelineState(run, pagesIndex), 'active');
         assert.equal(getRunTimelineState(run, pagesIndex + 1), 'empty');
+    });
+});
+
+describe('isRunStalled — requires BOTH an actively-processing status AND a long gap since progress', () => {
+    const NOW = new Date('2026-07-31T12:00:00Z').getTime();
+    const twentyMinutesAgo = new Date(NOW - 20 * 60_000).toISOString();
+    const twoMinutesAgo = new Date(NOW - 2 * 60_000).toISOString();
+
+    test('a queued run with no progress past the threshold can be flagged stalled', () => {
+        const run = { status: 'queued', expects_automatic_progress: true, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), true);
+    });
+
+    test('an active generation status (generating_pages) with no progress past the threshold can be flagged stalled', () => {
+        const run = { status: 'generating_pages', expects_automatic_progress: true, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), true);
+    });
+
+    test('an active run with recent progress is not flagged stalled', () => {
+        const run = { status: 'generating_pages', expects_automatic_progress: true, last_progress_at: twoMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('awaiting_document_owner_approval is never flagged stalled, no matter how long it has waited', () => {
+        const run = { status: 'awaiting_document_owner_approval', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+
+        // Even an implausibly long wait must not flip this — the backend flag alone decides.
+        const longWait = { ...run, last_progress_at: new Date(NOW - 60 * 24 * 60_000).toISOString() };
+        assert.equal(isRunStalled(longWait, 15, NOW), false);
+    });
+
+    test('decision_only is never flagged stalled', () => {
+        const run = { status: 'decision_only', expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('completed, failed, escalated, and cancelled are never flagged stalled', () => {
+        for (const status of ['completed', 'failed', 'escalated', 'cancelled']) {
+            const run = { status, expects_automatic_progress: false, last_progress_at: twentyMinutesAgo };
+            assert.equal(isRunStalled(run, 15, NOW), false, `expected ${status} to never be stalled`);
+        }
+    });
+
+    test('a missing expects_automatic_progress flag (undefined) is treated as not expecting progress', () => {
+        const run = { status: 'generating_pages', last_progress_at: twentyMinutesAgo };
+
+        assert.equal(isRunStalled(run, 15, NOW), false);
+    });
+
+    test('no run at all is never flagged stalled', () => {
+        assert.equal(isRunStalled(null, 15, NOW), false);
+        assert.equal(isRunStalled(undefined, 15, NOW), false);
     });
 });
 

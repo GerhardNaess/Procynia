@@ -108,6 +108,100 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('slug', mb_strtolower($developerPrompt));
     }
 
+    // =========================================================================
+    // Page responsibility (reduce cross-page repetition)
+    // =========================================================================
+
+    public function test_developer_prompt_documents_page_responsibility_for_every_page_type(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+            $this->assertStringContainsString('PAGE RESPONSIBILITY', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('excluded', mb_strtolower($developerPrompt), "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_treats_excluded_topics_as_a_hard_binding_boundary(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('hard, binding boundary', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_caps_reference_only_topics_to_one_sentence(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('at most one short sentence', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_concept_and_entity_structure_caps_section_count_to_owned_topics(): void
+    {
+        foreach (['concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('at most one ## section per item', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_best_practice_rule_requires_necessity_not_just_accuracy(): void
+    {
+        $payload = $this->capturePayload(pageType: 'concept');
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+        $this->assertStringContainsString('a thin source document justifies a thin page', $developerPrompt);
+    }
+
+    public function test_developer_prompt_forbids_repeating_the_same_sentence(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('never restate the same sentence', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_summary_developer_prompt_instructs_basing_on_the_finished_article(): void
+    {
+        $payload = $this->capturePayload(pageType: 'summary');
+        $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('Additional context', $developerPrompt);
+        $this->assertStringContainsString('finished article', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('independently re-deriving', mb_strtolower($developerPrompt));
+    }
+
+    public function test_concept_and_entity_developer_prompts_instruct_linking_instead_of_repeating(): void
+    {
+        foreach (['concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
+
+            $this->assertStringContainsString('never a repeated or newly-invented explanation', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_additional_context_with_responsibility_guidance_reaches_the_user_prompt(): void
+    {
+        $context = "This page's own content responsibility — explain ONLY these in depth, nothing beyond them:\n- Definer ITIL som rammeverk.\n\nEXCLUDED — do not mention these at all on this page, in any depth:\n- Detaljert Incident Management-flyt.";
+
+        $payload = $this->capturePayload(pageType: 'concept', additionalContext: $context);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('Definer ITIL som rammeverk.', $userPrompt);
+        $this->assertStringContainsString('Detaljert Incident Management-flyt.', $userPrompt);
+    }
+
     public function test_empty_link_catalog_is_documented_as_no_pages_available(): void
     {
         $payload = $this->capturePayload(linkCatalog: []);
@@ -212,11 +306,11 @@ class WikiPageContentAiClientTest extends TestCase
                         [
                             'type' => 'output_text',
                             'text' => json_encode([
-                        'page' => [
-                            'blocks' => [
-                                $this->sourceBasedBlock($expectedMarkdown),
-                            ],
-                        ],
+                                'page' => [
+                                    'blocks' => [
+                                        $this->sourceBasedBlock($expectedMarkdown),
+                                    ],
+                                ],
                             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                         ],
                     ],

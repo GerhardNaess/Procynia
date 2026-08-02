@@ -2,19 +2,23 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Jobs\EnterpriseWiki\ReconcileEnterpriseWikiClaimSourcesForDocument;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\User;
 use App\Services\DocumentTextExtractor;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -26,11 +30,14 @@ use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class WikiSourceController extends Controller
 {
+    use RedirectsToWikiIndexTab;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentDeletionService $deletionService,
+        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -111,7 +118,7 @@ class WikiSourceController extends Controller
             throw $e;
         }
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
     }
 
@@ -155,7 +162,7 @@ class WikiSourceController extends Controller
             'updated_by_user_id' => $user?->id,
         ]);
 
-        return redirect()->route('app.wiki.index', ['tab' => 'sources'])
+        return $this->redirectToWikiTab($request)
             ->with('success', 'Dokumenteier oppdatert.');
     }
 
@@ -183,6 +190,82 @@ class WikiSourceController extends Controller
         return $response;
     }
 
+    /**
+     * Serves a single Word image extracted from this document's ordinary content flow. There is
+     * no separate stored copy of the image anywhere (Fase 1 Enterprise Wiki image support
+     * deliberately reuses the document's own already-private, already customer-scoped storage
+     * instead of introducing a parallel media store — see CLAUDE.md: "reuse existing
+     * architecture") — the image is re-extracted from the stored .docx on every request and its
+     * bytes are re-encoded through GD before being served, which both validates the bytes really
+     * decode as the claimed format and strips any embedded metadata (e.g. JPEG EXIF) the source
+     * file might carry (Section 5: "remove or ignore unnecessary metadata").
+     */
+    public function image(EnterpriseWikiDocument $document, string $imageKey): Response
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        $image = $this->sourceElementService->imageBySourceKey($document, $imageKey);
+
+        if ($image === null) {
+            abort(404);
+        }
+
+        $servableBytes = $this->resolveServableImageBytes($image->bytes, $image->mimeType);
+
+        abort_if($servableBytes === null, 404);
+
+        return response($servableBytes, 200, [
+            'Content-Type' => $image->mimeType,
+            'Content-Disposition' => 'inline',
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Purpose: Decide what bytes are safe to serve for one image, preferring a GD re-encode (which
+     * strips embedded metadata, e.g. JPEG EXIF — Section 5: "remove or ignore unnecessary
+     * metadata") but falling back to the original bytes when GD cannot decode an otherwise
+     * genuinely well-formed image (some valid, spec-compliant PNG/JPEG files exercise decoder
+     * edge cases GD's bundled libraries reject even though the format's own header is intact).
+     * Only bytes that fail BOTH the GD re-encode and a raw header check are treated as truly
+     * corrupt and refused (Section 12: a corrupt image must be handled in a controlled way, not
+     * served as broken content — but a merely GD-unfriendly one should still display).
+     * Inputs: The raw bytes and the MIME type DocumentTextExtractor determined at extraction time.
+     * Returns: Bytes ready to serve, or null when the bytes are genuinely corrupt/unsupported.
+     * Side effects: None (operates entirely in memory).
+     */
+    private function resolveServableImageBytes(string $bytes, ?string $mimeType): ?string
+    {
+        $resource = @imagecreatefromstring($bytes);
+
+        if ($resource !== false) {
+            ob_start();
+
+            $encoded = match ($mimeType) {
+                'image/png' => imagepng($resource),
+                'image/jpeg' => imagejpeg($resource, null, 90),
+                default => false,
+            };
+
+            $reencodedBytes = ob_get_clean();
+            imagedestroy($resource);
+
+            if ($encoded && is_string($reencodedBytes) && $reencodedBytes !== '') {
+                return $reencodedBytes;
+            }
+        }
+
+        $headerInfo = @getimagesizefromstring($bytes);
+        $headerMimeType = is_array($headerInfo) ? ($headerInfo['mime'] ?? null) : null;
+
+        return $headerMimeType === $mimeType ? $bytes : null;
+    }
+
     public function deletePreview(EnterpriseWikiDocument $document): JsonResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
@@ -197,7 +280,17 @@ class WikiSourceController extends Controller
         return response()->json($this->deletionService->preview($document));
     }
 
-    public function destroy(EnterpriseWikiDocument $document): RedirectResponse
+    /**
+     * Cancels every non-terminal ingest run for this document so the document becomes eligible
+     * for the ordinary deletion flow, which is blocked by ANY non-terminal run (see
+     * EnterpriseWikiDocumentDeletionService::hasActiveRun()). Deliberately separate from
+     * WikiController::cancelRun() (the Kjøringer-tab "Avbryt kjøring" action, which only allows
+     * cancelling a run EnterpriseWikiIngestRun::isCancellable() considers still genuinely under
+     * automatic processing): a run stuck waiting on Document Owner approval has nothing left
+     * running to interrupt from the Kjøringer tab, but it still blocks deletion, and this action
+     * exists specifically to unblock that — never presented as an ordinary "stop the run" control.
+     */
+    public function cancelBlockingRunsForDeletion(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
@@ -206,13 +299,47 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        abort_unless($user?->canDeleteEnterpriseWikiDocument($document) ?? false, 403);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        $blockingRuns = $this->deletionService->documentRuns($document)
+            ->reject(fn (EnterpriseWikiIngestRun $run): bool => $run->isTerminal());
+
+        if ($blockingRuns->isEmpty()) {
+            return $this->redirectToWikiTab($request)
+                ->with('error', __('procynia.wiki.cancel_blocking_runs_none_active'));
+        }
+
+        foreach ($blockingRuns as $run) {
+            $this->documentFlowService->cancelRun($run, $user);
+        }
+
+        Log::info('[PROCYNIA][WIKI_SOURCE] Cancelled blocking ingest runs to unblock document deletion.', [
+            'document_id' => $document->id,
+            'customer_id' => $customerId,
+            'run_ids' => $blockingRuns->pluck('id')->all(),
+            'user_id' => $user->id,
+        ]);
+
+        return $this->redirectToWikiTab($request)
+            ->with('success', __('procynia.wiki.cancel_blocking_runs_success'));
+    }
+
+    public function destroy(Request $request, EnterpriseWikiDocument $document): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
         $documentId = $document->id;
-        $result = $this->deletionService->delete($document);
+        $result = $this->deletionService->delete($document, $user);
 
         if ($result['blocked'] ?? false) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', __('procynia.wiki.delete_preview_blocked_in_progress'));
         }
 
@@ -220,6 +347,7 @@ class WikiSourceController extends Controller
             'document_id' => $documentId,
             'customer_id' => $customerId,
             'runs_deleted' => $result['runs_deleted'],
+            'pending_approval_runs_cancelled' => $result['pending_approval_runs_cancelled'],
             'sole_source_pages_deleted' => $result['sole_source_pages_deleted'],
             'shared_pages_kept' => $result['shared_pages_kept'],
             'page_versions_deleted' => $result['page_versions_deleted'],
@@ -230,7 +358,7 @@ class WikiSourceController extends Controller
             'storage_error' => $result['storage_error'],
         ]);
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with('success', $this->deletionSuccessMessage($result));
     }
 
@@ -263,7 +391,7 @@ class WikiSourceController extends Controller
         return $message;
     }
 
-    public function ingest(EnterpriseWikiDocument $document): RedirectResponse
+    public function ingest(Request $request, EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
 
@@ -272,12 +400,12 @@ class WikiSourceController extends Controller
         }
 
         if (! EnterpriseWikiMaintainerDecisionAiClient::isAvailable()) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Wiki-generering er ikke aktivert ennå.');
         }
 
         if ($document->document_status !== EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Dokumentet er ikke klart for ingest. Kun ekstraherte dokumenter kan brukes.');
         }
 
@@ -286,7 +414,7 @@ class WikiSourceController extends Controller
         } catch (InvalidArgumentException $e) {
             Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
 
-            return redirect()->route('app.wiki.index')
+            return $this->redirectToWikiTab($request)
                 ->with('error', 'Kunne ikke starte ingest. Prøv igjen.');
         }
 
@@ -303,7 +431,7 @@ class WikiSourceController extends Controller
             'created' => $prepared['created'],
         ]);
 
-        return redirect()->route('app.wiki.index')
+        return $this->redirectToWikiTab($request)
             ->with(
                 'success',
                 $prepared['created']

@@ -115,6 +115,84 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         );
     }
 
+    /**
+     * Regression for run 574's finding #5560, on the generate() command path (Pass 1). A
+     * verbatim-repeated sentence returned across two of the AI's structured blocks for a summary
+     * page must not survive into content_markdown / content_blocks_json, and the summary must
+     * still generate successfully — the dedup step does not introduce a new repair round or
+     * block summary generation.
+     */
+    public function test_command_still_generates_summary_normally_when_ai_returns_a_duplicate_sentence(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $summary] = $this->createAppliedRunWithArticleAndSummary($customer);
+
+        $repeatedSentence = 'Som oversiktsbilde over en Incident-prosess viser illustrasjoner et løp fra innmelding til avslutning.';
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($repeatedSentence): array {
+                if ($pageType !== EnterpriseWikiPage::PAGE_TYPE_SUMMARY) {
+                    return $this->structuredPageResult(self::FAKE_MARKDOWN, $sourceElements);
+                }
+
+                $sourceElement = $sourceElements[0] ?? [
+                    'source_element_key' => 'document-1-full-text',
+                    'source_element_type' => 'manual',
+                ];
+
+                $blocks = [
+                    [
+                        'markdown' => "# Sammendrag: Test Artikkel\n\n{$repeatedSentence}",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                        'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                        'source_element_types' => [(string) $sourceElement['source_element_type']],
+                        'best_practice_reason' => null,
+                        'link_intents' => [],
+                    ],
+                    [
+                        'markdown' => "{$repeatedSentence} Videre beskrives ansvarsfordelingen i detalj.",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                        'source_element_keys' => [],
+                        'source_element_types' => [],
+                        'best_practice_reason' => 'Generell fagkunnskap.',
+                        'link_intents' => [],
+                    ],
+                ];
+
+                return [
+                    'markdown' => trim(implode("\n\n", array_column($blocks, 'markdown'))),
+                    'blocks' => $blocks,
+                ];
+            })
+            ->byDefault();
+
+        $this->artisan('wiki:generate-applied-pages', ['--run-id' => $run->id])
+            ->assertExitCode(0);
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $summary->id)
+            ->firstOrFail();
+
+        $this->assertSame(1, substr_count($version->content_markdown, $repeatedSentence));
+        $this->assertStringContainsString('Videre beskrives ansvarsfordelingen i detalj.', $version->content_markdown);
+        $this->assertStringContainsString('# Sammendrag: Test Artikkel', $version->content_markdown);
+
+        $blocks = collect($version->content_blocks_json);
+        $secondBlock = $blocks->first(fn (array $b): bool => str_contains($b['markdown'] ?? '', 'Videre beskrives'));
+        $this->assertNotNull($secondBlock);
+        $this->assertStringNotContainsString($repeatedSentence, $secondBlock['markdown']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $secondBlock['content_origin']);
+    }
+
     public function test_command_fills_content_markdown_for_article_page(): void
     {
         $customer = $this->createCustomer();

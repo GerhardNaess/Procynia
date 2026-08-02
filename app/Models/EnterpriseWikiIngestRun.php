@@ -137,6 +137,62 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_DECISION_ONLY,
     ];
 
+    /**
+     * The single, central definition of "this run is still being worked on by the automatic
+     * pipeline" — deliberately narrower than NON_TERMINAL_STATUSES. STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL
+     * and STATUS_DECISION_ONLY are both non-terminal (the run genuinely isn't finished/failed/
+     * cancelled) but neither has any active job or lease behind it: the automatic pipeline has
+     * already finished everything it is going to do, and the run is now waiting on a human
+     * decision (or, for decision_only, was never meant to progress further at all). Presenting
+     * "Avbryt kjøring" for either is misleading — there is nothing left to interrupt.
+     *
+     * Every caller that decides whether to show/allow the ordinary run-cancellation action
+     * (WikiController's `can_cancel` flag and cancelRun() guard) must use this method rather than
+     * re-deriving its own status list, so the Kjøringer tab and the backend can never disagree
+     * about which runs are actually cancellable.
+     */
+    public const CANCELLABLE_STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+    ];
+
+    /**
+     * The single, central definition of "the automatic pipeline currently expects to make
+     * technical progress on this run" — used to decide whether a long gap since the last
+     * recorded activity is actually suspicious (a "seems stalled" warning) or just an ordinary
+     * wait for something else to happen. Deliberately a SEPARATE concept from
+     * CANCELLABLE_STATUSES above, even though their membership happens to be identical today:
+     * cancellability is a policy/permission question ("can a user interrupt this run right
+     * now"), while this is a technical-health question ("is there still automatic work
+     * scheduled here, such that silence would be unusual"). A run waiting on a human decision
+     * (STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) or one that was never meant to progress further
+     * (STATUS_DECISION_ONLY) is correctly excluded from both lists for genuinely different
+     * reasons, and the two must be free to diverge later without one silently dragging the
+     * other along — never derive one from the other just to save a line.
+     *
+     * Every caller that decides whether a long-idle run should be flagged as stalled (the
+     * Kjøringer/Kildedokumenter "Ser ut til å stå stille" warning) must use
+     * expectsAutomaticProgress() rather than re-deriving its own status list.
+     */
+    public const EXPECTS_AUTOMATIC_PROGRESS_STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+    ];
+
     protected $fillable = [
         'uuid',
         'customer_id',
@@ -229,5 +285,40 @@ class EnterpriseWikiIngestRun extends Model
     public function isQueued(): bool
     {
         return $this->status === self::STATUS_QUEUED;
+    }
+
+    /**
+     * Whether the ordinary "Avbryt kjøring" action should be offered/allowed for this run. See
+     * CANCELLABLE_STATUSES's own docblock for why this is narrower than !isTerminal().
+     */
+    public function isCancellable(): bool
+    {
+        return in_array($this->status, self::CANCELLABLE_STATUSES, true);
+    }
+
+    /**
+     * Whether a long gap since this run's last recorded activity should be treated as
+     * suspicious. See EXPECTS_AUTOMATIC_PROGRESS_STATUSES's own docblock for why this is not
+     * simply isCancellable() or !isTerminal().
+     */
+    public function expectsAutomaticProgress(): bool
+    {
+        return in_array($this->status, self::EXPECTS_AUTOMATIC_PROGRESS_STATUSES, true);
+    }
+
+    /**
+     * Whether this run is non-terminal but has no active technical job behind it — waiting on a
+     * human decision (STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL) or never meant to progress further
+     * (STATUS_DECISION_ONLY) — rather than genuinely still being processed. The complement of
+     * expectsAutomaticProgress() within the non-terminal statuses.
+     *
+     * Callers deciding whether source-document deletion may proceed directly (auto-ending the
+     * human-waiting run as part of deletion) rather than requiring an explicit prior cancel must
+     * use this method, not a re-derived status list. See
+     * EnterpriseWikiDocumentDeletionService::hasActiveRun().
+     */
+    public function isAwaitingHumanAction(): bool
+    {
+        return ! $this->isTerminal() && ! $this->expectsAutomaticProgress();
     }
 }

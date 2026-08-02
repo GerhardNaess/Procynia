@@ -114,66 +114,85 @@ class EnterpriseWikiClaimCanonicalizationServiceTest extends TestCase
     }
 
     // =========================================================================
-    // isGenuineBestPracticeText() — Del 2/4 deterministic backend guard, task's own examples
+    // isEligibleForBestPractice() — Procynia writes best-practice text in the same formal,
+    // declarative register as any other Wiki text (CLAUDE.md's "avtaletekst" premise); the
+    // distinction is content_origin plus UI labeling, never a recommendation marker such as
+    // "bør"/"kan"/"anbefales". The sole disqualifier is the text asserting something about a
+    // named, specific customer, supplier, or agreement — never the sentence's own tone.
     // =========================================================================
 
-    public function test_recommendation_with_boer_is_genuine_best_practice(): void
+    public function test_declarative_sentence_without_any_marker_is_eligible(): void
     {
-        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det anbefales å etablere døgnbemannet vakt.'));
+        // The task's own canonical example — a plain, confident, constaterende statement of
+        // professional fact, with no "bør"/"kan"/"anbefales" anywhere.
+        $this->assertTrue($this->service()->isEligibleForBestPractice(
+            'Tydelig rolle- og ansvarsfordeling gir klare eskaleringslinjer og konsistent prosessutførelse.',
+        ));
     }
 
-    public function test_current_state_assertion_is_not_genuine_best_practice(): void
+    public function test_general_process_integration_truth_is_eligible(): void
     {
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kunden har døgnbemannet vaktordning.'));
+        $this->assertTrue($this->service()->isEligibleForBestPractice(
+            'Sammenheng mellom hendelses-, problem- og endringshåndtering styrker helhetlig tjenestestyring.',
+        ));
     }
 
-    public function test_boer_review_recommendation_is_genuine_best_practice(): void
+    public function test_general_masterdata_truth_is_eligible(): void
     {
-        $this->assertTrue($this->service()->isGenuineBestPracticeText('Tilgangsrettigheter bør gjennomgås regelmessig.'));
+        $this->assertTrue($this->service()->isEligibleForBestPractice(
+            'Konsistent bruk av masterdata gir bedre sporbarhet i hendelseshåndteringen.',
+        ));
     }
 
-    public function test_kan_redusere_recommendation_is_genuine_best_practice(): void
+    public function test_run_486_supporting_sentence_without_marker_is_eligible(): void
     {
-        $this->assertTrue($this->service()->isGenuineBestPracticeText('En selvbetjeningsportal kan redusere belastningen på servicedesk.'));
+        // Real run-486 wording — a supporting/context sentence split from a larger
+        // recommendation paragraph, with no marker of its own and no party-specific assertion.
+        $this->assertTrue($this->service()->isEligibleForBestPractice(
+            'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.',
+        ));
     }
 
-    public function test_hensiktsmessig_recommendation_is_genuine_best_practice(): void
+    public function test_customer_current_state_assertion_is_not_eligible(): void
     {
-        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det kan være hensiktsmessig å definere tydelige KPI-er.'));
+        $this->assertFalse($this->service()->isEligibleForBestPractice('Kunden har etablert døgnbemannet vaktordning.'));
     }
 
-    public function test_customer_uses_tool_assertion_is_not_genuine_best_practice(): void
+    public function test_supplier_current_state_assertion_is_not_eligible(): void
     {
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Servicedesk bruker ServiceNow.'));
+        $this->assertFalse($this->service()->isEligibleForBestPractice('Leverandøren utfører daglig overvåking av systemet.'));
     }
 
-    public function test_supplier_follows_standard_assertion_is_not_genuine_best_practice(): void
+    public function test_agreement_specific_assertion_is_not_eligible(): void
     {
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Leverandøren følger ISO 27001.'));
+        $this->assertFalse($this->service()->isEligibleForBestPractice(
+            'Prosessen i avtalen omfatter fem godkjente eskaleringsnivåer.',
+        ));
     }
 
-    public function test_plain_factual_claim_without_modal_is_not_genuine_best_practice(): void
+    public function test_empty_text_is_not_eligible(): void
     {
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kritiske saker besvares innen 15 minutter.'));
+        $this->assertFalse($this->service()->isEligibleForBestPractice(''));
     }
 
-    public function test_skal_requirement_wording_is_not_treated_as_best_practice_signal(): void
+    public function test_marker_wording_alone_does_not_make_a_party_specific_claim_eligible(): void
     {
-        // "skal"/"må" are requirement/obligation language, not recommendation language — the task
-        // explicitly excludes them from best-practice signals so a contractual requirement can't
-        // be waved through just because it contains a modal verb.
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kritiske saker skal besvares innen 15 minutter.'));
+        // The recommendation-flavored wording no longer carries any weight — a sentence that
+        // asserts a named party's current state must still be excluded regardless of phrasing.
+        $this->assertFalse($this->service()->isEligibleForBestPractice(
+            'Det anbefales at leverandøren allerede følger denne rutinen.',
+        ));
     }
 
-    public function test_wording_drifted_from_recommendation_to_fact_is_no_longer_genuine(): void
+    public function test_same_content_treated_differently_by_party_specificity(): void
     {
-        $this->assertTrue($this->service()->isGenuineBestPracticeText('Det anbefales å etablere døgnbemannet vakt.'));
-        $this->assertFalse($this->service()->isGenuineBestPracticeText('Kunden har etablert døgnbemannet vakt.'));
-    }
+        // Item 5: the identical underlying idea is eligible when stated as a general truth, and
+        // not eligible when the same idea is asserted as a fact about the named customer.
+        $general = 'Tydelig rolle- og ansvarsfordeling gir klare eskaleringslinjer.';
+        $customerSpecific = 'Kunden har tydelig rolle- og ansvarsfordeling som gir klare eskaleringslinjer.';
 
-    public function test_empty_text_is_never_genuine_best_practice(): void
-    {
-        $this->assertFalse($this->service()->isGenuineBestPracticeText(''));
+        $this->assertTrue($this->service()->isEligibleForBestPractice($general));
+        $this->assertFalse($this->service()->isEligibleForBestPractice($customerSpecific));
     }
 
     // =========================================================================

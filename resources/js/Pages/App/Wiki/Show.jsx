@@ -8,6 +8,8 @@ import {
     groupWikiFindingsByCode,
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
+import { formatFindingUserId } from './runFindingsLogic';
+import { groupContentBlocksBySection } from './wikiBestPracticeSectionLogic';
 
 function getWikiShowHelpSections(tw) {
     return [
@@ -627,6 +629,56 @@ function WikiTableBlock({ block, tw, sourceDocuments }) {
     );
 }
 
+/**
+ * Renders a deterministic "image" content block (see EnterpriseWikiImageBlockBuilder) as a real,
+ * semantic <figure>/<img>/<figcaption> — never as Markdown text. The image itself is never
+ * embedded directly or loaded from a raw storage path: image_data.image_url is always a server-
+ * computed, authenticated route (WikiSourceController::image()) that re-extracts and re-encodes
+ * the bytes on every request. Never editable in this phase, matching WikiTableBlock's precedent.
+ */
+function WikiImageBlock({ block, tw, sourceDocuments }) {
+    const imageData = block.image_data;
+
+    if (!imageData || !imageData.image_url) {
+        return null;
+    }
+
+    const sourceDocument = sourceDocuments.find((doc) => String(doc.id) === String(block.source_id)) ?? null;
+    const caption = imageData.caption
+        || (tw.wiki_figure_caption ?? 'Figur :number').replace(':number', imageData.figure_number);
+
+    return (
+        <div className="not-prose my-4 space-y-2">
+            <figure className="m-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                <img
+                    src={imageData.image_url}
+                    alt={imageData.alt_text ?? ''}
+                    loading="lazy"
+                    className="block max-h-[28rem] w-full object-contain"
+                />
+                <figcaption className="border-t border-slate-200 bg-white px-4 py-2.5 text-base text-slate-700">
+                    {caption}
+                </figcaption>
+            </figure>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-base text-slate-500">
+                <p>
+                    {tw.source_page_reference ?? 'Plassering i kilden'}: {block.page_reference ?? '—'}
+                </p>
+                {sourceDocument?.download_url && (
+                    <a
+                        href={sourceDocument.download_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                    >
+                        {tw.source_open_document ?? 'Åpne original kilde'}
+                    </a>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
@@ -1144,6 +1196,18 @@ export default function WikiShow({
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
 
+    // Mirrors EnterpriseWikiRunFindingsService's own id construction ('claim-defect-'.$claim->id /
+    // 'best-practice-'.$primary->id) so the SAME stable id shown in the Kjøringer "Funn" panel is
+    // shown here too — reconstructed client-side from data already present on the claim
+    // (content_origin, id) rather than requiring a backend prop change. Returns null for a claim
+    // that is not itself a Funn-panel finding category (e.g. a plain source_based claim).
+    const findingIdForClaim = (claim) => {
+        if (claim.content_origin === 'best_practice') return `best-practice-${claim.id}`;
+        if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') return `claim-defect-${claim.id}`;
+
+        return null;
+    };
+
     const claimProblemLabel = (claim) => {
         if (claim.content_origin === 'internal_error' || claim.content_origin === 'unsupported_generated_content') {
             return tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.';
@@ -1222,6 +1286,11 @@ export default function WikiShow({
                             <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
+                            {findingIdForClaim(claim) && (
+                                <p className="font-mono text-sm font-semibold text-slate-600">
+                                    {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
+                                </p>
+                            )}
                             <p className="text-lg font-semibold text-slate-900">
                                 {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
                             </p>
@@ -1399,6 +1468,11 @@ export default function WikiShow({
             >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
+                        {findingIdForClaim(claim) && (
+                            <p className="font-mono text-sm font-semibold text-slate-600">
+                                {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
+                            </p>
+                        )}
                         {showClaimText && (
                             <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
@@ -2162,12 +2236,25 @@ export default function WikiShow({
                     {hasArticle ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             <div className="wiki-article">
-                                {contentBlocks.length > 0 ? (
-                                    contentBlocks.map((block) => {
+                                {(() => {
+                                    // A single content block's own markup — table/image/editing/plain markdown —
+                                    // WITHOUT its own "Beste praksis" frame; suppressBestPracticeFrame is true when
+                                    // this block is rendered inside a shared section frame (see below) so the label
+                                    // and amber background are shown once per faglig seksjon, not once per block.
+                                    const renderBlock = (block, { suppressBestPracticeFrame = false } = {}) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
+                                        // A block's own content_origin is set once at generation time and never
+                                        // rewritten — but claim verification can later re-classify a specific claim
+                                        // (e.g. AI-mistagged source_based text that reads as genuine best-practice
+                                        // advice gets promoted, see EnterpriseWikiVerifyPageClaimsService). Checking
+                                        // the block's linked claims too keeps the reader-facing label in sync with
+                                        // that reclassification instead of showing a stale origin.
+                                        const claimsForBlock = claims.filter((claim) => claim.content_block_key === block.block_key);
+                                        const isBestPracticeBlock = block.content_origin === 'best_practice'
+                                            || (claimsForBlock.length > 0 && claimsForBlock.every((claim) => claim.content_origin === 'best_practice'));
                                         const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
                                         const canSaveBlockEdit = Boolean(
                                             canEditWikiClaims
@@ -2189,6 +2276,8 @@ export default function WikiShow({
                                             >
                                                 {block.block_type === 'table' ? (
                                                     <WikiTableBlock block={block} tw={tw} sourceDocuments={sourceDocuments} />
+                                                ) : block.block_type === 'image' ? (
+                                                    <WikiImageBlock block={block} tw={tw} sourceDocuments={sourceDocuments} />
                                                 ) : isEditingTargetBlock ? (
                                                     <div className="space-y-3">
                                                         <label className="block space-y-2">
@@ -2235,6 +2324,13 @@ export default function WikiShow({
                                                             </p>
                                                         )}
                                                     </div>
+                                                ) : isBestPracticeBlock && !suppressBestPracticeFrame ? (
+                                                    <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                                                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                            {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                        </p>
+                                                        <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                    </div>
                                                 ) : (
                                                     <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
                                                 )}
@@ -2259,10 +2355,34 @@ export default function WikiShow({
                                                 )}
                                             </div>
                                         );
-                                    })
-                                ) : (
-                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>
-                                )}
+                                    };
+
+                                    if (contentBlocks.length === 0) {
+                                        return <ReactMarkdown components={{ a: WikiArticleLink }}>{articleContent}</ReactMarkdown>;
+                                    }
+
+                                    // Server-computed section_key (EnterpriseWikiBestPracticeSectionService, via
+                                    // WikiController::renderedContentBlocks()) is grouped here purely by "consecutive
+                                    // blocks sharing the same key" — the heading/level detection itself is never
+                                    // re-derived on the frontend (Del 3: "ikke dupliser logikken").
+                                    return groupContentBlocksBySection(contentBlocks).map((group) => {
+                                        if (group.type === 'single') {
+                                            return renderBlock(group.block);
+                                        }
+
+                                        return (
+                                            <div
+                                                key={`section-${group.sectionKey}`}
+                                                className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3"
+                                            >
+                                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                    {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                </p>
+                                                {group.blocks.map((block) => renderBlock(block, { suppressBestPracticeFrame: true }))}
+                                            </div>
+                                        );
+                                    });
+                                })()}
                             </div>
                         </div>
                     ) : (
@@ -2272,10 +2392,10 @@ export default function WikiShow({
                     )}
                 </section>
 
-                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'blocked_by_quality' && (
-                    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                        <p className="text-sm font-medium text-amber-800">
-                            {tw.document_owner_blocked_by_quality_message ?? 'Wiki-siden behandles fortsatt fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget.'}
+                {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'qa_review_open' && (
+                    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                        <p className="text-sm font-medium text-slate-700">
+                            {tw.document_owner_qa_review_open_message ?? 'Wiki-siden er tilgjengelig og kan brukes. Systemet har notert noen faglige punkter til frivillig QA-gjennomgang.'}
                         </p>
                     </section>
                 )}

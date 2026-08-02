@@ -317,7 +317,9 @@ Route::prefix('app')
             Route::patch('/sources/{document}/owner', [WikiSourceController::class, 'updateOwner'])->name('sources.owner.update');
             Route::delete('/sources/{document}', [WikiSourceController::class, 'destroy'])->name('sources.destroy');
             Route::get('/sources/{document}/delete-preview', [WikiSourceController::class, 'deletePreview'])->name('sources.delete-preview');
+            Route::patch('/sources/{document}/cancel-blocking-runs', [WikiSourceController::class, 'cancelBlockingRunsForDeletion'])->name('sources.cancel-blocking-runs');
             Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
+            Route::get('/sources/{document}/images/{imageKey}', [WikiSourceController::class, 'image'])->name('sources.image');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
             Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
             Route::get('/runs/{run}/pages', [WikiController::class, 'runPages'])->name('runs.pages');

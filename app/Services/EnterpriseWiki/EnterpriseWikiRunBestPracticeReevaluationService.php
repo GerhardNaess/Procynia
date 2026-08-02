@@ -24,26 +24,38 @@ use App\Models\EnterpriseWikiPageVersion;
  *      already made this call — this service never invents best-practice status for a block that
  *      was never tagged as such; doing so would be constructing false history).
  *   3. That block carries a real, non-empty best_practice_reason.
- *   4. The claim's OWN current text still reads as a genuine recommendation, not a customer-state
- *      assertion (EnterpriseWikiClaimCanonicalizationService::isGenuineBestPracticeText() — the
- *      same deterministic check used by extraction and verification, so a claim can never end up
- *      classified differently depending on which code path last touched it).
+ *   4. The claim's OWN current text has not drifted into a party-/agreement-specific
+ *      current-state assertion (EnterpriseWikiClaimCanonicalizationService::
+ *      isEligibleForBestPractice() — the same deterministic check used by extraction and
+ *      verification, so a claim can never end up classified differently depending on which
+ *      code path last touched it). No recommendation marker ("bør"/"anbefales"/...) is
+ *      required anywhere in this check — Procynia writes best-practice text in the same
+ *      formal, declarative register as any other Wiki text.
  *
- * Read-only by default; only writes when explicitly told to apply. verified_at is deliberately
- * left untouched — the claim's original verification timestamp remains an honest record of when
- * AI verification ran, even though this scoped correction supersedes its verdict.
+ * Read-only by default; only writes when explicitly told to apply.
+ *
+ * Only ever reachable for a claim with NO prior authoritative decision (verified_at null) —
+ * EnterpriseWikiClaimClassificationService rejects any attempt by this service to reclassify a
+ * claim verification already authoritatively decided, so a claim that was genuinely verified and
+ * kept unsupported_generated_content (e.g. a deterministic conflict veto) can never be silently
+ * promoted here. The claims this service can still act on are the ones that never received a
+ * verification decision at all (e.g. demoted straight at extraction, before verification ever
+ * ran) — for those, this IS their first real decision, so it is recorded as authoritative
+ * (verified_at set, decision_source: best_practice_reevaluation) exactly like a claim verification
+ * decided directly.
  */
 class EnterpriseWikiRunBestPracticeReevaluationService
 {
     public function __construct(
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiClaimClassificationService $classificationService,
     ) {}
 
     /**
      * @return array{
      *     run_id: int, applied: bool, checked: int, eligible: int, reclassified: int,
      *     skipped_no_matching_best_practice_block: int, skipped_missing_best_practice_reason: int,
-     *     skipped_not_genuine_recommendation: int,
+     *     skipped_not_genuine_recommendation: int, skipped_authoritative: int,
      *     candidates: list<array{claim_id: int, page_id: int, block_key: ?string, claim_text: string}>
      * }
      */
@@ -73,6 +85,7 @@ class EnterpriseWikiRunBestPracticeReevaluationService
         $skippedNoBlock = 0;
         $skippedNoReason = 0;
         $skippedNotGenuine = 0;
+        $skippedAuthoritative = 0;
         $candidates = [];
 
         foreach ($claims as $claim) {
@@ -97,8 +110,24 @@ class EnterpriseWikiRunBestPracticeReevaluationService
                 continue;
             }
 
-            if (! $this->canonicalizationService->isGenuineBestPracticeText((string) $claim->claim_text)) {
+            if (! $this->canonicalizationService->isEligibleForBestPractice((string) $claim->claim_text)) {
                 $skippedNotGenuine++;
+
+                continue;
+            }
+
+            // Task rule 8: a claim already carrying an authoritative verification decision (it
+            // went through real verification and was deliberately kept unsupported_generated_content
+            // — e.g. a deterministic conflict veto) must never be silently promoted by this
+            // narrower, block-driven rule. Only a claim that never received an authoritative
+            // decision at all (verified_at null — e.g. demoted straight at extraction, before
+            // verification ever ran) is still eligible here.
+            if ($this->classificationService->wouldBeRejectedAsAuthoritative(
+                $claim,
+                EnterpriseWikiClaimClassificationService::SOURCE_BEST_PRACTICE_REEVALUATION,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            )) {
+                $skippedAuthoritative++;
 
                 continue;
             }
@@ -115,7 +144,7 @@ class EnterpriseWikiRunBestPracticeReevaluationService
                 continue;
             }
 
-            $claim->update([
+            $outcome = $this->classificationService->classifyClaim($claim->id, EnterpriseWikiClaimClassificationService::SOURCE_BEST_PRACTICE_REEVALUATION, [
                 'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
                 'review_reason' => $reason,
@@ -129,9 +158,23 @@ class EnterpriseWikiRunBestPracticeReevaluationService
                     'reevaluated_run_id' => $run->id,
                 ]),
                 'generation_issue' => null,
+                // Only ever reached for a claim with no prior authoritative decision at all
+                // (verified_at was null — verification, for whatever reason, never ran on it).
+                // This IS therefore that claim's first real decision — mark it authoritative
+                // (verified_at set, decision_source: best_practice_reevaluation) so it is itself
+                // now protected, exactly like a claim verification decided directly.
+                'authoritative' => true,
             ]);
 
-            $reclassified++;
+            if ($outcome['result'] === EnterpriseWikiClaimClassificationService::RESULT_REJECTED_AUTHORITATIVE) {
+                $skippedAuthoritative++;
+
+                continue;
+            }
+
+            if ($outcome['result'] === EnterpriseWikiClaimClassificationService::RESULT_APPLIED) {
+                $reclassified++;
+            }
         }
 
         return [
@@ -143,6 +186,7 @@ class EnterpriseWikiRunBestPracticeReevaluationService
             'skipped_no_matching_best_practice_block' => $skippedNoBlock,
             'skipped_missing_best_practice_reason' => $skippedNoReason,
             'skipped_not_genuine_recommendation' => $skippedNotGenuine,
+            'skipped_authoritative' => $skippedAuthoritative,
             'candidates' => $candidates,
         ];
     }

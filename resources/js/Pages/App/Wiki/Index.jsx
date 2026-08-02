@@ -11,6 +11,8 @@ import {
     matchesFindingsLocalFilter,
     getRunTimelineState,
     getEscalationCopy,
+    isRunStalled,
+    formatFindingUserId,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -65,7 +67,7 @@ function PageTypeBadge({ type, label }) {
 
 const DOCUMENT_OWNER_SUMMARY_STYLES = {
     awaiting_sync: 'bg-slate-100 text-slate-600',
-    blocked_by_quality: 'bg-amber-100 text-amber-700',
+    qa_review_open: 'bg-slate-100 text-slate-600',
     missing_owner: 'bg-rose-100 text-rose-700',
     pending: 'bg-amber-100 text-amber-700',
     mixed: 'bg-violet-100 text-violet-700',
@@ -275,7 +277,7 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <ol className="mt-2 flex flex-wrap gap-1.5">
+        <ol className="mt-2 flex flex-wrap gap-2">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
                 const stateCls = state === 'done'
@@ -295,9 +297,9 @@ function RunTimeline({ run, tw }) {
                 return (
                     <li
                         key={step.key}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-semibold ${stateCls}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-base font-semibold leading-6 ${stateCls}`}
                     >
-                        <span className={`h-2 w-2 rounded-full ${dotCls}`} aria-hidden="true" />
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
                         {tw[step.labelKey] ?? step.fallback}
                     </li>
                 );
@@ -312,13 +314,24 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const activity = getIngestActivityCopy(run, tw);
     const isActive = isActiveWikiRun(run);
     const isEscalated = run.status === 'escalated';
+    // The secondary activity pill only adds information while the automatic pipeline still
+    // expects to make technical progress (queued/running/generating/etc.) — for every other
+    // status (awaiting_document_owner_approval, decision_only, completed, failed, cancelled) it
+    // just restates the main status badge in slightly different words ("Avventer
+    // dokumenteiergodkjenning" vs "Avventer dokumenteier"). A literal string comparison against
+    // the main badge's label would miss that case entirely (different wording, same fact), so
+    // this reuses the same backend-computed, status-driven flag the stalled check already relies
+    // on rather than hardcoding a single text comparison.
+    const showSecondaryStatusPill = !!run.expects_automatic_progress;
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
     const progressLabel = formatRelativeProgress(progressAt, locale);
     const lastProgressLabel = progressLabel
         ? `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${progressLabel}`
         : null;
-    const staleMinutes = progressAt ? Math.max(0, Math.round((Date.now() - new Date(progressAt).getTime()) / 60000)) : null;
-    const seemsStalled = isActive && staleMinutes !== null && staleMinutes >= 15;
+    // Deliberately NOT based on isActive/isActiveWikiRun — that list also covers
+    // awaiting_document_owner_approval (kept "active" for polling/aria-live purposes), which must
+    // never be flagged stalled: it is a normal, indefinite wait for a human, not a stuck pipeline.
+    const seemsStalled = isRunStalled(run);
     const counters = [];
 
     if (showCounters) {
@@ -340,33 +353,35 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
 
     return (
-        <div className="mt-2 space-y-1.5" aria-live={isActive ? 'polite' : 'off'}>
-            {!isEscalated && (
+        <div className="mt-2 space-y-2" aria-live={isActive ? 'polite' : 'off'}>
+            {!isEscalated && (showSecondaryStatusPill || seemsStalled) && (
                 <div className="flex flex-wrap items-center gap-2">
-                    {activity?.tone === 'active' ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
-                            <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
-                            {activity.label}
-                        </span>
-                    ) : (
-                        <span
-                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                                activity?.tone === 'done'
-                                    ? 'bg-emerald-50 text-emerald-700'
-                                    : activity?.tone === 'error'
-                                        ? 'bg-rose-50 text-rose-700'
-                                        : activity?.tone === 'warning'
-                                            ? 'bg-amber-50 text-amber-700'
-                                            : activity?.tone === 'decision'
-                                                ? 'bg-violet-50 text-violet-700'
-                                                : 'bg-slate-100 text-slate-500'
-                            }`}
-                        >
-                            {activity?.label ?? run.status}
-                        </span>
+                    {showSecondaryStatusPill && (
+                        activity?.tone === 'active' ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700">
+                                <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
+                                {activity.label}
+                            </span>
+                        ) : (
+                            <span
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${
+                                    activity?.tone === 'done'
+                                        ? 'bg-emerald-50 text-emerald-700'
+                                        : activity?.tone === 'error'
+                                            ? 'bg-rose-50 text-rose-700'
+                                            : activity?.tone === 'warning'
+                                                ? 'bg-amber-50 text-amber-700'
+                                                : activity?.tone === 'decision'
+                                                    ? 'bg-violet-50 text-violet-700'
+                                                    : 'bg-slate-100 text-slate-500'
+                                }`}
+                            >
+                                {activity?.label ?? run.status}
+                            </span>
+                        )
                     )}
                     {seemsStalled && (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
                             {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
                         </span>
                     )}
@@ -397,27 +412,27 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                     )}
                 </div>
             ) : (
-                <p className="text-[11px] leading-4 text-slate-500">
+                <p className="text-base leading-6 text-slate-500">
                     {activity?.detail ?? run.status}
                     {activity?.waiting ? ` · ${activity.waiting}` : ''}
                 </p>
             )}
 
             {seemsStalled && (
-                <p className="text-[11px] leading-4 text-amber-700">
+                <p className="text-base leading-6 text-amber-700">
                     {(tw.ingest_activity_stalled_explanation ?? 'Ingen registrert fremdrift siden :time. Kjøringen kan vente på en handling og er ikke nødvendigvis feilet.')
                         .replace(':time', `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim())}
                 </p>
             )}
 
             {showCounters && counters.length > 0 && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {counters.join(' · ')}
                 </p>
             )}
 
             {lastProgressLabel && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {lastProgressLabel}
                 </p>
             )}
@@ -971,7 +986,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <div className="space-y-1.5">
                 <span className={`${BADGE} bg-violet-100 text-violet-700`}>{label}</span>
                 {generatedAt && (
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-base leading-6 text-slate-400">
                         {(tw ?? {}).decision_panel_generated ?? 'Generert'} {generatedAt}
                     </p>
                 )}
@@ -979,7 +994,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     <button
                         type="button"
                         onClick={() => onViewDecision(run)}
-                        className="inline-flex h-6 items-center rounded-full border border-violet-200 bg-violet-50 px-3 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-100"
+                        className="inline-flex h-9 items-center rounded-full border border-violet-200 bg-violet-50 px-3.5 text-base font-semibold leading-6 text-violet-700 transition hover:bg-violet-100"
                     >
                         {(tw ?? {}).decision_panel_view_button ?? 'Vis beslutning'}
                     </button>
@@ -993,21 +1008,21 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
     const errorMessage = run.qa_last_error ?? run.error_message;
     return (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
             <div className="flex items-center gap-2">
                 <span className={`${BADGE} ${cls}`}>{label}</span>
                 {isInProgress && (
                     <button
                         type="button"
                         onClick={onReload}
-                        className="text-[11px] text-slate-400 underline hover:text-slate-600"
+                        className="text-base leading-6 text-slate-400 underline hover:text-slate-600"
                     >
                         Oppdater
                     </button>
                 )}
             </div>
             {run.status === 'queued' && (
-                <p className="text-[11px] leading-4 text-slate-400">
+                <p className="text-base leading-6 text-slate-400">
                     {queuedSince ? `I kø siden ${queuedSince} · ` : ''}
                     {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
@@ -1015,7 +1030,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
             <RunActivityBlock run={run} tw={tw} locale={locale} showCounters />
             {run.status === 'failed' && errorMessage && (
                 <p
-                    className="line-clamp-2 wrap-break-word text-[11px] leading-4 text-rose-500"
+                    className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-500"
                     title={errorMessage}
                 >
                     {errorMessage}
@@ -1602,6 +1617,15 @@ function SourcesTab({
 }) {
     const srcFilters = sourcesFilters ?? {};
     const [srcSearchInput, setSrcSearchInput] = useState(srcFilters.search ?? '');
+
+    // Sent with every write request from this tab so the backend redirects back here (with the
+    // active filters, where present) instead of falling back to the default Wiki-sider tab — see
+    // App\Http\Controllers\Concerns\RedirectsToWikiIndexTab.
+    const tabReturnParams = () => ({
+        tab: 'sources',
+        src_q: srcFilters.search ?? '',
+        src_status: srcFilters.status ?? '',
+    });
     const { auth = {} } = usePage().props;
     const currentUser = auth.user ?? {};
     const canAssignDocumentOwner = Boolean(currentUser.can_assign_enterprise_wiki_document_owner);
@@ -1654,7 +1678,7 @@ function SourcesTab({
 
         router.patch(
             `/app/wiki/sources/${source.id}/owner`,
-            { owner_user_id: normalized === '' ? null : Number(normalized) },
+            { owner_user_id: normalized === '' ? null : Number(normalized), ...tabReturnParams() },
             {
                 preserveScroll: true,
                 onFinish: () => {
@@ -1694,14 +1718,27 @@ function SourcesTab({
         if (!deletePreview?.source) return;
         const sourceId = deletePreview.source.id;
         setDeletePreview(null);
-        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true });
+        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true, data: tabReturnParams() });
     };
 
     const handleDeleteCancel = () => setDeletePreview(null);
 
+    // Separate from RunsTab's ordinary "Avbryt kjøring" action — this cancels whichever run(s) are
+    // still genuinely under automatic processing and blocking THIS document's deletion. A run only
+    // waiting on Document Owner approval no longer needs this step at all: delete() ends it
+    // automatically as part of deletion. See WikiSourceController::cancelBlockingRunsForDeletion()
+    // and EnterpriseWikiDocumentDeletionService::hasActiveRun().
+    const handleCancelBlockingRunsForDeletion = () => {
+        if (!deletePreview?.source) return;
+        const sourceId = deletePreview.source.id;
+        setDeletePreview(null);
+        router.patch(`/app/wiki/sources/${sourceId}/cancel-blocking-runs`, tabReturnParams(), { preserveScroll: true });
+    };
+
     const submitUpload = (event) => {
         event.preventDefault();
         if (!uploadForm.data.file || uploadForm.processing) return;
+        uploadForm.transform((data) => ({ ...data, ...tabReturnParams() }));
         uploadForm.post(sourcesStoreUrl, {
             forceFormData: true,
             onSuccess: () => {
@@ -1728,7 +1765,7 @@ function SourcesTab({
                         <h2 className="text-base font-semibold text-slate-950">
                             {tw.sources_title ?? 'Kildedokumenter'}
                         </h2>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
+                        <p className="max-w-2xl text-base leading-6 text-slate-500">
                             {tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.'}
                         </p>
                     </div>
@@ -1768,7 +1805,7 @@ function SourcesTab({
                             <button
                                 type="button"
                                 onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '' }); }}
-                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                     <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
@@ -1779,7 +1816,7 @@ function SourcesTab({
                     </div>
 
                     {sources.length === 0 ? (
-                        <p className="text-sm text-slate-400">
+                        <p className="text-base text-slate-500">
                             {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                         </p>
                     ) : (
@@ -1794,7 +1831,7 @@ function SourcesTab({
                                     <col style={{ width: '420px' }} />
                                 </colgroup>
                                 <thead className="bg-slate-50">
-                                    <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                    <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                         <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                         <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                         <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
@@ -1812,9 +1849,16 @@ function SourcesTab({
                                         // the button while a run is active, but it is disabled with a clear
                                         // explanation rather than silently disappearing.
                                         const canDelete = !!source.can_delete;
+                                        // Deliberately narrower than isInProgress above: a run merely awaiting
+                                        // document-owner approval has finished all automatic processing and
+                                        // does not block deletion (the backend ends it automatically as part
+                                        // of delete) — only a run the pipeline is still actively working on
+                                        // should disable the Delete button. Mirrors
+                                        // EnterpriseWikiDocumentDeletionService::hasActiveRun().
+                                        const hasBlockingRun = !!source.latest_ingest_run?.expects_automatic_progress;
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
-                                        <tr key={source.id} className="text-sm">
+                                        <tr key={source.id} className="text-base leading-6 text-slate-700">
                                             <td className="overflow-hidden px-4 py-3 align-top">
                                                 <span className="block truncate font-medium text-slate-900" title={source.original_filename}>
                                                     {source.original_filename}
@@ -1826,7 +1870,7 @@ function SourcesTab({
                                                     label={sourceStatusLabel(source.document_status)}
                                                 />
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 align-top text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 align-top text-base text-slate-500">
                                                 {formatDate(source.created_at, locale)}
                                             </td>
                                             <td className="px-4 py-3 align-top">
@@ -1845,7 +1889,7 @@ function SourcesTab({
                                                             <li key={p.id}>
                                                                 <Link
                                                                     href={`/app/wiki/${p.slug}`}
-                                                                    className="block truncate text-[11px] text-violet-600 hover:text-violet-800 hover:underline"
+                                                                    className="block truncate text-base text-violet-600 hover:text-violet-800 hover:underline"
                                                                     title={p.title}
                                                                 >
                                                                     {p.title}
@@ -1861,7 +1905,7 @@ function SourcesTab({
                                                         <select
                                                             value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
                                                             onChange={(event) => handleOwnerChange(source.id, event.target.value)}
-                                                            className={`${SELECT_CLS} w-full`}
+                                                            className={`${RUNS_SELECT_CLS} w-full`}
                                                         >
                                                             <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
                                                             {ownerOptions.map((option) => (
@@ -1874,7 +1918,7 @@ function SourcesTab({
                                                             type="button"
                                                             disabled={savingOwnerIds.has(source.id)}
                                                             onClick={() => handleOwnerSave(source)}
-                                                            className="inline-flex h-7 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className={ACTION_BUTTON_SECONDARY}
                                                         >
                                                             {savingOwnerIds.has(source.id)
                                                                 ? (tw.document_owner_saving ?? 'Lagrer eier...')
@@ -1882,7 +1926,7 @@ function SourcesTab({
                                                         </button>
                                                     </div>
                                                 ) : (
-                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                    <span className={`${BADGE} ${source.owner_name ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-700'}`}>
                                                         {sourceOwnerLabel}
                                                     </span>
                                                 )}
@@ -1916,7 +1960,7 @@ function SourcesTab({
                                                                     setIngestingIds((prev) => new Set(prev).add(source.id));
                                                                     router.post(
                                                                         `/app/wiki/sources/${source.id}/ingest`,
-                                                                        {},
+                                                                        tabReturnParams(),
                                                                         {
                                                                             onFinish: () =>
                                                                                 setIngestingIds((prev) => {
@@ -1940,8 +1984,8 @@ function SourcesTab({
                                                         {canDelete && (
                                                             <button
                                                                 type="button"
-                                                                disabled={isInProgress}
-                                                                title={isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
+                                                                disabled={hasBlockingRun}
+                                                                title={hasBlockingRun ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined}
                                                                 onClick={() => handleDeleteClick(source)}
                                                                 className={ACTION_BUTTON_DESTRUCTIVE}
                                                             >
@@ -1954,12 +1998,12 @@ function SourcesTab({
                                                     </div>
                                                     <Link
                                                         href={`/app/wiki?tab=runs&run_src=${source.id}`}
-                                                        className="text-[11px] text-slate-400 hover:text-violet-600 hover:underline"
+                                                        className="text-base text-slate-500 hover:text-violet-600 hover:underline"
                                                     >
                                                         {tw.runs_view_runs ?? 'Kjøringer'}
                                                     </Link>
                                                     {source.document_status === 'extracted' && !wikiGenerationAvailable && (
-                                                        <span className="text-[11px] text-slate-400">
+                                                        <span className="text-base text-slate-500">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
                                                         </span>
                                                     )}
@@ -1974,37 +2018,46 @@ function SourcesTab({
                     )}
 
                     <div className="border-t border-slate-100 pt-4">
-                        <form onSubmit={submitUpload} className="space-y-3">
+                        <form onSubmit={submitUpload} className="space-y-4">
                             <div className="space-y-1.5">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    {tw.sources_file_label ?? 'Velg fil'}
-                                </span>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".pdf,.docx"
-                                    disabled={uploadForm.processing}
-                                    onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
-                                    className="block w-full max-w-sm cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
-                                />
-                                <p className="text-xs text-slate-400">
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <input
+                                        ref={fileInputRef}
+                                        id="wiki-source-file"
+                                        type="file"
+                                        accept=".pdf,.docx"
+                                        disabled={uploadForm.processing}
+                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                        className="peer sr-only"
+                                    />
+                                    <label
+                                        htmlFor="wiki-source-file"
+                                        className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-700"
+                                    >
+                                        {tw.sources_file_label ?? 'Velg fil'}
+                                    </label>
+                                    <span className="min-w-0 break-all text-base text-slate-700">
+                                        {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
+                                    </span>
+                                </div>
+                                <p className="text-base text-slate-500">
                                     {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
                                 </p>
                                 {uploadForm.errors.file ? (
-                                    <p className="text-sm text-rose-600">{uploadForm.errors.file}</p>
+                                    <p className="text-base text-rose-600">{uploadForm.errors.file}</p>
                                 ) : null}
                             </div>
 
                             {canAssignDocumentOwner ? (
                                 <div className="space-y-1.5">
-                                    <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="wiki-source-owner">
+                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="wiki-source-owner">
                                         {tw.document_owner_label ?? 'Dokumenteier'}
                                     </label>
                                     <select
                                         id="wiki-source-owner"
                                         value={uploadForm.data.owner_user_id}
                                         onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
-                                        className={`${SELECT_CLS} w-full max-w-sm`}
+                                        className={`${RUNS_SELECT_CLS} w-full max-w-sm`}
                                     >
                                         <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
                                         {ownerOptions.map((option) => (
@@ -2014,7 +2067,7 @@ function SourcesTab({
                                         ))}
                                     </select>
                                     {uploadForm.errors.owner_user_id ? (
-                                        <p className="text-sm text-rose-600">{uploadForm.errors.owner_user_id}</p>
+                                        <p className="text-base text-rose-600">{uploadForm.errors.owner_user_id}</p>
                                     ) : null}
                                 </div>
                             ) : (
@@ -2024,7 +2077,7 @@ function SourcesTab({
                             <button
                                 type="submit"
                                 disabled={!uploadForm.data.file || uploadForm.processing}
-                                className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-11 items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 {uploadForm.processing
                                     ? (tw.sources_uploading ?? 'Laster opp...')
@@ -2057,9 +2110,14 @@ function SourcesTab({
                         )}
 
                         {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
-                            <p className="text-sm text-rose-600">
-                                {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
-                            </p>
+                            <div className="space-y-2">
+                                <p className="text-sm text-rose-600">
+                                    {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes mens en Wiki-kjøring pågår. Vent til kjøringen er ferdig eller stopp den først.'}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                    {tw.cancel_blocking_runs_confirm_body ?? 'Dette avbryter kjøringen(e) som blokkerer sletting av dette dokumentet, slik at dokumentet kan slettes. Wiki-innhold som allerede er generert blir beholdt. Handlingen kan ikke angres.'}
+                                </p>
+                            </div>
                         )}
 
                         {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
@@ -2070,6 +2128,11 @@ function SourcesTab({
                                 <p className="text-sm text-slate-600">
                                     {tw.delete_preview_intro ?? 'Dette sletter kildedokumentet og Enterprise Wiki-innhold som kun er generert fra dette dokumentet. Handlingen kan ikke angres.'}
                                 </p>
+                                {deletePreview.data.pending_approval_run_count > 0 && (
+                                    <p className="text-sm font-medium text-amber-700">
+                                        {tw.delete_preview_pending_approval ?? 'Dokumentet har en åpen godkjenningsflyt som venter på dokumenteiergodkjenning. Denne avsluttes automatisk dersom du sletter dokumentet nå.'}
+                                    </p>
+                                )}
                                 <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm space-y-1.5">
                                     <div className="flex justify-between">
                                         <dt className="text-slate-500">{tw.document_owner_label ?? 'Dokumenteier'}</dt>
@@ -2136,7 +2199,18 @@ function SourcesTab({
                                     onClick={handleDeleteConfirm}
                                     className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
                                 >
-                                    {tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold'}
+                                    {deletePreview.data?.pending_approval_run_count > 0
+                                        ? (tw.delete_confirm_button_pending_approval ?? 'Avbryt godkjenningsflyt og slett dokument')
+                                        : (tw.delete_confirm_button ?? 'Slett dokument og Wiki-innhold')}
+                                </button>
+                            )}
+                            {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
+                                <button
+                                    type="button"
+                                    onClick={handleCancelBlockingRunsForDeletion}
+                                    className="inline-flex h-9 items-center rounded-full bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700"
+                                >
+                                    {tw.cancel_blocking_runs_button ?? 'Avbryt kjøring og fortsett sletting'}
                                 </button>
                             )}
                         </div>
@@ -2150,16 +2224,25 @@ function SourcesTab({
 // ─── Runs tab ────────────────────────────────────────────────────────────────
 
 function findingsCountToneClass(run) {
+    // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): only a genuinely
+    // blocking (technical) lint finding gets the alarming rose tone. Open, voluntary claim QA
+    // signals never block the Wiki and share the neutral amber "worth a look" tone with ordinary
+    // non-blocking findings.
     if ((run.findings_open_blocking_count ?? 0) > 0) {
         return 'text-rose-600 hover:bg-rose-50 focus-visible:ring-rose-400';
     }
 
-    if ((run.findings_open_non_blocking_count ?? 0) > 0) {
+    if ((run.findings_open_non_blocking_count ?? 0) > 0 || (run.findings_open_qa_review_count ?? 0) > 0) {
         return 'text-amber-600 hover:bg-amber-50 focus-visible:ring-amber-400';
     }
 
     return 'text-slate-500 hover:bg-slate-100 focus-visible:ring-slate-400';
 }
+
+// Readability pass: a Kjøringer-tab-specific select style, kept separate from the shared
+// SELECT_CLS (text-sm) so this fix stays scoped to this tab rather than resizing every filter
+// dropdown across Wiki-sider/Kvalitet too — same scoping precedent as FINDING_BADGE above.
+const RUNS_SELECT_CLS = 'h-11 rounded-lg border border-slate-200 bg-white px-3 text-base text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
 function RunsTab({ runs, runsFilters, tw, locale }) {
     const filters = runsFilters ?? {};
@@ -2176,7 +2259,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
         if (!cancelTarget) return;
         const runId = cancelTarget.id;
         setCancelTarget(null);
-        router.patch(`/app/wiki/runs/${runId}/cancel`, {}, { preserveScroll: true });
+        // Sent so the backend redirects back to Kjøringer (with the active filters, where
+        // present) instead of falling back to the default Wiki-sider tab — see
+        // App\Http\Controllers\Concerns\RedirectsToWikiIndexTab.
+        router.patch(`/app/wiki/runs/${runId}/cancel`, {
+            tab: 'runs',
+            run_status: filters.status ?? '',
+            run_decision: filters.decision ?? '',
+            run_src: filters.src_id ?? '',
+        }, { preserveScroll: true });
     };
 
     const navigate = (overrides) => {
@@ -2260,7 +2351,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 <select
                     value={filters.status ?? ''}
                     onChange={(e) => navigate({ run_status: e.target.value })}
-                    className={SELECT_CLS}
+                    className={RUNS_SELECT_CLS}
                 >
                     <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
                     {[
@@ -2284,16 +2375,16 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 <select
                     value={filters.decision ?? ''}
                     onChange={(e) => navigate({ run_decision: e.target.value })}
-                    className={SELECT_CLS}
+                    className={RUNS_SELECT_CLS}
                 >
                     <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
                     <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
-                    <option value="applied">{tw.run_decision_applied ?? 'Anvendt'}</option>
+                    <option value="applied">{tw.run_decision_applied ?? 'Sidestruktur opprettet'}</option>
                     <option value="none">{tw.runs_filter_decision_none ?? 'Ingen beslutning'}</option>
                 </select>
 
                 {filters.src_id && (
-                    <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm text-violet-700">
+                    <span className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-base leading-6 text-violet-700">
                         {tw.runs_filter_src_active ?? 'Filtrert på dokument'}
                         <button
                             type="button"
@@ -2301,7 +2392,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                             className="ml-0.5 text-violet-400 hover:text-violet-700"
                             aria-label="Fjern kildefilter"
                         >
-                            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                             </svg>
                         </button>
@@ -2312,9 +2403,9 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     <button
                         type="button"
                         onClick={() => navigate({ run_status: '', run_decision: '', run_src: '' })}
-                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                        className="inline-flex h-11 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                     >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
                         </svg>
                         {tw.runs_filter_clear ?? 'Nullstill'}
@@ -2332,7 +2423,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
-                                <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                     <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_document ?? 'Dokument'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
@@ -2353,15 +2444,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     const panelId = `run-panel-${run.id}`;
                                     return (
                                     <Fragment key={run.id}>
-                                        <tr className="text-sm text-slate-700">
-                                            <td className="px-4 py-3 text-right font-mono text-xs text-slate-400 tabular-nums">
+                                        <tr className="text-base leading-6 text-slate-700">
+                                            <td className="px-4 py-3 text-right font-mono text-base text-slate-400 tabular-nums">
                                                 {run.id}
                                             </td>
                                             <td className="max-w-[200px] px-4 py-3">
                                                 {run.source_id ? (
                                                     <Link
                                                         href={`/app/wiki?tab=sources`}
-                                                        className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
+                                                        className="block truncate text-base font-medium leading-6 text-slate-900 hover:text-violet-700 hover:underline"
                                                         title={run.source_document_filename ?? ''}
                                                     >
                                                         {run.source_document_filename ?? '—'}
@@ -2370,7 +2461,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                                 {run.status === 'failed' && runError && (
-                                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-rose-500" title={runError}>
+                                                    <p className="mt-1 line-clamp-2 text-base leading-6 text-rose-500" title={runError}>
                                                         {runError}
                                                     </p>
                                                 )}
@@ -2393,7 +2484,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                             <td className="px-4 py-3">
                                                 {run.maintainer_decision_status === 'applied' ? (
                                                     <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>
-                                                        {tw.run_decision_applied ?? 'Anvendt'}
+                                                        {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
                                                     </span>
                                                 ) : run.maintainer_decision_status === 'pending' ? (
                                                     <span className={`${BADGE} bg-slate-100 text-slate-500`}>
@@ -2410,7 +2501,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                         onClick={() => togglePanel(run, 'pages', true)}
                                                         aria-expanded={activePanel === 'pages'}
                                                         aria-controls={panelId}
-                                                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                     >
                                                         {run.pages_count}
                                                         <svg
@@ -2446,7 +2537,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                                 .replace(':total', run.lint_count)
                                                                 .replace(':blocking', run.findings_open_blocking_count)
                                                             : undefined}
-                                                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
+                                                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
                                                     >
                                                         {run.lint_count}
                                                         <svg
@@ -2462,10 +2553,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
                                                 {formatDate(run.created_at, locale)}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
                                             <td className="whitespace-nowrap px-4 py-3">
@@ -2519,24 +2610,24 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         <h2 className="mb-4 text-base font-semibold text-slate-900">
                             {tw.run_cancel_confirm_title ?? 'Bekreft avbrutt kjøring'}
                         </h2>
-                        <p className="text-sm font-medium text-slate-800 break-all">
+                        <p className="text-base font-medium leading-6 text-slate-800 break-all">
                             {cancelTarget.source_document_filename}
                         </p>
-                        <p className="mt-2 text-sm text-slate-600">
+                        <p className="mt-2 text-base leading-6 text-slate-600">
                             {tw.run_cancel_confirm_body ?? 'Dette stopper kjøringen. Wiki-innhold som allerede er generert blir beholdt, men kjøringen kan ikke fortsette eller fullføres etterpå. Handlingen kan ikke angres.'}
                         </p>
                         <div className="mt-5 flex justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={handleCancelDismiss}
-                                className="inline-flex h-9 items-center rounded-full border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                                className="inline-flex h-11 items-center rounded-full border border-slate-200 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
                             >
                                 {tw.run_cancel_dismiss_button ?? 'Lukk'}
                             </button>
                             <button
                                 type="button"
                                 onClick={handleCancelConfirm}
-                                className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                className="inline-flex h-11 items-center rounded-full bg-rose-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-rose-700"
                             >
                                 {tw.run_cancel_confirm_button ?? 'Avbryt kjøringen'}
                             </button>
@@ -2555,7 +2646,7 @@ const OWNER_STATUS_STYLES = {
     mixed: 'bg-amber-100 text-amber-700',
     missing_owner: 'bg-rose-100 text-rose-700',
     awaiting_sync: 'bg-slate-100 text-slate-700',
-    blocked_by_quality: 'bg-slate-100 text-slate-700',
+    qa_review_open: 'bg-slate-100 text-slate-700',
     processing: 'bg-slate-100 text-slate-700',
     processing_failed: 'bg-rose-100 text-rose-700',
     superseded: 'bg-slate-100 text-slate-600',
@@ -2571,7 +2662,7 @@ const OWNER_STATUS_STYLES = {
 function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
     if (!state || state.status === 'loading') {
         return (
-            <div id={panelId} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+            <div id={panelId} className="flex items-center gap-2 py-2 text-base leading-6 text-slate-500">
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-violet-500" aria-hidden="true" />
                 {tw.runs_pages_loading ?? 'Henter berørte Wiki-sider …'}
             </div>
@@ -2580,12 +2671,12 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
 
     if (state.status === 'error') {
         return (
-            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-sm text-rose-600">
+            <div id={panelId} className="flex items-center justify-between gap-3 py-2 text-base leading-6 text-rose-600">
                 <span>{tw.runs_pages_error ?? 'Kunne ikke hente Wiki-sidene. Prøv igjen.'}</span>
                 <button
                     type="button"
                     onClick={onRetry}
-                    className="shrink-0 rounded-md border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+                    className="shrink-0 rounded-md border border-rose-200 px-3.5 py-2 text-base font-medium leading-6 text-rose-700 transition hover:bg-rose-50"
                 >
                     {tw.runs_pages_retry ?? 'Prøv igjen'}
                 </button>
@@ -2609,60 +2700,60 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
         );
     }
 
-    if ((summary.blocked_by_quality ?? 0) > 0) {
+    if ((summary.pending_review ?? 0) > 0) {
         summaryParts.push(
-            (tw.runs_pages_summary_blocked ?? ':count blokkert av kvalitetskontroll').replace(':count', summary.blocked_by_quality),
+            (tw.runs_pages_summary_pending_review ?? ':count under behandling eller med åpne QA-punkter').replace(':count', summary.pending_review),
         );
     }
 
     return (
         <div id={panelId} className="space-y-3">
             <div>
-                <h4 className="text-sm font-semibold text-slate-700">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
-                <p className="mt-0.5 text-xs text-slate-500">{summaryParts.join(' · ')}</p>
+                <h4 className="text-lg font-semibold text-slate-800">{tw.runs_pages_heading ?? 'Berørte Wiki-sider'}</h4>
+                <p className="mt-1 text-base leading-6 text-slate-500">{summaryParts.join(' · ')}</p>
                 {stallExplanation && (
-                    <p className="mt-1 text-xs font-medium text-amber-700">{stallExplanation}</p>
+                    <p className="mt-1 text-base font-medium leading-6 text-amber-700">{stallExplanation}</p>
                 )}
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-full divide-y divide-slate-100 text-sm">
-                    <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                <table className="min-w-full divide-y divide-slate-100 text-base leading-6">
+                    <thead className="bg-slate-50 text-base font-semibold uppercase tracking-wide text-slate-500">
                         <tr className="text-left">
-                            <th className="px-3 py-2">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_result ?? 'Resultat'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
-                            <th className="px-3 py-2">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
-                            <th className="px-3 py-2 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_page ?? 'Wiki-side'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_result ?? 'Resultat'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_version ?? 'Sideversjon'}</th>
+                            <th className="px-3 py-2.5">{tw.runs_pages_col_owner_status ?? 'Dokumenteierstatus'}</th>
+                            <th className="px-3 py-2.5 text-right">{tw.runs_pages_col_action ?? 'Handling'}</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {pages.map((page) => (
                             <tr key={page.page_id} className="text-slate-700">
-                                <td className="max-w-[240px] px-3 py-2">
+                                <td className="max-w-[240px] px-3 py-2.5">
                                     <span className="block truncate font-medium text-slate-900" title={page.title}>
                                         {page.title}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2">
+                                <td className="px-3 py-2.5">
                                     <span className={`${BADGE} ${page.action === 'created' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
                                         {page.action === 'created'
                                             ? (tw.runs_pages_result_created ?? 'Opprettet')
                                             : (tw.runs_pages_result_updated ?? 'Oppdatert')}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+                                <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">
                                     {page.version_number
                                         ? (tw.runs_pages_version_label ?? 'Versjon :number').replace(':number', page.version_number)
                                         : '—'}
                                 </td>
-                                <td className="px-3 py-2">
+                                <td className="px-3 py-2.5">
                                     <span className={`${BADGE} ${OWNER_STATUS_STYLES[page.document_owner_status?.state] ?? 'bg-slate-100 text-slate-500'}`}>
                                         {page.document_owner_status?.label ?? '—'}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2 text-right whitespace-nowrap">
-                                    <Link href={page.url} className="text-sm font-medium text-violet-700 hover:underline">
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                    <Link href={page.url} className="text-base font-medium leading-6 text-violet-700 hover:underline">
                                         {page.can_handle
                                             ? (tw.runs_pages_action_open_and_handle ?? 'Åpne og behandle')
                                             : (tw.runs_pages_action_open ?? 'Åpne side')}
@@ -2705,6 +2796,11 @@ const FINDING_STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     approved_edited: 'bg-emerald-100 text-emerald-700',
     rejected: 'bg-slate-100 text-slate-700',
+    // Voluntary claim QA signals (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
+    // v0.10") — deliberately the same neutral sky tone as best-practice suggestions, never the
+    // rose/critical styling reserved for a genuinely blocking (requires_action) technical finding.
+    open_for_qa_review: 'bg-sky-100 text-sky-700',
+    flagged_for_review: 'bg-sky-100 text-sky-700',
 };
 
 // Claim-based findings (EnterpriseWikiClaimFindingExplainer categories) carry a concrete claim
@@ -2806,6 +2902,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                     {(tw.runs_findings_total_label ?? ':count funn totalt').replace(':count', summary.total ?? 0)}
                     {' · '}
                     {summary.open_blocking > 0 && `${summary.open_blocking} ${tw.runs_findings_open_blocking ?? 'åpne blokkerende'} · `}
+                    {summary.open_qa_review > 0 && `${summary.open_qa_review} ${tw.runs_findings_open_qa_review ?? 'åpne QA-punkter (blokkerer ikke Wiki)'} · `}
                     {summary.open_non_blocking > 0 && `${summary.open_non_blocking} ${tw.runs_findings_open_non_blocking ?? 'åpne ikke-blokkerende'} · `}
                     {summary.best_practice_pending > 0 && `${summary.best_practice_pending} ${tw.runs_findings_best_practice_pending_label ?? 'forslag venter på vurdering'} · `}
                     {summary.resolved > 0 && `${summary.resolved} ${tw.runs_findings_resolved ?? 'løst'} · `}
@@ -2871,12 +2968,20 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                                     </button>
                                                 )}
                                                 <div className="min-w-0 flex-1 space-y-1">
+                                                    <span className="block font-mono text-sm font-semibold text-slate-600">
+                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
+                                                    </span>
                                                     {finding.category_label && (
                                                         <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-base font-semibold uppercase tracking-wide leading-6 text-sky-800">
                                                             {finding.category_label}
                                                         </span>
                                                     )}
                                                     <span className="block text-base leading-6 font-semibold text-slate-900">{finding.title}</span>
+                                                    {finding.category === 'best_practice_suggestion' && finding.section_text && (
+                                                        <span className="block text-base leading-6 text-slate-600">
+                                                            {finding.section_text}
+                                                        </span>
+                                                    )}
                                                     <span className="block text-base leading-6 text-slate-600">
                                                         {finding.category === 'best_practice_suggestion' && (
                                                             <span className="font-medium text-slate-700">{tw.runs_findings_best_practice_reason_label ?? 'Begrunnelse:'} </span>
@@ -2945,6 +3050,9 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                         <tr key={`${finding.id}-detail`} className="bg-slate-50/60 text-slate-700">
                                             <td colSpan={5} className="px-4 py-4">
                                                 <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-base leading-6">
+                                                    <div className="font-mono text-sm font-semibold text-slate-600">
+                                                        {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(finding.id))}
+                                                    </div>
                                                     <div>
                                                         <span className="font-semibold text-slate-700">
                                                             {tw.claim_finding_claim_text_label ?? 'Påstand'}:

@@ -4,6 +4,7 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -20,6 +21,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGraphDataService;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -441,6 +443,153 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         ]);
     }
 
+    // =========================================================================
+    // Block provenance preserved after semantic repair (regression: a link-semantic repair used
+    // to write a new current version with content_markdown only, never content_blocks_json —
+    // see EnterpriseWikiPageVersionBlockProvenanceRepairService's docblock and
+    // EnterpriseWikiRepairPageVersionBlockProvenanceCommandTest for the manual-sweep coverage of
+    // the exact same drift).
+    // =========================================================================
+
+    public function test_repair_restores_block_provenance_for_the_new_version(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt om Konsept uten lenke ennå.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt med mer innhold.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            'artikkel',
+            'Artikkel',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            "Første avsnitt om Konsept uten lenke ennå.\n\nAndre avsnitt med mer innhold.",
+            $blocks,
+        );
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
+        $this->mockRevision(
+            "Første avsnitt om [[konsept|Konsept]] uten lenke ennå.\n\nAndre avsnitt med mer innhold.",
+            changed: true,
+        );
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['applied']);
+
+        $newVersion = $this->currentVersion($article);
+        $newBlocks = collect($newVersion->content_blocks_json);
+
+        $this->assertCount(2, $newBlocks);
+        $this->assertSame('source_based', $newBlocks->firstWhere('block_key', 'block-0001')['content_origin']);
+        $this->assertSame('source_based', $newBlocks->firstWhere('block_key', 'block-0002')['content_origin']);
+        $this->assertNotEmpty($newBlocks->firstWhere('block_key', 'block-0001')['source_elements']);
+    }
+
+    public function test_restored_blocks_let_a_real_excerpt_anchor_to_the_correct_block(): void
+    {
+        // Proves the fix actually unblocks downstream claim anchoring — not just that
+        // content_blocks_json is non-empty — by running the exact same matching method claim
+        // extraction uses (EnterpriseWikiPageContentBlockService::findUniqueBlockForExcerpt())
+        // against the newly repaired version.
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt om Konsept uten lenke ennå.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt med mer innhold.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            'artikkel',
+            'Artikkel',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            "Første avsnitt om Konsept uten lenke ennå.\n\nAndre avsnitt med mer innhold.",
+            $blocks,
+        );
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
+        $this->mockRevision(
+            "Første avsnitt om [[konsept|Konsept]] uten lenke ennå.\n\nAndre avsnitt med mer innhold.",
+            changed: true,
+        );
+
+        $this->repairService()->repairForRun($run);
+
+        $newVersion = $this->currentVersion($article);
+        $match = app(EnterpriseWikiPageContentBlockService::class)
+            ->findUniqueBlockForExcerpt($newVersion, 'Andre avsnitt med mer innhold.');
+
+        $this->assertNotNull($match);
+        $this->assertSame('block-0002', $match['block_key']);
+    }
+
+    public function test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_link_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+
+        $blocks = [
+            $this->sourceBasedBlock('block-0001', 0, 'Første avsnitt.'),
+            $this->sourceBasedBlock('block-0002', 1, 'Andre avsnitt om Konsept.'),
+        ];
+        $article = $this->createVersionedPage(
+            $customer,
+            'artikkel',
+            'Artikkel',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            "Første avsnitt.\n\nAndre avsnitt om Konsept.",
+            $blocks,
+        );
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
+        // The revision merges both paragraphs into a single segment — segment count (1) no
+        // longer matches the prior block count (2), so reconstruction must refuse rather than
+        // guess. The link repair itself is otherwise perfectly valid and must still succeed.
+        $this->mockRevision('Første avsnitt. Andre avsnitt om [[konsept|Konsept]].', changed: true);
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['applied']);
+        $this->assertEmpty($this->currentVersion($article)->content_blocks_json ?? []);
+    }
+
+    public function test_prior_version_blocks_are_never_touched_by_block_provenance_restore(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+
+        $blocks = [$this->sourceBasedBlock('block-0001', 0, 'Innhold om Konsept uten lenke.')];
+        $article = $this->createVersionedPage(
+            $customer,
+            'artikkel',
+            'Artikkel',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'Innhold om Konsept uten lenke.',
+            $blocks,
+        );
+        $originalVersion = $this->currentVersion($article);
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
+        $this->mockRevision('Innhold om [[konsept|Konsept]] uten lenke.', changed: true);
+
+        $this->repairService()->repairForRun($run);
+
+        $originalVersion->refresh();
+        $this->assertFalse((bool) $originalVersion->is_current);
+        $this->assertSame($blocks, $originalVersion->content_blocks_json);
+    }
+
     public function test_process_enterprise_wiki_ingest_not_modified(): void
     {
         $reflection = new \ReflectionClass(ProcessEnterpriseWikiIngest::class);
@@ -579,12 +728,16 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         ]);
     }
 
+    /**
+     * @param  list<array<string, mixed>>|null  $blocks
+     */
     private function createVersionedPage(
         Customer $customer,
         string $slug,
         string $title,
         string $pageType,
         string $content,
+        ?array $blocks = null,
     ): EnterpriseWikiPage {
         $page = $this->createPage($customer, $slug, $title, $pageType);
 
@@ -593,10 +746,29 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
             'version_number' => 1,
             'is_current' => true,
             'content_markdown' => $content,
+            'content_blocks_json' => $blocks,
             'generated_by_model' => 'gpt-5',
         ]);
 
         return $page;
+    }
+
+    private function sourceBasedBlock(string $blockKey, int $position, string $markdown): array
+    {
+        return [
+            'block_key' => $blockKey,
+            'position' => $position,
+            'markdown' => $markdown,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_id' => 456,
+            'source_label' => 'source.docx',
+            'source_elements' => [[
+                'source_type' => 'enterprise_wiki_document',
+                'source_id' => 456,
+                'source_element_key' => 'paragraph-'.$position,
+                'source_excerpt' => $markdown,
+            ]],
+        ];
     }
 
     private function createAppliedRun(Customer $customer, EnterpriseWikiDocument $document, array $pages): EnterpriseWikiIngestRun

@@ -332,10 +332,13 @@ class EnterpriseWikiDocumentOwnerApprovalService
      */
     private function buildRequirementGroupsFromClaims(Collection $claims, EnterpriseWikiPage $page): Collection
     {
-        if ($this->hasActiveClaimIntegrityDefects($claims)) {
-            return collect();
-        }
-
+        // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): Document Owner
+        // approval attributes real, source-linked content to its owning document — it is
+        // orthogonal to claim QA review and must never be suppressed by open claim QA signals
+        // (unsupported_generated_content/internal_error/missing provenance). Approval
+        // requirements are always built from claims' actual source references below, regardless
+        // of hasOpenClaimQaSignals() — that method remains available purely as informational data
+        // for the voluntary QA screen (see hasOpenClaimQaSignalsForVersion()).
         $documentIds = $claims->flatMap(function (EnterpriseWikiClaim $claim): Collection {
             return $claim->sourceReferences
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
@@ -399,11 +402,12 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * Whether a page version's claims currently carry an active claim-integrity defect — the
-     * public counterpart of hasActiveClaimIntegrityDefects() for callers (WikiController) that
-     * only need the boolean, not a full requirements/approvals computation.
+     * Whether a page version's claims currently carry an open claim QA signal — informational
+     * only (v0.10). Public counterpart of hasOpenClaimQaSignals() for callers (WikiController)
+     * that only need the boolean, not a full requirements/approvals computation. Does not affect
+     * whether a Document Owner approval requirement is created — see buildRequirementGroupsFromClaims().
      */
-    public function hasActiveClaimIntegrityDefectsForVersion(EnterpriseWikiPageVersion $version): bool
+    public function hasOpenClaimQaSignalsForVersion(EnterpriseWikiPageVersion $version): bool
     {
         $claims = $version->relationLoaded('claims')
             ? $version->claims
@@ -416,41 +420,31 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 ])
                 ->get();
 
-        return $this->hasActiveClaimIntegrityDefects($claims);
+        return $this->hasOpenClaimQaSignals($claims);
     }
 
     /**
-     * A page version carrying an active claim-integrity defect (unsupported generated content,
-     * an internal generation/anchoring error, or a source-based claim missing its provenance —
-     * the same set EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects() gates QA on)
-     * must never generate a Document Owner approval requirement: the whole-page approval this
-     * service builds would otherwise ask the Document Owner to bless known-invalid text as
-     * ordinary, presumed-correct Wiki content. Best-practice suggestions are excluded — those
-     * are a distinct, already-supported review flow (WikiClaimController::approve()) and must
-     * not suppress or block the document-owner requirement on their own.
+     * Whether a page version's claims carry an open claim QA signal (unsupported generated
+     * content, an internal generation/anchoring error a human has explicitly flagged, or a
+     * source-based claim missing its provenance — the same set
+     * EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals() reports, so the two can never
+     * disagree). Purely informational since v0.10 (docs/enterprise-llm-wiki-plan.md,
+     * "Arkitekturnotat — v0.10") — it no longer suppresses or gates the Document Owner approval
+     * requirement (see buildRequirementGroupsFromClaims()). Best-practice suggestions are
+     * excluded — those are a distinct, already-supported review flow (WikiClaimController::approve()).
      */
-    private function hasActiveClaimIntegrityDefects(Collection $claims): bool
+    private function hasOpenClaimQaSignals(Collection $claims): bool
     {
         return $claims->contains(function (EnterpriseWikiClaim $claim): bool {
-            if (in_array($claim->content_origin, [
-                EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
-                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
-            ], true)) {
-                // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md,
-                // "Arkitekturnotat — v0.7"): an internal comparison-mechanism signal alone
-                // (negation/modality/actor/scope/subject mismatch, or internal_error/technical
-                // uncertainty) must never suppress the Document Owner approval requirement by
-                // itself — only a genuine user-facing "not confirmed by source" case
-                // (EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()), or an authorized
-                // user's explicit override, does. Same gate rule as
-                // EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(), so the two can
-                // never disagree.
-                if ($claim->blocking_override === true) {
-                    return true;
-                }
+            if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR) {
+                // internal_error alone is pure technical noise (a linking/anchoring limitation),
+                // not content a human generated — stays hidden unless a human explicitly flagged
+                // it, matching EnterpriseWikiClaimFindingExplainer::isUserFacingAddition().
+                return $claim->blocking_override === true;
+            }
 
-                return $this->claimFindingExplainer->isUserFacingAddition($claim)
-                    && $this->claimFindingExplainer->blockingState($claim)['blocks_gate'];
+            if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT) {
+                return $this->claimFindingExplainer->isUserFacingAddition($claim);
             }
 
             return $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED

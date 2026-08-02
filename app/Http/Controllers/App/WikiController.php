@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Exceptions\EnterpriseWikiOrphanConceptLinkException;
+use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
@@ -15,6 +16,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
@@ -38,6 +40,8 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
+    use RedirectsToWikiIndexTab;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
@@ -49,6 +53,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiOrphanConceptLinkService $orphanConceptLinkService,
+        private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
     ) {}
 
     public function index(Request $request): Response
@@ -56,10 +61,7 @@ class WikiController extends Controller
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
-        $allowedTabs = ['pages', 'sources', 'runs', 'quality'];
-        $tab = in_array($request->query('tab'), $allowedTabs, true)
-            ? $request->query('tab')
-            : 'pages';
+        $tab = $this->resolveWikiReturnTab($request);
 
         $lintBySeverity = EnterpriseWikiLintFinding::query()
             ->where('customer_id', $customerId)
@@ -250,8 +252,8 @@ class WikiController extends Controller
         $requirements = $this->documentOwnerApprovalService->previewRequirementsForPageVersion($currentVersion);
 
         if ($requirements->isEmpty()) {
-            if ($this->documentOwnerApprovalService->hasActiveClaimIntegrityDefectsForVersion($currentVersion)) {
-                return $this->documentOwnerSummaryBlockedByQuality();
+            if ($this->documentOwnerApprovalService->hasOpenClaimQaSignalsForVersion($currentVersion)) {
+                return $this->documentOwnerSummaryQaReviewOpen();
             }
 
             return $this->documentOwnerSummaryAwaitingSync();
@@ -397,20 +399,19 @@ class WikiController extends Controller
     }
 
     /**
-     * A technically invalid page version (active unsupported/internal-error claims, or a
-     * source-based claim missing its provenance — see
-     * EnterpriseWikiDocumentOwnerApprovalService::hasActiveClaimIntegrityDefectsForVersion())
-     * never generates a Document Owner approval requirement, so it always falls into the same
-     * "no requirements" branch as a page still awaiting its first sync. This distinct state
-     * keeps the two apart in the UI: a Document Owner must never be asked to approve/reject
-     * unresolved technical defects, only see an understandable "still processing" message
-     * without internal enum names (Del 9).
+     * A page version whose claims still carry an open, informational claim QA signal (see
+     * EnterpriseWikiDocumentOwnerApprovalService::hasOpenClaimQaSignalsForVersion()) but no
+     * source-linked claims yet, so there is nothing to build a Document Owner approval
+     * requirement from. Since v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10")
+     * this is never a blocking state: the Wiki page is fully generated and usable, and the open
+     * signals are a voluntary QA opportunity, not an approval prerequisite — the label must say
+     * so plainly rather than implying the page is still being processed or withheld (Del 5).
      */
-    private function documentOwnerSummaryBlockedByQuality(): array
+    private function documentOwnerSummaryQaReviewOpen(): array
     {
         return [
-            'state' => 'blocked_by_quality',
-            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
+            'state' => 'qa_review_open',
+            'label' => __('procynia.wiki.document_owner_qa_review_open'),
             'owner_count' => 0,
             'approved_count' => 0,
             'pending_count' => 0,
@@ -441,15 +442,15 @@ class WikiController extends Controller
 
     /**
      * The run hasn't finished generating this page's version yet — there is nothing to approve
-     * until it exists. Reuses the exact same user-facing wording as
-     * documentOwnerSummaryBlockedByQuality() ("Behandles fortsatt") since both are the same kind
-     * of "not actionable yet, not a decision the user can make" state (Del 5).
+     * until it exists. This is a genuine "still processing" state, distinct from
+     * documentOwnerSummaryQaReviewOpen() (page is fully generated and usable, only voluntary QA
+     * signals remain open).
      */
     private function documentOwnerSummaryProcessing(): array
     {
         return [
             'state' => 'processing',
-            'label' => __('procynia.wiki.document_owner_blocked_by_quality'),
+            'label' => __('procynia.wiki.document_owner_processing'),
             'owner_count' => 0,
             'approved_count' => 0,
             'pending_count' => 0,
@@ -691,6 +692,7 @@ class WikiController extends Controller
                 'finished_at' => $latestRuns[$doc->id]->finished_at,
                 'updated_at' => $latestRuns[$doc->id]->updated_at,
                 'last_progress_at' => $latestRuns[$doc->id]->updated_at,
+                'expects_automatic_progress' => $latestRuns[$doc->id]->expectsAutomaticProgress(),
                 'maintainer_decision_json' => $latestRuns[$doc->id]->maintainer_decision_json,
                 'maintainer_decision_status' => $latestRuns[$doc->id]->maintainer_decision_status,
                 'maintainer_decision_generated_at' => $latestRuns[$doc->id]->maintainer_decision_generated_at,
@@ -789,7 +791,7 @@ class WikiController extends Controller
                     'maintainer_decision_status' => $run->maintainer_decision_status,
                     'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,
-                    'can_cancel' => ! $run->isTerminal()
+                    'can_cancel' => $run->isCancellable()
                         && $document instanceof EnterpriseWikiDocument
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
                     'error_message' => $run->error_message,
@@ -804,6 +806,11 @@ class WikiController extends Controller
                     'sections_count' => (int) ($run->sections_count ?? 0),
                     'lint_count' => $summary['total'],
                     'findings_open_blocking_count' => $summary['open_blocking'],
+                    // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): open
+                    // claim QA signals are a separate, non-blocking count — never merged into
+                    // findings_open_blocking_count, which reflects only a genuinely blocking
+                    // (technical) lint finding.
+                    'findings_open_qa_review_count' => $summary['open_qa_review'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'findings_explanation' => $summary['explanation'] ?? null,
                     'created_at' => $run->created_at,
@@ -811,6 +818,7 @@ class WikiController extends Controller
                     'finished_at' => $run->finished_at,
                     'updated_at' => $run->updated_at,
                     'last_progress_at' => $run->updated_at,
+                    'expects_automatic_progress' => $run->expectsAutomaticProgress(),
                 ];
             })->all(),
             'runs_filters' => [
@@ -855,11 +863,15 @@ class WikiController extends Controller
         $rows = $runPages->map(fn (EnterpriseWikiIngestRunPage $runPage): array => $this->buildRunPageRow($runPage, $user))->values();
 
         $doneStates = ['approved', 'rejected', 'superseded'];
-        $blockedStates = ['blocked_by_quality', 'processing', 'processing_failed'];
+        // Not yet a final owner decision — either genuinely still processing (technical), or
+        // fully generated/usable with only voluntary QA signals still open (qa_review_open).
+        // Neither state blocks the Wiki page itself since v0.10 (docs/enterprise-llm-wiki-plan.md,
+        // "Arkitekturnotat — v0.10") — this bucket is informational only.
+        $pendingReviewStates = ['qa_review_open', 'processing', 'processing_failed'];
 
         $doneCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $doneStates, true))->count();
-        $blockedCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $blockedStates, true))->count();
-        $awaitingCount = $rows->count() - $doneCount - $blockedCount;
+        $pendingReviewCount = $rows->filter(fn (array $row): bool => in_array($row['document_owner_status']['state'], $pendingReviewStates, true))->count();
+        $awaitingCount = $rows->count() - $doneCount - $pendingReviewCount;
 
         return response()->json([
             'pages' => $rows->all(),
@@ -867,21 +879,24 @@ class WikiController extends Controller
                 'total' => $rows->count(),
                 'done' => $doneCount,
                 'awaiting_document_owner' => $awaitingCount,
-                'blocked_by_quality' => $blockedCount,
+                'pending_review' => $pendingReviewCount,
             ],
             'stall_explanation' => $this->runStallExplanation($run, $awaitingCount),
         ]);
     }
 
     /**
-     * Manually cancel a non-terminal ingest run — e.g. one that is legitimately waiting on
-     * Document Owner approval with no active job/lease behind it — so its source document
-     * becomes eligible for the existing document-scoped deletion. Authorization mirrors
-     * WikiSourceController::destroy() exactly: the run is cancelled by whoever could delete its
-     * source document (System Owner, or the document's registered owner), since cancelling a
-     * run only ever exists to unblock that same deletion.
+     * Manually cancel a run that is still genuinely under automatic processing — i.e.
+     * EnterpriseWikiIngestRun::isCancellable() is true (see that constant's docblock for why this
+     * is narrower than "not terminal"). A run already waiting on Document Owner approval has
+     * nothing left running to interrupt, so this ordinary Kjøringer-tab action correctly refuses
+     * it; WikiSourceController::cancelBlockingRunsForDeletion() is the separate, narrowly-scoped
+     * action for unblocking document deletion when a run is stuck in that (or any other
+     * non-terminal) state. Authorization here otherwise mirrors WikiSourceController::destroy():
+     * the run is cancelled by whoever could delete its source document (System Owner, or the
+     * document's registered owner).
      */
-    public function cancelRun(EnterpriseWikiIngestRun $run): RedirectResponse
+    public function cancelRun(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
@@ -896,9 +911,9 @@ class WikiController extends Controller
         abort_unless($document instanceof EnterpriseWikiDocument, 404);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
-        if ($run->isTerminal()) {
-            return redirect()->route('app.wiki.index', ['tab' => 'runs'])
-                ->with('error', __('procynia.wiki.run_cancel_already_terminal'));
+        if (! $run->isCancellable()) {
+            return $this->redirectToWikiTab($request)
+                ->with('error', __('procynia.wiki.run_cancel_not_cancellable'));
         }
 
         $this->documentFlowService->cancelRun($run, $user);
@@ -909,7 +924,7 @@ class WikiController extends Controller
             'user_id' => $user->id,
         ]);
 
-        return redirect()->route('app.wiki.index', ['tab' => 'runs'])
+        return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_cancel_success'));
     }
 
@@ -2069,24 +2084,64 @@ class WikiController extends Controller
      */
     private function renderedContentBlocks(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page, int $customerId): array
     {
+        // Section boundaries (heading block + its following best-practice blocks) are computed
+        // once here — the single shared source of truth also used by EnterpriseWikiRunFindingsService
+        // for QA finding grouping — so the frontend never re-derives heading/level detection
+        // itself; it only groups consecutive blocks sharing the same section_key for display.
+        $sectionMap = $this->bestPracticeSectionService->mapBlocksToSections($version);
+
         return $this->displayContentBlocks($version)
-            ->map(fn (array $block): array => [
-                'block_key' => $block['block_key'] ?? null,
-                'position' => $block['position'] ?? 0,
-                'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
-                'raw_markdown' => (string) $block['markdown'],
-                'content_origin' => $block['content_origin'] ?? null,
-                'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
-                // Deterministic "table" blocks (see EnterpriseWikiTableBlockBuilder) carry a real
-                // block_type + structured table_data alongside their Markdown fallback, so the
-                // frontend can render a genuine <table> instead of the Markdown string.
-                'block_type' => $block['block_type'] ?? null,
-                'table_data' => $block['table_data'] ?? null,
-                'source_label' => $block['source_label'] ?? null,
-                'page_reference' => $block['page_reference'] ?? null,
-            ])
+            ->map(function (array $block) use ($customerId, $page, $sectionMap): array {
+                $blockKey = $block['block_key'] ?? null;
+                $section = $blockKey !== null ? ($sectionMap[$blockKey] ?? null) : null;
+
+                return [
+                    'block_key' => $blockKey,
+                    'position' => $block['position'] ?? 0,
+                    'markdown' => $this->wikilinkRenderer->render((string) $block['markdown'], $customerId, $page),
+                    'raw_markdown' => (string) $block['markdown'],
+                    'content_origin' => $block['content_origin'] ?? null,
+                    'is_derived_from_markdown' => (bool) ($block['is_derived_from_markdown'] ?? false),
+                    // Deterministic "table" blocks (see EnterpriseWikiTableBlockBuilder) carry a real
+                    // block_type + structured table_data alongside their Markdown fallback, so the
+                    // frontend can render a genuine <table> instead of the Markdown string.
+                    'block_type' => $block['block_type'] ?? null,
+                    'table_data' => $block['table_data'] ?? null,
+                    'image_data' => $this->renderedImageData($block),
+                    'source_label' => $block['source_label'] ?? null,
+                    'page_reference' => $block['page_reference'] ?? null,
+                    'section_key' => $section['section_key'] ?? null,
+                    'section_heading' => $section['heading_text'] ?? null,
+                ];
+            })
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Turn a deterministic "image" block's image_data (see EnterpriseWikiImageBlockBuilder)
+     * into the frontend-facing payload — never exposes a raw storage path, only an authenticated,
+     * customer-scoped route URL (WikiSourceController::image()) the frontend's <img> tag can load.
+     * Inputs: A content block array.
+     * Returns: The image_data payload with image_url added, or null for a non-image block.
+     * Side effects: None.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>|null
+     */
+    private function renderedImageData(array $block): ?array
+    {
+        $imageData = $block['image_data'] ?? null;
+        $documentId = (int) ($block['source_id'] ?? 0);
+        $sourceImageKey = is_array($imageData) ? (string) ($imageData['source_image_key'] ?? '') : '';
+
+        if (! is_array($imageData) || $documentId <= 0 || $sourceImageKey === '') {
+            return null;
+        }
+
+        return array_merge($imageData, [
+            'image_url' => route('app.wiki.sources.image', [$documentId, $sourceImageKey]),
+        ]);
     }
 
     /**

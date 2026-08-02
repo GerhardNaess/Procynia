@@ -23,12 +23,15 @@ class EnterpriseWikiSourceReference extends Model
 
     public const SOURCE_ELEMENT_TYPE_TABLE_ROW = 'table_row';
 
+    public const SOURCE_ELEMENT_TYPE_IMAGE = 'image';
+
     public const SOURCE_ELEMENT_TYPE_MANUAL = 'manual';
 
     public const SOURCE_ELEMENT_TYPES = [
         self::SOURCE_ELEMENT_TYPE_PARAGRAPH,
         self::SOURCE_ELEMENT_TYPE_LIST_ITEM,
         self::SOURCE_ELEMENT_TYPE_TABLE_ROW,
+        self::SOURCE_ELEMENT_TYPE_IMAGE,
         self::SOURCE_ELEMENT_TYPE_MANUAL,
     ];
 

@@ -5,8 +5,8 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
-use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -25,8 +25,8 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use RuntimeException;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class EnterpriseWikiDocumentFlowServiceTest extends TestCase
@@ -87,6 +87,39 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }
 
+    /**
+     * Best-effort ordering (see beginGeneratingPages()'s docblock): article dispatched before
+     * summary so EnterpriseWikiGenerateAppliedPagesService::buildArticleSummaryContextForRun()
+     * has the best chance of finding the article's finished content already written when the
+     * summary job runs, letting the summary condense the actual article instead of independently
+     * re-deriving from the raw source document.
+     */
+    public function test_article_page_job_is_dispatched_before_summary_page_job(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->flowService()->prepareRunForDocument($customer->id, $document->id)['run'];
+
+        $pages = $this->attachAllPageTypes($run);
+
+        $callOrder = [];
+        $this->configureStage1Mocks($customer, $document, $callOrder);
+
+        $this->flowService()->run($run->id);
+
+        $pushedPageIds = Queue::pushed(GenerateEnterpriseWikiAppliedPage::class)
+            ->map(fn (GenerateEnterpriseWikiAppliedPage $job) => $job->pageId)
+            ->values()
+            ->all();
+
+        $this->assertSame(
+            [$pages['article']->id, $pages['summary']->id],
+            $pushedPageIds,
+        );
+    }
+
     public function test_run_dispatches_article_page_job(): void
     {
         $this->assertPageTypeDispatched(EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
@@ -129,7 +162,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $run = $this->flowService()->prepareRunForDocument($customer->id, $document->id)['run'];
 
         $pages = $this->attachAllPageTypes($run);
-        $existingVersion = \App\Models\EnterpriseWikiPageVersion::query()->create([
+        $existingVersion = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $pages['article']->id,
             'version_number' => 1,
             'is_current' => true,
@@ -385,6 +418,97 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
 
         $this->assertTrue($run->isTerminal());
         $this->assertNotContains(EnterpriseWikiIngestRun::STATUS_CANCELLED, EnterpriseWikiIngestRun::NON_TERMINAL_STATUSES);
+    }
+
+    // =========================================================================
+    // isCancellable() — the single central rule for whether the ordinary "Avbryt kjøring"
+    // action applies (deliberately narrower than !isTerminal()).
+    // =========================================================================
+
+    public function test_is_cancellable_true_for_every_genuinely_active_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::CANCELLABLE_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertTrue($run->isCancellable(), "Expected status [{$status}] to be cancellable.");
+        }
+    }
+
+    public function test_is_cancellable_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $this->assertFalse($run->isCancellable());
+    }
+
+    public function test_is_cancellable_false_for_decision_only(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_DECISION_ONLY);
+
+        $this->assertFalse($run->isCancellable());
+    }
+
+    public function test_is_cancellable_false_for_every_terminal_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::TERMINAL_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertFalse($run->isCancellable(), "Expected terminal status [{$status}] to not be cancellable.");
+        }
+    }
+
+    // =========================================================================
+    // expectsAutomaticProgress() — the central rule for the "Ser ut til å stå stille" warning.
+    // A separate concept from isCancellable() even though membership currently matches — see
+    // EXPECTS_AUTOMATIC_PROGRESS_STATUSES's own docblock.
+    // =========================================================================
+
+    public function test_expects_automatic_progress_true_for_every_genuinely_active_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::EXPECTS_AUTOMATIC_PROGRESS_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertTrue($run->expectsAutomaticProgress(), "Expected status [{$status}] to expect automatic progress.");
+        }
+    }
+
+    public function test_expects_automatic_progress_false_for_awaiting_document_owner_approval(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+
+        $this->assertFalse($run->expectsAutomaticProgress());
+    }
+
+    public function test_expects_automatic_progress_false_for_decision_only(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_DECISION_ONLY);
+
+        $this->assertFalse($run->expectsAutomaticProgress());
+    }
+
+    public function test_expects_automatic_progress_false_for_every_terminal_status(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        foreach (EnterpriseWikiIngestRun::TERMINAL_STATUSES as $status) {
+            $run = $this->createIngestRunWithStatus($customer, $document, $status);
+            $this->assertFalse($run->expectsAutomaticProgress(), "Expected terminal status [{$status}] to not expect automatic progress.");
+        }
     }
 
     // =========================================================================

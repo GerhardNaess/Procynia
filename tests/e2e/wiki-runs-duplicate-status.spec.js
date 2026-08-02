@@ -1,0 +1,167 @@
+import { test, expect } from '@playwright/test';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execAsync = promisify(exec);
+const FIXTURE = '\\Tests\\Support\\WikiRunsStalledIndicatorE2EFixture';
+const CUSTOMER_ID = 4;
+
+async function loginAsDevDataUser(page) {
+    await page.goto('/login');
+    await page.fill('#email', 'alisan@advania.no');
+    await page.fill('#password', 'Opaque01');
+    await page.click('button[type="submit"]');
+    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
+}
+
+/**
+ * Verifies the "Remove duplicate document-owner status badge" fix: for
+ * awaiting_document_owner_approval, only ONE highlighted status badge (the main one) should
+ * appear — the secondary "Avventer dokumenteier" pill duplicated it in different words and is
+ * now hidden. Reuses WikiRunsStalledIndicatorE2EFixture (same fixture as the stalled-indicator
+ * spec): it already seeds one awaiting_document_owner_approval run and one genuinely active run
+ * side by side, which is exactly what's needed to prove the secondary pill is hidden for one and
+ * preserved for the other.
+ */
+test.describe.serial('Kjøringer duplicate status badge removal', () => {
+    let activeRunId;
+    let waitingRunId;
+
+    test.beforeAll(async () => {
+        const { stdout } = await execAsync(
+            `docker compose exec -T app php artisan tinker --execute="echo json_encode(${FIXTURE}::seed(${CUSTOMER_ID}));"`,
+            { cwd: new URL('../..', import.meta.url).pathname },
+        );
+        const ids = JSON.parse(stdout.trim());
+        activeRunId = ids.active_run_id;
+        waitingRunId = ids.waiting_run_id;
+    });
+
+    test.afterAll(async () => {
+        await execAsync(
+            `docker compose exec -T app php artisan tinker --execute="${FIXTURE}::cleanup(${CUSTOMER_ID});"`,
+            { cwd: new URL('../..', import.meta.url).pathname },
+        );
+    });
+
+    test('1. awaiting_document_owner_approval shows only one highlighted status badge, not two', async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row).toBeVisible();
+
+        // Exactly one badge (the main one) — the second, shorter-worded pill that used to repeat
+        // the same fact ("Avventer dokumenteier") must not exist at all.
+        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
+        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
+    });
+
+    test('2. the main status badge (Avventer dokumenteiergodkjenning) is still shown', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toBeVisible();
+    });
+
+    test('3. the explanation text (Venter på dokumenteiergodkjenning) is still shown', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+    });
+
+    test('4. the Dokumenteier step indicator is still shown', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row.getByText('Dokumenteier', { exact: true })).toBeVisible();
+    });
+
+    test('4b. the redundant secondary badge (Avventer dokumenteier) is not shown', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
+    });
+
+    test('5. secondary status is still shown for a status where it adds real information (active/generating_pages)', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${activeRunId}")`).first();
+        await expect(row).toBeVisible();
+        await expect(row.getByText('Genererer sider', { exact: true })).toBeVisible();
+        // "Arbeid pågår" (secondary pill) is genuinely new information beyond the main badge —
+        // it tells the reader automatic work is actively in flight, not merely which step.
+        await expect(row.getByText('Arbeid pågår', { exact: true })).toBeVisible();
+    });
+
+    test('6. desktop layout renders both rows without console errors', async ({ page }) => {
+        const errors = [];
+        page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+        page.on('pageerror', (err) => errors.push(String(err)));
+
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
+        await expect(page.locator(`tr:has-text("${activeRunId}")`).first()).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+
+    test('7. 390px layout renders both rows without console errors or page-level horizontal overflow', async ({ page }) => {
+        const errors = [];
+        page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+        page.on('pageerror', (err) => errors.push(String(err)));
+
+        await page.setViewportSize({ width: 390, height: 844 });
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
+        await expect(page.locator(`tr:has-text("${activeRunId}")`).first()).toBeVisible();
+
+        const bodyOverflows = await page.evaluate(
+            () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        );
+        expect(bodyOverflows).toBe(false);
+        expect(errors).toEqual([]);
+    });
+
+    test('8. no overlapping text in the waiting run row at 390px', async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row).toBeVisible();
+
+        const overlaps = await row.evaluate((rowEl) => {
+            const textEls = Array.from(rowEl.querySelectorAll('span, p, td')).filter((el) => el.textContent.trim());
+            const rects = textEls.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+            let overlapCount = 0;
+            for (let i = 0; i < rects.length; i++) {
+                for (let j = i + 1; j < rects.length; j++) {
+                    const a = rects[i];
+                    const b = rects[j];
+                    const aContainsB = a.left <= b.left && a.right >= b.right && a.top <= b.top && a.bottom >= b.bottom;
+                    const bContainsA = b.left <= a.left && b.right >= a.right && b.top <= a.top && b.bottom >= a.bottom;
+                    if (aContainsB || bContainsA) continue;
+                    const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+                    const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+                    if (overlapX > 2 && overlapY > 2) overlapCount++;
+                }
+            }
+            return overlapCount;
+        });
+
+        expect(overlaps).toBe(0);
+    });
+});

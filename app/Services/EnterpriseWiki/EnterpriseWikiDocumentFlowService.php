@@ -406,6 +406,13 @@ class EnterpriseWikiDocumentFlowService
      * Concept and entity pages are deliberately NOT dispatched here — they read the
      * finished article/summary content as context, so FinalizeEnterpriseWikiPageGeneration
      * dispatches them only once every article/summary job has completed successfully.
+     *
+     * Article dispatched before summary (best effort, not a hard guarantee under a
+     * multi-worker queue): EnterpriseWikiGenerateAppliedPagesService::buildArticleSummaryContextForRun()
+     * has the summary page read the article's finished content_markdown as context when it is
+     * already available, so the summary condenses the actual article instead of independently
+     * re-deriving from the raw source — this ordering maximizes the chance that content exists in
+     * time, with a graceful, correctness-preserving fallback to the raw source when it does not.
      */
     private function beginGeneratingPages(EnterpriseWikiIngestRun $run): void
     {
@@ -418,6 +425,9 @@ class EnterpriseWikiDocumentFlowService
                 EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
                 EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
             ]))
+            ->with('page')
+            ->get()
+            ->sortBy(fn (EnterpriseWikiIngestRunPage $row): int => $row->page?->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 0 : 1)
             ->pluck('enterprise_wiki_page_id');
 
         foreach ($pageIds as $pageId) {
@@ -498,6 +508,7 @@ class EnterpriseWikiDocumentFlowService
             'claims' => $result['claims'] ?? null,
             'skipped' => $result['skipped'] ?? null,
             'busy' => $result['busy'] ?? 0,
+            'capped_pages' => $result['capped_pages'] ?? 0,
         ]);
 
         if (($result['busy'] ?? 0) > 0) {
@@ -672,14 +683,23 @@ class EnterpriseWikiDocumentFlowService
      * failed) — no stage re-execution, no AI calls. Used both by the ordinary continuation
      * flow above and by wiki:recover-document-flow's direct-finalize path, which calls this
      * after independently validating the QA snapshot and required artifacts still hold.
+     *
+     * v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claims and their QA
+     * review are a voluntary, non-blocking quality loop, never a completion gate.
+     * EnterpriseWikiPostIngestQaService::evaluate() no longer produces QA_STATUS_REPAIR_REQUIRED
+     * for any new evaluation — a technically sound run always reaches qa_status=passed regardless
+     * of open claim QA signals. The REPAIR_REQUIRED arm below is kept only so a historical run
+     * already recorded with that status (before this change) is treated exactly like a passed
+     * run — its claim QA signals remain fully visible and actionable in the voluntary QA screen,
+     * they just no longer stop the run from completing/being used.
      */
     public function finalizeFromExistingQaResult(EnterpriseWikiIngestRun $run): void
     {
         $fresh = $run->fresh() ?? $run;
 
         match ($fresh->qa_status) {
-            EnterpriseWikiIngestRun::QA_STATUS_PASSED => $this->completeRunIfOwnerApproved($fresh),
-            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED => $this->escalateRunForClaimIntegrityRepair($fresh),
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED => $this->completeRunIfOwnerApproved($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_ESCALATED => $this->escalateRun($fresh),
             EnterpriseWikiIngestRun::QA_STATUS_FAILED => $this->markRunFailed(
                 $fresh,
@@ -697,20 +717,25 @@ class EnterpriseWikiDocumentFlowService
     /**
      * Re-evaluate the owner-approval gate for a run after document ownership changes.
      *
-     * Guarded on qa_status === passed: Document Owner approval exists to gate legitimate,
-     * source-backed content — it must never complete a run whose own technical QA has not
-     * (yet) passed, however "ready" (no pending/rejected groups) the approval gate looks. A run
-     * can look vacuously ready here precisely because its pages carry active claim-integrity
-     * defects: EnterpriseWikiDocumentOwnerApprovalService never creates an approval requirement
-     * for a claim that lacks a real source reference, so a technically invalid page version can
-     * have zero pending groups without a single legitimate approval having been given. This is
-     * called both from the ordinary QA-passed path (completeRunIfOwnerApproved(), where the
-     * guard is always satisfied) and from syncDocumentOwnerApprovals() after a document owner
-     * changes, which has no QA context of its own.
+     * Guarded on qa_status being technically sound (passed, or the legacy repair_required value
+     * — see finalizeFromExistingQaResult()): Document Owner approval exists to gate legitimate,
+     * source-backed content — it must never complete a run whose own technical QA genuinely
+     * failed or is still escalated. It is NOT guarded on claim QA signals: since v0.10
+     * (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"), claims and their QA review
+     * are a voluntary, non-blocking quality loop, and
+     * EnterpriseWikiDocumentOwnerApprovalService always builds its approval requirements from
+     * claims' actual source references regardless of open claim QA signals — so this gate can no
+     * longer look "vacuously ready" the way it could before that change. This is called both from
+     * the ordinary QA-passed path (completeRunIfOwnerApproved(), where the guard is always
+     * satisfied) and from syncDocumentOwnerApprovals() after a document owner changes, which has
+     * no QA context of its own.
      */
     public function reconcileRunDocumentOwnerApprovalState(EnterpriseWikiIngestRun $run): void
     {
-        if ($run->qa_status !== EnterpriseWikiIngestRun::QA_STATUS_PASSED) {
+        if (! in_array($run->qa_status, [
+            EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+            EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
+        ], true)) {
             return;
         }
 
@@ -769,34 +794,6 @@ class EnterpriseWikiDocumentFlowService
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
             'run_id' => $run->id,
-        ]);
-    }
-
-    /**
-     * A run whose QA verdict is repair_required has known, active claim-integrity defects
-     * (unsupported generated content, an internal generation/anchoring error, or a source-based
-     * claim missing its provenance — see EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects()).
-     * That content must never reach Document Owner approval as ordinary, presumed-correct Wiki
-     * text, so this stops the run here rather than routing it into
-     * completeRunIfOwnerApproved()/reconcileRunDocumentOwnerApprovalState().
-     *
-     * The run is left in a clear, user-facing "needs technical repair" state — no internal
-     * queue/lease/database detail in error_message — and is picked up for an automatic, bounded
-     * content repair attempt by EnterpriseWikiMaintenanceCycleService (EnterpriseWikiClaimContentRepairService),
-     * exactly like an ordinary qa_status=escalated run is picked up for deep repair. This method
-     * itself never calls AI and never attempts a repair — it only records the stop.
-     */
-    private function escalateRunForClaimIntegrityRepair(EnterpriseWikiIngestRun $run): void
-    {
-        $run->update([
-            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
-            'finished_at' => now(),
-            'error_message' => 'Wiki-siden ble stanset fordi systemet fant innhold som ikke kunne bekreftes mot kildegrunnlaget. Automatisk reparasjon vil bli forsøkt.',
-        ]);
-
-        Log::info('[WIKI_DOCUMENT_FLOW] Run escalated for claim-content repair — not routed to document owner approval.', [
-            'run_id' => $run->id,
-            'claim_integrity_defects' => $run->qa_result['claim_integrity_defects'] ?? [],
         ]);
     }
 

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Data\Ai\Requirements\DocxHeadingData;
+use App\Data\Ai\Requirements\DocxImageData;
 use App\Data\Ai\Requirements\DocxListItemData;
 use App\Data\Ai\Requirements\DocxTableCellData;
 use App\Data\Ai\Requirements\DocxTableData;
@@ -380,6 +381,552 @@ class DocumentTextExtractor
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
         }
+    }
+
+    /**
+     * Purpose: Extract PNG/JPEG images placed in a DOCX file's ordinary body-level content flow
+     * (Fase 1 Enterprise Wiki image support — see DocxImageData's class docblock). Each image is
+     * linked to its Word relationship ID, document position, nearest section heading, and the
+     * paragraph text immediately before/after it.
+     * Inputs: Absolute filesystem path to a DOCX file.
+     * Returns: Images in document order. Images inside table cells (Fase 1 explicitly excludes
+     * these — see docxTableCellAncestry()), images whose relationship cannot be resolved, and
+     * non-PNG/JPEG images (including SVG) are silently omitted rather than surfaced as broken
+     * entries — a single corrupt/unsupported image must never break extraction of the rest of the
+     * document (Section 12). Images inside header/footer OOXML parts are never seen at all, since
+     * this method only ever reads word/document.xml.
+     * Side effects: Opens the ZIP archive and parses XML independently of
+     * extractDocxTextAndTables()/parseWordXmlTextAndTables() — neither of those methods, nor any
+     * of their existing callers, is touched by this method.
+     *
+     * @return list<DocxImageData>
+     */
+    public function extractDocxImages(string $path): array
+    {
+        if (! is_file($path) || ! is_readable($path)) {
+            return [];
+        }
+
+        $zip = new ZipArchive;
+
+        if ($zip->open($path) !== true) {
+            return [];
+        }
+
+        $xml = $zip->getFromName('word/document.xml');
+        $relationshipsXml = $zip->getFromName('word/_rels/document.xml.rels');
+        $stylesXml = $zip->getFromName('word/styles.xml');
+        $mediaFiles = $this->extractDocxImageMediaFiles($zip);
+        $zip->close();
+
+        if (! is_string($xml) || trim($xml) === '') {
+            return [];
+        }
+
+        $relationshipMap = $this->extractDocxImageRelationshipMap(
+            is_string($relationshipsXml) ? $relationshipsXml : null,
+        );
+
+        return $this->parseWordXmlImages(
+            $xml,
+            $relationshipMap,
+            $mediaFiles,
+            is_string($stylesXml) ? $stylesXml : null,
+        );
+    }
+
+    /**
+     * Purpose: Read every file under word/media/ in the DOCX ZIP archive into memory.
+     * Inputs: An already-open ZipArchive.
+     * Returns: word/media/... path => raw file bytes.
+     * Side effects: Reads entries from the ZIP archive.
+     *
+     * @return array<string, string>
+     */
+    private function extractDocxImageMediaFiles(ZipArchive $zip): array
+    {
+        $files = [];
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+
+            if (! is_string($name) || ! str_starts_with($name, 'word/media/')) {
+                continue;
+            }
+
+            $bytes = $zip->getFromIndex($i);
+
+            if (is_string($bytes)) {
+                $files[$name] = $bytes;
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * Purpose: Parse word/_rels/document.xml.rels into a relationship-ID => media-path map,
+     * keeping only relationships whose Type identifies them as images.
+     * Inputs: Raw relationships XML content, if present.
+     * Returns: Relationship Id => normalized "word/media/..." path.
+     * Side effects: Parses XML in memory.
+     *
+     * @return array<string, string>
+     */
+    private function extractDocxImageRelationshipMap(?string $relationshipsXml): array
+    {
+        if (! is_string($relationshipsXml) || trim($relationshipsXml) === '') {
+            return [];
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument;
+
+            if (! $dom->loadXML($relationshipsXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('r', 'http://schemas.openxmlformats.org/package/2006/relationships');
+
+            $map = [];
+            $relationshipNodes = $xpath->query('//r:Relationship');
+
+            if ($relationshipNodes === false) {
+                return [];
+            }
+
+            foreach ($relationshipNodes as $relationshipNode) {
+                if (! $relationshipNode instanceof DOMElement) {
+                    continue;
+                }
+
+                $type = (string) $relationshipNode->attributes?->getNamedItem('Type')?->nodeValue;
+
+                if (! str_contains($type, '/image')) {
+                    continue;
+                }
+
+                $id = (string) $relationshipNode->attributes?->getNamedItem('Id')?->nodeValue;
+                $target = (string) $relationshipNode->attributes?->getNamedItem('Target')?->nodeValue;
+
+                if ($id === '' || $target === '') {
+                    continue;
+                }
+
+                $map[$id] = $this->normalizeDocxImageMediaPath($target);
+            }
+
+            return $map;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Normalize a relationship Target attribute (e.g. "media/image1.png") into the
+     * "word/media/image1.png" path used as a ZIP entry name/media-files map key.
+     * Inputs: The raw Target attribute value.
+     * Returns: A path rooted at "word/".
+     * Side effects: None.
+     */
+    private function normalizeDocxImageMediaPath(string $target): string
+    {
+        $target = ltrim($target, '/');
+        $target = preg_replace('#^(\.\./)+#', '', $target) ?? $target;
+
+        if (! str_starts_with($target, 'word/')) {
+            $target = 'word/'.$target;
+        }
+
+        return $target;
+    }
+
+    /**
+     * Purpose: Walk word/document.xml once, collecting an ordered list of body-level text and
+     * image entries, then assemble those into DocxImageData (Section 3: document order/context).
+     * Inputs: Raw document.xml content, the relationship-ID => media-path map, the media-path =>
+     * bytes map, and optional raw styles.xml content (for heading/caption style-name detection).
+     * Returns: Images in document order.
+     * Side effects: Parses XML in memory.
+     *
+     * @param  array<string, string>  $relationshipMap
+     * @param  array<string, string>  $mediaFiles
+     * @return list<DocxImageData>
+     */
+    private function parseWordXmlImages(string $xml, array $relationshipMap, array $mediaFiles, ?string $stylesXml): array
+    {
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument;
+
+            if (! $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+            $xpath->registerNamespace('wp', 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing');
+            $xpath->registerNamespace('a', 'http://schemas.openxmlformats.org/drawingml/2006/main');
+            $xpath->registerNamespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+
+            $styleMap = $this->extractDocxStyleMap($stylesXml);
+
+            /** @var list<array<string, mixed>> $entries ordered {kind: 'text'|'image', ...} entries */
+            $entries = [];
+            $currentSectionNumber = null;
+            $currentSectionTitle = null;
+
+            $paragraphNodes = $xpath->query('//w:p');
+
+            if ($paragraphNodes === false) {
+                return [];
+            }
+
+            foreach ($paragraphNodes as $paragraph) {
+                if (! $paragraph instanceof DOMElement) {
+                    continue;
+                }
+
+                if ($this->docxTableCellAncestry($paragraph) !== null) {
+                    // Fase 1: images inside table cells are out of scope (see class docblock).
+                    continue;
+                }
+
+                $textNodes = $xpath->query('.//w:t', $paragraph);
+                $parts = [];
+
+                if ($textNodes !== false) {
+                    foreach ($textNodes as $textNode) {
+                        $parts[] = (string) $textNode->textContent;
+                    }
+                }
+
+                $paragraphText = $this->normalizeWhitespace(implode(' ', $parts));
+
+                $styleId = null;
+                $styleNode = $xpath->query('.//w:pPr/w:pStyle', $paragraph);
+
+                if ($styleNode !== false && $styleNode->length > 0) {
+                    $styleId = (string) $styleNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+                }
+
+                $resolvedStyleName = $styleMap[$styleId] ?? $styleId;
+
+                if ($paragraphText !== '' && $this->resolveDocxHeadingLevel($styleId, $resolvedStyleName) !== null) {
+                    // Simplified section tracking for image context: the literal leading number
+                    // in the heading text (if any) is used directly — Word auto-numbering
+                    // reconstruction (numbering.xml) is intentionally not replicated here, since
+                    // exact section numbers matter less for image context than for tables.
+                    [$currentSectionNumber, $currentSectionTitle] = $this->splitDocxSectionHeading($paragraphText);
+                }
+
+                $images = $this->collectDocxParagraphImages($paragraph, $xpath, $relationshipMap, $mediaFiles);
+
+                if ($images === []) {
+                    if ($paragraphText !== '') {
+                        $entries[] = ['kind' => 'text', 'text' => $paragraphText, 'style_name' => $resolvedStyleName];
+                    }
+
+                    continue;
+                }
+
+                foreach ($images as $image) {
+                    $entries[] = [
+                        'kind' => 'image',
+                        'text' => $paragraphText,
+                        'style_name' => $resolvedStyleName,
+                        'image' => $image,
+                        'section_number' => $currentSectionNumber,
+                        'section_title' => $currentSectionTitle,
+                    ];
+                }
+            }
+
+            return $this->assembleDocxImages($entries);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Resolve every image drawn in a single body paragraph into raw image data.
+     * Inputs: The paragraph element, the bound DOMXPath, the relationship map, and the media-file
+     * bytes map.
+     * Returns: Zero or more raw image entries (relationship_id, media_path, mime_type, width,
+     * height, content_hash, alt_text, bytes) — unresolvable relationships, missing media bytes,
+     * and non-PNG/JPEG formats are silently skipped (Section 12).
+     * Side effects: None.
+     *
+     * @param  array<string, string>  $relationshipMap
+     * @param  array<string, string>  $mediaFiles
+     * @return list<array<string, mixed>>
+     */
+    private function collectDocxParagraphImages(DOMElement $paragraph, DOMXPath $xpath, array $relationshipMap, array $mediaFiles): array
+    {
+        $blipNodes = $xpath->query('.//w:drawing//a:blip', $paragraph);
+
+        if ($blipNodes === false || $blipNodes->length === 0) {
+            return [];
+        }
+
+        $images = [];
+
+        foreach ($blipNodes as $blipNode) {
+            if (! $blipNode instanceof DOMElement) {
+                continue;
+            }
+
+            $relationshipId = (string) $blipNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed')?->nodeValue;
+
+            if ($relationshipId === '') {
+                $relationshipId = (string) $blipNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'link')?->nodeValue;
+            }
+
+            if ($relationshipId === '' || ! isset($relationshipMap[$relationshipId])) {
+                continue;
+            }
+
+            $mediaPath = $relationshipMap[$relationshipId];
+            $bytes = $mediaFiles[$mediaPath] ?? null;
+
+            if (! is_string($bytes) || $bytes === '') {
+                continue;
+            }
+
+            $extension = Str::lower((string) pathinfo($mediaPath, PATHINFO_EXTENSION));
+
+            if (! in_array($extension, ['png', 'jpg', 'jpeg'], true)) {
+                // Fase 1 scope: PNG/JPEG only. Other formats (incl. SVG) are not extracted at
+                // all here, per Section 5's "reject or mark unsupported".
+                continue;
+            }
+
+            [$width, $height] = $this->docxImageDimensions($bytes, $blipNode, $xpath);
+
+            $images[] = [
+                'relationship_id' => $relationshipId,
+                'media_path' => $mediaPath,
+                'mime_type' => $extension === 'png' ? 'image/png' : 'image/jpeg',
+                'width' => $width,
+                'height' => $height,
+                'content_hash' => hash('sha256', $bytes),
+                'alt_text' => $this->docxImageAltText($blipNode, $xpath),
+                'bytes' => $bytes,
+            ];
+        }
+
+        return $images;
+    }
+
+    /**
+     * Purpose: Resolve an image's alt-text via Word's own descr -> title fallback chain.
+     * Inputs: The <a:blip> element and the bound DOMXPath.
+     * Returns: The first non-blank of wp:docPr's descr/title attributes that isn't just Word's
+     * auto-generated shape name, or null.
+     * Side effects: None.
+     *
+     * `wp:docPr`'s `name` attribute is deliberately EXCLUDED from this chain — unlike `descr`
+     * (the modern Alt Text field) and `title` (the older Office alt-text field), `name` is never
+     * human-authored: Word assigns it automatically ("Picture 1", "Picture 2", ...) to every
+     * inline image regardless of whether anyone ever opens the Alt Text pane. Treating `name` as
+     * real alt-text produced meaningless placeholder text (e.g. "Alt-tekst: Picture 1") that
+     * described nothing about the image — a real bug found via a genuine production document
+     * (INCLUDEPICTURE-pasted image, no formal alt-text/caption, Word name "Picture 1"). The same
+     * auto-generated-looking pattern is filtered out of `descr`/`title` too, in the rarer case a
+     * paste operation populates one of those with an equally generic placeholder.
+     */
+    private function docxImageAltText(DOMElement $blipNode, DOMXPath $xpath): ?string
+    {
+        $docPrNodes = $xpath->query('ancestor::wp:inline/wp:docPr | ancestor::wp:anchor/wp:docPr', $blipNode);
+
+        if ($docPrNodes === false || $docPrNodes->length === 0) {
+            return null;
+        }
+
+        $docPr = $docPrNodes->item(0);
+
+        if (! $docPr instanceof DOMElement) {
+            return null;
+        }
+
+        foreach (['descr', 'title'] as $attribute) {
+            $value = trim((string) $docPr->attributes?->getNamedItem($attribute)?->nodeValue);
+
+            if ($value !== '' && ! $this->isAutoGeneratedImageName($value)) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Detect Word's auto-generated shape-name pattern ("Picture 1", "Image 2", ...) so it
+     * is never mistaken for real, human-authored alt-text.
+     * Inputs: A candidate alt-text/title value.
+     * Returns: Whether the value looks like an auto-generated placeholder rather than a real
+     * description.
+     * Side effects: None.
+     */
+    private function isAutoGeneratedImageName(string $value): bool
+    {
+        return preg_match('/^(picture|image|graphic|illustration|bilde|figur)\s*\d*$/iu', trim($value)) === 1;
+    }
+
+    /**
+     * Purpose: Determine an image's pixel dimensions, preferring the actual decoded image over
+     * Word's own declared display size.
+     * Inputs: The raw image bytes, the <a:blip> element, and the bound DOMXPath.
+     * Returns: [width, height] in pixels, or [null, null] when neither source yields a value.
+     * Side effects: None.
+     *
+     * @return array{0: ?int, 1: ?int}
+     */
+    private function docxImageDimensions(string $bytes, DOMElement $blipNode, DOMXPath $xpath): array
+    {
+        $sizeInfo = @getimagesizefromstring($bytes);
+
+        if (is_array($sizeInfo) && isset($sizeInfo[0], $sizeInfo[1])) {
+            return [(int) $sizeInfo[0], (int) $sizeInfo[1]];
+        }
+
+        $extentNodes = $xpath->query('ancestor::wp:inline/wp:extent | ancestor::wp:anchor/wp:extent', $blipNode);
+
+        if ($extentNodes !== false && $extentNodes->length > 0) {
+            $extent = $extentNodes->item(0);
+
+            if ($extent instanceof DOMElement) {
+                $cx = $extent->attributes?->getNamedItem('cx')?->nodeValue;
+                $cy = $extent->attributes?->getNamedItem('cy')?->nodeValue;
+
+                if (is_numeric($cx) && is_numeric($cy)) {
+                    // EMUs (English Metric Units) -> pixels: 914400 EMU per inch, 96 px per inch.
+                    return [(int) round(((float) $cx) / 9525), (int) round(((float) $cy) / 9525)];
+                }
+            }
+        }
+
+        return [null, null];
+    }
+
+    /**
+     * Purpose: Turn the ordered text/image entry list collected by parseWordXmlImages() into
+     * DocxImageData, resolving each image's nearest preceding/following text and adopting a
+     * caption (Section 3/7/8: document order and context).
+     * Inputs: Ordered entries, each either {kind: 'text', text, style_name} or {kind: 'image',
+     * text, style_name, image, section_number, section_title}.
+     * Returns: Images in document order, with a placeholder sourceImageKey ("img{n}") — see
+     * DocxImageData::manyWithDocumentId() for the final, document-scoped key.
+     * Side effects: None.
+     *
+     * @param  list<array<string, mixed>>  $entries
+     * @return list<DocxImageData>
+     */
+    private function assembleDocxImages(array $entries): array
+    {
+        $images = [];
+        $imageIndex = 0;
+
+        foreach ($entries as $position => $entry) {
+            if ($entry['kind'] !== 'image') {
+                continue;
+            }
+
+            $image = $entry['image'];
+            $textBefore = $this->nearestDocxTextEntry($entries, $position, -1);
+            $textAfter = $this->nearestDocxTextEntry($entries, $position, 1);
+
+            $ownText = trim((string) ($entry['text'] ?? ''));
+            $caption = null;
+
+            if ($ownText !== '' && $this->isDocxFigureCaptionText($ownText, $entry['style_name'] ?? null)) {
+                $caption = $ownText;
+            } elseif ($textAfter !== null && $this->isDocxFigureCaptionText($textAfter, null)) {
+                $caption = $textAfter;
+            }
+
+            $images[] = new DocxImageData(
+                sourceImageKey: sprintf('img%d', $imageIndex),
+                imageIndex: $imageIndex,
+                documentOrder: (int) $position,
+                relationshipId: $image['relationship_id'],
+                originalMediaPath: $image['media_path'],
+                mimeType: $image['mime_type'],
+                width: $image['width'],
+                height: $image['height'],
+                contentHash: $image['content_hash'],
+                sectionNumber: $entry['section_number'] ?? null,
+                sectionTitle: $entry['section_title'] ?? null,
+                caption: $caption,
+                altText: $image['alt_text'],
+                textBefore: $textBefore,
+                textAfter: $textAfter,
+                bytes: $image['bytes'],
+            );
+
+            $imageIndex++;
+        }
+
+        return $images;
+    }
+
+    /**
+     * Purpose: Find the nearest plain-text entry preceding/following an image entry, skipping
+     * over any other image entries in between.
+     * Inputs: The full ordered entry list, the image's own position, and a direction (-1 = before,
+     * 1 = after).
+     * Returns: The nearest text entry's text, or null if none exists in that direction.
+     * Side effects: None.
+     *
+     * @param  list<array<string, mixed>>  $entries
+     */
+    private function nearestDocxTextEntry(array $entries, int $fromPosition, int $direction): ?string
+    {
+        $position = $fromPosition + $direction;
+
+        while (isset($entries[$position])) {
+            if ($entries[$position]['kind'] === 'text') {
+                $text = trim((string) $entries[$position]['text']);
+
+                return $text !== '' ? $text : null;
+            }
+
+            $position += $direction;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Heuristically decide whether a piece of text is a Word figure/image caption —
+     * either its paragraph style name suggests a caption, or the text itself starts with a
+     * figure/image-like prefix (Norwegian and English). Deliberately conservative: a plain
+     * paragraph that merely mentions "figur" mid-sentence is not treated as a caption.
+     * Inputs: The candidate text and an optional resolved paragraph style name.
+     * Returns: Whether the text looks like a figure caption.
+     * Side effects: None.
+     */
+    private function isDocxFigureCaptionText(string $text, ?string $styleName): bool
+    {
+        if ($styleName !== null && preg_match('/caption|figure|figur|illustrasjon|bilde|diagram/iu', $styleName) === 1) {
+            return true;
+        }
+
+        $normalizedText = mb_strtolower(trim($text), 'UTF-8');
+
+        foreach (['figur ', 'figure ', 'bilde ', 'image ', 'illustrasjon ', 'diagram '] as $prefix) {
+            if (str_starts_with($normalizedText, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -157,6 +157,68 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
+    // Del 4 (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): a run-wide cap
+    // on new claims, configured via services.enterprise_wiki.max_new_claims_per_run — the run
+    // still completes normally once the cap is reached, it is never a failure.
+    // =========================================================================
+
+    public function test_run_level_cap_stops_creating_new_claims_once_reached(): void
+    {
+        config(['services.enterprise_wiki.max_new_claims_per_run' => 3]);
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $pages = [
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Page One'),
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Page Two'),
+            $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Page Three'),
+        ];
+
+        // FAKE_CLAIMS returns 2 claims per page: with a cap of 3, the first 2 pages processed
+        // (2 + 2 = 4 claims, checked before each page's AI call) exhaust the cap and the 3rd page
+        // is skipped entirely — regardless of which specific page that turns out to be.
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $versionIds = array_map(fn (array $p) => $p['version']->id, $pages);
+        $totalClaims = EnterpriseWikiClaim::query()->whereIn('enterprise_wiki_page_version_id', $versionIds)->count();
+        $pagesWithNoClaims = collect($versionIds)
+            ->filter(fn (int $versionId): bool => EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $versionId)->doesntExist())
+            ->count();
+
+        $this->assertSame(4, $totalClaims, 'Exactly 2 of the 3 pages (2 claims each) fit under the cap of 3.');
+        $this->assertSame(1, $pagesWithNoClaims, 'Exactly one page must be fully capped out.');
+    }
+
+    public function test_run_level_cap_still_completes_the_extraction_step_for_capped_pages(): void
+    {
+        // A capped page must still record its claims_extracted_at checkpoint so
+        // EnterpriseWikiPostIngestQaService::findIncompleteSteps() never treats it as an
+        // unfinished step — the cap is never a failure state (Del 4).
+        config(['services.enterprise_wiki.max_new_claims_per_run' => 1]);
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $pageOne = $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Page One');
+        $pageTwo = $this->createPageWithVersion($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Page Two');
+
+        $exitCode = Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $this->assertSame(0, $exitCode, 'Reaching the cap must never fail the command/run.');
+
+        $pageTwoPivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $pageTwo['page']->id)
+            ->firstOrFail();
+
+        $this->assertNotNull($pageTwoPivot->claims_extracted_at, 'A capped page must still be marked as having completed its extraction step.');
+    }
+
+    public function test_run_level_cap_default_is_configurable_via_env_pattern(): void
+    {
+        $this->assertSame(60, config('services.enterprise_wiki.max_new_claims_per_run'));
+    }
+
+    // =========================================================================
     // Wiki run-34 fix: exact-duplicate claims within one extraction response are deduplicated
     // =========================================================================
 
@@ -556,6 +618,53 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertNull($claim->review_reason);
     }
 
+    /**
+     * Regression for ingest run 486 (production document "Incident Management Illustration.docx"):
+     * a genuinely best_practice-tagged block ("## Berøringspunkter mot øvrige ITIL-prosesser") was
+     * a multi-sentence recommendation paragraph — one sentence carried the "bør"/"lurt å" markers,
+     * but the AI extraction step split it into several separate claims, and this particular
+     * sentence (general ITIL domain context, no marker of its own, no assertion about the
+     * customer's current state) was wrongly downgraded to unsupported_generated_content purely
+     * because it lacked its own marker word — creating a blocking claim-integrity defect for
+     * content that was never presented as a customer-specific fact.
+     */
+    public function test_supporting_sentence_from_best_practice_block_without_its_own_marker_stays_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $blocks = $version->content_blocks_json;
+        foreach ([1, 2] as $index) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+            $blocks[$index]['source_id'] = null;
+            $blocks[$index]['source_element_key'] = null;
+            $blocks[$index]['source_elements'] = [];
+            $blocks[$index]['best_practice_reason'] = 'Anbefalingen er lagt til som eksplisitt beste praksis.';
+        }
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->andReturn(['claims' => [
+                ['text' => 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt alpha.', 'conflict_note' => null],
+                ['text' => 'Å koble prosessflyten til etablert datakatalog og systemforvaltningspraksis i masterdata-samhandling og til operasjonelle rutiner i applikasjonsdrift kan gjøre hendelseshåndteringen mer presis og sporbar.', 'confidence' => 'medium', 'excerpt' => 'Supporting excerpt beta.', 'conflict_note' => null],
+            ]]);
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->get();
+
+        $this->assertCount(2, $claims);
+
+        foreach ($claims as $claim) {
+            $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+            $this->assertNotSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
+        }
+    }
+
     public function test_command_does_not_create_additional_ingest_runs(): void
     {
         $customer = $this->createCustomer();
@@ -770,6 +879,47 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
     }
 
+    /**
+     * Regression for ingest run 486 — same manual-mixed-block path, using the real production
+     * wording that lacks its own recommendation marker but does not assert any current-state fact
+     * either. Must stay best_practice, unlike the "Kunden har..." drift case above.
+     */
+    public function test_manual_mixed_block_best_practice_fact_without_own_marker_is_not_degraded(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $text = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = 'mixed';
+        $blocks[1]['markdown'] = $text;
+        $blocks[1]['source_elements'] = [];
+        $version->update([
+            'content_markdown' => "# Test Page\n\n{$blocks[1]['markdown']}",
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaimsForManualMixedBlock')
+            ->once()
+            ->andReturn(['claims' => [[
+                'text' => $text,
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                'excerpt' => $text,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'source_element_keys' => [],
+                'best_practice_reason' => 'AI mente dette var normativt.',
+                'conflict_note' => null,
+            ]]]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)
+            ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
+
+        $claim = EnterpriseWikiClaim::query()->findOrFail($result['claim_ids'][0]);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertNotSame('best_practice_claim_asserts_current_state', $claim->generation_issue);
+    }
+
     public function test_manual_mixed_block_invalid_claim_rolls_back_whole_block_response(): void
     {
         $customer = $this->createCustomer();
@@ -900,6 +1050,36 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
         ]);
+    }
+
+    /**
+     * A page (of the given type) attached to an EXISTING run's pivot, with a current version
+     * whose content matches FAKE_CLAIMS' excerpts closely enough for the mocked AI client's
+     * default response to persist without erroring — deliberately no content_blocks_json, so
+     * claims land as content_origin=internal_error (irrelevant for cap tests, which only assert
+     * on claim ROW counts, never content_origin).
+     *
+     * @return array{page: EnterpriseWikiPage, version: EnterpriseWikiPageVersion}
+     */
+    private function createPageWithVersion(Customer $customer, EnterpriseWikiIngestRun $run, string $pageType, string $title): array
+    {
+        $page = $this->createPage($customer, $pageType, $title);
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# {$title}\n\nSupporting excerpt alpha.\n\nSupporting excerpt beta.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        return ['page' => $page, 'version' => $version];
     }
 
     /**

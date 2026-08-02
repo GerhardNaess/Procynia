@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Services\EnterpriseWiki\EnterpriseWikiClaimClassificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -56,8 +57,7 @@ class EnterpriseWikiRunBestPracticeReevaluationCommandTest extends TestCase
             bestPracticeReason: 'Regelmessig oppfølging reduserer risiko.',
         );
         $claim->update(['claim_text' => 'Det anbefales å etablere en fast eskaleringsrutine.', 'page_excerpt' => 'Det anbefales å etablere en fast eskaleringsrutine.']);
-        $originalVerifiedAt = now()->subDay();
-        $claim->update(['verified_at' => $originalVerifiedAt]);
+        $this->assertNull($claim->fresh()->verified_at);
 
         $this->artisan('wiki:reevaluate-run-best-practice-claims', ['--run-id' => $run->id, '--apply' => true])
             ->expectsOutputToContain('Applied reclassifications')
@@ -70,9 +70,42 @@ class EnterpriseWikiRunBestPracticeReevaluationCommandTest extends TestCase
         $this->assertSame('scoped_run_reevaluation', $fresh->review_metadata['classification_basis'] ?? null);
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $fresh->review_metadata['reevaluated_from_content_origin'] ?? null);
         $this->assertSame($run->id, $fresh->review_metadata['reevaluated_run_id'] ?? null);
-        // verified_at is preserved, not reset — the original verification timestamp remains an
-        // honest record even though this scoped correction supersedes its verdict.
-        $this->assertSame($originalVerifiedAt->format('Y-m-d H:i:s'), $fresh->verified_at->format('Y-m-d H:i:s'));
+        $this->assertSame(EnterpriseWikiClaimClassificationService::SOURCE_BEST_PRACTICE_REEVALUATION, $fresh->review_metadata['decision_source'] ?? null);
+        // This is the claim's first-ever authoritative decision (it was never verified before) —
+        // verified_at is now set, marking it authoritative and protected going forward.
+        $this->assertNotNull($fresh->verified_at);
+    }
+
+    /**
+     * Task requirement: a claim already carrying an AUTHORITATIVE verification decision (it went
+     * through real verification and was deliberately kept unsupported_generated_content — e.g. a
+     * deterministic conflict veto) must never be silently promoted by this narrower, block-driven
+     * rule. Otherwise identical fixture to the "reclassified" test above, differing only in
+     * verified_at being already set.
+     */
+    public function test_authoritatively_verified_unsupported_claim_is_not_promoted(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createRunWithClaim(
+            $customer,
+            claimText: 'placeholder',
+            blockOrigin: EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            bestPracticeReason: 'Regelmessig oppfølging reduserer risiko.',
+        );
+        $claim->update([
+            'claim_text' => 'Det anbefales å etablere en fast eskaleringsrutine.',
+            'page_excerpt' => 'Det anbefales å etablere en fast eskaleringsrutine.',
+            'verified_at' => now()->subDay(),
+            'review_metadata' => ['classification_basis' => 'semantic_verification', 'verdict' => 'contradicted'],
+        ]);
+
+        $this->artisan('wiki:reevaluate-run-best-practice-claims', ['--run-id' => $run->id, '--apply' => true])
+            ->expectsOutputToContain('Eligible for best_practice:                     0')
+            ->assertExitCode(0);
+
+        $fresh = $claim->fresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $fresh->content_origin);
+        $this->assertSame('semantic_verification', $fresh->review_metadata['classification_basis'] ?? null);
     }
 
     public function test_claim_without_a_best_practice_block_is_not_reclassified(): void
@@ -126,6 +159,30 @@ class EnterpriseWikiRunBestPracticeReevaluationCommandTest extends TestCase
             ->assertExitCode(0);
 
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->fresh()->content_origin);
+    }
+
+    /**
+     * Regression for ingest run 486: real production wording split from a best_practice block —
+     * no marker of its own ("bør"/"anbefales" lived in a sibling sentence of the same paragraph),
+     * but also no current-state assertion. Unlike the marker-based check this command used to
+     * apply, it must still be eligible and reclassified — the block's own tag is enough.
+     */
+    public function test_claim_without_its_own_marker_but_no_drift_is_reclassified(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , , $claim] = $this->createRunWithClaim(
+            $customer,
+            claimText: 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.',
+            blockOrigin: EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            bestPracticeReason: 'Regelmessig oppfølging reduserer risiko.',
+        );
+
+        $this->artisan('wiki:reevaluate-run-best-practice-claims', ['--run-id' => $run->id, '--apply' => true])
+            ->expectsOutputToContain('Eligible for best_practice:                     1')
+            ->expectsOutputToContain('Reclassified:                                   1')
+            ->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->fresh()->content_origin);
     }
 
     public function test_internal_error_claims_are_never_touched(): void
@@ -241,7 +298,11 @@ class EnterpriseWikiRunBestPracticeReevaluationCommandTest extends TestCase
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-            'verified_at' => now(),
+            // Never verified (verified_at null) — this fixture represents the one case this
+            // service can still legitimately act on post-authority-model: a claim demoted straight
+            // at extraction, before verification ever ran on it. A claim verification DID
+            // authoritatively decide is covered separately (see the authoritative-decision test).
+            'verified_at' => null,
         ]);
 
         return [$run, $page, $version, $claim];

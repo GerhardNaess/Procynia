@@ -12,8 +12,11 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Services\Ai\Wiki\WikiClaimVerificationAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionBlockProvenanceRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
+use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -518,21 +521,29 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_retry_mode_can_re_evaluate_a_passed_run_and_downgrade_it(): void
+    public function test_retry_mode_can_re_evaluate_a_passed_run_and_reports_the_new_claim_qa_signal(): void
     {
+        // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): claim QA signals
+        // never downgrade qa_status away from passed — a re-evaluation still reports the newly
+        // discovered signal informationally, but the run stays passed.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_PASSED);
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
         $this->markStepsComplete($run);
 
-        // A claim-integrity defect discovered after the run was originally marked passed.
+        // A claim QA signal discovered after the run was originally marked passed.
         $version = $article->versions()->where('is_current', true)->first();
         EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $article->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Bad claim.',
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'content_block_key' => 'block-0001',
+            'review_metadata' => [
+                'classification_basis' => 'semantic_verification',
+                'verdict' => 'not_supported',
+            ],
             'position_order' => 0,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
@@ -542,9 +553,373 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $result = $this->service()->runForRun($run, retry: true);
 
         $this->assertNotNull($result);
-        $this->assertContains('active_unsupported_generated_content_claims', $result['claim_integrity_defects']);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    // =========================================================================
+    // Run-482 fix: a document like "Incident Management Illustration.docx" whose only real
+    // content is one short paragraph plus one figure generates additional best-practice
+    // guidance beyond the source — this must not, on its own, escalate the run.
+    // =========================================================================
+
+    public function test_run_with_only_correctly_marked_best_practice_content_does_not_escalate(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustration');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        // The model generated this best-practice guidance but — exactly the run-482 bug — mis-
+        // tagged it source_based instead of best_practice.
+        $bestPracticeText = 'Det anbefales å definere tydelige roller, eskaleringspunkter og responstider.';
+
+        $version->update([
+            'content_markdown' => "# Incident Management Illustration\n\nFiguren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.\n\n{$bestPracticeText}",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_elements' => [[
+                        'source_element_key' => 'paragraph-0',
+                        'source_element_type' => 'paragraph',
+                        'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                        'page_reference' => 'Løpende tekst',
+                    ]],
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => $bestPracticeText,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_elements' => [[
+                        'source_element_key' => 'paragraph-0',
+                        'source_element_type' => 'paragraph',
+                        'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                        'page_reference' => 'Løpende tekst',
+                    ]],
+                ],
+            ],
+        ]);
+
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+            'page_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+        $bestPracticeClaim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $bestPracticeText,
+            'page_excerpt' => $bestPracticeText,
+            'content_block_key' => 'block-0002',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'position_order' => 1,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source only describes the figure, not this guidance.',
+                'checks' => [],
+            ]);
+
+        // The real verification pipeline — proves the rescue fix end to end, not just in
+        // isolation.
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $bestPracticeClaim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $bestPracticeClaim->content_origin);
+
+        $this->markStepsComplete($run);
+
+        $result = $this->service()->runForRun($run->fresh());
+
+        $this->assertNotNull($result);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
+        $run->refresh();
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    /**
+     * Regression for ingest run 486 (real production document "Incident Management Illustration
+     * (E2E).docx"): the block was correctly tagged best_practice at generation time (not
+     * mis-tagged source_based, unlike the run-482 case above) — the bug here was that the claim
+     * extracted from it, a supporting sentence with no marker word of its own, was independently
+     * downgraded to unsupported_generated_content anyway, escalating the run for content that was
+     * never presented as a customer-specific fact.
+     */
+    public function test_run_with_best_practice_block_supporting_sentence_lacking_its_own_marker_does_not_escalate(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustration');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        // Real run-486 wording: a supporting/context sentence within a best_practice-tagged
+        // recommendation paragraph, extracted as its own claim. It carries no "bør"/"anbefales"
+        // marker of its own (that lives in a sibling sentence of the same block) and does not
+        // assert anything about the customer's current state.
+        $supportingText = 'Typiske grenseflater omfatter problemhåndtering, endringsstyring, kunnskapsforvaltning og forespørselshåndtering i ITIL.';
+
+        $version->update([
+            'content_markdown' => "# Incident Management Illustration\n\n{$supportingText}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => 'Når illustrasjonen brukes i operativ styring, bør team vurdere hvordan hendelser henger sammen med beslektede prosesser. '.$supportingText,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Generell ITSM-kontekst utover kildedokumentet.',
+            ]],
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $supportingText,
+            'page_excerpt' => $supportingText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'review_metadata' => [
+                'statement_kind' => 'recommendation',
+                'classification_basis' => 'ai_block_content_origin',
+                'suggested_placement' => 'block-0001',
+                'visible_wiki_link_recommendation' => 'not_needed',
+            ],
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->never();
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+
+        $this->markStepsComplete($run);
+
+        $result = $this->service()->runForRun($run->fresh());
+
+        $this->assertNotNull($result);
+        $this->assertNotContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
+        $run->refresh();
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_ESCALATED, $run->qa_status);
+        $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+    }
+
+    // =========================================================================
+    // Block-anchor safety net (Preserve Wiki block provenance after semantic repair): confirms
+    // isPositiveBestPracticeSuggestion() still refuses to rescue a claim with no resolvable
+    // content_block_key — this task's block-provenance fix restores the anchor earlier in the
+    // pipeline, it never loosens this structural requirement — and that restoring the anchor via
+    // EnterpriseWikiPageVersionBlockProvenanceRepairService is what lets a legitimate best-practice
+    // claim be rescued afterwards.
+    // =========================================================================
+
+    public function test_claim_without_a_resolvable_block_key_is_never_rescued_to_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'ITIL');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: ITIL');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        // Exactly the confirmed production drift (claims 5382/5384 on page 290 "ITIL"): real,
+        // eligible best-practice wording, but content_blocks_json is empty on this version — no
+        // prior block-bearing version exists in this test, so there is nothing to reconstruct.
+        $bestPracticeText = 'Bruk av prosessbilder sammen med nøkkelindikatorer gjør årsak-virkning-forhold mer synlige.';
+
+        $version->update([
+            'content_markdown' => "# ITIL\n\n{$bestPracticeText}",
+            'content_blocks_json' => [],
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $bestPracticeText,
+            'page_excerpt' => $bestPracticeText,
+            'content_block_key' => '',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source does not describe this guidance.',
+                'checks' => [],
+            ]);
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+    }
+
+    public function test_restoring_the_block_anchor_lets_the_same_claim_be_rescued_to_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'ITIL');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: ITIL');
+
+        $bestPracticeText = 'Bruk av prosessbilder sammen med nøkkelindikatorer gjør årsak-virkning-forhold mer synlige.';
+
+        // A prior version carries the real block (as if generated normally) — mirroring the real
+        // production page 290 "ITIL" shape, the block's own markdown includes the page heading
+        // (single newline, not a blank line) so it forms exactly one "\n\n"-delimited segment.
+        $blockMarkdown = "# ITIL\n{$bestPracticeText}";
+        $priorVersion = $article->versions()->where('is_current', true)->first();
+        $priorVersion->update([
+            'is_current' => false,
+            'content_markdown' => $blockMarkdown,
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $blockMarkdown,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Generell ITSM-anbefaling.',
+            ]],
+        ]);
+
+        // …but the CURRENT version is exactly the confirmed drift left by a semantic repair that
+        // predates this task's fix: content_markdown carried over unchanged, content_blocks_json empty.
+        $current = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => $blockMarkdown,
+            'content_blocks_json' => [],
+            'generated_by_model' => 'gpt-5/semantic-repair',
+        ]);
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $current->id,
+            'claim_text' => $bestPracticeText,
+            'page_excerpt' => $bestPracticeText,
+            'content_block_key' => '',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        // This is exactly what EnterpriseWikiLinkSemanticRepairService/EnterpriseWikiSemanticRepairService
+        // now call automatically right after creating a new current version (see restoreBlockProvenance()
+        // in both services) — invoked directly here to isolate the effect on classification.
+        app(EnterpriseWikiPageVersionBlockProvenanceRepairService::class)
+            ->repairPageVersion($article->id, $current);
+
+        $this->assertSame('block-0001', $claim->fresh()->content_block_key);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source does not describe this guidance.',
+                'checks' => [],
+            ]);
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+    }
+
+    public function test_run_with_an_unsupported_customer_fact_still_reports_an_open_qa_signal_but_never_blocks(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustration');
+        $version = $article->versions()->where('is_current', true)->first();
+
+        $version->update([
+            'content_markdown' => "# Incident Management Illustration\n\nKunden har fem godkjente eskaleringsnivåer definert i sin styringsmodell.",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => 'Kunden har fem godkjente eskaleringsnivåer definert i sin styringsmodell.',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_elements' => [[
+                    'source_element_key' => 'paragraph-0',
+                    'source_element_type' => 'paragraph',
+                    'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                    'page_reference' => 'Løpende tekst',
+                ]],
+            ]],
+        ]);
+
+        // No best-practice marker at all — a plain, specific, unsupported customer fact. This
+        // must still surface as an open claim QA signal — the fix above is scoped to genuinely
+        // best-practice content only — but per v0.10 it never blocks the run either way.
+        $unsupportedText = 'Kunden har fem godkjente eskaleringsnivåer definert i sin styringsmodell.';
+
+        $claim = EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $unsupportedText,
+            'page_excerpt' => $unsupportedText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->andReturn([
+                'verdict' => 'not_supported',
+                'reason' => 'The source does not mention escalation levels.',
+                'checks' => [],
+            ]);
+
+        app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $claim->refresh();
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+
+        $this->markStepsComplete($run);
+
+        $result = $this->service()->runForRun($run->fresh());
+
+        $this->assertNotNull($result);
+        $this->assertContains('open_unsupported_generated_content_claims', $result['claim_qa_signals']);
+        $run->refresh();
+        // v0.10: the open claim QA signal is reported for the voluntary QA screen, but never
+        // gates qa_status — the run is technically sound and passes.
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
     public function test_find_pending_runs_and_find_retryable_runs_never_include_passed(): void

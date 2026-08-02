@@ -14,11 +14,14 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\TestCase;
+use ZipArchive;
 
 class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
 {
@@ -57,7 +60,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         [$run, $article, $summary] = $this->createAppliedRunWithTwoPages($customer);
 
         Queue::fake();
-        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class));
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
 
         $this->assertTrue(
             EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists()
@@ -74,7 +77,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $customer = $this->createCustomer();
         [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
 
-        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class));
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
 
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }
@@ -85,7 +88,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
 
         Queue::fake();
-        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class));
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
 
         $pivot = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
@@ -106,7 +109,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
 
         Queue::fake();
-        $service = app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class);
+        $service = app(EnterpriseWikiGenerateAppliedPagesService::class);
 
         (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($service);
         (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($service);
@@ -136,7 +139,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
 
         Queue::fake();
         (new GenerateEnterpriseWikiAppliedPage($newRun->id, $article->id))->handle(
-            app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class)
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
         );
 
         $this->assertSame(2, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->count());
@@ -172,7 +175,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
 
         try {
             (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
-                app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class)
+                app(EnterpriseWikiGenerateAppliedPagesService::class)
             );
             $this->fail('Expected the job to rethrow.');
         } catch (RuntimeException $e) {
@@ -206,14 +209,14 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
             'enterprise_wiki_page_id' => $article->id,
             'version_number' => 1,
             'is_current' => true,
-            'content_markdown' => '# Artikkel om Procynia' . "\n\nProcynia styrer hele tilbudsprosessen.",
+            'content_markdown' => '# Artikkel om Procynia'."\n\nProcynia styrer hele tilbudsprosessen.",
             'generated_by_model' => 'gpt-5',
         ]);
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $summary->id,
             'version_number' => 1,
             'is_current' => true,
-            'content_markdown' => '# Sammendrag om Procynia' . "\n\nKort sammendrag av kontrollert tilbudsarbeid.",
+            'content_markdown' => '# Sammendrag om Procynia'."\n\nKort sammendrag av kontrollert tilbudsarbeid.",
             'generated_by_model' => 'gpt-5',
         ]);
 
@@ -240,11 +243,421 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
 
         Queue::fake();
         (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
-            app(\App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService::class)
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
         );
 
         $this->assertStringContainsString('Procynia styrer hele tilbudsprosessen', $capturedContext);
         $this->assertStringContainsString('Kort sammendrag av kontrollert tilbudsarbeid', $capturedContext);
+    }
+
+    public function test_concept_page_receives_its_own_maintainer_assigned_responsibility_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'ITIL');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => 'ITIL',
+                'proposed_slug' => $concept->slug,
+                'reason' => 'Overordnet rammeverk.',
+                'owned_topics' => ['Definer ITIL som rammeverk for tjenestestyring.'],
+                'reference_only_topics' => ['Bruk av prosessillustrasjonen.'],
+                'excluded_topics' => ['Detaljert Incident Management-arbeidsflyt.', 'Detaljerte KPI-kataloger.'],
+                'related_page_guidance' => [
+                    ['page_title' => 'Incident Management', 'relationship' => 'Lenk hit for detaljert hendelseshåndtering.'],
+                ],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Definer ITIL som rammeverk for tjenestestyring.', $capturedContext);
+        $this->assertStringContainsString('Bruk av prosessillustrasjonen.', $capturedContext);
+        $this->assertStringContainsString('Detaljert Incident Management-arbeidsflyt.', $capturedContext);
+        $this->assertStringContainsString('Detaljerte KPI-kataloger.', $capturedContext);
+        $this->assertStringContainsString('Incident Management: Lenk hit for detaljert hendelseshåndtering.', $capturedContext);
+    }
+
+    public function test_article_page_receives_its_own_maintainer_assigned_responsibility_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => [
+                'action' => 'create',
+                'title' => $article->title,
+                'proposed_slug' => $article->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Beskriv hva illustrasjonen viser og bruksområder for den.'],
+                'reference_only_topics' => ['ITIL som overordnet rammeverk.'],
+                'excluded_topics' => ['Full generell definisjon av ITIL.'],
+                'related_page_guidance' => [
+                    ['page_title' => 'ITIL', 'relationship' => 'Lenk hit for rammeverksforklaring.'],
+                ],
+            ],
+            'source_summary' => ['action' => 'create', 'title' => $summary->title, 'proposed_slug' => $summary->slug, 'reason' => 'r'],
+            'concept_pages' => [],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $summary): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Beskriv hva illustrasjonen viser og bruksområder for den.', $capturedContext);
+        $this->assertStringContainsString('ITIL som overordnet rammeverk.', $capturedContext);
+        $this->assertStringContainsString('Full generell definisjon av ITIL.', $capturedContext);
+        $this->assertStringContainsString('ITIL: Lenk hit for rammeverksforklaring.', $capturedContext);
+    }
+
+    public function test_summary_page_receives_the_finished_article_content_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        // Simulate the article having already been generated (phase 1's article-first ordering).
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Incident Management Illustration'."\n\nDenne siden beskriver figuren i detalj.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Finished article to summarize', $capturedContext);
+        $this->assertStringContainsString('Denne siden beskriver figuren i detalj.', $capturedContext);
+    }
+
+    public function test_summary_page_falls_back_gracefully_when_article_is_not_yet_generated(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustration');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag av Incident Management Illustration');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringNotContainsString('Finished article to summarize', (string) $capturedContext);
+    }
+
+    /**
+     * Regression for run 475/480: EnterpriseWikiGenerateAppliedPagesService has two generation
+     * paths — generate() (used by the wiki:generate-applied-pages command, and by every other
+     * test in this suite) and generatePageForRun() (used by THIS job — the actual queued,
+     * per-page production path on the enterprise-wiki-pages queue). generatePageForRun() called
+     * appendTableBlocksIfRelevant() but never appendImageBlocksIfRelevant(), so a cited image
+     * never became a figure block for any document processed through real ingest, even though
+     * every other image-support test (which exercises generate(), not this job) passed. This test
+     * drives the job's handle() method directly — the same entrypoint the real queue worker
+     * calls — with a real .docx containing an embedded image, and confirms the resulting page
+     * version now carries a genuine "image" content block.
+     */
+    public function test_job_creates_a_figure_block_for_a_cited_image_via_the_real_production_path(): void
+    {
+        Storage::fake('local');
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocxDocumentWithOneImage($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array {
+                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
+                $this->assertNotNull($imageElement, 'Expected the image to be exposed as a citable source element.');
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN, [$imageElement]);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->firstOrFail();
+
+        $imageBlocks = collect($version->content_blocks_json)
+            ->filter(fn (array $block): bool => ($block['block_type'] ?? null) === 'image')
+            ->values();
+
+        $this->assertCount(1, $imageBlocks);
+        $this->assertSame('img0', $imageBlocks[0]['image_data']['source_image_key']);
+    }
+
+    /**
+     * Regression for run 574's finding #5560: a sentence the model returns as its own leading
+     * paragraph and then repeats verbatim as the opening sentence of a later block must be
+     * removed at generation time, on the real per-page production path this job drives.
+     */
+    public function test_job_removes_a_verbatim_duplicate_sentence_across_generated_blocks(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Incident Management Illustrasjon');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Incident Management Illustrasjon');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        $repeatedSentence = 'Som oversiktsbilde over en Incident-prosess viser illustrasjoner et løp fra innmelding til avslutning.';
+        $usedSourceElementKey = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use ($repeatedSentence, $summary, &$usedSourceElementKey): array {
+                $sourceElement = $sourceElements[0] ?? [
+                    'source_element_key' => 'document-1-full-text',
+                    'source_element_type' => 'manual',
+                ];
+                $usedSourceElementKey = (string) $sourceElement['source_element_key'];
+
+                $blocks = [
+                    [
+                        'markdown' => "# Incident Management Illustrasjon\n\n{$repeatedSentence}",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                        'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                        'source_element_types' => [(string) $sourceElement['source_element_type']],
+                        'best_practice_reason' => null,
+                        'link_intents' => [],
+                    ],
+                    [
+                        'markdown' => "{$repeatedSentence} Se også [[{$summary->slug}]] for detaljer.",
+                        'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                        'source_element_keys' => [],
+                        'source_element_types' => [],
+                        'best_practice_reason' => 'Generell fagkunnskap om hendelseshåndtering.',
+                        'link_intents' => [],
+                    ],
+                ];
+
+                return [
+                    'markdown' => trim(implode("\n\n", array_column($blocks, 'markdown'))),
+                    'blocks' => $blocks,
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail();
+
+        // The repeated sentence survives exactly once in the persisted content_markdown — the
+        // duplicate is not merely hidden by the frontend, it is not stored a second time at all.
+        $this->assertSame(1, substr_count($version->content_markdown, $repeatedSentence));
+        $this->assertStringContainsString('# Incident Management Illustrasjon', $version->content_markdown);
+
+        $blocks = collect($version->content_blocks_json);
+
+        $firstBlock = $blocks->first(fn (array $b): bool => str_contains($b['markdown'] ?? '', $repeatedSentence));
+        $this->assertNotNull($firstBlock, 'Expected the first, kept occurrence of the sentence.');
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $firstBlock['content_origin']);
+        $this->assertSame($usedSourceElementKey, $firstBlock['source_element_key']);
+
+        $secondBlock = $blocks->first(fn (array $b): bool => str_contains($b['markdown'] ?? '', 'Se også'));
+        $this->assertNotNull($secondBlock, 'Expected the second block to survive with its unique tail.');
+        $this->assertStringNotContainsString($repeatedSentence, $secondBlock['markdown']);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $secondBlock['content_origin']);
+        $this->assertSame('Generell fagkunnskap om hendelseshåndtering.', $secondBlock['best_practice_reason']);
+    }
+
+    private function createDocxDocumentWithOneImage(Customer $customer): EnterpriseWikiDocument
+    {
+        $documentXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.</w:t></w:r></w:p>
+        <w:p xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+            <w:r>
+                <w:drawing>
+                    <wp:inline>
+                        <wp:extent cx="1905000" cy="1905000"/>
+                        <wp:docPr id="1" name="Picture 1"/>
+                        <a:graphic>
+                            <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:pic>
+                                    <pic:blipFill>
+                                        <a:blip r:embed="rId1"/>
+                                    </pic:blipFill>
+                                </pic:pic>
+                            </a:graphicData>
+                        </a:graphic>
+                    </wp:inline>
+                </w:drawing>
+            </w:r>
+        </w:p>
+    </w:body>
+</w:document>
+XML;
+
+        $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+
+        $mediaImage = imagecreatetruecolor(300, 200);
+        imagefilledrectangle($mediaImage, 0, 0, 299, 199, (int) imagecolorallocate($mediaImage, 40, 80, 140));
+        ob_start();
+        imagepng($mediaImage);
+        $mediaBytes = (string) ob_get_clean();
+        imagedestroy($mediaImage);
+
+        $path = tempnam(sys_get_temp_dir(), 'wiki-page-job-image-').'.docx';
+        $zip = new ZipArchive;
+        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $zip->addFromString('word/document.xml', $documentXml);
+        $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+        $zip->addFromString('word/media/image1.png', $mediaBytes);
+        $zip->close();
+        $docxBytes = (string) file_get_contents($path);
+        @unlink($path);
+
+        $filename = 'bilder-'.Str::lower(Str::random(6)).'.docx';
+        $document = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => $filename,
+            'file_path' => sprintf('customers/%d/wiki-documents/%s', $customer->id, $filename),
+            'file_hash_sha256' => hash('sha256', $docxBytes),
+            'extracted_text' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+
+        Storage::disk('local')->put($document->file_path, $docxBytes);
+
+        return $document;
     }
 
     // =========================================================================

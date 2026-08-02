@@ -7,10 +7,39 @@
  * count as user-facing.
  */
 
+/**
+ * Technical id prefixes EnterpriseWikiRunFindingsService::buildForRun() prepends to the
+ * underlying stable database id (claim id or lint finding id) to keep ids unique across finding
+ * categories on the backend (e.g. 'claim-defect-5378') — never meant to be user-facing wording.
+ */
+const FINDING_ID_KNOWN_PREFIXES = ['claim-defect-', 'best-practice-', 'lint-'];
+
+/**
+ * Strips the backend's internal category prefix from a finding id, leaving only the stable
+ * numeric database id a user can reasonably read as "the finding's ID" (e.g.
+ * 'claim-defect-5378' -> '5378'). The full underlying id is never changed or lost anywhere else —
+ * this only affects how it is PRESENTED. Falls back to the full original id whenever the value
+ * doesn't match a known prefix, or what follows a known prefix isn't a plain numeric primary key,
+ * so a user is never shown an empty/missing id.
+ */
+export function formatFindingUserId(id) {
+    const raw = String(id ?? '');
+
+    for (const prefix of FINDING_ID_KNOWN_PREFIXES) {
+        if (raw.startsWith(prefix)) {
+            const remainder = raw.slice(prefix.length);
+
+            return /^\d+$/.test(remainder) ? remainder : raw;
+        }
+    }
+
+    return raw;
+}
+
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
     { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
-    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Anvendelse' },
+    { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Oppretter sidestruktur' },
     { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
     { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
     { key: 'qa', labelKey: 'ingest_timeline_qa', fallback: 'QA' },
@@ -19,10 +48,12 @@ export const RUN_TIMELINE_STEPS = [
 
 /**
  * A finding's `status` is set by EnterpriseWikiRunFindingsService from one of three sources (lint
- * finding, claim-integrity defect, or best-practice suggestion), and each source has its own status
- * vocabulary — 'open' filter must match ALL of them, not just the lint-finding ones. Missing
- * 'requires_decision'/'user_blocking' here previously made a genuinely open, blocking claim defect
- * disappear from the "Åpne" tab even though it was correctly counted in summary.open_blocking.
+ * finding, claim QA signal, or best-practice suggestion), and each source has its own status
+ * vocabulary — 'open' filter must match ALL of them, not just the lint-finding ones.
+ * 'open_for_qa_review'/'flagged_for_review' (claim QA signals, v0.10 — docs/enterprise-llm-wiki-plan.md,
+ * "Arkitekturnotat — v0.10") are voluntary, never blocking — they must still appear under "Åpne" so a
+ * QA specialist can find them, but the 'blocking' filter below correctly never matches them since
+ * finding.blocks_run is always false for a claim QA signal.
  */
 export function matchesFindingsLocalFilter(finding, filterKey) {
     switch (filterKey) {
@@ -30,8 +61,8 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
             return finding.status === 'requires_action'
                 || finding.status === 'open'
                 || finding.status === 'pending_review'
-                || finding.status === 'requires_decision'
-                || finding.status === 'user_blocking';
+                || finding.status === 'open_for_qa_review'
+                || finding.status === 'flagged_for_review';
         case 'blocking':
             return finding.blocks_run;
         case 'resolved':
@@ -48,11 +79,12 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
  * matches any RUN_TIMELINE_STEPS key, so a naive "find the step matching run.status" lookup
  * always misses for it — and previously fell back to marking the LAST step (Dokumenteier) as the
  * error location for every escalated run, regardless of why it escalated. In the current
- * architecture 'escalated' is only ever set from EnterpriseWikiDocumentFlowService::escalateRun()/
- * escalateRunForClaimIntegrityRepair(), both called exclusively from finalizeFromExistingQaResult()
- * reacting to qa_status escalated/repair_required — i.e. a run in this state ALWAYS stopped at the
- * QA step and NEVER reached Document Owner review, so the QA step (not Dokumenteier) is where the
- * error belongs.
+ * architecture 'escalated' is only ever set from EnterpriseWikiDocumentFlowService::escalateRun(),
+ * called from finalizeFromExistingQaResult() reacting to qa_status=escalated (a genuine technical
+ * QA outcome — since v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10", claim QA
+ * signals never reach qa_status=repair_required/escalated on their own) — i.e. a run in this state
+ * ALWAYS stopped at the QA step and NEVER reached Document Owner review, so the QA step (not
+ * Dokumenteier) is where the error belongs.
  *
  * 'failed' is deliberately NOT given the same treatment: it can originate from many different
  * pipeline stages (maintainer decision, apply, page generation, wikilink materialization, or a QA
@@ -115,8 +147,8 @@ export function getRunTimelineState(run, stepIndex) {
  * computed on every run row:
  *
  *   - run.error_message: the specific technical reason the run was escalated in the first place
- *     (only set by EnterpriseWikiDocumentFlowService::escalateRunForClaimIntegrityRepair(); plain
- *     escalateRun() calls clear it), e.g. "unverifiable content found against the source material".
+ *     (markRunFailed() sets it for a genuine pipeline exception; plain escalateRun() calls clear
+ *     it since v0.10 removed the claim-content-specific escalation path).
  *   - run.findings_explanation: EnterpriseWikiRunFindingsService::buildExplanation()'s live
  *     comparison of qa_status against the actual open-blocking-findings count — this is what
  *     catches (and plainly states) the maintenance-cycle drift where qa_status has since moved to
@@ -127,6 +159,34 @@ export function getRunTimelineState(run, stepIndex) {
  * both are shown when that happens. Neither is guessed — a run with neither ends up on the same
  * generic fallback word the badge already shows, never a fabricated reason.
  */
+/**
+ * Whether a run's row should show the "Ser ut til å stå stille" warning and its explanation.
+ * Requires BOTH halves — a status where the automatic pipeline still expects to make technical
+ * progress (run.expects_automatic_progress, computed once centrally by
+ * EnterpriseWikiIngestRun::expectsAutomaticProgress() and never re-derived from the status
+ * string here), AND a genuinely long gap since the last recorded activity. A run waiting on a
+ * human decision (e.g. awaiting_document_owner_approval) can sit idle for hours by design —
+ * that is never "stalled", regardless of how long ago its last progress timestamp was.
+ *
+ * `now` is injectable (defaults to the real current time) purely so this stays deterministic
+ * under a fixed clock in unit tests — callers never need to pass it themselves.
+ */
+export function isRunStalled(run, thresholdMinutes = 15, now = Date.now()) {
+    if (!run || !run.expects_automatic_progress) {
+        return false;
+    }
+
+    const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
+
+    if (!progressAt) {
+        return false;
+    }
+
+    const staleMinutes = Math.max(0, Math.round((now - new Date(progressAt).getTime()) / 60000));
+
+    return staleMinutes >= thresholdMinutes;
+}
+
 export function getEscalationCopy(run, tw = {}) {
     const blockingCount = run?.findings_open_blocking_count ?? 0;
     const totalCount = run?.lint_count ?? 0;
