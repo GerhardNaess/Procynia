@@ -683,7 +683,7 @@ class EnterpriseWikiVerifyPageClaimsService
         // to source_based on a coincidental partial text match). Only re-validate that it
         // is still genuinely normative and still anchored — never prove source support.
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
-            && $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)
+            && $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text, (string) ($claim->page_excerpt ?? ''))
         ) {
             $outcome = $this->persistBestPracticeVerification(
                 $claim->id,
@@ -2040,7 +2040,7 @@ class EnterpriseWikiVerifyPageClaimsService
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)) {
+        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text, (string) ($claim->page_excerpt ?? ''))) {
             return false;
         }
 

@@ -261,7 +261,7 @@ class EnterpriseWikiClaimIntegrityRepairService
      */
     private function isPositiveBestPracticeSuggestion(EnterpriseWikiClaim $claim): bool
     {
-        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)) {
+        if (! $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text, (string) ($claim->page_excerpt ?? ''))) {
             return false;
         }
 

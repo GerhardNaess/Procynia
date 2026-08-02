@@ -423,6 +423,76 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
     }
 
+    // =========================================================================
+    // Run 575 fix: a claim that is a pure internal Wiki navigation reference (its raw
+    // page_excerpt/block markdown is only a bare [[wikilink]] pointer) must never be rescued to
+    // best_practice on a not_supported verdict — see EnterpriseWikiNavigationReferenceDetector.
+    // =========================================================================
+
+    public function test_pure_navigation_reference_claim_is_not_rescued_to_best_practice_on_not_supported_verdict(): void
+    {
+        $customer = $this->createCustomer();
+
+        // Run 575's finding #5587 pattern: the claim's paraphrased text carries no wikilink
+        // markup (the AI stripped it during extraction), but the raw page_excerpt it was
+        // extracted from still does — this is the structural signal the fix relies on.
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlockAndExcerpt(
+            $customer,
+            'Begreper og rammeverk er omtalt på ITIL Incident Management.',
+            'Begreper og rammeverk er omtalt på [[itil-incident-management|ITIL Incident Management]].',
+            [[
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                'page_reference' => 'Løpende tekst',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_UNSUPPORTED_GENERATED_CONTENT, $claim->sourceStatus());
+    }
+
+    public function test_assertion_followed_by_navigation_link_is_still_rescued_to_best_practice(): void
+    {
+        $customer = $this->createCustomer();
+
+        // Counter-example from the task: the claim's own text is a genuine professional
+        // recommendation. The presence of a wikilink elsewhere in the excerpt/block must not
+        // suppress this — only a text that is ENTIRELY navigation is exempted.
+        [$run, , , $claim] = $this->createClaimWithStructuredSourceBlockAndExcerpt(
+            $customer,
+            'Incident Management skal alltid ha en tydelig sakseier.',
+            'Incident Management skal alltid ha én tydelig sakseier. Se [[itil-incident-management|ITIL Incident Management]].',
+            [[
+                'source_element_key' => 'paragraph-0',
+                'source_element_type' => 'paragraph',
+                'source_excerpt' => 'Figuren under illustrerer samhandlingsprosessen mellom Kunden og Leverandøren.',
+                'page_reference' => 'Løpende tekst',
+            ]],
+        );
+
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(verdict: 'not_supported', reason: 'No candidate excerpt supports this claim.'));
+
+        Artisan::call('wiki:verify-page-claims', ['--run-id' => $run->id]);
+
+        $claim->refresh();
+
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_BEST_PRACTICE_REVIEW, $claim->sourceStatus());
+    }
+
     public function test_explicit_best_practice_block_remains_best_practice_review_without_calling_verification_ai(): void
     {
         $customer = $this->createCustomer();
@@ -627,6 +697,37 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
         $claim->update([
             'claim_text' => $claimText,
             'page_excerpt' => $claimText,
+            'content_block_key' => 'block-0001',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+        ]);
+
+        return [$run, $page, $version, $claim->fresh(), $document];
+    }
+
+    /**
+     * Like createClaimWithStructuredSourceBlock(), but with the claim's paraphrased claim_text
+     * and its raw page_excerpt (which may still carry [[wikilink]] markup) set independently —
+     * needed for the navigation-reference fix, since a real extracted claim_text never retains
+     * wikilink syntax while page_excerpt (the verbatim source anchor) does.
+     */
+    private function createClaimWithStructuredSourceBlockAndExcerpt(Customer $customer, string $claimText, string $pageExcerpt, array $sourceElements): array
+    {
+        [$run, $page, $version, $claim, $document] = $this->createAppliedRunWithClaimedPage($customer);
+
+        $version->update([
+            'content_markdown' => "# {$page->title}\n\n{$pageExcerpt}",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => $pageExcerpt,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'source_elements' => $sourceElements,
+            ]],
+        ]);
+
+        $claim->update([
+            'claim_text' => $claimText,
+            'page_excerpt' => $pageExcerpt,
             'content_block_key' => 'block-0001',
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
         ]);

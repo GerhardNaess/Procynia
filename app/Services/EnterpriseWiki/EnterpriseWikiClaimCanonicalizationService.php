@@ -184,6 +184,7 @@ class EnterpriseWikiClaimCanonicalizationService
 
     public function __construct(
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
+        private readonly EnterpriseWikiNavigationReferenceDetector $navigationReferenceDetector,
     ) {}
 
     /**
@@ -202,12 +203,27 @@ class EnterpriseWikiClaimCanonicalizationService
      * ALREADY has/does/is/covers the thing described — assertsCurrentPartyState()'s party-/
      * agreement-specific drift check. A general professional/industry statement that names no
      * such specific referent is eligible no matter how plainly or authoritatively it is phrased.
+     *
+     * Run 575's finding #5587: a claim whose ANCHOR text (the raw page excerpt or block markdown
+     * it was extracted from, still carrying [[wikilink]] markup — $anchorText, when the caller
+     * has it) is nothing but a bare pointer to another Wiki page is disqualified too, regardless
+     * of how the paraphrased $text itself reads — see EnterpriseWikiNavigationReferenceDetector.
+     * $anchorText is optional: a caller with no excerpt/markdown on hand simply skips this check,
+     * unaffected, exactly as before this fix existed.
      */
-    public function isEligibleForBestPractice(string $text): bool
+    public function isEligibleForBestPractice(string $text, string $anchorText = ''): bool
     {
         $normalized = $this->textNormalizer->normalize($text);
 
-        return $normalized !== '' && ! $this->assertsCurrentPartyState($normalized);
+        if ($normalized === '' || $this->assertsCurrentPartyState($normalized)) {
+            return false;
+        }
+
+        if (trim($anchorText) !== '' && $this->navigationReferenceDetector->isPureNavigationReference($anchorText)) {
+            return false;
+        }
+
+        return true;
     }
 
     public function assertsCurrentPartyState(string $normalizedText): bool
