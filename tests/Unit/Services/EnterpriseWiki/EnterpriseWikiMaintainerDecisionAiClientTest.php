@@ -6,6 +6,7 @@ use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
 use Mockery\MockInterface;
@@ -49,14 +50,18 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
 
     public function test_payload_uses_capacity_planner_derived_max_output_tokens(): void
     {
-        $payload = $this->capturePayload();
+        $sourceText = 'Noe innhold her.';
+        $payload = $this->capturePayload(sourceText: $sourceText);
 
-        $userPromptText = $this->userMessageText($payload);
-
+        // The capacity decision is sized off the RAW source text, not the templated prompt text
+        // the payload actually embeds — see EnterpriseWikiMaintainerDecisionAiClient::decide()'s
+        // docblock: sizing off the (truncated) prompt text would cap the input measure at
+        // MAX_SOURCE_TEXT_CHARS regardless of true document size, making split_required
+        // effectively unreachable.
         $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
             operationType: 'enterprise_wiki_maintainer_decision',
             model: 'gpt-5',
-            inputSizeChars: mb_strlen($userPromptText),
+            inputSizeChars: mb_strlen($sourceText),
             expectedResultObjects: 2,
         ));
 
@@ -495,6 +500,83 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         );
 
         $this->assertArrayHasKey('source_article', $result);
+    }
+
+    // =========================================================================
+    // decide() — split routing (Wiki "Split oversized Wiki maintainer decisions" work item):
+    // when the capacity planner reports strategy=split_required, decide() must delegate entirely
+    // to EnterpriseWikiMaintainerDecisionSplitCoordinator instead of attempting (and predictably
+    // truncating) a single oversized call.
+    // =========================================================================
+
+    public function test_decide_routes_to_split_coordinator_when_strategy_is_split_required(): void
+    {
+        $decision = $this->validDecision();
+
+        /** @var EnterpriseWikiMaintainerDecisionSplitCoordinator&MockInterface $splitMock */
+        $splitMock = $this->mock(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
+        $splitMock->shouldReceive('decide')->once()->andReturn($decision);
+
+        /** @var OpenAiClient&MockInterface $aiMock */
+        $aiMock = $this->mock(OpenAiClient::class);
+        $aiMock->shouldNotReceive('createResponse');
+
+        // A large enough source text that the real capacity profile resolves to split_required
+        // (see EnterpriseWikiAiCapacityPlannerTest's equivalent real-profile assertion).
+        $largeSourceText = str_repeat('ITIL prosessbeskrivelse med mange rammeverk og konsepter. ', 700);
+
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
+            ->decide(['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no');
+
+        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+    }
+
+    public function test_decide_does_not_route_to_split_coordinator_for_a_small_document(): void
+    {
+        /** @var EnterpriseWikiMaintainerDecisionSplitCoordinator&MockInterface $splitMock */
+        $splitMock = $this->mock(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
+        $splitMock->shouldNotReceive('decide');
+
+        $client = $this->clientReturning($this->validDecision());
+
+        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'Noe kort innhold.', [], 'no');
+    }
+
+    /**
+     * The run-584 document pattern (~13k source chars, the exact input size that previously
+     * completed successfully in a single call) must still resolve to a single call, not split —
+     * no regression from introducing the split flow.
+     */
+    public function test_decide_still_uses_single_call_for_the_run_584_document_pattern(): void
+    {
+        /** @var EnterpriseWikiMaintainerDecisionSplitCoordinator&MockInterface $splitMock */
+        $splitMock = $this->mock(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
+        $splitMock->shouldNotReceive('decide');
+
+        $sourceText = str_repeat('A', 12_500); // truncated to MAX_SOURCE_TEXT_CHARS=12000 in the prompt, matching run 584's actual scale.
+        $client = $this->clientReturning($this->validDecision());
+
+        $client->decide(['title' => 'T', 'filename' => 'T.docx'], $sourceText, [], 'no');
+    }
+
+    public function test_repair_never_routes_to_split_coordinator_regardless_of_size(): void
+    {
+        /** @var EnterpriseWikiMaintainerDecisionSplitCoordinator&MockInterface $splitMock */
+        $splitMock = $this->mock(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
+        $splitMock->shouldNotReceive('decide');
+
+        /** @var OpenAiClient&MockInterface $aiMock */
+        $aiMock = $this->mock(OpenAiClient::class);
+        $aiMock->shouldReceive('createResponse')->once()->andReturn([
+            'status' => 'completed',
+            'output_text' => json_encode($this->validDecision()),
+        ]);
+
+        $largeSourceText = str_repeat('ITIL prosessbeskrivelse med mange rammeverk og konsepter. ', 700);
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
+            ['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no', $this->validDecision(), ['issue'],
+        );
     }
 
     // =========================================================================

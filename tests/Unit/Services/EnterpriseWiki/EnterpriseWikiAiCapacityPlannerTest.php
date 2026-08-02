@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\EnterpriseWiki;
 
+use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
@@ -38,6 +39,24 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
                 'retry_multiplier' => 2.0,
                 'max_output_tokens' => 4000,
                 'max_capacity_retries' => 1,
+                'global_plan' => [
+                    'base_overhead_tokens' => 80,
+                    'tokens_per_result_object' => 50,
+                    'tokens_per_input_chars_unit' => 2,
+                    'input_chars_per_unit' => 100,
+                    'reasoning_token_buffer' => 0,
+                    'minimum_output_tokens' => 150,
+                    'safety_margin_ratio' => 0.2,
+                    'retry_multiplier' => 2.0,
+                ],
+                'batch' => [
+                    'batch_overhead_tokens' => 50,
+                    'tokens_per_candidate' => 100,
+                    'safety_margin_ratio' => 0.2,
+                    'minimum_output_tokens' => 200,
+                    'max_candidates_per_batch' => 5,
+                    'min_candidates_per_batch' => 1,
+                ],
             ],
         ]);
     }
@@ -198,6 +217,132 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
     }
 
     // =========================================================================
+    // Split-strategy determination (single_call / capacity_retry / split_required)
+    // =========================================================================
+
+    // 1. Small task chooses single_call.
+    public function test_small_task_chooses_single_call_strategy(): void
+    {
+        $plan = $this->planner()->plan($this->request(['inputSizeChars' => 100, 'expectedResultObjects' => 2]));
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_SINGLE_CALL, $plan->strategy);
+    }
+
+    // 2. Large task chooses split_required.
+    public function test_large_task_chooses_split_required_strategy(): void
+    {
+        $plan = $this->planner()->plan($this->request(['inputSizeChars' => 50_000, 'expectedResultObjects' => 100]));
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $plan->strategy);
+    }
+
+    /**
+     * 3. Retry with no real extra headroom chooses split over a pointless retry: once the first
+     * attempt's own (unclamped) preferred estimate already exceeds the ceiling, a retry
+     * mathematically clamps to the EXACT SAME chosen budget as the first attempt — proving retry
+     * cannot help, which is precisely why split_required is chosen instead.
+     */
+    public function test_split_required_means_a_retry_would_be_pointless(): void
+    {
+        $request0 = $this->request(['inputSizeChars' => 50_000, 'expectedResultObjects' => 100, 'retryAttempt' => 0]);
+        $request1 = $this->request(['inputSizeChars' => 50_000, 'expectedResultObjects' => 100, 'retryAttempt' => 1]);
+
+        $plan0 = $this->planner()->plan($request0);
+        $plan1 = $this->planner()->plan($request1);
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $plan0->strategy);
+        $this->assertSame($plan0->chosenMaxOutputTokens, $plan1->chosenMaxOutputTokens);
+    }
+
+    public function test_moderate_task_chooses_capacity_retry_strategy_when_a_retry_would_still_help(): void
+    {
+        // need = 200 + 10*200 = 2200; preferred0 = ceil(2200*1.2) = 2640 (fits under 4000);
+        // preferred1 = ceil(2640*2) = 5280 (would not fit) => capacity_retry.
+        $plan = $this->planner()->plan($this->request(['inputSizeChars' => 20_000, 'expectedResultObjects' => 2]));
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_CAPACITY_RETRY, $plan->strategy);
+    }
+
+    // 4. Same input yields the same strategy every time (covered generally by determinism test
+    // above; this asserts it specifically for the split_required boundary case).
+    public function test_same_input_yields_the_same_strategy_every_time(): void
+    {
+        $request = $this->request(['inputSizeChars' => 50_000, 'expectedResultObjects' => 100]);
+
+        $this->assertSame(
+            $this->planner()->plan($request)->strategy,
+            $this->planner()->plan($request)->strategy,
+        );
+    }
+
+    // =========================================================================
+    // Batch planning (planBatchCount / planBatchCall)
+    // =========================================================================
+
+    // 5. Batch size stays within configured bounds.
+    public function test_batch_count_splits_candidates_within_configured_bounds(): void
+    {
+        $batches = $this->planner()->planBatchCount('test_operation', 'test-model', 12);
+
+        // capacityDrivenMax = floor((4000/1.2 - 50) / 100) = 32; capped at configured max=5;
+        // batchCount = ceil(12/5) = 3; distributed evenly.
+        $this->assertSame([4, 4, 4], $batches);
+        $this->assertSame(12, array_sum($batches));
+
+        foreach ($batches as $size) {
+            $this->assertLessThanOrEqual(5, $size);
+            $this->assertGreaterThanOrEqual(1, $size);
+        }
+    }
+
+    public function test_batch_count_returns_empty_for_zero_candidates(): void
+    {
+        $this->assertSame([], $this->planner()->planBatchCount('test_operation', 'test-model', 0));
+    }
+
+    public function test_batch_count_returns_a_single_batch_when_all_candidates_fit(): void
+    {
+        $this->assertSame([3], $this->planner()->planBatchCount('test_operation', 'test-model', 3));
+    }
+
+    public function test_batch_count_is_deterministic(): void
+    {
+        $first = $this->planner()->planBatchCount('test_operation', 'test-model', 17);
+        $second = $this->planner()->planBatchCount('test_operation', 'test-model', 17);
+
+        $this->assertSame($first, $second);
+    }
+
+    // 6. Model/operation maximum is respected for batch calls too.
+    public function test_batch_call_never_exceeds_the_model_or_operation_maximum(): void
+    {
+        $plan = $this->planner()->planBatchCall('test_operation', 'test-model', candidatesInBatch: 5, inputSizeChars: 1_000_000);
+
+        $this->assertLessThanOrEqual(4000, $plan->chosenMaxOutputTokens);
+    }
+
+    public function test_batch_call_retry_budget_is_higher_than_first_attempt(): void
+    {
+        $first = $this->planner()->planBatchCall('test_operation', 'test-model', 3, 500, retryAttempt: 0);
+        $retry = $this->planner()->planBatchCall('test_operation', 'test-model', 3, 500, retryAttempt: 1);
+
+        $this->assertGreaterThan($first->chosenMaxOutputTokens, $retry->chosenMaxOutputTokens);
+    }
+
+    public function test_global_plan_call_uses_a_much_smaller_input_cost_than_the_whole_decision_estimate(): void
+    {
+        // Using the SAME large input that pushes plan() to split_required, planGlobalPlanCall()
+        // must still resolve to a comfortable single-call-sized budget — otherwise Phase A would
+        // itself require splitting, which would be self-defeating.
+        $wholeDecisionPlan = $this->planner()->plan($this->request(['inputSizeChars' => 50_000, 'expectedResultObjects' => 100]));
+        $globalPlanPlan = $this->planner()->planGlobalPlanCall('test_operation', 'test-model', 2, 50_000);
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $wholeDecisionPlan->strategy);
+        $this->assertLessThan($wholeDecisionPlan->chosenMaxOutputTokens, $globalPlanPlan->chosenMaxOutputTokens);
+        $this->assertLessThanOrEqual(4000, $globalPlanPlan->chosenMaxOutputTokens);
+    }
+
+    // =========================================================================
     // Capacity / boundary tests against realistic maintainer-decision-shaped fixtures
     // (tests 26-29 from the task) — uses the REAL 'enterprise_wiki_maintainer_decision'
     // profile from config/ai_capacity.php, not the synthetic 'test_operation' profile above.
@@ -249,6 +394,37 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
      * tokens_per_result_object/tokens_per_input_chars_unit still reflect reality, instead of
      * silently under-budgeting like the run-583 incident.
      */
+    /**
+     * Confirms the REAL 'enterprise_wiki_maintainer_decision' profile (not the synthetic
+     * 'test_operation' profile used above) genuinely resolves to split_required for a document
+     * large enough to exceed its configured operation maximum (9000) — the actual condition this
+     * whole work item exists to handle, not just an artefact of the synthetic test config.
+     */
+    public function test_real_operation_profile_chooses_split_required_for_a_genuinely_large_document(): void
+    {
+        $plan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            inputSizeChars: 40_000,
+            expectedResultObjects: 2,
+        ));
+
+        $this->assertSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $plan->strategy);
+    }
+
+    /** The run-584 document pattern (~13k input chars) must still choose single_call — no regression. */
+    public function test_real_operation_profile_still_chooses_single_call_for_the_run_584_document_pattern(): void
+    {
+        $plan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            inputSizeChars: 13_197,
+            expectedResultObjects: 2,
+        ));
+
+        $this->assertNotSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $plan->strategy);
+    }
+
     public function test_concept_candidate_field_count_is_a_deliberate_capacity_tripwire(): void
     {
         $schema = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();

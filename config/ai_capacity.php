@@ -74,6 +74,62 @@ return [
 
             'max_output_tokens' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_MAX_TOKENS', 9000),
             'max_capacity_retries' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_MAX_RETRIES', 1),
+
+            /*
+            |----------------------------------------------------------------
+            | Split-flow global-plan profile
+            |----------------------------------------------------------------
+            |
+            | Sizes EnterpriseWikiMaintainerDecisionSplitCoordinator's Phase A call (global plan +
+            | compact concept_candidate_mentions identification only — no full candidate
+            | disposition). Deliberately a MUCH smaller tokens_per_input_chars_unit than the
+            | profile above: reusing that value here would size Phase A as if it still had to
+            | return full candidate detail for every candidate, defeating the point of splitting
+            | in the first place (Phase A would itself compute strategy=split_required, since it
+            | shares the same large input).
+            |
+            */
+            'global_plan' => [
+                'base_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_BASE_TOKENS', 900),
+                'tokens_per_result_object' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_PER_OBJECT_TOKENS', 220),
+                'tokens_per_input_chars_unit' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_INPUT_TOKENS', 40),
+                'input_chars_per_unit' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_INPUT_CHARS_PER_UNIT', 800),
+                'reasoning_token_buffer' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_REASONING_BUFFER', 1500),
+                'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_MIN_TOKENS', 1200),
+                'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_SAFETY_MARGIN', 0.35),
+                'retry_multiplier' => (float) env('AI_CAPACITY_WIKI_MAINTAINER_GLOBAL_RETRY_MULTIPLIER', 1.75),
+            ],
+
+            /*
+            |----------------------------------------------------------------
+            | Split-flow batch profile
+            |----------------------------------------------------------------
+            |
+            | Used only when EnterpriseWikiAiCapacityPlanner::plan() returns
+            | strategy=split_required — sizes EnterpriseWikiMaintainerDecisionSplitCoordinator's
+            | per-batch concept-candidate calls. A concept_candidates-only response has a
+            | different per-item token cost than a full page entry, hence its own
+            | tokens_per_candidate/base_overhead rather than reusing the values above.
+            |
+            */
+            'batch' => [
+                // Fixed cost of the batch response's wrapper JSON (concept_candidates +
+                // concept_pages arrays), independent of candidate count.
+                'batch_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_BATCH_OVERHEAD_TOKENS', 400),
+
+                // Estimated tokens per candidate this batch decides — the full 9-field
+                // concept_candidates entry, plus its concept_pages entry when decision=create.
+                'tokens_per_candidate' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_BATCH_TOKENS_PER_CANDIDATE', 260),
+
+                'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_MAINTAINER_BATCH_SAFETY_MARGIN', 0.35),
+                'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_BATCH_MIN_TOKENS', 800),
+
+                // Capacity-driven batch size (computed from the above) is further capped by
+                // this configured ceiling, and floored at the configured minimum — the planner
+                // always takes the smaller of the two caps, never just one or the other.
+                'max_candidates_per_batch' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_MAX_CANDIDATES_PER_BATCH', 6),
+                'min_candidates_per_batch' => (int) env('AI_CAPACITY_WIKI_MAINTAINER_MIN_CANDIDATES_PER_BATCH', 1),
+            ],
         ],
 
     ],

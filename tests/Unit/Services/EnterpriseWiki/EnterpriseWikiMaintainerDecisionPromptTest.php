@@ -721,6 +721,208 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         ];
     }
 
+    // =========================================================================
+    // Split flow — Phase A: globalPlanSchema() / validateGlobalPlan() / parseGlobalPlan()
+    // =========================================================================
+
+    public function test_global_plan_schema_is_strict_json_schema(): void
+    {
+        $schema = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema();
+
+        $this->assertSame('json_schema', $schema['type']);
+        $this->assertTrue($schema['json_schema']['strict']);
+        $this->assertFalse($schema['json_schema']['schema']['additionalProperties']);
+    }
+
+    public function test_global_plan_schema_requires_source_article_summary_entity_pages_and_mentions(): void
+    {
+        $required = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['required'];
+
+        foreach (['source_article', 'source_summary', 'entity_pages', 'concept_candidate_mentions'] as $field) {
+            $this->assertContains($field, $required);
+        }
+    }
+
+    public function test_global_plan_schema_does_not_include_concept_pages_or_full_candidates(): void
+    {
+        $props = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['properties'];
+
+        $this->assertArrayNotHasKey('concept_pages', $props);
+        $this->assertArrayNotHasKey('concept_candidates', $props);
+    }
+
+    public function test_global_plan_schema_mention_items_are_minimal(): void
+    {
+        $props = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['properties'];
+        $mentionSchema = $props['concept_candidate_mentions']['items'];
+
+        $this->assertSame(['name', 'concept_type', 'mentioned_context'], $mentionSchema['required']);
+        $this->assertArrayNotHasKey('decision', $mentionSchema['properties']);
+        $this->assertArrayNotHasKey('justification', $mentionSchema['properties']);
+    }
+
+    public function test_global_plan_schema_reuses_the_same_source_page_shape_as_the_full_schema(): void
+    {
+        $fullProps = $this->schemaProps();
+        $globalProps = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['properties'];
+
+        $this->assertSame($fullProps['source_article'], $globalProps['source_article']);
+        $this->assertSame($fullProps['entity_pages']['items'], $globalProps['entity_pages']['items']);
+    }
+
+    public function test_valid_global_plan_parses_without_exception(): void
+    {
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($this->validGlobalPlan());
+
+        $this->assertArrayHasKey('source_article', $parsed);
+        $this->assertArrayHasKey('concept_candidate_mentions', $parsed);
+    }
+
+    public function test_global_plan_missing_source_article_is_rejected(): void
+    {
+        $plan = $this->validGlobalPlan();
+        unset($plan['source_article']);
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validateGlobalPlan($plan);
+
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_global_plan_normalises_missing_optional_keys(): void
+    {
+        $plan = $this->validGlobalPlan();
+        unset($plan['entity_pages'], $plan['concept_candidate_mentions'], $plan['warnings'], $plan['no_action_reason']);
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($plan);
+
+        $this->assertSame([], $parsed['entity_pages']);
+        $this->assertSame([], $parsed['concept_candidate_mentions']);
+        $this->assertSame([], $parsed['warnings']);
+        $this->assertNull($parsed['no_action_reason']);
+    }
+
+    public function test_global_plan_mention_missing_name_is_rejected(): void
+    {
+        $plan = $this->validGlobalPlan();
+        $plan['concept_candidate_mentions'] = [['concept_type' => 'process', 'mentioned_context' => 'section 2']];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validateGlobalPlan($plan);
+
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('name', implode(' ', $errors));
+    }
+
+    public function test_parse_global_plan_throws_on_invalid_plan(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Invalid maintainer decision global plan/');
+
+        EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(['source_article' => null]);
+    }
+
+    // =========================================================================
+    // Split flow — Phase B: candidateBatchSchema() / validateCandidateBatch() / parseCandidateBatch()
+    // =========================================================================
+
+    public function test_candidate_batch_schema_is_strict_json_schema(): void
+    {
+        $schema = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema();
+
+        $this->assertSame('json_schema', $schema['type']);
+        $this->assertTrue($schema['json_schema']['strict']);
+        $this->assertFalse($schema['json_schema']['schema']['additionalProperties']);
+    }
+
+    public function test_candidate_batch_schema_requires_concept_candidates_and_concept_pages_only(): void
+    {
+        $schema = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema()['json_schema']['schema'];
+
+        $this->assertSame(['concept_candidates', 'concept_pages'], $schema['required']);
+        $this->assertSame(['concept_candidates', 'concept_pages'], array_keys($schema['properties']));
+    }
+
+    public function test_candidate_batch_schema_reuses_the_exact_same_fragments_as_the_full_schema(): void
+    {
+        $fullProps = $this->schemaProps();
+        $batchProps = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema()['json_schema']['schema']['properties'];
+
+        $this->assertSame($fullProps['concept_candidates'], $batchProps['concept_candidates']);
+        $this->assertSame($fullProps['concept_pages'], $batchProps['concept_pages']);
+    }
+
+    public function test_valid_candidate_batch_parses_without_exception(): void
+    {
+        $batch = [
+            'concept_candidates' => [$this->validConceptCandidate()],
+            'concept_pages' => [],
+        ];
+
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($batch);
+
+        $this->assertCount(1, $parsed['concept_candidates']);
+        $this->assertSame([], $parsed['concept_pages']);
+    }
+
+    public function test_candidate_batch_missing_concept_candidates_is_rejected(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validateCandidateBatch(['concept_pages' => []]);
+
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('concept_candidates', implode(' ', $errors));
+    }
+
+    public function test_candidate_batch_missing_concept_pages_is_rejected(): void
+    {
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validateCandidateBatch(['concept_candidates' => []]);
+
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('concept_pages', implode(' ', $errors));
+    }
+
+    public function test_candidate_batch_invalid_candidate_entry_is_rejected(): void
+    {
+        $batch = [
+            'concept_candidates' => [['name' => 'X']],
+            'concept_pages' => [],
+        ];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validateCandidateBatch($batch);
+
+        $this->assertNotEmpty($errors);
+    }
+
+    public function test_parse_candidate_batch_throws_on_invalid_batch(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/Invalid maintainer decision candidate batch/');
+
+        EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch([]);
+    }
+
+    private function validGlobalPlan(): array
+    {
+        return [
+            'source_article' => [
+                'action' => 'create',
+                'title' => 'Masterdata ITIL',
+                'proposed_slug' => 'masterdata-itil-ab12cd',
+                'reason' => 'New source document.',
+            ],
+            'source_summary' => [
+                'action' => 'create',
+                'title' => 'Sammendrag: Masterdata ITIL',
+                'proposed_slug' => 'sammendrag-masterdata-itil-ab12cd',
+                'reason' => 'Companion summary.',
+            ],
+            'entity_pages' => [],
+            'concept_candidate_mentions' => [
+                ['name' => 'ITIL Incident Management', 'concept_type' => 'process', 'mentioned_context' => 'section 2'],
+            ],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ];
+    }
+
     private function validConceptCandidate(): array
     {
         return [

@@ -7,13 +7,25 @@ use JsonSerializable;
 /**
  * EnterpriseWikiAiCapacityPlanner's decision for one AI call attempt.
  *
- * `strategy` is deliberately reserved for a future value such as 'split_required', for when
- * adaptive budgeting plus one capacity retry are no longer enough for a given operation — this
- * class only ever produces STRATEGY_SINGLE_CALL today; no splitting logic exists yet.
+ * `strategy` is one of three deterministic outcomes (see EnterpriseWikiAiCapacityPlanner::plan()):
+ *  - STRATEGY_SINGLE_CALL: the estimate fits comfortably, with room to spare even after a
+ *    hypothetical capacity retry.
+ *  - STRATEGY_CAPACITY_RETRY: the estimate fits now, but a capacity retry (if the response
+ *    unexpectedly comes back incomplete) would itself get clamped to the same ceiling instead of
+ *    the full theoretical retry boost — still informational only; the caller still attempts a
+ *    single call first, exactly as for STRATEGY_SINGLE_CALL.
+ *  - STRATEGY_SPLIT_REQUIRED: the estimate already exceeds the resolved ceiling before any retry
+ *    is even considered — mathematically, a retry would clamp to the exact same ceiling as the
+ *    first attempt (see the planner), so it can never help. Only this value should cause a caller
+ *    to route through EnterpriseWikiMaintainerDecisionSplitCoordinator instead of a single call.
  */
 final readonly class AiCapacityPlan implements JsonSerializable
 {
     public const STRATEGY_SINGLE_CALL = 'single_call';
+
+    public const STRATEGY_CAPACITY_RETRY = 'capacity_retry';
+
+    public const STRATEGY_SPLIT_REQUIRED = 'split_required';
 
     public function __construct(
         public string $operationType,

@@ -65,7 +65,117 @@ class EnterpriseWikiMaintainerDecisionPrompt
      */
     public static function jsonSchema(): array
     {
-        $responsibilityProperties = [
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_article' => self::sourcePageSchema(),
+                        'source_summary' => self::sourcePageSchema(),
+                        'concept_candidates' => ['type' => 'array', 'items' => self::conceptCandidateSchema()],
+                        'concept_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'no_action_reason' => ['type' => ['string', 'null']],
+                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => [
+                        'source_article',
+                        'source_summary',
+                        'concept_candidates',
+                        'concept_pages',
+                        'entity_pages',
+                        'no_action_reason',
+                        'warnings',
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Phase A of the split flow (see EnterpriseWikiMaintainerDecisionSplitCoordinator): a compact
+     * schema deciding source_article/source_summary/entity_pages exactly as jsonSchema() does,
+     * plus concept_candidate_mentions — a deliberately minimal identification-only list (name,
+     * concept_type, where mentioned) with none of the full concept_candidates disposition fields
+     * (decision/justification/owning_page_title/necessary_for_article). Those are decided per
+     * batch in Phase B (see candidateBatchSchema()) so this call's own output stays small
+     * regardless of how many candidates the source document turns out to have.
+     */
+    public static function globalPlanSchema(): array
+    {
+        $mentionSchema = [
+            'type' => 'object',
+            'properties' => [
+                'name' => ['type' => 'string'],
+                'concept_type' => ['type' => 'string'],
+                'mentioned_context' => ['type' => 'string'],
+            ],
+            'required' => ['name', 'concept_type', 'mentioned_context'],
+            'additionalProperties' => false,
+        ];
+
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision_global_plan',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_article' => self::sourcePageSchema(),
+                        'source_summary' => self::sourcePageSchema(),
+                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'concept_candidate_mentions' => ['type' => 'array', 'items' => $mentionSchema],
+                        'no_action_reason' => ['type' => ['string', 'null']],
+                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => [
+                        'source_article',
+                        'source_summary',
+                        'entity_pages',
+                        'concept_candidate_mentions',
+                        'no_action_reason',
+                        'warnings',
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Phase B of the split flow: one batch's disposition for its own subset of candidates —
+     * reuses the exact same concept_candidates/concept_pages fragments jsonSchema() uses, so a
+     * batch response is structurally identical to that slice of a normal single-call decision.
+     */
+    public static function candidateBatchSchema(): array
+    {
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision_candidate_batch',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'concept_candidates' => ['type' => 'array', 'items' => self::conceptCandidateSchema()],
+                        'concept_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                    ],
+                    'required' => ['concept_candidates', 'concept_pages'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private static function responsibilityProperties(): array
+    {
+        return [
             'owned_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
             'reference_only_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
             'excluded_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -82,20 +192,28 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 ],
             ],
         ];
+    }
 
-        $sourcePageSchema = [
+    /** @return array<string, mixed> */
+    private static function sourcePageSchema(): array
+    {
+        return [
             'type' => 'object',
             'properties' => array_merge([
                 'action' => ['type' => 'string', 'enum' => self::ACTIONS],
                 'title' => ['type' => 'string'],
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
-            ], $responsibilityProperties),
+            ], self::responsibilityProperties()),
             'required' => ['action', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
+    }
 
-        $sharedPageSchema = [
+    /** @return array<string, mixed> */
+    private static function sharedPageSchema(): array
+    {
+        return [
             'type' => 'object',
             'properties' => array_merge([
                 'action' => ['type' => 'string', 'enum' => self::ACTIONS],
@@ -103,12 +221,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'title' => ['type' => 'string'],
                 'proposed_slug' => ['type' => 'string'],
                 'reason' => ['type' => 'string'],
-            ], $responsibilityProperties),
+            ], self::responsibilityProperties()),
             'required' => ['action', 'page_id', 'title', 'proposed_slug', 'reason', 'owned_topics', 'reference_only_topics', 'excluded_topics', 'related_page_guidance'],
             'additionalProperties' => false,
         ];
+    }
 
-        $conceptCandidateSchema = [
+    /** @return array<string, mixed> */
+    private static function conceptCandidateSchema(): array
+    {
+        return [
             'type' => 'object',
             'properties' => [
                 'name' => ['type' => 'string'],
@@ -133,36 +255,6 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'necessary_for_article',
             ],
             'additionalProperties' => false,
-        ];
-
-        return [
-            'type' => 'json_schema',
-            'json_schema' => [
-                'name' => 'maintainer_decision',
-                'strict' => true,
-                'schema' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'source_article' => $sourcePageSchema,
-                        'source_summary' => $sourcePageSchema,
-                        'concept_candidates' => ['type' => 'array', 'items' => $conceptCandidateSchema],
-                        'concept_pages' => ['type' => 'array', 'items' => $sharedPageSchema],
-                        'entity_pages' => ['type' => 'array', 'items' => $sharedPageSchema],
-                        'no_action_reason' => ['type' => ['string', 'null']],
-                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
-                    ],
-                    'required' => [
-                        'source_article',
-                        'source_summary',
-                        'concept_candidates',
-                        'concept_pages',
-                        'entity_pages',
-                        'no_action_reason',
-                        'warnings',
-                    ],
-                    'additionalProperties' => false,
-                ],
-            ],
         ];
     }
 
@@ -255,8 +347,165 @@ class EnterpriseWikiMaintainerDecisionPrompt
     }
 
     // -------------------------------------------------------------------------
+    // Split flow — Phase A (global plan)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return string[]
+     */
+    public static function validateGlobalPlan(array $raw): array
+    {
+        $errors = [];
+
+        foreach (['source_article', 'source_summary'] as $key) {
+            if (! isset($raw[$key]) || ! is_array($raw[$key])) {
+                $errors[] = "{$key} is required and must be an object.";
+
+                continue;
+            }
+            $errors = array_merge($errors, self::validateSourceEntry($raw[$key], $key));
+        }
+
+        if (array_key_exists('entity_pages', $raw)) {
+            if (! is_array($raw['entity_pages'])) {
+                $errors[] = 'entity_pages must be an array.';
+            } else {
+                foreach ($raw['entity_pages'] as $i => $entry) {
+                    $errors = array_merge($errors, self::validateSharedEntry($entry, "entity_pages[{$i}]"));
+                }
+            }
+        }
+
+        if (array_key_exists('concept_candidate_mentions', $raw)) {
+            if (! is_array($raw['concept_candidate_mentions'])) {
+                $errors[] = 'concept_candidate_mentions must be an array.';
+            } else {
+                foreach ($raw['concept_candidate_mentions'] as $i => $entry) {
+                    $errors = array_merge($errors, self::validateMentionEntry($entry, "concept_candidate_mentions[{$i}]"));
+                }
+            }
+        }
+
+        if (
+            array_key_exists('no_action_reason', $raw)
+            && $raw['no_action_reason'] !== null
+            && ! is_string($raw['no_action_reason'])
+        ) {
+            $errors[] = 'no_action_reason must be a string or null.';
+        }
+
+        if (array_key_exists('warnings', $raw) && ! is_array($raw['warnings'])) {
+            $errors[] = 'warnings must be an array of strings.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException when validation fails.
+     */
+    public static function parseGlobalPlan(array $raw): array
+    {
+        $errors = self::validateGlobalPlan($raw);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(
+                'Invalid maintainer decision global plan: '.implode(' | ', $errors)
+            );
+        }
+
+        return [
+            'source_article' => $raw['source_article'],
+            'source_summary' => $raw['source_summary'],
+            'entity_pages' => $raw['entity_pages'] ?? [],
+            'concept_candidate_mentions' => $raw['concept_candidate_mentions'] ?? [],
+            'no_action_reason' => $raw['no_action_reason'] ?? null,
+            'warnings' => $raw['warnings'] ?? [],
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Split flow — Phase B (candidate batch)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return string[]
+     */
+    public static function validateCandidateBatch(array $raw): array
+    {
+        $errors = [];
+
+        if (! array_key_exists('concept_candidates', $raw) || ! is_array($raw['concept_candidates'])) {
+            $errors[] = 'concept_candidates is required and must be an array.';
+        } else {
+            foreach ($raw['concept_candidates'] as $i => $entry) {
+                $errors = array_merge($errors, self::validateConceptCandidateEntry($entry, "concept_candidates[{$i}]"));
+            }
+        }
+
+        if (! array_key_exists('concept_pages', $raw) || ! is_array($raw['concept_pages'])) {
+            $errors[] = 'concept_pages is required and must be an array.';
+        } else {
+            foreach ($raw['concept_pages'] as $i => $entry) {
+                $errors = array_merge($errors, self::validateSharedEntry($entry, "concept_pages[{$i}]"));
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException when validation fails.
+     */
+    public static function parseCandidateBatch(array $raw): array
+    {
+        $errors = self::validateCandidateBatch($raw);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(
+                'Invalid maintainer decision candidate batch: '.implode(' | ', $errors)
+            );
+        }
+
+        return [
+            'concept_candidates' => $raw['concept_candidates'],
+            'concept_pages' => $raw['concept_pages'],
+        ];
+    }
+
+    // -------------------------------------------------------------------------
     // Internal validators
     // -------------------------------------------------------------------------
+
+    /** @return string[] */
+    private static function validateMentionEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = [];
+
+        foreach (['name', 'concept_type', 'mentioned_context'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        return $errors;
+    }
 
     /** @return string[] */
     private static function validateSourceEntry(array $entry, string $ctx): array

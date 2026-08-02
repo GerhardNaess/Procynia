@@ -5,11 +5,6 @@ namespace App\Services\EnterpriseWiki;
 use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
-use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
-use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseIncompleteException;
-use App\Services\OpenAi\OpenAiClient;
-use Closure;
-use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -50,9 +45,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
     private const EXPECTED_RESULT_OBJECTS = 2;
 
     public function __construct(
-        private readonly OpenAiClient $openAiClient,
-        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
+        private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
+        private readonly EnterpriseWikiMaintainerDecisionSplitCoordinator $splitCoordinator,
     ) {}
 
     public static function isAvailable(): bool
@@ -86,13 +81,32 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
 
         $languageName = $this->languageName($languageCode);
-        $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext);
 
-        $decoded = $this->executeWithCapacityRetry(
-            'EnterpriseWikiMaintainerDecisionAiClient',
-            mb_strlen($userPromptText),
-            fn (int $maxOutputTokens): array => $this->buildPayload($languageName, $userPromptText, $maxOutputTokens),
-        );
+        // The split-vs-single-call DECISION must reflect the document's genuine size, not the
+        // prompt text actually sent to OpenAI — userPrompt() truncates source text at
+        // MAX_SOURCE_TEXT_CHARS before embedding it (an input-token concern, unrelated to output
+        // budgeting), so sizing the decision off the already-truncated prompt would cap
+        // rawSourceSizeChars at ~12000 regardless of how large the real document is, making
+        // split_required effectively unreachable no matter how content-rich the document truly is.
+        $rawSourceSizeChars = mb_strlen(trim($sourceText));
+        $plan = $this->planCapacity($rawSourceSizeChars, retryAttempt: 0);
+
+        // A capacity retry always clamps to the exact same ceiling as the first attempt (see
+        // EnterpriseWikiAiCapacityPlanner), so whenever the first attempt's own estimate already
+        // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
+        // split flow instead of attempting (and predictably truncating) a single oversized call.
+        if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
+            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode);
+        } else {
+            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext);
+
+            $decoded = $this->capacityRetryExecutor->execute(
+                'EnterpriseWikiMaintainerDecisionAiClient',
+                $rawSourceSizeChars,
+                fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($rawSourceSizeChars, $retryAttempt),
+                fn (int $maxOutputTokens): array => $this->buildPayload($languageName, $userPromptText, $maxOutputTokens),
+            );
+        }
 
         try {
             return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
@@ -145,10 +159,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
         $languageName = $this->languageName($languageCode);
         $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues);
+        $inputSizeChars = mb_strlen($repairPromptText);
 
-        $decoded = $this->executeWithCapacityRetry(
+        $decoded = $this->capacityRetryExecutor->execute(
             'EnterpriseWikiMaintainerDecisionAiClient:repair',
-            mb_strlen($repairPromptText),
+            $inputSizeChars,
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($inputSizeChars, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
         );
 
@@ -163,48 +179,6 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
     }
 
-    /**
-     * Runs one AI call attempt, and — only when it comes back status=incomplete with
-     * reason=max_output_tokens — exactly one further attempt at a higher, capacity-planner-chosen
-     * budget. Never re-parses or reuses the first attempt's (possibly partial) response text;
-     * the retry is a brand-new call with the identical semantic input and schema, just a bigger
-     * max_output_tokens. Any other exception (schema violation, refusal, malformed envelope, a
-     * non-token incomplete reason, timeout/API error) propagates immediately, untouched — only
-     * this one specific signal ever triggers a capacity retry.
-     *
-     * @param  Closure(int): array  $buildPayload
-     * @return array<string, mixed> The decoded (but not yet schema-parsed) response body.
-     */
-    private function executeWithCapacityRetry(string $operationLabel, int $inputSizeChars, Closure $buildPayload): array
-    {
-        $plan = $this->planCapacity($inputSizeChars, retryAttempt: 0);
-
-        try {
-            return $this->attemptCall($buildPayload($plan->chosenMaxOutputTokens), $operationLabel, $plan, $inputSizeChars);
-        } catch (EnterpriseWikiResponseIncompleteException $e) {
-            if (! $e->reachedMaxOutputTokens()) {
-                throw $e;
-            }
-
-            $retryPlan = $this->planCapacity($inputSizeChars, retryAttempt: 1);
-
-            try {
-                return $this->attemptCall($buildPayload($retryPlan->chosenMaxOutputTokens), $operationLabel, $retryPlan, $inputSizeChars);
-            } catch (EnterpriseWikiResponseIncompleteException $e2) {
-                if (! $e2->reachedMaxOutputTokens()) {
-                    throw $e2;
-                }
-
-                throw new EnterpriseWikiAiOutputCapacityExceededException(
-                    $operationLabel,
-                    $retryPlan,
-                    $e2->diagnostics['output_tokens'] ?? null,
-                    $e2->diagnostics['response_id'] ?? null,
-                );
-            }
-        }
-    }
-
     private function planCapacity(int $inputSizeChars, int $retryAttempt): AiCapacityPlan
     {
         return $this->capacityPlanner->plan(new AiCapacityRequest(
@@ -214,47 +188,6 @@ class EnterpriseWikiMaintainerDecisionAiClient
             expectedResultObjects: self::EXPECTED_RESULT_OBJECTS,
             retryAttempt: $retryAttempt,
         ));
-    }
-
-    /** @return array<string, mixed> */
-    private function attemptCall(array $payload, string $operationLabel, AiCapacityPlan $plan, int $inputSizeChars): array
-    {
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
-
-        $this->logCapacityDecision($operationLabel, $plan, $inputSizeChars, $response);
-
-        return $this->responsesDecoder->decode($response, $operationLabel);
-    }
-
-    /**
-     * One structured log line per attempt covering the capacity decision and the actual usage
-     * OpenAI reports — reuses EnterpriseWikiResponsesDecoder::diagnostics() (the same data the
-     * decoder's own "Response rejected" warning uses on failure) rather than duplicating a raw
-     * response dump. Never logs document text, secrets, or full raw AI output.
-     */
-    private function logCapacityDecision(string $operationLabel, AiCapacityPlan $plan, int $inputSizeChars, array $response): void
-    {
-        $diagnostics = $this->responsesDecoder->diagnostics($response, $operationLabel);
-
-        Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_CAPACITY] Capacity decision for AI call.', [
-            'operation' => $operationLabel,
-            'operation_type' => $plan->operationType,
-            'model' => $plan->model,
-            'input_size_chars' => $inputSizeChars,
-            'retry_level' => $plan->retryLevel,
-            'chosen_max_output_tokens' => $plan->chosenMaxOutputTokens,
-            'estimated_minimum_tokens' => $plan->estimatedMinimumTokens,
-            'estimated_need_tokens' => $plan->estimatedNeedTokens,
-            'max_allowed_tokens' => $plan->maxAllowedTokens,
-            'was_clamped' => $plan->wasClamped,
-            'basis' => $plan->basis,
-            'response_id' => $diagnostics['response_id'] ?? null,
-            'response_status' => $diagnostics['response_status'] ?? null,
-            'incomplete_reason' => $diagnostics['incomplete_reason'] ?? null,
-            'output_tokens' => $diagnostics['output_tokens'] ?? null,
-            'reasoning_tokens' => $diagnostics['reasoning_tokens'] ?? null,
-            'total_tokens' => $diagnostics['total_tokens'] ?? null,
-        ]);
     }
 
     private function buildRepairPayload(string $languageName, string $repairPromptText, int $maxOutputTokens): array
