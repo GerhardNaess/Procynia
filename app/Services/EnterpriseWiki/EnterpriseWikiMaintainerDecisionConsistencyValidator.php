@@ -226,15 +226,30 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
     }
 
     /**
+     * The four distinct page roles a figure claim can carry — see
+     * EnterpriseWikiMaintainerDecisionMerger's identical constants/docblock (Wiki run-591: never
+     * lump concept_page and entity_page together as a generic 'other').
+     */
+    private const ROLE_SOURCE_ARTICLE = 'source_article';
+
+    private const ROLE_SOURCE_SUMMARY = 'source_summary';
+
+    private const ROLE_CONCEPT_PAGE = 'concept_page';
+
+    private const ROLE_ENTITY_PAGE = 'entity_page';
+
+    private const PRIMARY_ROLES = [self::ROLE_CONCEPT_PAGE, self::ROLE_ENTITY_PAGE];
+
+    /**
      * Defense-in-depth companion to EnterpriseWikiMaintainerDecisionMerger's harder, split-flow-
-     * specific figure-conflict check: catches the same shape of problem (one figure planned onto
-     * two different pages) within a single, already-assembled decision — including a plain
+     * specific figure-conflict check: catches the same shape of problem (an illegal combination of
+     * pages claiming one figure) within a single, already-assembled decision — including a plain
      * single_call decision, which never goes through the merger at all.
      *
-     * Wiki run-588: follows the EXACT same article+summary pairing exception as
-     * EnterpriseWikiMaintainerDecisionMerger::dedupeAndCheckFiguresForPage() — a figure legitimately
-     * claimed by both source_article and source_summary is not an issue; any other pair, or a third
-     * page claiming the same key, still is. Kept as separate, duplicated logic (not a shared
+     * Wiki run-591: follows the EXACT same role model and isValidRoleCombination() rule as
+     * EnterpriseWikiMaintainerDecisionMerger::dedupeAndCheckFiguresForPage() — a figure may have at
+     * most one primary (concept_page/entity_page) owner, plus the run's own secondary
+     * source_article and/or source_summary. Kept as separate, duplicated logic (not a shared
      * helper) — same precedent as entriesWithGuidance()'s own label-based role detection and the
      * rest of this class's relationship to the merger: two different call sites over different
      * inputs (a single, already-assembled decision here vs. a live batch merge there).
@@ -249,7 +264,7 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
 
         foreach ($this->entriesWithGuidance($decision) as [$label, $entry]) {
             $pageTitle = (string) ($entry['title'] ?? $label);
-            $pageRole = in_array($label, ['source_article', 'source_summary'], true) ? $label : 'other';
+            $pageRole = $this->roleForLabel($label);
             $seenOnThisPage = [];
 
             foreach ((array) ($entry['planned_figures'] ?? []) as $figure) {
@@ -275,13 +290,13 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
                 $existingClaims = $seenBySourceKey[$sourceElementKey] ?? [];
 
                 if ($existingClaims !== []) {
-                    $isLegitimateArticleSummaryPair = count($existingClaims) === 1
-                        && $this->isArticleSummaryPair($existingClaims[0]['role'], $pageRole);
+                    $candidateRoles = [...array_column($existingClaims, 'role'), $pageRole];
 
-                    if (! $isLegitimateArticleSummaryPair) {
+                    if (! $this->isValidRoleCombination($candidateRoles)) {
                         $issues[] = "Figure \"{$sourceElementKey}\" is planned onto both ".
-                            "\"{$existingClaims[0]['title']}\" and \"{$pageTitle}\" — a figure must ".
-                            'belong to at most one page (or, exclusively, to the run\'s own source_article + source_summary pair).';
+                            "\"{$existingClaims[0]['title']}\" and \"{$pageTitle}\" — a figure may have at ".
+                            'most one primary (concept/entity) owner, plus the run\'s own source_article '.
+                            'and/or source_summary.';
 
                         continue;
                     }
@@ -294,12 +309,44 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         return $issues;
     }
 
-    private function isArticleSummaryPair(string $roleA, string $roleB): bool
+    /**
+     * Derives the page role from entriesWithGuidance()'s own label shape: 'source_article'/
+     * 'source_summary' verbatim, or 'concept_pages[{i}] (...)' / 'entity_pages[{i}] (...)' for
+     * shared pages — mirrors EnterpriseWikiMaintainerDecisionMerger's identical role constants.
+     */
+    private function roleForLabel(string $label): string
     {
-        $roles = [$roleA, $roleB];
-        sort($roles);
+        return match (true) {
+            $label === self::ROLE_SOURCE_ARTICLE, $label === self::ROLE_SOURCE_SUMMARY => $label,
+            str_starts_with($label, 'entity_pages[') => self::ROLE_ENTITY_PAGE,
+            default => self::ROLE_CONCEPT_PAGE,
+        };
+    }
 
-        return $roles === ['source_article', 'source_summary'];
+    /**
+     * Wiki run-591: identical rule to EnterpriseWikiMaintainerDecisionMerger::isValidRoleCombination()
+     * — at most one primary (concept_page/entity_page) owner, plus the run's own secondary
+     * source_article and/or source_summary; summary alone (without article) never legitimises a
+     * primary owner's figure.
+     *
+     * @param  list<string>  $roles
+     */
+    private function isValidRoleCombination(array $roles): bool
+    {
+        $primaryCount = count(array_intersect($roles, self::PRIMARY_ROLES));
+
+        if ($primaryCount > 1) {
+            return false;
+        }
+
+        if ($primaryCount === 1
+            && in_array(self::ROLE_SOURCE_SUMMARY, $roles, true)
+            && ! in_array(self::ROLE_SOURCE_ARTICLE, $roles, true)
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     /** @param  string[]  $knownTitles */

@@ -235,7 +235,9 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
         $this->assertSame([], $this->validator()->findIssues($decision, [], []));
     }
 
-    public function test_same_figure_planned_onto_two_pages_in_a_single_decision_is_an_issue(): void
+    // Wiki run-591: article + exactly one concept page is a legitimate primary/secondary pairing,
+    // not a conflict — see the dedicated "Wiki run-591" section below for the full rule.
+    public function test_same_figure_planned_onto_article_and_one_concept_page_is_not_an_issue(): void
     {
         $decision = $this->baseDecision();
         $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1')];
@@ -243,10 +245,7 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
             array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
         ];
 
-        $issues = $this->validator()->findIssues($decision, []);
-
-        $this->assertNotEmpty($issues);
-        $this->assertStringContainsString('img1', implode(' ', $issues));
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
     }
 
     public function test_same_figure_planned_onto_the_same_page_twice_has_no_conflict_issue(): void
@@ -299,7 +298,9 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
         $this->assertStringContainsString('img1', implode(' ', $issues));
     }
 
-    public function test_same_figure_on_article_summary_and_a_third_page_is_an_issue(): void
+    // Wiki run-591: article + summary + exactly one concept page is also legitimate — the
+    // secondary pair does not by itself add a second primary owner.
+    public function test_same_figure_on_article_summary_and_one_concept_page_is_not_an_issue(): void
     {
         $decision = $this->baseDecision();
         $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1', required: true)];
@@ -308,10 +309,113 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
             array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
         ];
 
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    // =========================================================================
+    // Wiki run-591: primary (concept/entity) + secondary (article/summary) figure ownership
+    // =========================================================================
+
+    public function test_same_figure_on_article_and_one_entity_page_is_not_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1')];
+        $decision['entity_pages'] = [$this->entityPageEntry('Acme AS', figures: [$this->plannedFigure('img1')])];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    public function test_same_figure_on_article_summary_and_one_entity_page_is_not_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1', required: true)];
+        $decision['source_summary']['planned_figures'] = [$this->plannedFigure('img1', required: false)];
+        $decision['entity_pages'] = [$this->entityPageEntry('Acme AS', figures: [$this->plannedFigure('img1')])];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    public function test_same_figure_on_two_entity_pages_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['entity_pages'] = [
+            $this->entityPageEntry('Acme AS', figures: [$this->plannedFigure('img1')]),
+            $this->entityPageEntry('Beta AS', figures: [$this->plannedFigure('img1')]),
+        ];
+
         $issues = $this->validator()->findIssues($decision, []);
 
         $this->assertNotEmpty($issues);
         $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    public function test_same_figure_on_a_concept_page_and_an_entity_page_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_pages'] = [
+            array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+        ];
+        $decision['entity_pages'] = [$this->entityPageEntry('Acme AS', figures: [$this->plannedFigure('img1')])];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    public function test_same_figure_on_article_and_two_concept_pages_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1')];
+        $decision['concept_pages'] = [
+            array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+            array_merge($this->conceptPageEntry('Problem Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    public function test_same_figure_on_article_summary_and_two_concept_pages_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1', required: true)];
+        $decision['source_summary']['planned_figures'] = [$this->plannedFigure('img1', required: false)];
+        $decision['concept_pages'] = [
+            array_merge($this->conceptPageEntry('Change Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+            array_merge($this->conceptPageEntry('Problem Management'), ['planned_figures' => [$this->plannedFigure('img1')]]),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    public function test_same_figure_on_summary_and_an_entity_page_without_article_is_an_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_summary']['planned_figures'] = [$this->plannedFigure('img1')];
+        $decision['entity_pages'] = [$this->entityPageEntry('Acme AS', figures: [$this->plannedFigure('img1')])];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('img1', implode(' ', $issues));
+    }
+
+    // The exact run-591 shape: article + one concept page, no conflict.
+    public function test_run_591_like_decision_has_no_conflict_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['planned_figures'] = [$this->plannedFigure('img1', required: false)];
+        $decision['concept_pages'] = [
+            array_merge($this->conceptPageEntry('Styrings- og samhandlingsmodell'), ['planned_figures' => [$this->plannedFigure('img1', required: true)]]),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
     }
 
     // =========================================================================
@@ -358,6 +462,18 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
         }
 
         return $entry;
+    }
+
+    private function entityPageEntry(string $title, array $figures = []): array
+    {
+        return [
+            'action' => 'create',
+            'page_id' => null,
+            'title' => $title,
+            'proposed_slug' => strtolower(str_replace(' ', '-', $title)),
+            'reason' => 'Entity page.',
+            'planned_figures' => $figures,
+        ];
     }
 
     private function candidate(

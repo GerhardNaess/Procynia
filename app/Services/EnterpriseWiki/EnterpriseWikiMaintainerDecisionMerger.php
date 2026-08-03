@@ -108,15 +108,25 @@ class EnterpriseWikiMaintainerDecisionMerger
     }
 
     /**
-     * Roles eligible for the article+summary figure-pairing exception — see
-     * dedupeAndCheckFiguresForPage()'s docblock. Any other page (concept, entity) is tracked under
-     * the generic 'other' role and is never eligible for the exception.
+     * The four distinct page roles a figure claim can carry — Wiki run-591 (never lump concept_page
+     * and entity_page together as a generic 'other'; the merger and
+     * EnterpriseWikiMaintainerDecisionConsistencyValidator must reason about them explicitly and
+     * identically).
+     *
+     * source_article/source_summary are the SECONDARY display roles: the run's own main article and
+     * its companion summary may both show a figure that "belongs" elsewhere, as a secondary
+     * presentation. concept_page/entity_page are the PRIMARY scholarly roles: the one, deeper-detail
+     * home a figure is actually explained in. See PRIMARY_ROLES and isValidRoleCombination().
      */
     private const ROLE_SOURCE_ARTICLE = 'source_article';
 
     private const ROLE_SOURCE_SUMMARY = 'source_summary';
 
-    private const ROLE_OTHER = 'other';
+    private const ROLE_CONCEPT_PAGE = 'concept_page';
+
+    private const ROLE_ENTITY_PAGE = 'entity_page';
+
+    private const PRIMARY_ROLES = [self::ROLE_CONCEPT_PAGE, self::ROLE_ENTITY_PAGE];
 
     /**
      * Wiki run-587: figures are offered identically to the global plan and every batch (see
@@ -125,15 +135,10 @@ class EnterpriseWikiMaintainerDecisionMerger
      * each plan the same source_element_key onto a different page without either side ever seeing
      * the other's decision. This pass runs once, on the fully assembled decision, across every
      * page-bearing field: an exact repeat of the same key on the SAME page is silently deduped
-     * (keeping the first occurrence); the same key claimed by two DIFFERENT pages is a hard
-     * failure, never "last writer wins" — identical philosophy to the candidate/page conflict
-     * checks above, just keyed on source_element_key instead of name/title.
-     *
-     * Wiki run-588: the ONE narrow exception is the run's own source_article + source_summary pair
-     * — EnterpriseWikiMaintainerDecisionAiClient::figurePlanningRules() explicitly tells the model
-     * this pairing is legitimate ("a summary and its full article both showing the same key
-     * diagram"), so the merger must not reject exactly the case it instructed the model to produce.
-     * See dedupeAndCheckFiguresForPage() for the exact rule.
+     * (keeping the first occurrence); an ILLEGAL combination of pages claiming the same key is a
+     * hard failure, never "last writer wins" — identical philosophy to the candidate/page conflict
+     * checks above, just keyed on source_element_key instead of name/title. See
+     * isValidRoleCombination() for exactly which combinations are legal (Wiki run-588/591).
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
@@ -154,12 +159,15 @@ class EnterpriseWikiMaintainerDecisionMerger
             );
         }
 
-        foreach (['concept_pages', 'entity_pages'] as $listKey) {
+        foreach ([
+            'concept_pages' => self::ROLE_CONCEPT_PAGE,
+            'entity_pages' => self::ROLE_ENTITY_PAGE,
+        ] as $listKey => $role) {
             foreach ($decision[$listKey] as $i => $page) {
                 $decision[$listKey][$i]['planned_figures'] = $this->dedupeAndCheckFiguresForPage(
                     (array) ($page['planned_figures'] ?? []),
                     (string) ($page['title'] ?? ''),
-                    self::ROLE_OTHER,
+                    $role,
                     $seenBySourceKey,
                 );
             }
@@ -169,18 +177,16 @@ class EnterpriseWikiMaintainerDecisionMerger
     }
 
     /**
-     * A figure already claimed by exactly one OTHER page is a conflict UNLESS that other page and
-     * this page are the run's own source_article + source_summary pair — the one professionally
-     * legitimate case (e.g. the same key diagram shown in both the full article and its summary),
-     * which the prompt itself explicitly allows. Once a THIRD page (any role) claims the same key —
-     * including a third attempt at article/summary once that pair already exists — it is always a
-     * conflict, since a figure planned onto more than two pages is never covered by the narrow
-     * article+summary exception.
+     * A figure already claimed by one or more pages may gain another claimant only when the
+     * RESULTING full set of roles is still legal — see isValidRoleCombination() for the exact rule
+     * (Wiki run-591: article + exactly one concept/entity page is legitimate; concept + concept,
+     * summary + concept without article, or a second primary owner are not). Never "last writer
+     * wins": an illegal combination always throws, regardless of processing order.
      *
-     * Differing section_placement/caption_hint/purpose between the article's and summary's own
-     * planned_figures entries is NOT a conflict and is never inspected here: each page keeps its own
-     * complete entry untouched (nothing is merged/collapsed into a shared record), so neither side's
-     * classification/required/purpose value is ever hidden or overwritten by the other's.
+     * Differing section_placement/caption_hint/purpose between different pages' own planned_figures
+     * entries is NOT a conflict and is never inspected here: each page keeps its own complete entry
+     * untouched (nothing is merged/collapsed into a shared record), so no side's
+     * classification/required/purpose value is ever hidden or overwritten by another's.
      *
      * @param  list<array<string, mixed>>  $plannedFigures
      * @param  array<string, list<array{title: string, role: string}>>  $seenBySourceKey  source_element_key
@@ -217,10 +223,9 @@ class EnterpriseWikiMaintainerDecisionMerger
             $existingClaims = $seenBySourceKey[$sourceElementKey] ?? [];
 
             if ($existingClaims !== []) {
-                $isLegitimateArticleSummaryPair = count($existingClaims) === 1
-                    && $this->isArticleSummaryPair($existingClaims[0]['role'], $pageRole);
+                $candidateRoles = [...array_column($existingClaims, 'role'), $pageRole];
 
-                if (! $isLegitimateArticleSummaryPair) {
+                if (! $this->isValidRoleCombination($candidateRoles)) {
                     throw EnterpriseWikiMaintainerDecisionMergeConflictException::conflictingFigureAssignment(
                         $sourceElementKey,
                         $existingClaims[0]['title'],
@@ -236,12 +241,34 @@ class EnterpriseWikiMaintainerDecisionMerger
         return $deduped;
     }
 
-    private function isArticleSummaryPair(string $roleA, string $roleB): bool
+    /**
+     * Wiki run-591: a figure may have AT MOST ONE primary scholarly owner (concept_page or
+     * entity_page) — the one page that explains it in depth — plus, in addition, the run's own
+     * secondary display pages (source_article and/or source_summary). This makes legal exactly:
+     * {article}, {summary}, {concept}, {entity}, {article, summary}, {article, concept},
+     * {article, entity}, {article, summary, concept}, {article, summary, entity}. Illegal: two
+     * distinct primary owners in any combination (concept+concept, entity+entity, concept+entity,
+     * article+two concepts, ...), and summary+primary WITHOUT article also present — the summary
+     * secondary display is only allowed to piggyback on the article's, never to stand in for it.
+     *
+     * @param  list<string>  $roles
+     */
+    private function isValidRoleCombination(array $roles): bool
     {
-        $roles = [$roleA, $roleB];
-        sort($roles);
+        $primaryCount = count(array_intersect($roles, self::PRIMARY_ROLES));
 
-        return $roles === [self::ROLE_SOURCE_ARTICLE, self::ROLE_SOURCE_SUMMARY];
+        if ($primaryCount > 1) {
+            return false;
+        }
+
+        if ($primaryCount === 1
+            && in_array(self::ROLE_SOURCE_SUMMARY, $roles, true)
+            && ! in_array(self::ROLE_SOURCE_ARTICLE, $roles, true)
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
