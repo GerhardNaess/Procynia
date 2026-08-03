@@ -522,12 +522,22 @@ class EnterpriseWikiAppliedRunLintService
     }
 
     /**
-     * Wiki run-587: cross-page counterpart to checkPlannedFigureCoverage() — that check only ever
-     * sees one page's own planned_figures, so it cannot detect a figure planned onto page A that
-     * ended up materialized as a real image block on page B instead. This is most likely on an
-     * article/summary page, since — unlike concept/entity — those still materialize ANY image the
-     * AI happens to cite, not only ones this page's own plan assigned to it. Requires run-wide
-     * visibility across all pages, so this runs once per run rather than once per page.
+     * Wiki run-587/run-593: cross-page counterpart to checkPlannedFigureCoverage() — that check
+     * only ever sees one page's own planned_figures, so it cannot detect a figure materialized on
+     * a page whose own plan never actually included it. Requires run-wide visibility across all
+     * pages, so this runs once per run rather than once per page.
+     *
+     * Wiki run-593: a figure belongs to the source document, not to one "owner" page — the same
+     * source_element_key may legitimately be planned (and therefore materialized) on several pages
+     * at once (see the run-593 figure-placement simplification, commit 253db52). This check is
+     * therefore never a single-owner comparison: a figure materialized on page X is valid whenever
+     * X is one of the (possibly several) pages that key was actually planned onto. It still flags a
+     * figure materialized on a page whose own plan never included that key at all, as long as the
+     * key WAS planned somewhere in this run — a figure never planned anywhere in the run at all is
+     * out of scope for this check (e.g. an article/summary page's pre-existing, unrelated freedom
+     * to materialize any cited-but-unplanned image — EnterpriseWikiGenerateAppliedPagesService's
+     * own generation-time gate already restricts concept/entity pages to their own planned_figures,
+     * so this never applies there in practice).
      *
      * @param  list<array{page: EnterpriseWikiPage, version: ?EnterpriseWikiPageVersion}>  $allPages
      */
@@ -538,19 +548,20 @@ class EnterpriseWikiAppliedRunLintService
         array &$touchedIds,
         array &$counts,
     ): void {
-        $plannedPageIdByKey = [];
+        /** @var array<string, array<int, true>> $plannedPageIdsByKey source_element_key => set of page ids it is actually planned onto */
+        $plannedPageIdsByKey = [];
 
         foreach ($allPages as $entry) {
             foreach ($this->plannedFiguresForPage($entry['page'], $decisionJson) as $figure) {
                 $key = (string) ($figure['source_element_key'] ?? '');
 
                 if ($key !== '') {
-                    $plannedPageIdByKey[$key] = $entry['page']->id;
+                    $plannedPageIdsByKey[$key][$entry['page']->id] = true;
                 }
             }
         }
 
-        if ($plannedPageIdByKey === []) {
+        if ($plannedPageIdsByKey === []) {
             return;
         }
 
@@ -568,9 +579,23 @@ class EnterpriseWikiAppliedRunLintService
                 }
 
                 $key = (string) ($block['source_element_key'] ?? ($block['image_data']['source_image_key'] ?? ''));
-                $plannedPageId = $plannedPageIdByKey[$key] ?? null;
 
-                if ($key === '' || $plannedPageId === null || $plannedPageId === $page->id) {
+                if ($key === '') {
+                    continue;
+                }
+
+                $plannedPageIds = $plannedPageIdsByKey[$key] ?? null;
+
+                // Never planned onto any page in this run at all — out of scope for this
+                // cross-page check (e.g. an article/summary page's own, unrelated freedom to
+                // materialize any cited image regardless of planning).
+                if ($plannedPageIds === null) {
+                    continue;
+                }
+
+                // Valid exactly when THIS page is one of the (possibly several) pages the figure
+                // was actually planned onto — never compared against a single global owner.
+                if (array_key_exists($page->id, $plannedPageIds)) {
                     continue;
                 }
 
@@ -578,9 +603,9 @@ class EnterpriseWikiAppliedRunLintService
                     $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_WRONG_PAGE),
                     EnterpriseWikiLintFinding::SEVERITY_ERROR,
                     sprintf(
-                        'Figure "%s" was materialized on this page, but planned_figures assigned it to a different page (page id %d).',
+                        'Figure "%s" was materialized on this page, but this page\'s own planned_figures does not include it (planned onto page(s) %s).',
                         $key,
-                        $plannedPageId,
+                        implode(', ', array_keys($plannedPageIds)),
                     ),
                     $touchedIds,
                     $counts,
