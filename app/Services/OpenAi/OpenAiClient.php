@@ -2,6 +2,7 @@
 
 namespace App\Services\OpenAi;
 
+use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -27,9 +28,16 @@ class OpenAiClient
         return $response;
     }
 
-    public function createResponse(array $payload, int $timeoutSeconds = 120): array
+    /**
+     * @param  ?callable(TransferStats): void  $onStats  Optional Guzzle transfer-stats
+     *                                                   callback (see 'on_stats' in Guzzle's RequestOptions) — invoked for both a successful
+     *                                                   and a failed transfer, so a caller can capture connect/transfer timing even when this
+     *                                                   method ends up throwing (e.g. EnterpriseWikiAiCapacityRetryExecutor's structured
+     *                                                   per-attempt logging, built for the Wiki run-592 incident).
+     */
+    public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
-        return $this->send('responses', $payload, $timeoutSeconds);
+        return $this->send('responses', $payload, $timeoutSeconds, $onStats);
     }
 
     public function createEmbedding(string $input): array
@@ -40,9 +48,9 @@ class OpenAiClient
         ]);
     }
 
-    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180): Response
+    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null): Response
     {
-        $response = $this->pendingRequest($timeoutSeconds)->post(ltrim($endpoint, '/'), $payload);
+        $response = $this->pendingRequest($timeoutSeconds, $onStats)->post(ltrim($endpoint, '/'), $payload);
 
         if ($response->failed()) {
             $this->logFailure($endpoint, $response->status(), $this->requestIdFrom($response), $response->body());
@@ -51,9 +59,9 @@ class OpenAiClient
         return $response;
     }
 
-    private function send(string $endpoint, array $payload, int $timeoutSeconds = 120): array
+    private function send(string $endpoint, array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
-        $response = $this->post($endpoint, $payload, $timeoutSeconds);
+        $response = $this->post($endpoint, $payload, $timeoutSeconds, $onStats);
         $requestId = $this->requestIdFrom($response);
 
         if ($response->failed()) {
@@ -142,7 +150,7 @@ class OpenAiClient
         );
     }
 
-    private function pendingRequest(int $timeoutSeconds = 180): PendingRequest
+    private function pendingRequest(int $timeoutSeconds = 180, ?callable $onStats = null): PendingRequest
     {
         $apiKey = trim((string) config('services.openai.api_key'));
         $baseUrl = trim((string) config('services.openai.base_url', 'https://api.openai.com/v1'));
@@ -155,16 +163,22 @@ class OpenAiClient
             throw new RuntimeException('OpenAI base URL is not configured.');
         }
 
+        $options = [
+            'curl' => [
+                CURLOPT_CONNECTTIMEOUT => max(1, min($timeoutSeconds, 10)),
+            ],
+        ];
+
+        if ($onStats !== null) {
+            $options['on_stats'] = $onStats;
+        }
+
         return Http::baseUrl(rtrim($baseUrl, '/'))
             ->withToken($apiKey)
             ->acceptJson()
             ->asJson()
             ->timeout($timeoutSeconds)
-            ->withOptions([
-                'curl' => [
-                    CURLOPT_CONNECTTIMEOUT => max(1, min($timeoutSeconds, 10)),
-                ],
-            ]);
+            ->withOptions($options);
     }
 
     private function embeddingModel(): string

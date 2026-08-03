@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
@@ -25,6 +26,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
@@ -646,7 +648,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
                 ->shouldReceive('runForDocument')
                 ->once()
                 ->ordered('enterprise-wiki-document-flow')
-                ->with($customer->id, $document->id, 'no')
+                ->with($customer->id, $document->id, 'no', Mockery::type(AiCallContext::class))
                 ->andReturnUsing(function () use (&$callOrder, $decision, $shouldFail) {
                     $callOrder[] = 'maintainer_decision';
 

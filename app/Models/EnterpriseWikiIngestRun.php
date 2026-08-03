@@ -225,6 +225,8 @@ class EnterpriseWikiIngestRun extends Model
         'source_hash',
         'status',
         'failed_phase',
+        'transient_failure',
+        'maintainer_decision_attempt_count',
         'model_used',
         'input_tokens',
         'output_tokens',
@@ -255,6 +257,8 @@ class EnterpriseWikiIngestRun extends Model
     {
         return [
             'source_id' => 'integer',
+            'transient_failure' => 'boolean',
+            'maintainer_decision_attempt_count' => 'integer',
             'input_tokens' => 'integer',
             'output_tokens' => 'integer',
             'cost_estimate_nok' => 'decimal:4',

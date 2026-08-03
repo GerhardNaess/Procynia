@@ -376,7 +376,12 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $client = $this->clientReturning($this->validDecision());
         $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'Hemmelig kildetekst som aldri skal logges.', [], 'no');
 
-        Log::shouldHaveReceived('info')->once()->withArgs(function (string $message, array $context): bool {
+        // Wiki run-592: the executor now also logs one line per raw HTTP attempt (see
+        // EnterpriseWikiAiCapacityRetryExecutor::logAttempt()), in addition to this existing
+        // capacity-decision line — so info() is called more than once per successful call overall;
+        // this assertion only checks that AT LEAST one of those calls is the capacity-decision line
+        // with the expected shape, never any raw document text.
+        Log::shouldHaveReceived('info')->atLeast()->once()->withArgs(function (string $message, array $context): bool {
             return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION_CAPACITY] Capacity decision for AI call.'
                 && ($context['operation_type'] ?? null) === 'enterprise_wiki_maintainer_decision'
                 && ($context['model'] ?? null) === 'gpt-5'

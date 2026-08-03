@@ -11,6 +11,7 @@ import {
     matchesFindingsLocalFilter,
     getRunTimelineState,
     getEscalationCopy,
+    getTransientFailureCopy,
     isRunStalled,
     formatFindingUserId,
 } from './runFindingsLogic';
@@ -308,7 +309,9 @@ function RunTimeline({ run, tw }) {
     );
 }
 
-function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false, onOpenFindings = null }) {
+function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false, onOpenFindings = null, onRetryMaintainerDecision = null }) {
+    const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+
     if (!run) return null;
 
     const activity = getIngestActivityCopy(run, tw);
@@ -351,6 +354,15 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     // no explanation of why. Route this one status straight to a real, data-backed explanation
     // instead of re-rendering the activity pill/detail pair used by every other status.
     const escalation = isEscalated ? getEscalationCopy(run, tw) : null;
+
+    // Wiki run-592: a maintainer_decision failure classified as a documented transient
+    // HTTP/network condition gets its own explanation block — friendly primary message, raw
+    // exception text only behind a "technical details" toggle, and a retry action gated on the
+    // backend's own eligibility check (run.can_retry_maintainer_decision), never derived here.
+    const isTransientMaintainerFailure = run.status === 'failed'
+        && run.failed_phase === 'maintainer_decision'
+        && !!run.transient_failure;
+    const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
 
     return (
         <div className="mt-2 space-y-2" aria-live={isActive ? 'polite' : 'off'}>
@@ -408,6 +420,48 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                             className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-base font-semibold leading-6 text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                         >
                             {tw.ingest_activity_escalated_action ?? 'Åpne funn'}
+                        </button>
+                    )}
+                </div>
+            ) : isTransientMaintainerFailure ? (
+                <div className="max-w-sm space-y-1">
+                    <p className="text-base font-medium leading-6 text-rose-800">
+                        {transientFailure.primaryMessage}
+                    </p>
+                    <p className="text-base leading-6 text-slate-600">
+                        {transientFailure.failedInPhase}
+                    </p>
+                    {transientFailure.attemptSummary && (
+                        <p className="text-base leading-6 text-slate-500">
+                            {transientFailure.attemptSummary}
+                        </p>
+                    )}
+                    <p className="text-base leading-6 text-slate-500">
+                        {transientFailure.documentPreservedNote}
+                    </p>
+                    {transientFailure.technicalDetails && (
+                        <div>
+                            <button
+                                type="button"
+                                onClick={() => setShowTechnicalDetails((current) => !current)}
+                                className="text-base font-semibold leading-6 text-slate-500 underline decoration-dotted hover:text-slate-700 focus:outline-none"
+                            >
+                                {tw.run_technical_details_toggle ?? 'Vis tekniske detaljer'}
+                            </button>
+                            {showTechnicalDetails && (
+                                <p className="mt-1 break-all text-base leading-6 text-slate-400">
+                                    {transientFailure.technicalDetails}
+                                </p>
+                            )}
+                        </div>
+                    )}
+                    {run.can_retry_maintainer_decision && onRetryMaintainerDecision && (
+                        <button
+                            type="button"
+                            onClick={() => onRetryMaintainerDecision(run)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                        >
+                            {tw.run_retry_maintainer_decision_button ?? 'Prøv beslutningsfasen på nytt'}
                         </button>
                     )}
                 </div>
@@ -1028,7 +1082,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                 </p>
             )}
             <RunActivityBlock run={run} tw={tw} locale={locale} showCounters />
-            {run.status === 'failed' && errorMessage && (
+            {run.status === 'failed' && errorMessage && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
                 <p
                     className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-500"
                     title={errorMessage}
@@ -2270,6 +2324,32 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
         }, { preserveScroll: true });
     };
 
+    // Wiki run-592: mirrors cancelTarget above exactly (same confirm-then-router.patch shape) —
+    // retryTarget/retryInFlight is intentionally its own pair rather than reusing cancelTarget so
+    // the two confirmation modals (and their in-flight guards) never collide for the same run.
+    const [retryTarget, setRetryTarget] = useState(null);
+    const [retryInFlight, setRetryInFlight] = useState(false);
+
+    const handleRetryClick = (run) => setRetryTarget(run);
+    const handleRetryDismiss = () => setRetryTarget(null);
+    const handleRetryConfirm = () => {
+        if (!retryTarget || retryInFlight) return;
+        const runId = retryTarget.id;
+        setRetryInFlight(true);
+        router.patch(`/app/wiki/runs/${runId}/retry-maintainer-decision`, {
+            tab: 'runs',
+            run_status: filters.status ?? '',
+            run_decision: filters.decision ?? '',
+            run_src: filters.src_id ?? '',
+        }, {
+            preserveScroll: true,
+            onFinish: () => {
+                setRetryInFlight(false);
+                setRetryTarget(null);
+            },
+        });
+    };
+
     const navigate = (overrides) => {
         router.get('/app/wiki', {
             tab: 'runs',
@@ -2460,7 +2540,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 ) : (
                                                     <span className="text-slate-400">—</span>
                                                 )}
-                                                {run.status === 'failed' && runError && (
+                                                {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
                                                     <p className="mt-1 line-clamp-2 text-base leading-6 text-rose-500" title={runError}>
                                                         {runError}
                                                     </p>
@@ -2479,6 +2559,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     locale={locale}
                                                     showTimeline
                                                     onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
+                                                    onRetryMaintainerDecision={handleRetryClick}
                                                 />
                                             </td>
                                             <td className="px-4 py-3">
@@ -2630,6 +2711,40 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                 className="inline-flex h-11 items-center rounded-full bg-rose-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-rose-700"
                             >
                                 {tw.run_cancel_confirm_button ?? 'Avbryt kjøringen'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {retryTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
+                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+                            {tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv beslutningsfasen på nytt?'}
+                        </h2>
+                        <p className="text-base font-medium leading-6 text-slate-800 break-all">
+                            {retryTarget.source_document_filename}
+                        </p>
+                        <p className="mt-2 text-base leading-6 text-slate-600">
+                            {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Beslutningsfasen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
+                        </p>
+                        <div className="mt-5 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={handleRetryDismiss}
+                                disabled={retryInFlight}
+                                className="inline-flex h-11 items-center rounded-full border border-slate-200 px-4 text-base font-semibold leading-6 text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {tw.run_retry_maintainer_decision_dismiss_button ?? 'Lukk'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleRetryConfirm}
+                                disabled={retryInFlight}
+                                className="inline-flex h-11 items-center rounded-full bg-violet-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {tw.run_retry_maintainer_decision_confirm_button ?? 'Prøv på nytt'}
                             </button>
                         </div>
                     </div>

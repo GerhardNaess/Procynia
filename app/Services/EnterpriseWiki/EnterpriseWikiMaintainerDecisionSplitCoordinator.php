@@ -2,7 +2,9 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Capacity\AiCapacityPlan;
+use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -53,6 +55,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
         private readonly EnterpriseWikiMaintainerDecisionMerger $merger,
+        private readonly EnterpriseWikiAiRequestTimeoutPolicy $timeoutPolicy,
     ) {}
 
     /**
@@ -74,10 +77,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $indexContext,
         string $languageCode,
         array $figureCandidates = [],
+        ?AiCallContext $context = null,
     ): array {
+        $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates);
+        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context);
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
 
         $mentions = $globalPlan['concept_candidate_mentions'];
@@ -116,6 +121,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                     $batchMentions,
                     $batchIndex,
                     $figureCandidates,
+                    $context,
                 );
                 $batchResults[] = EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($batchRaw);
             } catch (Throwable $e) {
@@ -140,8 +146,14 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /** @return array<string, mixed> */
-    private function decideGlobalPlan(array $sourceMeta, string $sourceText, array $indexContext, string $languageName, array $figureCandidates = []): array
-    {
+    private function decideGlobalPlan(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        string $languageName,
+        array $figureCandidates = [],
+        ?AiCallContext $context = null,
+    ): array {
         $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
         $inputSizeChars = mb_strlen($userPromptText);
 
@@ -156,6 +168,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 $retryAttempt,
             ),
             fn (int $maxOutputTokens): array => $this->buildGlobalPlanPayload($languageName, $userPromptText, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForGlobalPlan(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            )),
+            $context,
         );
     }
 
@@ -173,6 +192,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $batchMentions,
         int $batchIndex,
         array $figureCandidates = [],
+        ?AiCallContext $context = null,
     ): array {
         $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions, $figureCandidates);
         $inputSizeChars = mb_strlen($userPromptText);
@@ -189,6 +209,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 $retryAttempt,
             ),
             fn (int $maxOutputTokens): array => $this->buildCandidateBatchPayload($languageName, $userPromptText, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForBatch(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            ), $candidateCount),
+            $context,
         );
     }
 

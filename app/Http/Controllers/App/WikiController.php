@@ -23,6 +23,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiOrphanConceptLinkService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
@@ -54,6 +55,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiOrphanConceptLinkService $orphanConceptLinkService,
         private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
+        private readonly EnterpriseWikiMaintainerDecisionFailureRecoveryService $maintainerDecisionRecoveryService,
     ) {}
 
     public function index(Request $request): Response
@@ -793,12 +795,24 @@ class WikiController extends Controller
                     // before this field existed. The Kjøringer timeline uses this instead of
                     // guessing from the generic 'failed' status alone.
                     'failed_phase' => $run->failed_phase,
+                    // Wiki run-592: whether the recorded failure is a documented-transient
+                    // HTTP/network condition, and how many times maintainer_decision has actually
+                    // been attempted — both purely observability, shown alongside the retry action.
+                    'transient_failure' => $run->transient_failure,
+                    'maintainer_decision_attempt_count' => $run->maintainer_decision_attempt_count,
                     'maintainer_decision_status' => $run->maintainer_decision_status,
                     'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,
                     'can_cancel' => $run->isCancellable()
                         && $document instanceof EnterpriseWikiDocument
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
+                    // Wiki run-592: only true when EnterpriseWikiMaintainerDecisionFailureRecoveryService
+                    // itself would actually resume this run right now — the frontend never derives
+                    // this eligibility on its own (same authorization as can_cancel above).
+                    'can_retry_maintainer_decision' => $run->status === EnterpriseWikiIngestRun::STATUS_FAILED
+                        && $document instanceof EnterpriseWikiDocument
+                        && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
+                        && $this->maintainerDecisionRecoveryService->evaluate($run->id)->isResumed(),
                     'error_message' => $run->error_message,
                     'qa_status' => $run->qa_status,
                     'qa_last_error' => $run->qa_last_error,
@@ -931,6 +945,56 @@ class WikiController extends Controller
 
         return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_cancel_success'));
+    }
+
+    /**
+     * Wiki run-592: user-triggered "Prøv beslutningsfasen på nytt" — resumes a run that failed
+     * transiently during maintainer_decision (a documented cURL/HTTP transient failure — see
+     * EnterpriseWikiTransientFailureClassifier) WITHOUT re-uploading the source document. Same
+     * authorization as cancelRun() (whoever could delete the source document may also retry its
+     * runs) — no new permission concept introduced. Eligibility itself (status=failed,
+     * failed_phase=maintainer_decision, transient_failure=true, no persisted decision/pages yet) is
+     * entirely EnterpriseWikiMaintainerDecisionFailureRecoveryService's decision — this action
+     * never duplicates that logic, and never dispatches anything if the service says no.
+     */
+    public function retryMaintainerDecision(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+        $user = $this->customerContext->currentUser();
+
+        abort_unless((int) $run->customer_id === (int) $customerId, 404);
+        abort_unless($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, 404);
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->find($run->source_id);
+
+        abort_unless($document instanceof EnterpriseWikiDocument, 404);
+        abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
+
+        $result = $this->maintainerDecisionRecoveryService->attempt($run->id, caller: 'wiki_controller');
+
+        if (! $result->isResumed()) {
+            Log::info('[PROCYNIA][WIKI_RUN] Maintainer-decision retry requested but not resumed.', [
+                'run_id' => $run->id,
+                'document_id' => $document->id,
+                'user_id' => $user->id,
+                'outcome' => $result->outcome,
+                'reason' => $result->reason,
+            ]);
+
+            return $this->redirectToWikiTab($request)
+                ->with('error', __('procynia.wiki.run_retry_maintainer_decision_not_allowed'));
+        }
+
+        Log::info('[PROCYNIA][WIKI_RUN] Maintainer-decision retry resumed run.', [
+            'run_id' => $run->id,
+            'document_id' => $document->id,
+            'user_id' => $user->id,
+        ]);
+
+        return $this->redirectToWikiTab($request)
+            ->with('success', __('procynia.wiki.run_retry_maintainer_decision_success'));
     }
 
     /**

@@ -38,7 +38,8 @@ final readonly class EnterpriseWikiRunRecoveryResult implements JsonSerializable
         public array $incompleteSteps = [],
     ) {}
 
-    public static function resumed(string $reason, array $incompleteSteps): self
+    /** @param  string[]  $incompleteSteps */
+    public static function resumed(string $reason, array $incompleteSteps = []): self
     {
         return new self(self::OUTCOME_RESUMED, $reason, $incompleteSteps);
     }

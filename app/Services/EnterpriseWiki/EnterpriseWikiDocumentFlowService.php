@@ -2,9 +2,11 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -361,6 +363,7 @@ class EnterpriseWikiDocumentFlowService
                 'finished_at' => null,
                 'error_message' => null,
                 'failed_phase' => null,
+                'transient_failure' => null,
             ]);
 
             return $run->fresh();
@@ -369,10 +372,13 @@ class EnterpriseWikiDocumentFlowService
 
     private function performMaintainerDecision(EnterpriseWikiIngestRun $run): void
     {
+        $run->increment('maintainer_decision_attempt_count');
+
         $decision = $this->maintainerDecisionService->runForDocument(
             $run->customer_id,
             $run->source_id,
             $this->resolveLanguageCode($run->customer_id),
+            $this->buildAiCallContext($run),
         );
 
         $run->update([
@@ -388,6 +394,26 @@ class EnterpriseWikiDocumentFlowService
             'concept_pages' => count((array) data_get($decision, 'concept_pages', [])),
             'entity_pages' => count((array) data_get($decision, 'entity_pages', [])),
         ]);
+    }
+
+    /**
+     * Wiki run-592: how much of RunEnterpriseWikiDocumentFlow's own queue-job timeout is left
+     * right now, so EnterpriseWikiAiRequestTimeoutPolicy never resolves an AI-call timeout that
+     * could push the whole job past its own configured ceiling. Null when $run->started_at is
+     * unknown (should not normally happen for an in-flight run) — the policy then falls back to
+     * its configured range without a job-budget clamp.
+     */
+    private function buildAiCallContext(EnterpriseWikiIngestRun $run): AiCallContext
+    {
+        $remainingJobBudgetSeconds = $run->started_at !== null
+            ? max(0, RunEnterpriseWikiDocumentFlow::TIMEOUT_SECONDS - now()->diffInSeconds($run->started_at))
+            : null;
+
+        return new AiCallContext(
+            runId: $run->id,
+            documentId: $run->source_id,
+            remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+        );
     }
 
     private function performApplyMaintainerDecision(EnterpriseWikiIngestRun $run): void
@@ -751,6 +777,7 @@ class EnterpriseWikiDocumentFlowService
                 'finished_at' => null,
                 'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
                 'failed_phase' => null,
+                'transient_failure' => null,
             ]);
 
             Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting document owner approval after owner sync.', [
@@ -783,6 +810,7 @@ class EnterpriseWikiDocumentFlowService
             'finished_at' => now(),
             'error_message' => null,
             'failed_phase' => null,
+            'transient_failure' => null,
         ]);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run completed.', [
@@ -797,6 +825,7 @@ class EnterpriseWikiDocumentFlowService
             'finished_at' => now(),
             'error_message' => null,
             'failed_phase' => null,
+            'transient_failure' => null,
         ]);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
@@ -837,6 +866,11 @@ class EnterpriseWikiDocumentFlowService
             // "everything but the last step looks done" fallback that shipped before this.
             // Only ever a known EnterpriseWikiIngestRun::FAILED_PHASES value — never free text.
             'failed_phase' => EnterpriseWikiIngestRun::isValidFailedPhase($phase) ? $phase : null,
+            // Wiki run-592: whether this failure is a documented-transient HTTP/network condition
+            // (EnterpriseWikiTransientFailureClassifier) — the single field
+            // EnterpriseWikiMaintainerDecisionFailureRecoveryService checks before allowing the
+            // user-triggered "Prøv beslutningsfasen på nytt" action to resume the SAME run.
+            'transient_failure' => EnterpriseWikiTransientFailureClassifier::isTransient($exception->getMessage()),
             'error_message' => mb_substr($exception->getMessage(), 0, 1000),
             'finished_at' => now(),
         ];

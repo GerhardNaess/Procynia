@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiSourceReference;
@@ -40,8 +41,14 @@ class EnterpriseWikiMaintainerDecisionService
      * @throws EnterpriseWikiMaintainerDecisionInconsistentException If the decision is still
      *                                                               logically inconsistent after one bounded repair pass.
      */
-    public function runForDocument(int $customerId, int $documentId, string $languageCode = 'no'): array
-    {
+    public function runForDocument(
+        int $customerId,
+        int $documentId,
+        string $languageCode = 'no',
+        ?AiCallContext $context = null,
+    ): array {
+        $context ??= AiCallContext::none();
+
         $document = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->where('id', $documentId)
@@ -63,7 +70,7 @@ class EnterpriseWikiMaintainerDecisionService
         $figureCandidates = $this->figureCandidatesForDocument($document);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
 
-        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates);
+        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
         $issues = $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys);
 
         if ($issues === []) {
@@ -76,7 +83,7 @@ class EnterpriseWikiMaintainerDecisionService
             'issues' => $issues,
         ]);
 
-        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates);
+        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context);
         $remainingIssues = $this->consistencyValidator->findIssues($repaired, $indexContext, $validFigureKeys);
 
         if ($remainingIssues !== []) {

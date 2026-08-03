@@ -2,8 +2,10 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiCapacityRequest;
+use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use RuntimeException;
 
@@ -48,6 +50,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
         private readonly EnterpriseWikiMaintainerDecisionSplitCoordinator $splitCoordinator,
+        private readonly EnterpriseWikiAiRequestTimeoutPolicy $timeoutPolicy,
     ) {}
 
     public static function isAvailable(): bool
@@ -79,6 +82,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $indexContext,
         string $languageCode,
         array $figureCandidates = [],
+        ?AiCallContext $context = null,
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -86,6 +90,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
+        $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
 
         // The split-vs-single-call DECISION must reflect the document's genuine size, not the
@@ -102,7 +107,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
         if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
-            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates);
+            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
         } else {
             $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
 
@@ -111,6 +116,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 $rawSourceSizeChars,
                 fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($rawSourceSizeChars, $retryAttempt),
                 fn (int $maxOutputTokens): array => $this->buildPayload($languageName, $userPromptText, $maxOutputTokens),
+                fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
+                    operationType: self::CAPACITY_OPERATION_TYPE,
+                    inputSizeChars: $rawSourceSizeChars,
+                    chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                    remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+                )),
+                $context,
             );
         }
 
@@ -158,6 +170,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $decision,
         array $issues,
         array $figureCandidates = [],
+        ?AiCallContext $context = null,
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -165,6 +178,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             );
         }
 
+        $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
         $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues, $figureCandidates);
         $inputSizeChars = mb_strlen($repairPromptText);
@@ -174,6 +188,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($inputSizeChars, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            )),
+            $context,
         );
 
         try {

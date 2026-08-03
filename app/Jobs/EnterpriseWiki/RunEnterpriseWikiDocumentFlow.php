@@ -26,9 +26,18 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    /**
+     * Exposed as a class constant (not just the $timeout property below) so
+     * EnterpriseWikiDocumentFlowService can compute how much of this job's own timeout budget
+     * remains before making an AI call — see EnterpriseWikiAiRequestTimeoutPolicy /
+     * EnterpriseWikiAiCapacityRetryExecutor (Wiki run-592) — without instantiating this job or
+     * duplicating the number.
+     */
+    public const TIMEOUT_SECONDS = 1860;
+
     public int $tries = 1;
 
-    public int $timeout = 1860;
+    public int $timeout = self::TIMEOUT_SECONDS;
 
     public int $backoff = 60;
 

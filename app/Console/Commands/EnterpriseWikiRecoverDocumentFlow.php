@@ -182,6 +182,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             // failure being recovered from must not keep marking a later step red for a run
             // that is no longer failed.
             'failed_phase' => null,
+            'transient_failure' => null,
         ];
 
         if ($wasStaleQaClaim) {

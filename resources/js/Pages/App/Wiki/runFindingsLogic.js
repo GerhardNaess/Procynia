@@ -222,3 +222,23 @@ export function getEscalationCopy(run, tw = {}) {
 
     return { primaryReason, secondaryReason, blockingSummary, blockingCount };
 }
+
+// Wiki run-592: a maintainer_decision failure classified as a documented transient
+// HTTP/network condition (timeout, connection reset, 429/5xx) gets a friendly, non-technical
+// primary message instead of the raw exception text — the raw text is still shown, but only in a
+// secondary "technical details" field the caller renders separately (never as the main message).
+export function getTransientFailureCopy(run, tw = {}) {
+    const errorMessage = run?.error_message ?? '';
+    const isTimeout = /timeout|timed out|curl error 28/i.test(errorMessage);
+    const primaryMessage = isTimeout
+        ? (tw.run_transient_timeout_message ?? 'AI-tjenesten svarte ikke innen tidsgrensen under planleggingen av Wiki-sidene. Dokumentet og kildegrunnlaget er bevart. Du kan prøve beslutningsfasen på nytt uten å laste opp dokumentet igjen.')
+        : (tw.run_transient_generic_message ?? 'En midlertidig kommunikasjonsfeil oppstod under planleggingen av Wiki-sidene. Dokumentet og kildegrunnlaget er bevart.');
+    const failedInPhase = tw.run_transient_failed_in_phase ?? 'Feilen oppstod i fasen «Beslutning».';
+    const attemptCount = run?.maintainer_decision_attempt_count ?? 0;
+    const attemptSummary = attemptCount > 0
+        ? (tw.run_transient_attempt_count ?? ':count forsøk totalt.').replace(':count', attemptCount)
+        : null;
+    const documentPreservedNote = tw.run_transient_document_preserved_note ?? 'Dokumentet er bevart. Ny opplasting er ikke nødvendig.';
+
+    return { primaryMessage, failedInPhase, attemptSummary, documentPreservedNote, technicalDetails: errorMessage || null };
+}
