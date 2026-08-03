@@ -299,11 +299,18 @@ services:
             - /bin/sh
             - -lc
             - |
-                printf '%s\n' '[Procynia][Queue] Starting queue worker connection=redis queues=enterprise-wiki-pages tries=1 backoff=60 timeout=420 retry_after=480'
-                exec php artisan queue:work redis --queue=enterprise-wiki-pages --tries=1 --backoff=60 --timeout=420 --sleep=3
+                printf '%s\n' '[Procynia][Queue] Starting 4 queue worker processes connection=redis queues=enterprise-wiki-pages tries=1 backoff=60 timeout=420 retry_after=480'
+                trap 'kill -TERM 0' TERM INT
+                for i in 1 2 3 4; do
+                    php artisan queue:work redis --queue=enterprise-wiki-pages --tries=1 --backoff=60 --timeout=420 --sleep=3 &
+                done
+                wait
         healthcheck:
             # A single page-generation job may legitimately run for up to --timeout=420s
-            # (7 min); retries covers 10 min.
+            # (7 min); retries covers 10 min. Four worker processes now share this queue
+            # (Wiki performance analysis: page generation ran fully sequentially on one
+            # worker) — the heartbeat check itself is queue-scoped, not process-scoped, so
+            # it stays green as long as ANY of the four processes keeps consuming the queue.
             test: ["CMD", "php", "artisan", "ops:queue-heartbeat-status", "enterprise-wiki-pages"]
             interval: 60s
             timeout: 10s
