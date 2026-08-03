@@ -806,13 +806,17 @@ class WikiController extends Controller
                     'can_cancel' => $run->isCancellable()
                         && $document instanceof EnterpriseWikiDocument
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false),
-                    // Wiki run-592: only true when EnterpriseWikiMaintainerDecisionFailureRecoveryService
-                    // itself would actually resume this run right now — the frontend never derives
-                    // this eligibility on its own (same authorization as can_cancel above).
+                    // Wiki run-592/run-593: only true when
+                    // EnterpriseWikiMaintainerDecisionFailureRecoveryService itself would actually
+                    // resume this run right now — the frontend never derives this eligibility on
+                    // its own (same authorization as can_cancel above). allowManualOverride=true
+                    // here because this gates the manual "Prøv beslutningsfasen på nytt" button —
+                    // must match the same flag retryMaintainerDecision() calls attempt() with,
+                    // otherwise the button's visibility and the action's real eligibility disagree.
                     'can_retry_maintainer_decision' => $run->status === EnterpriseWikiIngestRun::STATUS_FAILED
                         && $document instanceof EnterpriseWikiDocument
                         && ($user?->canDeleteEnterpriseWikiDocument($document) ?? false)
-                        && $this->maintainerDecisionRecoveryService->evaluate($run->id)->isResumed(),
+                        && $this->maintainerDecisionRecoveryService->evaluate($run->id, allowManualOverride: true)->isResumed(),
                     'error_message' => $run->error_message,
                     'qa_status' => $run->qa_status,
                     'qa_last_error' => $run->qa_last_error,
@@ -948,14 +952,17 @@ class WikiController extends Controller
     }
 
     /**
-     * Wiki run-592: user-triggered "Prøv beslutningsfasen på nytt" — resumes a run that failed
-     * transiently during maintainer_decision (a documented cURL/HTTP transient failure — see
-     * EnterpriseWikiTransientFailureClassifier) WITHOUT re-uploading the source document. Same
-     * authorization as cancelRun() (whoever could delete the source document may also retry its
-     * runs) — no new permission concept introduced. Eligibility itself (status=failed,
-     * failed_phase=maintainer_decision, transient_failure=true, no persisted decision/pages yet) is
-     * entirely EnterpriseWikiMaintainerDecisionFailureRecoveryService's decision — this action
-     * never duplicates that logic, and never dispatches anything if the service says no.
+     * Wiki run-592/run-593: user-triggered "Prøv beslutningsfasen på nytt" — resumes a run that
+     * failed during maintainer_decision WITHOUT re-uploading the source document, whether the
+     * recorded failure was a documented transient cURL/HTTP condition (EnterpriseWikiTransientFailureClassifier)
+     * or a non-transient one (e.g. the run-593 figure-planning conflict) — this is always an
+     * explicit, one-off click, so it passes allowManualOverride=true to
+     * EnterpriseWikiMaintainerDecisionFailureRecoveryService::attempt(). Same authorization as
+     * cancelRun() (whoever could delete the source document may also retry its runs) — no new
+     * permission concept introduced. Every OTHER safety check (status=failed,
+     * failed_phase=maintainer_decision, no persisted decision/pages yet, document + source text
+     * still present) is entirely the recovery service's decision — this action never duplicates
+     * that logic, and never dispatches anything if the service says no.
      */
     public function retryMaintainerDecision(Request $request, EnterpriseWikiIngestRun $run): RedirectResponse
     {
@@ -972,7 +979,7 @@ class WikiController extends Controller
         abort_unless($document instanceof EnterpriseWikiDocument, 404);
         abort_unless($user instanceof User && $user->canDeleteEnterpriseWikiDocument($document), 403);
 
-        $result = $this->maintainerDecisionRecoveryService->attempt($run->id, caller: 'wiki_controller');
+        $result = $this->maintainerDecisionRecoveryService->attempt($run->id, caller: 'wiki_controller', allowManualOverride: true);
 
         if (! $result->isResumed()) {
             Log::info('[PROCYNIA][WIKI_RUN] Maintainer-decision retry requested but not resumed.', [

@@ -16,9 +16,11 @@ use Tests\TestCase;
 
 /**
  * HTTP-level coverage for WikiController::retryMaintainerDecision() — the "Prøv beslutningsfasen
- * på nytt" action (Wiki run-592). Authorization mirrors cancelRun() exactly (whoever could delete
- * the source document may retry its runs); eligibility itself is entirely
- * EnterpriseWikiMaintainerDecisionFailureRecoveryService's decision, never re-implemented here.
+ * på nytt" action (Wiki run-592/run-593). Authorization mirrors cancelRun() exactly (whoever could
+ * delete the source document may retry its runs); eligibility itself is entirely
+ * EnterpriseWikiMaintainerDecisionFailureRecoveryService's decision (called with
+ * allowManualOverride=true, since this is always an explicit human click), never re-implemented
+ * here.
  */
 class WikiRetryMaintainerDecisionControllerTest extends TestCase
 {
@@ -88,7 +90,11 @@ class WikiRetryMaintainerDecisionControllerTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_non_transient_failure_is_rejected_with_a_flash_error_and_no_dispatch(): void
+    // Wiki run-593: retryMaintainerDecision() always passes allowManualOverride=true — an explicit
+    // human click on this HTTP action may resume a non-transient failure too, as long as the run
+    // is otherwise still safe to resume (no persisted decision/pages, document + source text
+    // present).
+    public function test_non_transient_failure_can_now_be_manually_retried_via_http(): void
     {
         Queue::fake();
 
@@ -96,6 +102,28 @@ class WikiRetryMaintainerDecisionControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $run = $this->createTransientlyFailedRun($customer);
         $run->update(['transient_failure' => false]);
+
+        $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/retry-maintainer-decision", ['tab' => 'runs']);
+
+        $response->assertRedirect('/app/wiki?tab=runs');
+        $response->assertSessionHas('success');
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_QUEUED, $run->fresh()->status);
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, fn ($job) => $job->runId === $run->id);
+    }
+
+    // The manual-override widening is scoped to the transient-failure requirement only — a run
+    // that already has an applied decision is still refused via HTTP, exactly as before.
+    public function test_non_transient_failure_with_applied_decision_is_still_rejected_via_http(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $run = $this->createTransientlyFailedRun($customer);
+        $run->update([
+            'transient_failure' => false,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
 
         $response = $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/retry-maintainer-decision", ['tab' => 'runs']);
 

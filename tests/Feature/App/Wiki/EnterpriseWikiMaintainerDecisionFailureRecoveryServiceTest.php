@@ -91,6 +91,8 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryServiceTest extends TestCas
         Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, 1);
     }
 
+    // Wiki run-593: automatic recovery (no allowManualOverride, i.e. the default) stays
+    // transient-only — a non-transient failure is never silently retried.
     public function test_non_transient_failure_is_not_recoverable(): void
     {
         Queue::fake();
@@ -104,6 +106,127 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryServiceTest extends TestCas
         $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_NOT_RECOVERABLE, $result->outcome);
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
         Queue::assertNothingPushed();
+    }
+
+    // =========================================================================
+    // Wiki run-593: manual override — an explicit human retry may resume a non-transient failure,
+    // but every other safety check still applies unchanged.
+    // =========================================================================
+
+    public function test_non_transient_failure_can_be_manually_resumed_when_run_is_empty_and_consistent(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+
+        $result = $this->service()->attempt($run->id, caller: 'test', allowManualOverride: true);
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_RESUMED, $result->outcome);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_QUEUED, $run->status);
+        $this->assertNull($run->failed_phase);
+        $this->assertNull($run->transient_failure);
+
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, fn ($job) => $job->runId === $run->id);
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, 1);
+    }
+
+    // Passing allowManualOverride=true still refuses recovery outright without a non-transient
+    // failure being the ONLY relaxed rule — a run without an applied decision/pages/document is
+    // still blocked exactly as under the automatic path.
+    public function test_manual_override_still_rejects_a_run_with_an_already_applied_decision(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+        $run->update(['maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED]);
+
+        $result = $this->service()->attempt($run->id, caller: 'test', allowManualOverride: true);
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_NOT_RECOVERABLE, $result->outcome);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_manual_override_still_rejects_a_run_with_an_existing_applied_page(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'artikkel-'.Str::lower(Str::random(6)),
+            'title' => 'Artikkel',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+        ]);
+
+        $result = $this->service()->attempt($run->id, caller: 'test', allowManualOverride: true);
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_NOT_RECOVERABLE, $result->outcome);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_manual_override_still_rejects_when_document_is_missing(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+        EnterpriseWikiDocument::query()->find($run->source_id)->delete();
+
+        $result = $this->service()->attempt($run->id, caller: 'test', allowManualOverride: true);
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_MISSING_DEPENDENCIES, $result->outcome);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_manual_override_double_call_dispatches_only_one_job(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+
+        $first = $this->service()->attempt($run->id, caller: 'test-first', allowManualOverride: true);
+        $second = $this->service()->attempt($run->id, caller: 'test-second', allowManualOverride: true);
+
+        $this->assertTrue($first->isResumed());
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_ALREADY_RUNNING, $second->outcome);
+
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, 1);
+    }
+
+    public function test_manual_override_reuses_the_same_run_id_and_document(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createNonTransientFailedRun($customer);
+        $originalRunId = $run->id;
+        $originalDocumentId = $run->source_id;
+
+        $this->service()->attempt($run->id, caller: 'test', allowManualOverride: true);
+
+        $this->assertSame(1, EnterpriseWikiIngestRun::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(1, EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->count());
+
+        $run->refresh();
+        $this->assertSame($originalRunId, $run->id);
+        $this->assertSame($originalDocumentId, $run->source_id);
+
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, fn ($job) => $job->runId === $originalRunId);
     }
 
     public function test_unclassified_failure_is_not_recoverable(): void
@@ -306,6 +429,32 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryServiceTest extends TestCas
             'transient_failure' => true,
             'maintainer_decision_attempt_count' => 1,
             'error_message' => 'cURL error 28: Operation timed out after 60000 milliseconds with 0 bytes received',
+            'finished_at' => now(),
+        ]);
+    }
+
+    /**
+     * Wiki run-593: the same shape as createTransientlyFailedRun() (status=failed,
+     * failed_phase=maintainer_decision, no maintainer_decision_status, no applied pages), but with
+     * a NON-transient recorded failure (the exact run-593 figure-planning-conflict message) — only
+     * recoverable via the manual-override path, never automatically.
+     */
+    private function createNonTransientFailedRun(Customer $customer): EnterpriseWikiIngestRun
+    {
+        $document = $this->createDocument($customer);
+
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            'failed_phase' => EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+            'transient_failure' => false,
+            'maintainer_decision_attempt_count' => 1,
+            'error_message' => 'Figure "img1" was planned onto page "Masterdata Samhandling" and also onto '.
+                'page "Samhandlingsarenaer" — conflicting figure placement for the same source element.',
             'finished_at' => now(),
         ]);
     }

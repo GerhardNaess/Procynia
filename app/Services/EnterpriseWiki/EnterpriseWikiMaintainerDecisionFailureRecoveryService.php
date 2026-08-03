@@ -21,11 +21,22 @@ use Illuminate\Support\Facades\Log;
  * Deliberately narrow and separate from EnterpriseWikiEscalatedRunRecoveryService (status=escalated,
  * resumes from verification_linking) and wiki:recover-document-flow's own status=failed branch
  * (requires maintainer_decision_status=applied) — this service owns exactly one case: status=failed
- * + failed_phase=maintainer_decision + a TRANSIENT recorded failure
- * (EnterpriseWikiTransientFailureClassifier, set by EnterpriseWikiDocumentFlowService::markRunFailed()).
- * A non-transient failure (schema violation, figure-planning conflict, consistency error,
- * permanent API error, missing local configuration) is never auto-recoverable via this path — the
- * user must not be offered a "prøv på nytt" action for a genuine defect that will just fail again.
+ * + failed_phase=maintainer_decision, with no persisted decision or pages yet.
+ *
+ * Two eligibility paths, controlled by $allowManualOverride:
+ *  - AUTOMATIC (default, $allowManualOverride=false): only a TRANSIENT recorded failure
+ *    (EnterpriseWikiTransientFailureClassifier, set by
+ *    EnterpriseWikiDocumentFlowService::markRunFailed()) is recoverable. A non-transient failure
+ *    (schema violation, figure-planning conflict, consistency error, permanent API error, missing
+ *    local configuration) is never auto-recoverable — nothing must silently retry a genuine defect
+ *    that will just fail again.
+ *  - MANUAL (Wiki run-593, $allowManualOverride=true): a human explicitly asked to retry — the
+ *    transient-failure requirement is dropped, but every OTHER safety check below (status=failed,
+ *    failed_phase=maintainer_decision, no maintainer_decision_status, no applied pages, document +
+ *    extracted text still present) still applies unchanged. This only widens WHICH failures are
+ *    offered a retry; it never weakens what "safe to resume" means. Only ever pass true from a
+ *    caller that is itself an explicit, one-off user action (never from a scheduled/automatic
+ *    caller) — see WikiController::retryMaintainerDecision().
  *
  * Two entry points, same shape as EnterpriseWikiEscalatedRunRecoveryService:
  *  - evaluate(): read-only preview, no lock, no mutation, no dispatch — safe to call whenever the
@@ -44,9 +55,11 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
 {
     /**
      * Read-only preview of what attempt() would do, without locking, mutating, or dispatching
-     * anything.
+     * anything. $allowManualOverride must match whatever attempt() will actually be called with
+     * (e.g. the Kjøringer UI's button-gating check must pass the same value the click handler
+     * uses), otherwise the button's visibility and the action's real eligibility can disagree.
      */
-    public function evaluate(int $runId): EnterpriseWikiRunRecoveryResult
+    public function evaluate(int $runId, bool $allowManualOverride = false): EnterpriseWikiRunRecoveryResult
     {
         $run = EnterpriseWikiIngestRun::query()->find($runId);
 
@@ -54,7 +67,7 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
             return EnterpriseWikiRunRecoveryResult::notRecoverable("Run [{$runId}] not found.");
         }
 
-        return $this->decide($run);
+        return $this->decide($run, $allowManualOverride);
     }
 
     /**
@@ -62,25 +75,29 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
      * Idempotent: calling this twice for the same run (concurrently or sequentially) never
      * dispatches two document-flow jobs — the second call observes the run's now-changed status
      * (no longer `failed`) and returns already_running.
+     *
+     * @param  bool  $allowManualOverride  See the class docblock. Only ever true for an explicit,
+     *                                     one-off user action — never a scheduled/automatic caller.
      */
-    public function attempt(int $runId, string $caller): EnterpriseWikiRunRecoveryResult
+    public function attempt(int $runId, string $caller, bool $allowManualOverride = false): EnterpriseWikiRunRecoveryResult
     {
-        return DB::transaction(function () use ($runId, $caller) {
+        return DB::transaction(function () use ($runId, $caller, $allowManualOverride) {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if ($run === null) {
                 return EnterpriseWikiRunRecoveryResult::notRecoverable("Run [{$runId}] not found.");
             }
 
-            $result = $this->decide($run);
+            $result = $this->decide($run, $allowManualOverride);
 
             if ($result->isResumed()) {
                 $this->resume($run);
 
-                Log::info('[WIKI_RUN_RECOVERY] Maintainer-decision run resumed after transient failure.', [
+                Log::info('[WIKI_RUN_RECOVERY] Maintainer-decision run resumed.', [
                     'run_id' => $run->id,
                     'customer_id' => $run->customer_id,
                     'caller' => $caller,
+                    'manual_override' => $allowManualOverride,
                     'maintainer_decision_attempt_count' => $run->maintainer_decision_attempt_count,
                 ]);
             } else {
@@ -88,6 +105,7 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
                     'run_id' => $run->id,
                     'customer_id' => $run->customer_id,
                     'caller' => $caller,
+                    'manual_override' => $allowManualOverride,
                     'outcome' => $result->outcome,
                     'reason' => $result->reason,
                 ]);
@@ -97,7 +115,7 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
         });
     }
 
-    private function decide(EnterpriseWikiIngestRun $run): EnterpriseWikiRunRecoveryResult
+    private function decide(EnterpriseWikiIngestRun $run, bool $allowManualOverride): EnterpriseWikiRunRecoveryResult
     {
         if (in_array($run->status, EnterpriseWikiIngestRun::EXPECTS_AUTOMATIC_PROGRESS_STATUSES, true)) {
             return EnterpriseWikiRunRecoveryResult::alreadyRunning(
@@ -131,7 +149,7 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
             );
         }
 
-        if ($run->transient_failure !== true) {
+        if (! $allowManualOverride && $run->transient_failure !== true) {
             return EnterpriseWikiRunRecoveryResult::notRecoverable(
                 "Run [{$run->id}] has a non-transient (or unclassified) failure — refusing automatic recovery: ".
                 ($run->error_message ?? '(no error message recorded)')
@@ -173,8 +191,9 @@ class EnterpriseWikiMaintainerDecisionFailureRecoveryService
         }
 
         return EnterpriseWikiRunRecoveryResult::resumed(
-            "Run [{$run->id}] failed transiently during maintainer_decision with no persisted decision or ".
-            'pages yet — safe to resume from a fresh queued dispatch, reusing the same run_id and document.'
+            "Run [{$run->id}] failed during maintainer_decision (".($allowManualOverride ? 'manual override' : 'transient').
+            ') with no persisted decision or pages yet — safe to resume from a fresh queued dispatch, reusing '.
+            'the same run_id and document.'
         );
     }
 
