@@ -48,23 +48,4 @@ class EnterpriseWikiMaintainerDecisionMergeConflictException extends RuntimeExce
             "slug \"{$secondSlug}\" in batch {$secondBatch} — conflicting page proposals for the same title."
         );
     }
-
-    /**
-     * Wiki run-587 figure pipeline: two different pages (from the global plan and/or different
-     * batches — figures are offered identically to every batch, see
-     * EnterpriseWikiMaintainerDecisionSplitCoordinator, so no batch is more entitled to a figure
-     * than another) each planned the same source_element_key onto themselves. Never resolved by
-     * "last writer wins" — a figure belongs to at most one page unless the model gives both pages
-     * an explicit, different reason to show it, which this merge step has no way to adjudicate.
-     */
-    public static function conflictingFigureAssignment(
-        string $sourceElementKey,
-        string $firstPageTitle,
-        string $secondPageTitle,
-    ): self {
-        return new self(
-            "Figure \"{$sourceElementKey}\" was planned onto page \"{$firstPageTitle}\" and also onto ".
-            "page \"{$secondPageTitle}\" — conflicting figure placement for the same source element."
-        );
-    }
 }

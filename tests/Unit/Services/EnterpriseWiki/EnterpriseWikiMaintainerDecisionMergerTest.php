@@ -201,16 +201,14 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
     }
 
     // =========================================================================
-    // Wiki run-587: planned_figures conflict detection
+    // Wiki run-587/run-593: planned_figures dedup and document-scoped placement
     // =========================================================================
 
-    // A figure planned onto two different pages across batches must not be silently
-    // "last-writer-wins" — it is a genuine conflict, same philosophy as page slug/candidate conflicts.
-    public function test_same_figure_planned_onto_two_different_pages_throws_merge_conflict(): void
+    // A figure belongs to the source document, not to any single page — the same figure planned
+    // onto two different pages across batches is legitimate and must not throw.
+    public function test_same_figure_planned_onto_two_different_pages_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
-
-        $this->merger()->merge($this->globalPlan(), [
+        $merged = $this->merger()->merge($this->globalPlan(), [
             $this->batch(
                 [$this->candidate('Incident Management', 'create')],
                 [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: true)])],
@@ -220,6 +218,11 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
                 [$this->pageWithFigures('Problem Management', figures: [$this->figure('img1', required: false)])],
             ),
         ]);
+
+        $conceptTitles = array_column($merged['concept_pages'], 'title');
+        $this->assertSame(['Incident Management', 'Problem Management'], $conceptTitles);
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][1]['planned_figures'][0]['source_element_key']);
     }
 
     // The exact same figure key appearing twice within one page's OWN planned_figures list (e.g.
@@ -306,11 +309,11 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
     }
 
     // =========================================================================
-    // Wiki run-591: primary (concept/entity) + secondary (article/summary) figure ownership
+    // Wiki run-593: a figure belongs to the source document, not to any single page — any
+    // combination of pages generated from the same document may show the same figure.
     // =========================================================================
 
-    // 2. article + exactly one concept page is allowed — the concept page is the figure's
-    // primary scholarly home, the article shows it secondarily.
+    // 2. article + exactly one concept page is allowed.
     public function test_same_figure_on_article_and_one_concept_page_is_allowed(): void
     {
         $merged = $this->merger()->merge(
@@ -371,43 +374,45 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
         $this->assertCount(1, $merged['entity_pages'][0]['planned_figures']);
     }
 
-    // 7. entity + entity is a hard conflict — at most one primary owner, regardless of type.
-    public function test_same_figure_on_two_entity_pages_throws_merge_conflict(): void
+    // 7. concept + concept is allowed — there is no longer any "one primary owner" limit.
+    public function test_same_figure_on_two_concept_pages_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+        $merged = $this->merger()->merge($this->globalPlan(), [
+            $this->batch(
+                [$this->candidate('Styringsmodell', 'create')],
+                [$this->pageWithFigures('Styringsmodell', figures: [$this->figure('img1', required: true)])],
+            ),
+            $this->batch(
+                [$this->candidate('Møtestruktur', 'create')],
+                [$this->pageWithFigures('Møtestruktur', figures: [$this->figure('img1', required: false)])],
+            ),
+        ]);
 
-        $globalPlan = $this->globalPlan();
-        $globalPlan['entity_pages'] = [
-            $this->entityPage('Acme AS', figures: [$this->figure('img1', required: true)]),
-            $this->entityPage('Beta AS', figures: [$this->figure('img1', required: false)]),
-        ];
-
-        $this->merger()->merge($globalPlan, []);
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][1]['planned_figures'][0]['source_element_key']);
     }
 
-    // 8. concept + entity is a hard conflict — two DIFFERENT primary owners, even though one of
-    // each type, is never allowed.
-    public function test_same_figure_on_a_concept_page_and_an_entity_page_throws_merge_conflict(): void
+    // 8. concept + entity is allowed.
+    public function test_same_figure_on_a_concept_page_and_an_entity_page_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
-
         $globalPlan = $this->globalPlan();
         $globalPlan['entity_pages'] = [$this->entityPage('Acme AS', figures: [$this->figure('img1', required: true)])];
 
-        $this->merger()->merge($globalPlan, [
+        $merged = $this->merger()->merge($globalPlan, [
             $this->batch(
                 [$this->candidate('Styrings- og samhandlingsmodell', 'create')],
                 [$this->pageWithFigures('Styrings- og samhandlingsmodell', figures: [$this->figure('img1', required: false)])],
             ),
         ]);
+
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['entity_pages'][0]['planned_figures'][0]['source_element_key']);
     }
 
-    // 9. article + two concept pages is a hard conflict — more than one primary owner.
-    public function test_same_figure_on_article_and_two_concept_pages_throws_merge_conflict(): void
+    // 9. article + two concept pages is allowed.
+    public function test_same_figure_on_article_and_two_concept_pages_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
-
-        $this->merger()->merge(
+        $merged = $this->merger()->merge(
             $this->globalPlanWithFigures([$this->figure('img1', required: false)], []),
             [
                 $this->batch(
@@ -420,36 +425,41 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
                 ),
             ],
         );
+
+        $this->assertSame('img1', $merged['source_article']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][1]['planned_figures'][0]['source_element_key']);
     }
 
-    // 10. article + summary + two concept pages is a hard conflict — same reason as above, the
-    // legitimate secondary pair does not relax the "at most one primary owner" rule.
-    public function test_same_figure_on_article_summary_and_two_concept_pages_throws_merge_conflict(): void
+    // 10. Same figure on article + summary + two concept pages + one entity page — an arbitrary
+    // number of pages from the same source document may all legitimately show the same figure.
+    public function test_same_figure_on_four_or_more_pages_from_the_same_document_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+        $globalPlan = $this->globalPlanWithFigures([$this->figure('img1', required: true)], [$this->figure('img1', required: false)]);
+        $globalPlan['entity_pages'] = [$this->entityPage('Acme AS', figures: [$this->figure('img1', required: false)])];
 
-        $this->merger()->merge(
-            $this->globalPlanWithFigures([$this->figure('img1', required: true)], [$this->figure('img1', required: false)]),
-            [
-                $this->batch(
-                    [$this->candidate('Styringsmodell', 'create')],
-                    [$this->pageWithFigures('Styringsmodell', figures: [$this->figure('img1', required: false)])],
-                ),
-                $this->batch(
-                    [$this->candidate('Møtestruktur', 'create')],
-                    [$this->pageWithFigures('Møtestruktur', figures: [$this->figure('img1', required: false)])],
-                ),
-            ],
-        );
+        $merged = $this->merger()->merge($globalPlan, [
+            $this->batch(
+                [$this->candidate('Styringsmodell', 'create')],
+                [$this->pageWithFigures('Styringsmodell', figures: [$this->figure('img1', required: false)])],
+            ),
+            $this->batch(
+                [$this->candidate('Møtestruktur', 'create')],
+                [$this->pageWithFigures('Møtestruktur', figures: [$this->figure('img1', required: false)])],
+            ),
+        ]);
+
+        $this->assertSame('img1', $merged['source_article']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['source_summary']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][1]['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['entity_pages'][0]['planned_figures'][0]['source_element_key']);
     }
 
-    // summary + concept WITHOUT article is still a hard conflict — the secondary display role
-    // may only piggyback on the article's, never stand in for it alone.
-    public function test_same_figure_on_summary_and_a_concept_page_without_article_still_throws_merge_conflict(): void
+    // summary + concept WITHOUT article is allowed — there is no article-precondition anymore.
+    public function test_same_figure_on_summary_and_a_concept_page_without_article_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
-
-        $this->merger()->merge(
+        $merged = $this->merger()->merge(
             $this->globalPlanWithFigures([], [$this->figure('img1', required: true)]),
             [
                 $this->batch(
@@ -458,17 +468,21 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
                 ),
             ],
         );
+
+        $this->assertSame('img1', $merged['source_summary']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['concept_pages'][0]['planned_figures'][0]['source_element_key']);
     }
 
     // summary + entity WITHOUT article — same rule, symmetric for entity pages.
-    public function test_same_figure_on_summary_and_an_entity_page_without_article_still_throws_merge_conflict(): void
+    public function test_same_figure_on_summary_and_an_entity_page_without_article_is_allowed(): void
     {
-        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
-
         $globalPlan = $this->globalPlanWithFigures([], [$this->figure('img1', required: true)]);
         $globalPlan['entity_pages'] = [$this->entityPage('Acme AS', figures: [$this->figure('img1', required: false)])];
 
-        $this->merger()->merge($globalPlan, []);
+        $merged = $this->merger()->merge($globalPlan, []);
+
+        $this->assertSame('img1', $merged['source_summary']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['entity_pages'][0]['planned_figures'][0]['source_element_key']);
     }
 
     // 12. Differing section_placement between the article's and the concept page's own entries
@@ -540,25 +554,6 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
 
         $conceptPage = collect($merged['concept_pages'])->firstWhere('title', 'Styrings- og samhandlingsmodell');
         $this->assertSame('img1', $conceptPage['planned_figures'][0]['source_element_key']);
-    }
-
-    public function test_figure_conflict_message_identifies_the_source_element_key(): void
-    {
-        try {
-            $this->merger()->merge($this->globalPlan(), [
-                $this->batch(
-                    [$this->candidate('Incident Management', 'create')],
-                    [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: true)])],
-                ),
-                $this->batch(
-                    [$this->candidate('Problem Management', 'create')],
-                    [$this->pageWithFigures('Problem Management', figures: [$this->figure('img1', required: false)])],
-                ),
-            ]);
-            $this->fail('Expected EnterpriseWikiMaintainerDecisionMergeConflictException.');
-        } catch (EnterpriseWikiMaintainerDecisionMergeConflictException $e) {
-            $this->assertStringContainsString('img1', $e->getMessage());
-        }
     }
 
     // No batches at all (global plan alone) still produces a complete, valid-shaped decision.

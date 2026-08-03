@@ -104,71 +104,38 @@ class EnterpriseWikiMaintainerDecisionMerger
             'warnings' => $globalPlan['warnings'] ?? [],
         ];
 
-        return $this->deduplicateAndValidateFigures($merged);
+        return $this->deduplicateFigures($merged);
     }
 
     /**
-     * The four distinct page roles a figure claim can carry — Wiki run-591 (never lump concept_page
-     * and entity_page together as a generic 'other'; the merger and
-     * EnterpriseWikiMaintainerDecisionConsistencyValidator must reason about them explicitly and
-     * identically).
+     * Wiki run-593: a figure belongs to the source document, not to any single page — the same
+     * source_element_key may legitimately appear on any number of pages generated from this
+     * document (source_article, source_summary, concept_pages, entity_pages), in any combination.
+     * There is no "primary owner" role and no cross-page conflict to detect here (see the removed
+     * run-591 role-combination rule — superseded by this simplification). The only thing this pass
+     * still does is dedupe an exact repeat of the same key WITHIN one page's own planned_figures
+     * list (e.g. listed twice in one batch's own response), keeping the first occurrence.
      *
-     * source_article/source_summary are the SECONDARY display roles: the run's own main article and
-     * its companion summary may both show a figure that "belongs" elsewhere, as a secondary
-     * presentation. concept_page/entity_page are the PRIMARY scholarly roles: the one, deeper-detail
-     * home a figure is actually explained in. See PRIMARY_ROLES and isValidRoleCombination().
-     */
-    private const ROLE_SOURCE_ARTICLE = 'source_article';
-
-    private const ROLE_SOURCE_SUMMARY = 'source_summary';
-
-    private const ROLE_CONCEPT_PAGE = 'concept_page';
-
-    private const ROLE_ENTITY_PAGE = 'entity_page';
-
-    private const PRIMARY_ROLES = [self::ROLE_CONCEPT_PAGE, self::ROLE_ENTITY_PAGE];
-
-    /**
-     * Wiki run-587: figures are offered identically to the global plan and every batch (see
-     * EnterpriseWikiMaintainerDecisionSplitCoordinator's class docblock — all batches see the same
-     * truncated source text), so two independent batches — or a batch and the global plan — can
-     * each plan the same source_element_key onto a different page without either side ever seeing
-     * the other's decision. This pass runs once, on the fully assembled decision, across every
-     * page-bearing field: an exact repeat of the same key on the SAME page is silently deduped
-     * (keeping the first occurrence); an ILLEGAL combination of pages claiming the same key is a
-     * hard failure, never "last writer wins" — identical philosophy to the candidate/page conflict
-     * checks above, just keyed on source_element_key instead of name/title. See
-     * isValidRoleCombination() for exactly which combinations are legal (Wiki run-588/591).
+     * Differing section_placement/caption_hint/purpose between different pages' own planned_figures
+     * entries is fine and untouched: each page keeps its own complete entry (nothing is merged or
+     * collapsed into a shared record), so no page's classification/required/purpose value is ever
+     * hidden or overwritten by another's.
      *
      * @param  array<string, mixed>  $decision
      * @return array<string, mixed>
-     *
-     * @throws EnterpriseWikiMaintainerDecisionMergeConflictException
      */
-    private function deduplicateAndValidateFigures(array $decision): array
+    private function deduplicateFigures(array $decision): array
     {
-        /** @var array<string, list<array{title: string, role: string}>> $seenBySourceKey */
-        $seenBySourceKey = [];
-
-        foreach ([self::ROLE_SOURCE_ARTICLE, self::ROLE_SOURCE_SUMMARY] as $role) {
-            $decision[$role]['planned_figures'] = $this->dedupeAndCheckFiguresForPage(
-                (array) ($decision[$role]['planned_figures'] ?? []),
-                (string) ($decision[$role]['title'] ?? ''),
-                $role,
-                $seenBySourceKey,
+        foreach (['source_article', 'source_summary'] as $key) {
+            $decision[$key]['planned_figures'] = $this->dedupeFiguresForPage(
+                (array) ($decision[$key]['planned_figures'] ?? []),
             );
         }
 
-        foreach ([
-            'concept_pages' => self::ROLE_CONCEPT_PAGE,
-            'entity_pages' => self::ROLE_ENTITY_PAGE,
-        ] as $listKey => $role) {
+        foreach (['concept_pages', 'entity_pages'] as $listKey) {
             foreach ($decision[$listKey] as $i => $page) {
-                $decision[$listKey][$i]['planned_figures'] = $this->dedupeAndCheckFiguresForPage(
+                $decision[$listKey][$i]['planned_figures'] = $this->dedupeFiguresForPage(
                     (array) ($page['planned_figures'] ?? []),
-                    (string) ($page['title'] ?? ''),
-                    $role,
-                    $seenBySourceKey,
                 );
             }
         }
@@ -177,26 +144,10 @@ class EnterpriseWikiMaintainerDecisionMerger
     }
 
     /**
-     * A figure already claimed by one or more pages may gain another claimant only when the
-     * RESULTING full set of roles is still legal — see isValidRoleCombination() for the exact rule
-     * (Wiki run-591: article + exactly one concept/entity page is legitimate; concept + concept,
-     * summary + concept without article, or a second primary owner are not). Never "last writer
-     * wins": an illegal combination always throws, regardless of processing order.
-     *
-     * Differing section_placement/caption_hint/purpose between different pages' own planned_figures
-     * entries is NOT a conflict and is never inspected here: each page keeps its own complete entry
-     * untouched (nothing is merged/collapsed into a shared record), so no side's
-     * classification/required/purpose value is ever hidden or overwritten by another's.
-     *
      * @param  list<array<string, mixed>>  $plannedFigures
-     * @param  array<string, list<array{title: string, role: string}>>  $seenBySourceKey  source_element_key
-     *                                                                                    => pages that have already legitimately claimed it, shared and mutated across every
-     *                                                                                    page processed by deduplicateAndValidateFigures() in this merge() call
      * @return list<array<string, mixed>>
-     *
-     * @throws EnterpriseWikiMaintainerDecisionMergeConflictException
      */
-    private function dedupeAndCheckFiguresForPage(array $plannedFigures, string $pageTitle, string $pageRole, array &$seenBySourceKey): array
+    private function dedupeFiguresForPage(array $plannedFigures): array
     {
         $deduped = [];
         $seenOnThisPage = [];
@@ -219,56 +170,10 @@ class EnterpriseWikiMaintainerDecisionMerger
             }
 
             $seenOnThisPage[] = $sourceElementKey;
-
-            $existingClaims = $seenBySourceKey[$sourceElementKey] ?? [];
-
-            if ($existingClaims !== []) {
-                $candidateRoles = [...array_column($existingClaims, 'role'), $pageRole];
-
-                if (! $this->isValidRoleCombination($candidateRoles)) {
-                    throw EnterpriseWikiMaintainerDecisionMergeConflictException::conflictingFigureAssignment(
-                        $sourceElementKey,
-                        $existingClaims[0]['title'],
-                        $pageTitle,
-                    );
-                }
-            }
-
-            $seenBySourceKey[$sourceElementKey][] = ['title' => $pageTitle, 'role' => $pageRole];
             $deduped[] = $figure;
         }
 
         return $deduped;
-    }
-
-    /**
-     * Wiki run-591: a figure may have AT MOST ONE primary scholarly owner (concept_page or
-     * entity_page) — the one page that explains it in depth — plus, in addition, the run's own
-     * secondary display pages (source_article and/or source_summary). This makes legal exactly:
-     * {article}, {summary}, {concept}, {entity}, {article, summary}, {article, concept},
-     * {article, entity}, {article, summary, concept}, {article, summary, entity}. Illegal: two
-     * distinct primary owners in any combination (concept+concept, entity+entity, concept+entity,
-     * article+two concepts, ...), and summary+primary WITHOUT article also present — the summary
-     * secondary display is only allowed to piggyback on the article's, never to stand in for it.
-     *
-     * @param  list<string>  $roles
-     */
-    private function isValidRoleCombination(array $roles): bool
-    {
-        $primaryCount = count(array_intersect($roles, self::PRIMARY_ROLES));
-
-        if ($primaryCount > 1) {
-            return false;
-        }
-
-        if ($primaryCount === 1
-            && in_array(self::ROLE_SOURCE_SUMMARY, $roles, true)
-            && ! in_array(self::ROLE_SOURCE_ARTICLE, $roles, true)
-        ) {
-            return false;
-        }
-
-        return true;
     }
 
     /**
