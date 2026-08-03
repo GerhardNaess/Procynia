@@ -697,6 +697,13 @@ class EnterpriseWikiGenerateAppliedPagesService
      * A no-op (no repair call, no exception) when the page has no owned_topics at all — a page
      * with no planned sections was never going to be checked in the first place.
      *
+     * Wiki run-593 (precision repair): WikiPageContentAiClient::repairPlannedSections() now
+     * returns ONLY the body content for each blocking section, never the whole page — this method
+     * prepends the EXACT planned_topic text as that section's `## ` heading itself (never left to
+     * the model) and splices the result into the EXISTING blocks via spliceSectionBlocks(), which
+     * replaces only the matched section's own block span (or appends at the end when the heading
+     * never existed) — every other already-generated block is passed through completely untouched.
+     *
      * @param  list<array<string, mixed>>  $blocks
      * @return array{0: string, 1: list<array<string, mixed>>} [markdown, blocks]
      *
@@ -734,7 +741,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'planned_topic' => $i['planned_topic']], $blocking),
         ]);
 
-        $repaired = $this->aiClient->repairPlannedSections(
+        $repairedSections = $this->aiClient->repairPlannedSections(
             pageTitle: $page->title,
             pageType: $page->page_type,
             existingMarkdown: $markdown,
@@ -746,14 +753,24 @@ class EnterpriseWikiGenerateAppliedPagesService
             sourceElements: $sourceElements,
         );
 
-        $repaired['blocks'] = array_map(function (array $block) use ($catalogResult): array {
-            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+        $repairedBlocks = $blocks;
 
-            return $block;
-        }, $repaired['blocks']);
-        $repaired['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($repaired['blocks']);
+        foreach ($repairedSections as $section) {
+            $sectionBlocks = array_map(function (array $block) use ($catalogResult): array {
+                $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
-        $repairedMarkdown = trim(implode("\n\n", array_column($repaired['blocks'], 'markdown')));
+                return $block;
+            }, $section['blocks']);
+
+            // The model was never asked for a heading — prepend the EXACT planned_topic text onto
+            // the first returned block's own markdown, so the persisted heading can never drift
+            // from the maintainer decision's own owned_topics wording.
+            $sectionBlocks[0]['markdown'] = '## '.trim($section['planned_topic'])."\n\n".$sectionBlocks[0]['markdown'];
+
+            $repairedBlocks = $this->spliceSectionBlocks($repairedBlocks, $section['planned_topic'], $sectionBlocks);
+        }
+
+        $repairedMarkdown = trim(implode("\n\n", array_column($repairedBlocks, 'markdown')));
 
         $this->validateWikilinks($run, $page, $repairedMarkdown, $catalogResult['run_page_count']);
 
@@ -779,7 +796,69 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
         }
 
-        return [$repairedMarkdown, $repaired['blocks']];
+        return [$repairedMarkdown, $repairedBlocks];
+    }
+
+    /**
+     * Replaces the block span belonging to the `## ` heading matching $plannedTopic with
+     * $newSectionBlocks — or appends $newSectionBlocks at the end when no existing block starts a
+     * matching heading (the planned_section_missing case). Every block outside the matched span is
+     * returned completely unchanged, in its original position — this is the one thing that makes
+     * "settes inn i eksisterende markdown uten å overskrive ferdig innhold" true structurally
+     * rather than by prompt instruction alone.
+     *
+     * Uses EnterpriseWikiPlannedSectionCoverageValidator::normalize()'s own fuzzy matching rule
+     * (unchanged) — the same heading this splice targets is exactly the one the validator will
+     * re-check afterward, so the two can never disagree on which section is which.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  list<array<string, mixed>>  $newSectionBlocks
+     * @return list<array<string, mixed>>
+     */
+    private function spliceSectionBlocks(array $blocks, string $plannedTopic, array $newSectionBlocks): array
+    {
+        $headingIndexes = [];
+
+        foreach ($blocks as $i => $block) {
+            if (preg_match('/^##\s+(.+?)\s*$/m', (string) ($block['markdown'] ?? ''), $matches) === 1) {
+                $headingIndexes[$i] = $matches[1];
+            }
+        }
+
+        $normalizedTopic = EnterpriseWikiPlannedSectionCoverageValidator::normalize($plannedTopic);
+        $matchedStart = null;
+
+        foreach ($headingIndexes as $i => $heading) {
+            $normalizedHeading = EnterpriseWikiPlannedSectionCoverageValidator::normalize($heading);
+
+            if ($normalizedHeading === '') {
+                continue;
+            }
+
+            if (str_contains($normalizedTopic, $normalizedHeading) || str_contains($normalizedHeading, $normalizedTopic)) {
+                $matchedStart = $i;
+
+                break;
+            }
+        }
+
+        if ($matchedStart === null) {
+            return [...$blocks, ...$newSectionBlocks];
+        }
+
+        $matchedEnd = count($blocks);
+
+        foreach ($headingIndexes as $i => $heading) {
+            if ($i > $matchedStart) {
+                $matchedEnd = $i;
+
+                break;
+            }
+        }
+
+        array_splice($blocks, $matchedStart, $matchedEnd - $matchedStart, $newSectionBlocks);
+
+        return $blocks;
     }
 
     /**

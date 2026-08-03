@@ -517,7 +517,7 @@ class WikiPageContentAiClientTest extends TestCase
                 return [
                     'status' => 'completed',
                     'output_text' => json_encode([
-                        'page' => ['blocks' => [$this->sourceBasedBlock("# Test Page\n\nRepaired content.")]],
+                        'sections' => [$this->sourceBasedSection('En tom seksjon', 'Repaired content.')],
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
@@ -540,8 +540,10 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('SECTIONS TO REPAIR', $userPrompt);
         $this->assertStringContainsString('En tom seksjon', $userPrompt);
         $this->assertStringContainsString('Kildetekst med relevant informasjon.', $userPrompt);
-        $this->assertStringContainsString('repairing a previously generated', mb_strtolower($developerPrompt));
-        $this->assertStringContainsString('never leave', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('repairing specific missing or empty planned sections', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('previously generated', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('never return an empty section', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('do not write the section heading', mb_strtolower($developerPrompt));
     }
 
     public function test_repair_planned_sections_uses_the_same_strict_schema(): void
@@ -557,7 +559,7 @@ class WikiPageContentAiClientTest extends TestCase
                 return [
                     'status' => 'completed',
                     'output_text' => json_encode([
-                        'page' => ['blocks' => [$this->sourceBasedBlock('# Test Page')]],
+                        'sections' => [$this->sourceBasedSection('X', 'Repaired body text.')],
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
@@ -571,10 +573,11 @@ class WikiPageContentAiClientTest extends TestCase
             languageCode: 'no',
         );
 
-        $this->assertSame('# Test Page', $result['markdown']);
+        $this->assertSame('X', $result[0]['planned_topic']);
+        $this->assertSame('Repaired body text.', $result[0]['blocks'][0]['markdown']);
     }
 
-    public function test_repair_planned_sections_throws_when_response_still_has_empty_blocks(): void
+    public function test_repair_planned_sections_throws_when_response_has_no_sections(): void
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
@@ -582,11 +585,63 @@ class WikiPageContentAiClientTest extends TestCase
             ->once()
             ->andReturn([
                 'status' => 'completed',
-                'output_text' => json_encode(['page' => []]),
+                'output_text' => json_encode(['sections' => []]),
             ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/generated page blocks were empty/');
+        $this->expectExceptionMessageMatches('/repaired sections were empty/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+    }
+
+    public function test_repair_planned_sections_throws_when_a_section_body_is_empty(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'sections' => [$this->sourceBasedSection('X', '')],
+                ]),
+            ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/markdown was empty/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+    }
+
+    public function test_repair_planned_sections_throws_when_a_section_does_not_match_a_requested_topic(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'sections' => [$this->sourceBasedSection('Not the requested topic', 'Some content.')],
+                ]),
+            ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/did not match any requested planned_topic/');
 
         app(WikiPageContentAiClient::class)->repairPlannedSections(
             pageTitle: 'Test Page',
@@ -700,6 +755,18 @@ class WikiPageContentAiClientTest extends TestCase
             'source_element_types' => ['manual'],
             'best_practice_reason' => null,
             'link_intents' => [],
+        ];
+    }
+
+    /**
+     * Wiki run-593: one "sections" entry as repairPlannedSections() now expects — body content
+     * only (no heading), keyed by the exact planned_topic it repairs.
+     */
+    private function sourceBasedSection(string $plannedTopic, string $bodyMarkdown): array
+    {
+        return [
+            'planned_topic' => $plannedTopic,
+            'blocks' => [$this->sourceBasedBlock($bodyMarkdown)],
         ];
     }
 }

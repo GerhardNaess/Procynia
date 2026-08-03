@@ -86,15 +86,21 @@ class WikiPageContentAiClient
     /**
      * Single bounded repair attempt for a page whose planned/owned-topic sections were found
      * missing, empty, or link-only by EnterpriseWikiPlannedSectionCoverageValidator (Wiki run-586
-     * incident). Receives the already-generated markdown as explicit context — unlike
-     * generatePageFromSource(), this is a targeted correction of specific named sections, not an
-     * independent regeneration, so everything already good in $existingMarkdown is preserved by
-     * instruction rather than re-derived from scratch.
+     * incident, precision-repair redesign for Wiki run-593). Generates ONLY the content for the
+     * requested section(s) — never the whole page — and never the heading line itself: the caller
+     * (EnterpriseWikiGenerateAppliedPagesService) prepends the EXACT planned_topic wording as the
+     * `## ` heading in code, so the persisted heading can never drift from what the maintainer
+     * decision's own owned_topics says, however the model might have paraphrased it. This is a
+     * structural guarantee, not an instruction the model could ignore — the previous design asked
+     * for the FULL corrected page back and relied on the prompt alone to avoid rewriting content
+     * that was already good.
      *
      * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
-     * @return array{markdown: string, blocks: list<array<string, mixed>>}
+     * @return list<array{planned_topic: string, blocks: list<array<string, mixed>>}> one entry per
+     *                                                                                requested issue, in the same order; `blocks` is body content only (no heading line),
+     *                                                                                same per-block shape generatePageFromSource() returns.
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
      */
@@ -127,7 +133,7 @@ class WikiPageContentAiClient
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient(repair)');
 
-        return $this->parseBlocksResponse($decoded);
+        return $this->parseSectionRepairResponse($decoded, $issues);
     }
 
     /**
@@ -237,6 +243,104 @@ class WikiPageContentAiClient
         ];
     }
 
+    /**
+     * Structural validation only — mirrors parseBlocksResponse()'s own checks (empty content,
+     * valid content_origin, source_element_keys present for source_based blocks, no HTML
+     * comments/citation lines/blockquotes), scoped to one section at a time. Whether a
+     * structurally-valid section is actually SUBSTANTIAL enough (not below-minimum-substance,
+     * not link-only) is still decided entirely by
+     * EnterpriseWikiPlannedSectionCoverageValidator::validate(), unchanged, after the caller
+     * splices this section into the full page markdown — this method never duplicates that
+     * matching/substance rule.
+     *
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @return list<array{planned_topic: string, blocks: list<array<string, mixed>>}>
+     */
+    private function parseSectionRepairResponse(array $decoded, array $issues): array
+    {
+        $sections = data_get($decoded, 'sections', []);
+
+        if (! is_array($sections) || $sections === []) {
+            throw new RuntimeException('WikiPageContentAiClient: repaired sections were empty.');
+        }
+
+        $requestedTopics = array_map(
+            static fn (array $issue): string => trim((string) $issue['planned_topic']),
+            $issues,
+        );
+
+        $result = [];
+
+        foreach ($sections as $sectionIndex => $section) {
+            if (! is_array($section)) {
+                throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] was invalid.");
+            }
+
+            $plannedTopic = trim((string) ($section['planned_topic'] ?? ''));
+
+            if (! in_array($plannedTopic, $requestedTopics, true)) {
+                throw new RuntimeException(
+                    "WikiPageContentAiClient: repaired section [{$sectionIndex}] did not match any requested planned_topic."
+                );
+            }
+
+            $blocks = $section['blocks'] ?? [];
+
+            if (! is_array($blocks) || $blocks === []) {
+                throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] had no blocks.");
+            }
+
+            $markdownParts = [];
+
+            foreach ($blocks as $blockIndex => $block) {
+                if (! is_array($block)) {
+                    throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] block [{$blockIndex}] was invalid.");
+                }
+
+                $blockMarkdown = trim((string) ($block['markdown'] ?? ''));
+
+                if ($blockMarkdown === '') {
+                    throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] block [{$blockIndex}] markdown was empty.");
+                }
+
+                $origin = (string) ($block['content_origin'] ?? '');
+                if (! in_array($origin, [
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                ], true)) {
+                    throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] block [{$blockIndex}] has invalid content_origin.");
+                }
+
+                $sourceElementKeys = $block['source_element_keys'] ?? [];
+                if (! is_array($sourceElementKeys)) {
+                    throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] block [{$blockIndex}] source_element_keys was invalid.");
+                }
+
+                if ($origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED && $sourceElementKeys === []) {
+                    throw new RuntimeException("WikiPageContentAiClient: source-based repaired block [{$sectionIndex}][{$blockIndex}] has no source_element_keys.");
+                }
+
+                $blocks[$blockIndex]['markdown'] = $blockMarkdown;
+                $markdownParts[] = $blockMarkdown;
+            }
+
+            $sectionMarkdown = trim(implode("\n\n", $markdownParts));
+
+            if ($sectionMarkdown === '') {
+                throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] content was empty.");
+            }
+
+            $this->validateMarkdown($sectionMarkdown);
+
+            $result[] = [
+                'planned_topic' => $plannedTopic,
+                'blocks' => array_values($blocks),
+            ];
+        }
+
+        return $result;
+    }
+
     private function validateMarkdown(string $markdown): void
     {
         if (str_contains($markdown, '<!--')) {
@@ -295,7 +399,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::schema(),
+                    'schema' => self::repairSectionsSchema(),
                 ],
             ],
             'reasoning' => [
@@ -309,15 +413,15 @@ class WikiPageContentAiClient
     private function repairDeveloperPrompt(string $pageType, string $languageName): string
     {
         return implode("\n", [
-            "You are an editorial wiki writer repairing a previously generated {$pageType} page in {$languageName} that has one or more planned sections left empty, missing real content, or containing only a link.",
+            "You are an editorial wiki writer repairing specific missing or empty planned sections of a previously generated {$pageType} page in {$languageName}.",
             '',
             'REPAIR RULES (mandatory):',
-            '- Return the FULL corrected page as page.blocks, using the exact same block schema as ordinary generation (one block per heading, paragraph, or heading+paragraph group).',
-            '- Keep everything from the previously generated page that is already good — do not rewrite or remove content that is not part of a listed broken section.',
-            '- For each broken section named in "SECTIONS TO REPAIR" below, add a real, substantial paragraph of flowing prose under its heading — grounded in the source document. Never leave a listed heading empty, and never leave it with only a wikilink or a bare punctuation mark.',
-            '- Preserve concrete details the source document actually states for each repaired section — roles, responsibilities, agenda items, participants, frequency, and decision flow — when the source material describes them.',
-            '- Do not invent facts not supported by the source document; if the source genuinely says nothing more about a listed section, write the fullest accurate paragraph the source material supports rather than leaving the heading empty.',
-            '- Do not add any new heading beyond what the previously generated page already had.',
+            '- Return ONLY the content for the section(s) listed in "SECTIONS TO REPAIR" below — never the rest of the page, and never repeat or rewrite content from a section not listed there.',
+            '- Do NOT write the section heading (the "## ..." line) yourself — return only the body content that belongs under that heading. The exact heading text is added separately by the caller, verbatim from the planned topic.',
+            '- Return exactly one entry in "sections" per requested planned_topic, in the same order, each with "planned_topic" copied back verbatim and its own "blocks".',
+            '- Write a real, substantial paragraph of flowing prose for each section — grounded in the source document. Never return an empty section, a section containing only a wikilink, or a bare punctuation mark.',
+            '- Preserve concrete details the source document actually states for each section — roles, responsibilities, agenda items, participants, frequency, and decision flow — when the source material describes them.',
+            '- Do not invent facts not supported by the source document; if the source genuinely says nothing more about a section, write the fullest accurate paragraph the source material supports rather than an empty or thin section.',
             '',
             'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
             '- No HTML comments (<!-- ... -->)',
@@ -326,7 +430,7 @@ class WikiPageContentAiClient
             '- No filenames, document IDs, run IDs, or internal technical identifiers',
             '- No mention of AI generation, confidence levels, or approval status',
             '',
-            'Every ordinary content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
+            'Every content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -349,19 +453,18 @@ class WikiPageContentAiClient
         $parts = [
             "Page title: {$pageTitle}",
             '',
-            'PREVIOUSLY GENERATED PAGE (needs repair — keep what is good, fix only the sections listed below):',
+            'PREVIOUSLY GENERATED PAGE (context only, so you know what already exists and never repeat it — it is kept exactly as-is except for the section(s) below, which do not exist yet or are still empty/link-only):',
             '',
             $existingMarkdown,
             '',
             '---',
             '',
-            'SECTIONS TO REPAIR:',
+            'SECTIONS TO REPAIR (return ONLY these, one per planned_topic, in this exact order — do not include the heading itself):',
             '',
         ];
 
         foreach ($issues as $issue) {
-            $heading = $issue['heading'] ?? $issue['planned_topic'];
-            $parts[] = sprintf('- "%s" — planned topic: %s (%s)', $heading, $issue['planned_topic'], $issue['type']);
+            $parts[] = sprintf('- planned_topic: %s (previous problem: %s)', $issue['planned_topic'], $issue['type']);
         }
 
         $parts[] = '';
@@ -830,6 +933,60 @@ class WikiPageContentAiClient
         return implode("\n", $parts);
     }
 
+    /**
+     * The per-block item schema shared by schema() (full-page generation) and
+     * repairSectionsSchema() (Wiki run-593: section-only repair) — kept as one definition so the
+     * two request shapes can never silently drift apart on what a "block" is.
+     */
+    private static function blockItemSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'markdown' => ['type' => 'string'],
+                'content_origin' => [
+                    'type' => 'string',
+                    'enum' => [
+                        EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                        EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    ],
+                ],
+                'source_element_keys' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                ],
+                'source_element_types' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                ],
+                'best_practice_reason' => [
+                    'type' => ['string', 'null'],
+                ],
+                'link_intents' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'target_slug' => ['type' => 'string'],
+                            'reason' => ['type' => 'string'],
+                        ],
+                        'required' => ['target_slug', 'reason'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => [
+                'markdown',
+                'content_origin',
+                'source_element_keys',
+                'source_element_types',
+                'best_practice_reason',
+                'link_intents',
+            ],
+            'additionalProperties' => false,
+        ];
+    }
+
     private static function schema(): array
     {
         return [
@@ -841,51 +998,7 @@ class WikiPageContentAiClient
                         'blocks' => [
                             'type' => 'array',
                             'minItems' => 1,
-                            'items' => [
-                                'type' => 'object',
-                                'properties' => [
-                                    'markdown' => ['type' => 'string'],
-                                    'content_origin' => [
-                                        'type' => 'string',
-                                        'enum' => [
-                                            EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                                            EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
-                                        ],
-                                    ],
-                                    'source_element_keys' => [
-                                        'type' => 'array',
-                                        'items' => ['type' => 'string'],
-                                    ],
-                                    'source_element_types' => [
-                                        'type' => 'array',
-                                        'items' => ['type' => 'string'],
-                                    ],
-                                    'best_practice_reason' => [
-                                        'type' => ['string', 'null'],
-                                    ],
-                                    'link_intents' => [
-                                        'type' => 'array',
-                                        'items' => [
-                                            'type' => 'object',
-                                            'properties' => [
-                                                'target_slug' => ['type' => 'string'],
-                                                'reason' => ['type' => 'string'],
-                                            ],
-                                            'required' => ['target_slug', 'reason'],
-                                            'additionalProperties' => false,
-                                        ],
-                                    ],
-                                ],
-                                'required' => [
-                                    'markdown',
-                                    'content_origin',
-                                    'source_element_keys',
-                                    'source_element_types',
-                                    'best_practice_reason',
-                                    'link_intents',
-                                ],
-                                'additionalProperties' => false,
-                            ],
+                            'items' => self::blockItemSchema(),
                         ],
                     ],
                     'required' => ['blocks'],
@@ -893,6 +1006,40 @@ class WikiPageContentAiClient
                 ],
             ],
             'required' => ['page'],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * Wiki run-593: one entry per requested planned_topic — "blocks" is body content only (no
+     * heading), the exact same per-block shape schema() uses. The caller
+     * (EnterpriseWikiGenerateAppliedPagesService) prepends the literal planned_topic text as the
+     * `## ` heading itself; the model is never asked to produce a heading at all.
+     */
+    private static function repairSectionsSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'sections' => [
+                    'type' => 'array',
+                    'minItems' => 1,
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'planned_topic' => ['type' => 'string'],
+                            'blocks' => [
+                                'type' => 'array',
+                                'minItems' => 1,
+                                'items' => self::blockItemSchema(),
+                            ],
+                        ],
+                        'required' => ['planned_topic', 'blocks'],
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => ['sections'],
             'additionalProperties' => false,
         ];
     }

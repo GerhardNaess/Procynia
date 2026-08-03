@@ -632,7 +632,14 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
             'warnings' => [],
         ]]);
 
-        $emptySectionsMarkdown = "# Samhandlings- og styringsmodell\n\nInnledende avsnitt.\n\n## Roller i styringsmodellen\n\n## Møtefora og beslutningsflyt\n\nSee [[{$article->slug}]] for details.";
+        // One block per heading/paragraph group — matching the real "STRUCTURED BLOCK OUTPUT"
+        // contract (never one giant block for the whole page), so spliceSectionBlocks() replaces
+        // only the two empty heading blocks and leaves the intro block completely untouched.
+        $emptySectionsBlocks = [
+            'Innledende avsnitt.',
+            '## Roller i styringsmodellen',
+            "## Møtefora og beslutningsflyt\n\nSee [[{$article->slug}]] for details.",
+        ];
 
         $this->mock(WikiPageContentAiClient::class)
             ->shouldReceive('generatePageFromSource')
@@ -645,7 +652,10 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 string $additionalContext = '',
                 array $linkCatalog = [],
                 array $sourceElements = [],
-            ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements))
+            ): array => $this->structuredPageResultFromBlocks(
+                array_merge(["# {$pageTitle}"], $emptySectionsBlocks),
+                $sourceElements,
+            ))
             ->shouldReceive('repairPlannedSections')
             ->once()
             ->andReturnUsing(function (
@@ -662,11 +672,18 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 $this->assertCount(2, $issues);
                 $this->assertStringContainsString('Roller i styringsmodellen', $existingMarkdown);
 
-                $repairedMarkdown = "# Samhandlings- og styringsmodell\n\nInnledende avsnitt.\n\n"
-                    ."## Roller i styringsmodellen\n\nDelivery Executive har overordnet ansvar for leveransen.\n\n"
-                    ."## Møtefora og beslutningsflyt\n\nStrategisk forum møtes årlig og behandler prioriteringer. See [[{$article->slug}]] for details.";
-
-                return $this->structuredPageResult($repairedMarkdown, $sourceElements);
+                return [
+                    $this->repairedSectionResult(
+                        'Roller i styringsmodellen',
+                        'Delivery Executive har overordnet ansvar for leveransen.',
+                        $sourceElements,
+                    ),
+                    $this->repairedSectionResult(
+                        'Møtefora og beslutningsflyt',
+                        "Strategisk forum møtes årlig og behandler prioriteringer. See [[{$article->slug}]] for details.",
+                        $sourceElements,
+                    ),
+                ];
             });
 
         Queue::fake();
@@ -675,8 +692,13 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         );
 
         $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+        $this->assertStringContainsString('## Roller i styringsmodellen', $version->content_markdown);
         $this->assertStringContainsString('Delivery Executive har overordnet ansvar', $version->content_markdown);
+        $this->assertStringContainsString('## Møtefora og beslutningsflyt', $version->content_markdown);
         $this->assertStringContainsString('Strategisk forum møtes årlig', $version->content_markdown);
+        // The original introductory paragraph (never part of any blocking section) survives the
+        // repair splice completely untouched.
+        $this->assertStringContainsString('Innledende avsnitt.', $version->content_markdown);
 
         $pivot = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
@@ -684,6 +706,174 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
             ->first();
         $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
         $this->assertSame($version->id, $pivot->generated_page_version_id);
+    }
+
+    /**
+     * Wiki run-593: the repair AI is never given a heading to invent — the caller
+     * (EnterpriseWikiGenerateAppliedPagesService) prepends the EXACT planned_topic text as the
+     * `## ` heading itself, regardless of what wording the model's own "planned_topic" echo used.
+     */
+    public function test_repair_uses_the_exact_planned_heading_not_a_model_invented_one(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        // Real grounding for the planned topic (validator's hasSourceGrounding() requires at
+        // least one significant topic word to actually appear in the source text — the exact
+        // run-593 shape: "rolle"/"møtefora"/"oversikt" all genuinely present).
+        $document->update(['extracted_text' => 'Dokumentet beskriver roller og møtefora i organisasjonen. Oversikt over ansvar.']);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Styringsnivåer');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Rolle- og møtefora-oversikt'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        // No matching heading at all yet (the exact run-593 shape: planned_section_missing).
+        $missingSectionMarkdown = "# Styringsnivåer\n\nInnledende avsnitt. See [[{$article->slug}]] for details.";
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($missingSectionMarkdown, $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array {
+                // Only the one missing section is requested — never the whole page.
+                $this->assertCount(1, $issues);
+                $this->assertSame('Rolle- og møtefora-oversikt', $issues[0]['planned_topic']);
+
+                return [
+                    $this->repairedSectionResult(
+                        'Rolle- og møtefora-oversikt',
+                        'Delivery Executive og Change Advisory Board møtes månedlig for prioritering.',
+                        $sourceElements,
+                    ),
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+        $this->assertStringContainsString("## Rolle- og møtefora-oversikt\n\nDelivery Executive og Change Advisory Board", $version->content_markdown);
+        $this->assertStringContainsString('Innledende avsnitt.', $version->content_markdown);
+    }
+
+    /**
+     * Wiki run-593: a repair response whose section is only a wikilink (no real prose) is still
+     * rejected — not by the AI client (structurally non-empty), but by
+     * EnterpriseWikiPlannedSectionCoverageValidator's own unchanged substance check, re-run after
+     * the section is spliced in.
+     */
+    public function test_repair_with_only_a_link_in_the_new_section_still_stops_generation(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        // Real grounding for the planned topic (validator's hasSourceGrounding() requires at
+        // least one significant topic word to actually appear in the source text — the exact
+        // run-593 shape: "rolle"/"møtefora"/"oversikt" all genuinely present).
+        $document->update(['extracted_text' => 'Dokumentet beskriver roller og møtefora i organisasjonen. Oversikt over ansvar.']);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Styringsnivåer');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => ['Rolle- og møtefora-oversikt'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $missingSectionMarkdown = "# Styringsnivåer\n\nInnledende avsnitt. See [[{$article->slug}]] for details.";
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResult($missingSectionMarkdown, $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => [
+                $this->repairedSectionResult('Rolle- og møtefora-oversikt', "[[{$article->slug}]]", $sourceElements),
+            ]);
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+                app(EnterpriseWikiGenerateAppliedPagesService::class)
+            );
+            $this->fail('Expected EnterpriseWikiPageGenerationIncompleteException to propagate.');
+        } catch (EnterpriseWikiPageGenerationIncompleteException $e) {
+            $this->assertContains('Rolle- og møtefora-oversikt', $e->missingOrEmptySections);
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
     public function test_repair_that_still_leaves_empty_sections_stops_generation_with_a_domain_exception(): void
@@ -727,7 +917,8 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 array $linkCatalog = [],
                 array $sourceElements = [],
             ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements))
-            // The repair attempt returns exactly the same broken shape — still empty.
+            // The repair attempt still returns link-only/below-minimum bodies for both sections —
+            // the validator rejects them exactly as it would have rejected the original response.
             ->shouldReceive('repairPlannedSections')
             ->once()
             ->andReturnUsing(fn (
@@ -740,7 +931,10 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 string $additionalContext = '',
                 array $linkCatalog = [],
                 array $sourceElements = [],
-            ): array => $this->structuredPageResult($emptySectionsMarkdown, $sourceElements));
+            ): array => [
+                $this->repairedSectionResult('Roller i styringsmodellen', "[[{$article->slug}]]", $sourceElements),
+                $this->repairedSectionResult('Møtefora og beslutningsflyt', "[[{$article->slug}]]", $sourceElements),
+            ]);
 
         Queue::fake();
 
@@ -1459,6 +1653,67 @@ XML;
             'blocks' => [
                 [
                     'markdown' => $markdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_element_keys' => [(string) $sourceElement['source_element_key']],
+                    'source_element_types' => [(string) $sourceElement['source_element_type']],
+                    'best_practice_reason' => null,
+                    'link_intents' => [],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Same shape as structuredPageResult(), but one block per given markdown fragment instead of
+     * a single block for the whole page — matching the real "one block per heading, paragraph, or
+     * heading+paragraph group" contract, so tests exercising spliceSectionBlocks() see the same
+     * block granularity a real AI response actually has.
+     *
+     * @param  list<string>  $blockMarkdowns
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function structuredPageResultFromBlocks(array $blockMarkdowns, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        $blocks = array_map(fn (string $markdown): array => [
+            'markdown' => $markdown,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_element_keys' => [(string) $sourceElement['source_element_key']],
+            'source_element_types' => [(string) $sourceElement['source_element_type']],
+            'best_practice_reason' => null,
+            'link_intents' => [],
+        ], $blockMarkdowns);
+
+        return [
+            'markdown' => trim(implode("\n\n", $blockMarkdowns)),
+            'blocks' => $blocks,
+        ];
+    }
+
+    /**
+     * Wiki run-593: the shape WikiPageContentAiClient::repairPlannedSections() now returns per
+     * requested planned_topic — body content only, never the heading line itself (the caller
+     * prepends the exact planned_topic text as the heading in code).
+     *
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array{planned_topic: string, blocks: list<array<string, mixed>>}
+     */
+    private function repairedSectionResult(string $plannedTopic, string $bodyMarkdown, array $sourceElements): array
+    {
+        $sourceElement = $sourceElements[0] ?? [
+            'source_element_key' => 'document-1-full-text',
+            'source_element_type' => 'manual',
+        ];
+
+        return [
+            'planned_topic' => $plannedTopic,
+            'blocks' => [
+                [
+                    'markdown' => $bodyMarkdown,
                     'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                     'source_element_keys' => [(string) $sourceElement['source_element_key']],
                     'source_element_types' => [(string) $sourceElement['source_element_type']],

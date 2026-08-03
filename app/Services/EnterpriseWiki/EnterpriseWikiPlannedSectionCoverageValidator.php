@@ -74,12 +74,12 @@ class EnterpriseWikiPlannedSectionCoverageValidator
                 continue;
             }
 
-            $normalizedTopic = $this->normalize($topic);
+            $normalizedTopic = self::normalize($topic);
             $matchedHeading = null;
             $matchedBody = null;
 
             foreach ($sections as $section) {
-                $normalizedHeading = $this->normalize($section['heading']);
+                $normalizedHeading = self::normalize($section['heading']);
 
                 if ($normalizedHeading === ''
                     || ! str_contains($normalizedTopic, $normalizedHeading) && ! str_contains($normalizedHeading, $normalizedTopic)
@@ -229,8 +229,12 @@ class EnterpriseWikiPlannedSectionCoverageValidator
     /**
      * Normalizes a topic/heading for fuzzy comparison: strips parenthetical asides (topics often
      * carry a clarifying suffix a heading omits), lowercases, and collapses punctuation/whitespace.
+     *
+     * Public (unchanged logic, visibility only) so EnterpriseWikiGenerateAppliedPagesService's own
+     * section-splice matching (Wiki run-593: precise section repair) uses the EXACT same rule this
+     * validator itself re-checks the repaired page against, rather than a second, divergent copy.
      */
-    private function normalize(string $text): string
+    public static function normalize(string $text): string
     {
         $withoutParens = preg_replace('/\([^)]*\)/', '', $text) ?? $text;
         $lower = mb_strtolower($withoutParens);
