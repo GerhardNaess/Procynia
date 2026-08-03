@@ -75,6 +75,18 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
 }
 
 /**
+ * Matches a status-like value (run.status while active, or run.failed_phase for a failed run) to
+ * its RUN_TIMELINE_STEPS index, applying the same aliasing either one may need: 'queued' covers
+ * the early 'running'/'sections_planned' sub-states, and 'generating_pages' also covers
+ * 'generating_concept_entity_pages' (phase 2 of page generation). Returns -1 when nothing matches.
+ */
+function findTimelineStepIndex(statusLike) {
+    return RUN_TIMELINE_STEPS.findIndex((step) => step.key === statusLike
+        || (step.key === 'queued' && ['queued', 'running', 'sections_planned'].includes(statusLike))
+        || (step.key === 'generating_pages' && statusLike === 'generating_concept_entity_pages'));
+}
+
+/**
  * Renders the per-run step timeline. 'escalated' is a terminal status that never literally
  * matches any RUN_TIMELINE_STEPS key, so a naive "find the step matching run.status" lookup
  * always misses for it — and previously fell back to marking the LAST step (Dokumenteier) as the
@@ -86,11 +98,18 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
  * ALWAYS stopped at the QA step and NEVER reached Document Owner review, so the QA step (not
  * Dokumenteier) is where the error belongs.
  *
- * 'failed' is deliberately NOT given the same treatment: it can originate from many different
- * pipeline stages (maintainer decision, apply, page generation, wikilink materialization, or a QA
- * technical failure), and none of that is recoverable from run.status alone — the previous
- * fallback (mark the last step red) is kept as-is for that case pending a reliable per-step failure
- * signal.
+ * 'failed' (Wiki run-588): can originate from many different pipeline stages (maintainer
+ * decision, apply, page generation, wikilink materialization, or a QA technical failure) — this
+ * used to be unrecoverable from run.status alone (which is always the generic 'failed' by the time
+ * the frontend sees it) and fell back to marking every step but the last as done, regardless of
+ * where the run actually stopped. EnterpriseWikiDocumentFlowService::markRunFailed() now persists
+ * the actual phase separately as run.failed_phase, so the real failing step is used directly: every
+ * step before it is done, the failing step itself is the error, and every step after it is empty
+ * (never reached — never implied complete). When failed_phase is missing or unrecognized (an older
+ * run recorded before this field existed, or some future/unexpected value), every step is shown
+ * neutrally ('empty') rather than guessing — the run's own overall status label elsewhere in the UI
+ * already conveys "Feilet"; this per-step timeline must never imply verification/QA completed
+ * without real data to back that up.
  */
 export function getRunTimelineState(run, stepIndex) {
     if (!run) return 'empty';
@@ -112,19 +131,20 @@ export function getRunTimelineState(run, stepIndex) {
         return 'empty';
     }
 
-    const currentIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === run.status
-        || (step.key === 'queued' && ['queued', 'running', 'sections_planned'].includes(run.status))
-        || (step.key === 'generating_pages' && run.status === 'generating_concept_entity_pages'));
-
     if (run.status === 'failed') {
-        if (currentIndex === -1) {
-            return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'error';
+        const failedIndex = findTimelineStepIndex(run.failed_phase);
+
+        if (failedIndex === -1) {
+            return 'empty';
         }
-        if (stepIndex < currentIndex) return 'done';
-        if (stepIndex === currentIndex) return 'error';
+
+        if (stepIndex < failedIndex) return 'done';
+        if (stepIndex === failedIndex) return 'error';
 
         return 'empty';
     }
+
+    const currentIndex = findTimelineStepIndex(run.status);
 
     if (run.status === 'awaiting_document_owner_approval') {
         return stepIndex < RUN_TIMELINE_STEPS.length - 1 ? 'done' : 'waiting';

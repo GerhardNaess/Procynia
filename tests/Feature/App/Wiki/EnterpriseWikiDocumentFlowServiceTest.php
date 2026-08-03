@@ -189,7 +189,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     #[DataProvider('stage1FailingStepProvider')]
-    public function test_run_marks_run_failed_when_a_stage1_step_throws(string $failingStep, array $expectedCallOrder): void
+    public function test_run_marks_run_failed_when_a_stage1_step_throws(string $failingStep, array $expectedCallOrder, string $expectedFailedPhase): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -212,13 +212,16 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $this->assertNotNull($run->finished_at);
         $this->assertSame(str_replace('_', ' ', $failingStep).' failed', $run->error_message);
         $this->assertNotSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        // Wiki run-588: the exact phase the run was in when it failed, persisted separately
+        // from the generic terminal 'status' above.
+        $this->assertSame($expectedFailedPhase, $run->failed_phase);
     }
 
     public static function stage1FailingStepProvider(): array
     {
         return [
-            'maintainer decision' => ['maintainer_decision', ['maintainer_decision']],
-            'apply' => ['apply', ['maintainer_decision', 'apply']],
+            'maintainer decision' => ['maintainer_decision', ['maintainer_decision'], EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION],
+            'apply' => ['apply', ['maintainer_decision', 'apply'], EnterpriseWikiIngestRun::STATUS_APPLYING],
         ];
     }
 
@@ -284,7 +287,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     #[DataProvider('stage2FailingStepProvider')]
-    public function test_continue_after_pages_generated_marks_run_failed_when_a_step_throws(string $failingStep, array $expectedCallOrder, bool $qaContext): void
+    public function test_continue_after_pages_generated_marks_run_failed_when_a_step_throws(string $failingStep, array $expectedCallOrder, bool $qaContext, string $expectedFailedPhase): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -306,6 +309,10 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
         $this->assertNotNull($run->finished_at);
         $this->assertSame(str_replace('_', ' ', $failingStep).' failed', $run->error_message);
+        // Wiki run-588: materialize/extract/verify/lint all fail while still nominally in the
+        // verification_linking phase (currentStage only advances to STATUS_QA right before the
+        // performPostIngestQa() call) — only the 'qa' failure is attributed to the qa phase.
+        $this->assertSame($expectedFailedPhase, $run->failed_phase);
 
         if ($qaContext) {
             $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
@@ -319,11 +326,11 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     public static function stage2FailingStepProvider(): array
     {
         return [
-            'materialize wikilinks' => ['materialize', ['materialize'], false],
-            'extract claims' => ['extract', ['materialize', 'extract'], false],
-            'verify claims' => ['verify', ['materialize', 'extract', 'verify'], false],
-            'lint' => ['lint', ['materialize', 'extract', 'verify', 'lint'], false],
-            'qa' => ['qa', ['materialize', 'extract', 'verify', 'lint', 'qa'], true],
+            'materialize wikilinks' => ['materialize', ['materialize'], false, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING],
+            'extract claims' => ['extract', ['materialize', 'extract'], false, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING],
+            'verify claims' => ['verify', ['materialize', 'extract', 'verify'], false, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING],
+            'lint' => ['lint', ['materialize', 'extract', 'verify', 'lint'], false, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING],
+            'qa' => ['qa', ['materialize', 'extract', 'verify', 'lint', 'qa'], true, EnterpriseWikiIngestRun::STATUS_QA],
         ];
     }
 

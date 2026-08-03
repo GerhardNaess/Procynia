@@ -530,9 +530,71 @@ class EnterpriseWikiRunFindingsConsistencyTest extends TestCase
         $this->assertSame($panelFirst['findings'][0]['id'], $panelSecond['findings'][0]['id'], 'The grouped finding id must stay stable across requests.');
     }
 
+    /**
+     * Wiki run-588: the Kjøringer runs-list payload must expose failed_phase so the frontend
+     * timeline never has to guess (or fall back to marking every step but the last as done) — see
+     * runFindingsLogic.js::getRunTimelineState().
+     */
+    public function test_runs_list_payload_includes_failed_phase(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            'failed_phase' => EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+            'error_message' => 'Figure conflict.',
+            'finished_at' => now(),
+        ]);
+
+        $failedPhase = 'NOT_SET';
+        $this->actingAs($user)->get('/app/wiki?tab=runs')->assertViewHas('page', function (array $inertia) use ($run, &$failedPhase): bool {
+            $failedPhase = $this->extractFailedPhaseFromRunsPayload($inertia, $run->id);
+
+            return true;
+        });
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION, $failedPhase);
+    }
+
+    public function test_runs_list_payload_has_null_failed_phase_for_a_run_that_never_failed(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+
+        $failedPhase = 'NOT_SET';
+        $this->actingAs($user)->get('/app/wiki?tab=runs')->assertViewHas('page', function (array $inertia) use ($run, &$failedPhase): bool {
+            $failedPhase = $this->extractFailedPhaseFromRunsPayload($inertia, $run->id);
+
+            return true;
+        });
+
+        $this->assertNull($failedPhase);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * Returns the matched run's 'failed_phase' value, or the literal string 'MISSING_KEY' when
+     * either the run itself isn't in the payload or the key is genuinely absent — distinct from a
+     * present key whose value is a real `null` (a run that never failed), which `?? 'MISSING_KEY'`
+     * cannot tell apart from a missing key.
+     */
+    private function extractFailedPhaseFromRunsPayload(array $inertia, int $runId): mixed
+    {
+        $found = collect(data_get($inertia, 'props.runs', []))->firstWhere('id', $runId);
+
+        if ($found === null || ! array_key_exists('failed_phase', $found)) {
+            return 'MISSING_KEY';
+        }
+
+        return $found['failed_phase'];
+    }
 
     /**
      * @return array{0: int, 1: array{summary: array<string, mixed>, findings: list<array<string, mixed>>}}

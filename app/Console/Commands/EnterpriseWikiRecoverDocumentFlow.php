@@ -178,6 +178,10 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
             'finished_at' => null,
             'error_message' => null,
+            // Wiki run-588: the run is being actively resumed — a stale failed_phase from the
+            // failure being recovered from must not keep marking a later step red for a run
+            // that is no longer failed.
+            'failed_phase' => null,
         ];
 
         if ($wasStaleQaClaim) {

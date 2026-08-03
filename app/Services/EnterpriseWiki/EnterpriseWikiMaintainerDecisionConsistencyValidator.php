@@ -231,15 +231,26 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
      * two different pages) within a single, already-assembled decision — including a plain
      * single_call decision, which never goes through the merger at all.
      *
+     * Wiki run-588: follows the EXACT same article+summary pairing exception as
+     * EnterpriseWikiMaintainerDecisionMerger::dedupeAndCheckFiguresForPage() — a figure legitimately
+     * claimed by both source_article and source_summary is not an issue; any other pair, or a third
+     * page claiming the same key, still is. Kept as separate, duplicated logic (not a shared
+     * helper) — same precedent as entriesWithGuidance()'s own label-based role detection and the
+     * rest of this class's relationship to the merger: two different call sites over different
+     * inputs (a single, already-assembled decision here vs. a live batch merge there).
+     *
      * @return string[]
      */
     private function findConflictingPlannedFigureAssignments(array $decision): array
     {
         $issues = [];
+        /** @var array<string, list<array{title: string, role: string}>> $seenBySourceKey */
         $seenBySourceKey = [];
 
         foreach ($this->entriesWithGuidance($decision) as [$label, $entry]) {
             $pageTitle = (string) ($entry['title'] ?? $label);
+            $pageRole = in_array($label, ['source_article', 'source_summary'], true) ? $label : 'other';
+            $seenOnThisPage = [];
 
             foreach ((array) ($entry['planned_figures'] ?? []) as $figure) {
                 if (! is_array($figure)) {
@@ -252,19 +263,43 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
                     continue;
                 }
 
-                if (isset($seenBySourceKey[$sourceElementKey]) && $seenBySourceKey[$sourceElementKey] !== $pageTitle) {
-                    $issues[] = "Figure \"{$sourceElementKey}\" is planned onto both ".
-                        "\"{$seenBySourceKey[$sourceElementKey]}\" and \"{$pageTitle}\" — a figure must ".
-                        'belong to at most one page.';
-
+                if (in_array($sourceElementKey, $seenOnThisPage, true)) {
+                    // Exact repeat within this same page's own planned_figures — not a
+                    // cross-page conflict, matches EnterpriseWikiMaintainerDecisionMerger's
+                    // identical same-page dedup.
                     continue;
                 }
 
-                $seenBySourceKey[$sourceElementKey] = $pageTitle;
+                $seenOnThisPage[] = $sourceElementKey;
+
+                $existingClaims = $seenBySourceKey[$sourceElementKey] ?? [];
+
+                if ($existingClaims !== []) {
+                    $isLegitimateArticleSummaryPair = count($existingClaims) === 1
+                        && $this->isArticleSummaryPair($existingClaims[0]['role'], $pageRole);
+
+                    if (! $isLegitimateArticleSummaryPair) {
+                        $issues[] = "Figure \"{$sourceElementKey}\" is planned onto both ".
+                            "\"{$existingClaims[0]['title']}\" and \"{$pageTitle}\" — a figure must ".
+                            'belong to at most one page (or, exclusively, to the run\'s own source_article + source_summary pair).';
+
+                        continue;
+                    }
+                }
+
+                $seenBySourceKey[$sourceElementKey][] = ['title' => $pageTitle, 'role' => $pageRole];
             }
         }
 
         return $issues;
+    }
+
+    private function isArticleSummaryPair(string $roleA, string $roleB): bool
+    {
+        $roles = [$roleA, $roleB];
+        sort($roles);
+
+        return $roles === ['source_article', 'source_summary'];
     }
 
     /** @param  string[]  $knownTitles */

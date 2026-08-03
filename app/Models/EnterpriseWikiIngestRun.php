@@ -193,6 +193,28 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_QA,
     ];
 
+    /**
+     * Every in-flight pipeline phase `failed_phase` may legitimately record — the exact phase the
+     * run was in the instant it failed (Wiki run-588: the run's own `status` is unconditionally
+     * overwritten to STATUS_FAILED by markRunFailed(), so without this separate field the phase at
+     * failure is lost the moment the row is persisted). Deliberately narrower than
+     * NON_TERMINAL_STATUSES: STATUS_DECISION_ONLY is never a phase a run can "fail out of" via
+     * markRunFailed() — a decision_only run follows a completely different code path that never
+     * calls it.
+     */
+    public const FAILED_PHASES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+        self::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+    ];
+
     protected $fillable = [
         'uuid',
         'customer_id',
@@ -202,6 +224,7 @@ class EnterpriseWikiIngestRun extends Model
         'source_id',
         'source_hash',
         'status',
+        'failed_phase',
         'model_used',
         'input_tokens',
         'output_tokens',
@@ -280,6 +303,17 @@ class EnterpriseWikiIngestRun extends Model
     public function isTerminal(): bool
     {
         return in_array($this->status, self::TERMINAL_STATUSES, true);
+    }
+
+    /**
+     * Whether $phase is one of the known pipeline phases `failed_phase` may record — used by
+     * EnterpriseWikiDocumentFlowService::markRunFailed() to avoid ever persisting an
+     * unvalidated/free-text value (e.g. a future ad-hoc bookkeeping string local to a service
+     * method) into this column.
+     */
+    public static function isValidFailedPhase(?string $phase): bool
+    {
+        return $phase !== null && in_array($phase, self::FAILED_PHASES, true);
     }
 
     public function isQueued(): bool

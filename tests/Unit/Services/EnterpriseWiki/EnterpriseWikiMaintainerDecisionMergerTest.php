@@ -240,6 +240,121 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
         $this->assertCount(1, $merged['concept_pages'][0]['planned_figures']);
     }
 
+    // =========================================================================
+    // Wiki run-588: article + summary figure-pairing exception
+    // =========================================================================
+
+    // 1. The same figure planned onto BOTH the run's own source_article and source_summary (the
+    // exact run-588 shape) is legitimate — the prompt itself tells the model this pairing is fine.
+    public function test_same_figure_on_source_article_and_source_summary_is_allowed(): void
+    {
+        $merged = $this->merger()->merge(
+            $this->globalPlanWithFigures([$this->figure('img1', required: true)], [$this->figure('img1', required: false)]),
+            [],
+        );
+
+        $this->assertCount(1, $merged['source_article']['planned_figures']);
+        $this->assertCount(1, $merged['source_summary']['planned_figures']);
+        $this->assertSame('img1', $merged['source_article']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['source_summary']['planned_figures'][0]['source_element_key']);
+    }
+
+    // 2. Differing section_placement between the article's and summary's own entries is allowed —
+    // each page keeps its own complete entry, nothing is merged or overwritten.
+    public function test_article_and_summary_figure_pairing_allows_different_section_placement(): void
+    {
+        $articleFigure = $this->figure('img1', required: true);
+        $articleFigure['section_placement'] = 'Styringsmodell';
+        $summaryFigure = $this->figure('img1', required: false);
+        $summaryFigure['section_placement'] = null;
+
+        $merged = $this->merger()->merge($this->globalPlanWithFigures([$articleFigure], [$summaryFigure]), []);
+
+        $this->assertSame('Styringsmodell', $merged['source_article']['planned_figures'][0]['section_placement']);
+        $this->assertNull($merged['source_summary']['planned_figures'][0]['section_placement']);
+    }
+
+    // 3. Differing caption_hint between the article's and summary's own entries is allowed.
+    public function test_article_and_summary_figure_pairing_allows_different_caption_hint(): void
+    {
+        $articleFigure = $this->figure('img1', required: true);
+        $articleFigure['caption_hint'] = 'Styringsmodell (detaljert)';
+        $summaryFigure = $this->figure('img1', required: false);
+        $summaryFigure['caption_hint'] = 'Styringsmodell';
+
+        $merged = $this->merger()->merge($this->globalPlanWithFigures([$articleFigure], [$summaryFigure]), []);
+
+        $this->assertSame('Styringsmodell (detaljert)', $merged['source_article']['planned_figures'][0]['caption_hint']);
+        $this->assertSame('Styringsmodell', $merged['source_summary']['planned_figures'][0]['caption_hint']);
+    }
+
+    // 4. Article + concept page is still a hard conflict — the exception is narrow, exactly the
+    // source_article/source_summary pair, never article + anything else.
+    public function test_same_figure_on_article_and_a_concept_page_still_throws_merge_conflict(): void
+    {
+        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+
+        $this->merger()->merge(
+            $this->globalPlanWithFigures([$this->figure('img1', required: true)], []),
+            [
+                $this->batch(
+                    [$this->candidate('Incident Management', 'create')],
+                    [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: false)])],
+                ),
+            ],
+        );
+    }
+
+    // 5. Summary + concept page is still a hard conflict.
+    public function test_same_figure_on_summary_and_a_concept_page_still_throws_merge_conflict(): void
+    {
+        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+
+        $this->merger()->merge(
+            $this->globalPlanWithFigures([], [$this->figure('img1', required: true)]),
+            [
+                $this->batch(
+                    [$this->candidate('Incident Management', 'create')],
+                    [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: false)])],
+                ),
+            ],
+        );
+    }
+
+    // 7. A figure legitimately paired onto article+summary, then also claimed by a THIRD page
+    // (any role), is still a hard conflict — the exception only ever covers exactly two pages.
+    public function test_same_figure_on_article_summary_and_a_third_page_throws_merge_conflict(): void
+    {
+        $this->expectException(EnterpriseWikiMaintainerDecisionMergeConflictException::class);
+
+        $this->merger()->merge(
+            $this->globalPlanWithFigures([$this->figure('img1', required: true)], [$this->figure('img1', required: false)]),
+            [
+                $this->batch(
+                    [$this->candidate('Incident Management', 'create')],
+                    [$this->pageWithFigures('Incident Management', figures: [$this->figure('img1', required: false)])],
+                ),
+            ],
+        );
+    }
+
+    // 11. The exact run-588 shape (global plan pairs img1 onto article+summary, batches propose
+    // unrelated concept pages with no figures at all) now completes the merge without throwing.
+    public function test_run_588_like_fixture_completes_merge_without_conflict(): void
+    {
+        $merged = $this->merger()->merge(
+            $this->globalPlanWithFigures([$this->figure('img1', required: true)], [$this->figure('img1', required: false)]),
+            [
+                $this->batch([$this->candidate('Styringsmodell', 'create')], [$this->page('Styringsmodell')]),
+                $this->batch([$this->candidate('Møtestruktur', 'create')], [$this->page('Møtestruktur')]),
+            ],
+        );
+
+        $this->assertSame('img1', $merged['source_article']['planned_figures'][0]['source_element_key']);
+        $this->assertSame('img1', $merged['source_summary']['planned_figures'][0]['source_element_key']);
+        $this->assertCount(2, $merged['concept_pages']);
+    }
+
     public function test_figure_conflict_message_identifies_the_source_element_key(): void
     {
         try {
@@ -308,6 +423,15 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
             'no_action_reason' => null,
             'warnings' => [],
         ];
+    }
+
+    private function globalPlanWithFigures(array $articleFigures, array $summaryFigures): array
+    {
+        $globalPlan = $this->globalPlan();
+        $globalPlan['source_article']['planned_figures'] = $articleFigures;
+        $globalPlan['source_summary']['planned_figures'] = $summaryFigures;
+
+        return $globalPlan;
     }
 
     private function batch(array $candidates, array $pages): array

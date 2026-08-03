@@ -124,6 +124,94 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
     });
 });
 
+describe('getRunTimelineState — failed run uses failed_phase, not the generic status (Wiki run-588)', () => {
+    const stepIndex = (key) => RUN_TIMELINE_STEPS.findIndex((step) => step.key === key);
+
+    // 15. The exact run-588 shape: failed during maintainer_decision.
+    test('failed in maintainer_decision shows Beslutning as error and every later step empty', () => {
+        const run = { status: 'failed', failed_phase: 'maintainer_decision' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('queued')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('maintainer_decision')), 'error');
+        assert.equal(getRunTimelineState(run, stepIndex('applying')), 'empty');
+        assert.equal(getRunTimelineState(run, stepIndex('generating_pages')), 'empty');
+        assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'empty');
+        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'empty');
+        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'empty');
+    });
+
+    // 16. Failed in generating_pages: earlier steps done, Sider red, later steps empty.
+    test('failed in generating_pages shows Sider as error and earlier steps done', () => {
+        const run = { status: 'failed', failed_phase: 'generating_pages' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('queued')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('maintainer_decision')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('applying')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('generating_pages')), 'error');
+        assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'empty');
+        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'empty');
+    });
+
+    test('failed_phase generating_concept_entity_pages is aliased to the Sider step, same as the active-run alias', () => {
+        const run = { status: 'failed', failed_phase: 'generating_concept_entity_pages' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('generating_pages')), 'error');
+    });
+
+    // 17. Failed in verification_linking.
+    test('failed in verification_linking shows Verifisering as error', () => {
+        const run = { status: 'failed', failed_phase: 'verification_linking' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('applying')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('generating_pages')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'error');
+        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'empty');
+    });
+
+    // 18. Failed in qa.
+    test('failed in qa shows QA as error', () => {
+        const run = { status: 'failed', failed_phase: 'qa' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('verification_linking')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'error');
+        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'empty');
+    });
+
+    // 19. Failed in the document-owner phase.
+    test('failed in awaiting_document_owner_approval shows Dokumenteier as error', () => {
+        const run = { status: 'failed', failed_phase: 'awaiting_document_owner_approval' };
+
+        assert.equal(getRunTimelineState(run, stepIndex('qa')), 'done');
+        assert.equal(getRunTimelineState(run, stepIndex('awaiting_document_owner_approval')), 'error');
+    });
+
+    // 20. No failed_phase at all — must never mark all-but-last as done (the run-588 bug itself).
+    test('failed with no failed_phase marks every step neutral, never done', () => {
+        const run = { status: 'failed', failed_phase: null };
+
+        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
+            assert.equal(getRunTimelineState(run, i), 'empty', `step ${i} should be neutral, not done or error`);
+        }
+    });
+
+    // 21. An older failed run recorded before this field existed (failed_phase key absent entirely).
+    test('an older failed run without a failed_phase field at all is rendered the same conservative way', () => {
+        const run = { status: 'failed' };
+
+        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
+            assert.equal(getRunTimelineState(run, i), 'empty');
+        }
+    });
+
+    test('an unrecognized failed_phase value is treated the same as missing, never as a match', () => {
+        const run = { status: 'failed', failed_phase: 'some_future_unknown_phase' };
+
+        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
+            assert.equal(getRunTimelineState(run, i), 'empty');
+        }
+    });
+});
+
 describe('isRunStalled — requires BOTH an actively-processing status AND a long gap since progress', () => {
     const NOW = new Date('2026-07-31T12:00:00Z').getTime();
     const twentyMinutesAgo = new Date(NOW - 20 * 60_000).toISOString();

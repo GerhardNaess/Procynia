@@ -310,8 +310,11 @@ class EnterpriseWikiDocumentFlowService
                 return;
             }
 
-            $currentStage = 'finalizing';
-
+            // $currentStage deliberately stays STATUS_QA through finalize: there is no
+            // dedicated timeline step for "finalizing" (EnterpriseWikiIngestRun::FAILED_PHASES
+            // has no such value), and a failure here means QA itself already passed/reached a
+            // terminal verdict — the closest meaningful phase for both the persisted
+            // failed_phase and the qaContext guard below is still 'qa'.
             $fresh = $run->fresh() ?? $run;
 
             // Defense in depth: a concurrent invocation may already have finalized this run
@@ -357,6 +360,7 @@ class EnterpriseWikiDocumentFlowService
                 'started_at' => now(),
                 'finished_at' => null,
                 'error_message' => null,
+                'failed_phase' => null,
             ]);
 
             return $run->fresh();
@@ -746,6 +750,7 @@ class EnterpriseWikiDocumentFlowService
                 'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
                 'finished_at' => null,
                 'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
+                'failed_phase' => null,
             ]);
 
             Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting document owner approval after owner sync.', [
@@ -777,6 +782,7 @@ class EnterpriseWikiDocumentFlowService
             'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
             'finished_at' => now(),
             'error_message' => null,
+            'failed_phase' => null,
         ]);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run completed.', [
@@ -790,6 +796,7 @@ class EnterpriseWikiDocumentFlowService
             'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
             'finished_at' => now(),
             'error_message' => null,
+            'failed_phase' => null,
         ]);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
@@ -824,6 +831,12 @@ class EnterpriseWikiDocumentFlowService
 
         $update = [
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+            // Wiki run-588: the phase the run was actually in when it failed — persisted
+            // separately from the generic terminal 'status' above so the run list can show
+            // exactly which step failed (and which later steps never ran) instead of the
+            // "everything but the last step looks done" fallback that shipped before this.
+            // Only ever a known EnterpriseWikiIngestRun::FAILED_PHASES value — never free text.
+            'failed_phase' => EnterpriseWikiIngestRun::isValidFailedPhase($phase) ? $phase : null,
             'error_message' => mb_substr($exception->getMessage(), 0, 1000),
             'finished_at' => now(),
         ];

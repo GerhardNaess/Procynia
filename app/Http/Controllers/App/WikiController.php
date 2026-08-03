@@ -788,6 +788,11 @@ class WikiController extends Controller
                 return [
                     'id' => $run->id,
                     'status' => $run->status,
+                    // Wiki run-588: the exact pipeline phase the run was in when it failed —
+                    // null for a run that never failed, or for an older failed run recorded
+                    // before this field existed. The Kjøringer timeline uses this instead of
+                    // guessing from the generic 'failed' status alone.
+                    'failed_phase' => $run->failed_phase,
                     'maintainer_decision_status' => $run->maintainer_decision_status,
                     'source_document_filename' => $document?->original_filename,
                     'source_id' => $run->source_id,

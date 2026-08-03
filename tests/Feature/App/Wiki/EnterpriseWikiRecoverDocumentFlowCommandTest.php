@@ -118,6 +118,7 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         // status=failed and a stale qa_status=failed, even though every artifact is genuinely
         // complete and defect-free.
         $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $run->update(['failed_phase' => EnterpriseWikiIngestRun::STATUS_QA]);
 
         $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
             ->assertExitCode(0);
@@ -127,6 +128,9 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
         $this->assertNotNull($fresh->finished_at);
         $this->assertNull($fresh->error_message);
+        // Wiki run-588: a stale failed_phase from the failure being recovered from must not
+        // survive onto a run that is no longer failed.
+        $this->assertNull($fresh->failed_phase);
 
         Queue::assertNothingPushed();
     }
@@ -213,6 +217,26 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         $this->assertNull($fresh->error_message);
 
         Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($j) => $j->runId === $run->id);
+    }
+
+    /**
+     * Wiki run-588: resuming a failed run must not leave a stale failed_phase behind once it is
+     * actively being worked on again — the Kjøringer timeline only ever consults failed_phase
+     * while status is still 'failed', but a stale value here would otherwise resurface if the
+     * run failed again later for an unrelated reason before ever calling markRunFailed() with a
+     * fresh phase.
+     */
+    public function test_resume_continuation_clears_a_stale_failed_phase(): void
+    {
+        Queue::fake();
+
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: false, qaStatus: null);
+        $run->update(['failed_phase' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->assertExitCode(0);
+
+        $this->assertNull($run->fresh()->failed_phase);
     }
 
     public function test_resume_continuation_does_not_call_qa_or_touch_qa_status(): void
