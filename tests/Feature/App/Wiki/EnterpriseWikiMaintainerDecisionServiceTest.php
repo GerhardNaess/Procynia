@@ -267,6 +267,34 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
 
+    public function test_composed_decision_validation_does_not_call_decide_or_persist(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldNotReceive('decide');
+        $mock->shouldNotReceive('repair');
+
+        $result = $this->service()->validateAndRepairForDocument($customer->id, $document, 'no', $this->validDecision());
+
+        $this->assertSame($this->validDecision()['source_article']['title'], $result['source_article']['title']);
+    }
+
+    public function test_composed_inconsistent_decision_uses_same_single_repair_pass(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $decision = $this->validDecision();
+        $decision['source_article']['related_page_guidance'] = [['page_title' => 'ITIL Incident Management', 'relationship' => 'See']];
+        $repaired = $decision;
+        $repaired['concept_pages'] = [['action' => 'create', 'page_id' => null, 'title' => 'ITIL Incident Management', 'proposed_slug' => 'itil-incident-management', 'reason' => 'Required']];
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldNotReceive('decide');
+        $mock->shouldReceive('repair')->once()->andReturn($repaired);
+
+        $this->assertCount(1, $this->service()->validateAndRepairForDocument($customer->id, $document, 'no', $decision)['concept_pages']);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

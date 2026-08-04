@@ -71,6 +71,33 @@ class EnterpriseWikiMaintainerDecisionService
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
 
         $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
+
+        return $this->validateAndRepairForDocument($customerId, $document, $languageCode, $decision, $context);
+    }
+
+    /**
+     * Validate and, when needed, repair an already-composed maintainer decision. This performs
+     * no decision-generation call, persistence, or apply operation.
+     *
+     * @param  array<string,mixed>  $decision
+     * @return array<string,mixed>
+     */
+    public function validateAndRepairForDocument(
+        int $customerId,
+        EnterpriseWikiDocument $document,
+        string $languageCode,
+        array $decision,
+        ?AiCallContext $context = null,
+    ): array {
+        $context ??= AiCallContext::none();
+        $sourceMeta = [
+            'title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown',
+            'filename' => (string) $document->original_filename,
+        ];
+        $sourceText = (string) ($document->extracted_text ?? '');
+        $indexContext = $this->indexContextService->buildForCustomer($customerId);
+        $figureCandidates = $this->figureCandidatesForDocument($document);
+        $validFigureKeys = array_column($figureCandidates, 'source_element_key');
         $issues = $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys);
 
         if ($issues === []) {
@@ -79,7 +106,7 @@ class EnterpriseWikiMaintainerDecisionService
 
         Log::warning('[WIKI_MAINTAINER_DECISION] Inconsistent decision detected — attempting one bounded repair pass.', [
             'customer_id' => $customerId,
-            'document_id' => $documentId,
+            'document_id' => $document->id,
             'issues' => $issues,
         ]);
 
@@ -89,7 +116,7 @@ class EnterpriseWikiMaintainerDecisionService
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
                 'customer_id' => $customerId,
-                'document_id' => $documentId,
+                'document_id' => $document->id,
                 'issues' => $remainingIssues,
             ]);
 
@@ -98,7 +125,7 @@ class EnterpriseWikiMaintainerDecisionService
 
         Log::info('[WIKI_MAINTAINER_DECISION] Repair pass resolved all detected inconsistencies.', [
             'customer_id' => $customerId,
-            'document_id' => $documentId,
+            'document_id' => $document->id,
         ]);
 
         return $repaired;
