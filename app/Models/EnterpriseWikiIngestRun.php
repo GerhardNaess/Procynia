@@ -28,6 +28,10 @@ class EnterpriseWikiIngestRun extends Model
 
     public const STATUS_VERIFICATION_LINKING = 'verification_linking';
 
+    public const STATUS_VERIFYING_CLAIMS = 'verifying_claims';
+
+    public const STATUS_POST_CLAIM_VERIFICATION = 'post_claim_verification';
+
     public const STATUS_QA = 'qa';
 
     public const STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL = 'awaiting_document_owner_approval';
@@ -54,6 +58,8 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_PAGES,
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_VERIFYING_CLAIMS,
+        self::STATUS_POST_CLAIM_VERIFICATION,
         self::STATUS_QA,
         self::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
         self::STATUS_COMPLETED,
@@ -132,6 +138,8 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_PAGES,
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_VERIFYING_CLAIMS,
+        self::STATUS_POST_CLAIM_VERIFICATION,
         self::STATUS_QA,
         self::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
         self::STATUS_DECISION_ONLY,
@@ -160,6 +168,8 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_PAGES,
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_VERIFYING_CLAIMS,
+        self::STATUS_POST_CLAIM_VERIFICATION,
         self::STATUS_QA,
     ];
 
@@ -190,6 +200,8 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_GENERATING_PAGES,
         self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_VERIFYING_CLAIMS,
+        self::STATUS_POST_CLAIM_VERIFICATION,
         self::STATUS_QA,
     ];
 

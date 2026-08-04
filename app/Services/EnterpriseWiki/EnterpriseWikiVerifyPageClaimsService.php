@@ -158,6 +158,87 @@ class EnterpriseWikiVerifyPageClaimsService
     }
 
     /**
+     * Verify one current-version claim belonging to an applied run. The existing reservation,
+     * AI request, validation, and persistence path is deliberately reused unchanged.
+     *
+     * @return array{pages: int, claims: int, references: int, skipped: int, no_support: int, busy: int, reused: int}
+     */
+    public function verifyClaimForRun(EnterpriseWikiIngestRun $run, int $claimId): array
+    {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException("Run [{$run->id}] is not applied.");
+        }
+
+        $claim = EnterpriseWikiClaim::query()
+            ->whereKey($claimId)
+            ->whereIn('enterprise_wiki_page_version_id', $this->currentVersionIdsForRun($run))
+            ->first();
+
+        if (! $claim instanceof EnterpriseWikiClaim) {
+            return ['pages' => 0, 'claims' => 0, 'references' => 0, 'skipped' => 1, 'no_support' => 0, 'busy' => 0, 'reused' => 0];
+        }
+
+        $document = EnterpriseWikiDocument::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('id', $run->source_id)
+            ->first();
+
+        if (! $document instanceof EnterpriseWikiDocument) {
+            throw new \InvalidArgumentException("Source document [{$run->source_id}] not found for run [{$run->id}].");
+        }
+
+        $version = EnterpriseWikiPageVersion::query()->findOrFail($claim->enterprise_wiki_page_version_id);
+        $outcome = $this->verifyClaimWithPolicy(
+            $claim,
+            $run,
+            $document,
+            $version,
+            $this->resolveLanguageCode($run->customer_id),
+            $this->ordinaryVerificationPolicy((string) ($document->extracted_text ?? '')),
+        );
+
+        return [
+            'pages' => 1,
+            'claims' => $outcome['claims'],
+            'references' => $outcome['references'],
+            'skipped' => $outcome['skipped'],
+            'no_support' => $outcome['no_support'],
+            'busy' => $outcome['busy'],
+            'reused' => $outcome['reused'],
+        ];
+    }
+
+    /** @return list<int> */
+    public function unverifiedClaimIdsForRun(EnterpriseWikiIngestRun $run): array
+    {
+        return EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $this->currentVersionIdsForRun($run))
+            ->whereNull('verified_at')
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    public function hasActiveClaimLeaseForRun(EnterpriseWikiIngestRun $run): bool
+    {
+        return EnterpriseWikiClaim::query()
+            ->whereIn('enterprise_wiki_page_version_id', $this->currentVersionIdsForRun($run))
+            ->whereNotNull('verification_claimed_at')
+            ->exists();
+    }
+
+    private function currentVersionIdsForRun(EnterpriseWikiIngestRun $run)
+    {
+        return EnterpriseWikiPageVersion::query()
+            ->select('id')
+            ->where('is_current', true)
+            ->whereIn('enterprise_wiki_page_id', EnterpriseWikiIngestRunPage::query()
+                ->select('enterprise_wiki_page_id')
+                ->where('enterprise_wiki_ingest_run_id', $run->id));
+    }
+
+    /**
      * Claim-scoped verification for claims extracted from one manually edited mixed block on an
      * explicit staged page version.
      *

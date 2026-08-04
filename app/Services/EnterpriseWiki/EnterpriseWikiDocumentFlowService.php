@@ -4,9 +4,11 @@ namespace App\Services\EnterpriseWiki;
 
 use App\Data\Ai\AiCallContext;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
+use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiClaimVerification;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
+use App\Jobs\EnterpriseWiki\VerifyEnterpriseWikiClaim;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -282,6 +284,17 @@ class EnterpriseWikiDocumentFlowService
             return;
         }
 
+        if ($run->status === EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
+            $this->dispatchClaimVerificationWork($run);
+
+            return;
+        }
+
+        if ($run->status === EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION) {
+            // A sentinel already atomically claimed post-verification continuation.
+            return;
+        }
+
         $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
 
         try {
@@ -296,41 +309,88 @@ class EnterpriseWikiDocumentFlowService
                 return;
             }
 
-            if (! $this->performVerifyPageClaims($run)) {
-                // Same reasoning as above, for an actively-held claim verification lease.
-                return;
+            $this->beginClaimVerification($run);
+        } catch (Throwable $e) {
+            $this->markRunFailed($run->fresh() ?? $run, $e, $currentStage === EnterpriseWikiIngestRun::STATUS_QA, $currentStage);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Fan-in entry point. Only the sentinel that atomically moves the run from
+     * verifying_claims to post_claim_verification may continue into lint/semantic/QA.
+     */
+    public function continueAfterClaimVerification(int $runId): void
+    {
+        $result = DB::transaction(function () use ($runId): array {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
+
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return ['run' => null, 'continue' => false, 'pending' => false];
             }
 
+            if ($run->status !== EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
+                return ['run' => $run, 'continue' => false, 'pending' => false];
+            }
+
+            $pending = $this->verifyPageClaimsService->unverifiedClaimIdsForRun($run);
+
+            if ($pending !== [] || $this->verifyPageClaimsService->hasActiveClaimLeaseForRun($run)) {
+                return ['run' => $run, 'continue' => false, 'pending' => true];
+            }
+
+            $run->update(['status' => EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION]);
+
+            return ['run' => $run->fresh() ?? $run, 'continue' => true, 'pending' => false];
+        });
+
+        $run = $result['run'];
+
+        if (! $run instanceof EnterpriseWikiIngestRun) {
+            return;
+        }
+
+        if ($result['pending']) {
+            $this->dispatchClaimVerificationWork($run, true);
+
+            return;
+        }
+
+        if (! $result['continue']) {
+            return;
+        }
+
+        $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
+
+        try {
             $this->performAppliedRunLint($run);
             $this->performLinkSemanticRepair($run);
 
             $currentStage = EnterpriseWikiIngestRun::STATUS_QA;
 
             if (! $this->performPostIngestQa($run)) {
-                // Busy/concurrent state, not a failure — a deferred retry of this same
-                // continuation job has already been dispatched. Leave the run exactly where
-                // it is; do not finalize, do not mark it failed.
                 return;
             }
 
-            // $currentStage deliberately stays STATUS_QA through finalize: there is no
-            // dedicated timeline step for "finalizing" (EnterpriseWikiIngestRun::FAILED_PHASES
-            // has no such value), and a failure here means QA itself already passed/reached a
-            // terminal verdict — the closest meaningful phase for both the persisted
-            // failed_phase and the qaContext guard below is still 'qa'.
             $fresh = $run->fresh() ?? $run;
 
-            // Defense in depth: a concurrent invocation may already have finalized this run
-            // between this run's own performPostIngestQa() call above and this point.
-            if ($fresh->isTerminal()) {
-                return;
+            if (! $fresh->isTerminal()) {
+                $this->finalizeFromExistingQaResult($fresh);
             }
-
-            $this->finalizeFromExistingQaResult($fresh);
         } catch (Throwable $e) {
             $this->markRunFailed($run->fresh() ?? $run, $e, $currentStage === EnterpriseWikiIngestRun::STATUS_QA, $currentStage);
 
             throw $e;
+        }
+    }
+
+    public function markClaimVerificationFailed(int $runId, Throwable $exception): void
+    {
+        $run = EnterpriseWikiIngestRun::query()->find($runId);
+
+        if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
+            $this->markRunFailed($run, $exception, false, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING);
         }
     }
 
@@ -570,38 +630,39 @@ class EnterpriseWikiDocumentFlowService
         return true;
     }
 
-    /**
-     * @return bool true when verification is done and the flow may proceed; false when at
-     *              least one claim's verification lease is held by another live worker — a
-     *              deferred retry has been dispatched and the caller must stop.
-     */
-    private function performVerifyPageClaims(EnterpriseWikiIngestRun $run): bool
+    private function beginClaimVerification(EnterpriseWikiIngestRun $run): void
     {
-        $result = $this->verifyPageClaimsService->verify($run->fresh() ?? $run);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Page claims verified.', [
-            'run_id' => $run->id,
-            'pages' => $result['pages'] ?? null,
-            'claims' => $result['claims'] ?? null,
-            'references' => $result['references'] ?? null,
-            'skipped' => $result['skipped'] ?? null,
-            'no_support' => $result['no_support'] ?? null,
-            'busy' => $result['busy'] ?? 0,
-        ]);
+        $this->dispatchClaimVerificationWork($run);
+    }
 
-        if (($result['busy'] ?? 0) > 0) {
-            Log::info('[WIKI_DOCUMENT_FLOW] Claim verification busy — continuation deferred.', [
-                'run_id' => $run->id,
-                'busy' => $result['busy'],
-            ]);
+    private function dispatchClaimVerificationWork(EnterpriseWikiIngestRun $run, bool $delayedSentinel = false): void
+    {
+        $fresh = $run->fresh() ?? $run;
 
-            ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($run->id)
-                ->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
-
-            return false;
+        if ($fresh->isTerminal() || $fresh->status !== EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
+            return;
         }
 
-        return true;
+        $claimIds = $this->verifyPageClaimsService->unverifiedClaimIdsForRun($fresh);
+
+        foreach ($claimIds as $claimId) {
+            VerifyEnterpriseWikiClaim::dispatch($fresh->id, $claimId);
+        }
+
+        $sentinel = FinalizeEnterpriseWikiClaimVerification::dispatch($fresh->id);
+
+        if ($delayedSentinel) {
+            $sentinel->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Claim verification jobs dispatched.', [
+            'run_id' => $fresh->id,
+            'claims_dispatched' => count($claimIds),
+            'sentinel_delayed' => $delayedSentinel,
+            'queue' => VerifyEnterpriseWikiClaim::QUEUE,
+        ]);
     }
 
     private function performAppliedRunLint(EnterpriseWikiIngestRun $run): void

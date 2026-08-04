@@ -81,6 +81,8 @@ class EnterpriseWikiPostIngestQaService
         EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES,
         EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
+        EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS,
+        EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION,
     ];
 
     public function __construct(
