@@ -56,4 +56,23 @@ class EnterpriseWikiMaintainerDecisionBatchStateService
     {
         return EnterpriseWikiMaintainerDecisionBatch::query()->where('enterprise_wiki_ingest_run_id', $runId)->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_COMPLETED)->orderBy('batch_number')->pluck('result_payload')->all();
     }
+
+    /** @return array{pending: int,running: int,failed: list<array{batch_number:int,error_message:?string}>,completed: int,total: int} */
+    public function summary(int $runId): array
+    {
+        $rows = EnterpriseWikiMaintainerDecisionBatch::query()->where('enterprise_wiki_ingest_run_id', $runId)->get();
+
+        return ['pending' => $rows->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_PENDING)->count(), 'running' => $rows->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_RUNNING)->count(), 'failed' => $rows->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_FAILED)->map(fn ($row) => ['batch_number' => $row->batch_number, 'error_message' => $row->error_message])->values()->all(), 'completed' => $rows->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_COMPLETED)->count(), 'total' => $rows->count()];
+    }
+
+    /** @return array<string,mixed>|null */
+    public function globalPlan(int $runId): ?array
+    {
+        $payload = EnterpriseWikiMaintainerDecisionBatch::query()
+            ->where('enterprise_wiki_ingest_run_id', $runId)
+            ->orderBy('batch_number')
+            ->value('input_payload');
+
+        return is_array($payload['global_plan'] ?? null) ? $payload['global_plan'] : null;
+    }
 }

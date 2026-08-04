@@ -455,11 +455,7 @@ class EnterpriseWikiDocumentFlowService
             $this->buildAiCallContext($run),
         );
 
-        $run->update([
-            'maintainer_decision_json' => $decision,
-            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
-            'maintainer_decision_generated_at' => now(),
-        ]);
+        $this->persistMaintainerDecision($run, $decision);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Maintainer decision generated.', [
             'run_id' => $run->id,
@@ -468,6 +464,20 @@ class EnterpriseWikiDocumentFlowService
             'concept_pages' => count((array) data_get($decision, 'concept_pages', [])),
             'entity_pages' => count((array) data_get($decision, 'entity_pages', [])),
         ]);
+    }
+
+    /** @param array<string,mixed> $decision */
+    public function persistMaintainerDecision(EnterpriseWikiIngestRun $run, array $decision): bool
+    {
+        return DB::transaction(function () use ($run, $decision): bool {
+            $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->findOrFail($run->id);
+            if ($locked->maintainer_decision_generated_at !== null) {
+                return false;
+            }
+            $locked->update(['maintainer_decision_json' => $decision, 'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING, 'maintainer_decision_generated_at' => now()]);
+
+            return true;
+        });
     }
 
     /**

@@ -145,6 +145,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         return $merged;
     }
 
+    /** @param list<array<string,mixed>> $batchResults @return array<string,mixed> */
+    public function mergePersistedBatchResults(array $globalPlan, array $batchResults): array
+    {
+        return $this->merger->merge($globalPlan, $batchResults);
+    }
+
     /** @return array<string, mixed> */
     private function decideGlobalPlan(
         array $sourceMeta,
