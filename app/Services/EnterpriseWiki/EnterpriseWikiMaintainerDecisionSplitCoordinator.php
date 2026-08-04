@@ -219,6 +219,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         );
     }
 
+    /** @return array<string,mixed> */
+    public function decidePersistedCandidateBatch(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $globalPlan, array $mentions, int $batchNumber, array $figureCandidates = [], ?AiCallContext $context = null): array
+    {
+        return $this->decideCandidateBatch($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $figureCandidates, $context);
+    }
+
     private function buildGlobalPlanPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
     {
         $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema();
