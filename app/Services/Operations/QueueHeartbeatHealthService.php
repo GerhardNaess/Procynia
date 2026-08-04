@@ -16,6 +16,7 @@ class QueueHeartbeatHealthService
         'enterprise-wiki',
         'enterprise-wiki-reconciliation',
         'enterprise-wiki-claim-verification',
+        'enterprise-wiki-maintainer-batches',
         'enterprise-wiki-pages',
         'default',
     ];

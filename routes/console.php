@@ -29,6 +29,7 @@ Schedule::job(new OpsQueueHeartbeatJob('ai-requirements'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki-reconciliation'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki-claim-verification'))->everyMinute();
+Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki-maintainer-batches'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('enterprise-wiki-pages'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('default'))->everyMinute();
 
