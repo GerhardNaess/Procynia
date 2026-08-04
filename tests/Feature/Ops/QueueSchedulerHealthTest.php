@@ -125,8 +125,8 @@ class QueueSchedulerHealthTest extends TestCase
 
         // One per queue a dedicated Docker worker service actually listens on (see
         // docker-compose.yml): supplier-harvests, supplier-lookups, ai-requirements,
-        // enterprise-wiki, enterprise-wiki-pages, default.
-        $this->assertCount(6, $heartbeatJobs);
+        // enterprise-wiki, enterprise-wiki-reconciliation, enterprise-wiki-pages, default.
+        $this->assertCount(7, $heartbeatJobs);
     }
 
     public function test_endpoint_requires_token_and_returns_403_without_it(): void

@@ -37,6 +37,8 @@ class ReconcileEnterpriseWikiClaimSourcesForDocument implements ShouldQueue
      */
     public const TIMEOUT_SECONDS = 1800;
 
+    public const QUEUE_NAME = 'enterprise-wiki-reconciliation';
+
     public int $tries = 1;
 
     public int $timeout = self::TIMEOUT_SECONDS;
@@ -45,7 +47,7 @@ class ReconcileEnterpriseWikiClaimSourcesForDocument implements ShouldQueue
 
     public function __construct(public readonly int $documentId)
     {
-        $this->queue = 'enterprise-wiki';
+        $this->queue = self::QUEUE_NAME;
     }
 
     public function handle(EnterpriseWikiClaimSourceReconciliationService $service): void

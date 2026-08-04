@@ -14,6 +14,7 @@ class QueueHeartbeatHealthService
         'supplier-lookups',
         'ai-requirements',
         'enterprise-wiki',
+        'enterprise-wiki-reconciliation',
         'enterprise-wiki-pages',
         'default',
     ];
