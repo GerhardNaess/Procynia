@@ -41,6 +41,10 @@ use Throwable;
  */
 class EnterpriseWikiExtractPageClaimsService
 {
+    private const AI_MAX_ATTEMPTS = 2;
+
+    private const AI_RETRY_BACKOFF_MICROSECONDS = 250_000;
+
     /**
      * Safety margin added on top of the continuation job's own timeout (queue scheduling
      * jitter, clock skew between workers, Laravel's own grace period before force-killing a
@@ -181,12 +185,7 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             try {
-                $result = $this->aiClient->extractClaims(
-                    pageTitle: $page->title,
-                    pageType: $page->page_type,
-                    contentMarkdown: (string) ($version->content_markdown ?? ''),
-                    languageCode: $languageCode,
-                );
+                $result = $this->extractClaimsWithTransientRetry($run, $page, $version, $languageCode);
             } catch (Throwable $e) {
                 $this->release($row->id, $token);
 
@@ -222,6 +221,60 @@ class EnterpriseWikiExtractPageClaimsService
             'busy' => $busy,
             'capped_pages' => $cappedPages,
         ];
+    }
+
+    /**
+     * Retry only a documented transient transport/provider failure once. The AI client either
+     * returns a complete decoded response or throws, so a failed first attempt cannot leak a
+     * partial response into the second attempt or persistence.
+     *
+     * @return array{claims: list<array{text: string, confidence: string, excerpt: string, conflict_note: string|null}>}
+     */
+    private function extractClaimsWithTransientRetry(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $languageCode,
+    ): array {
+        for ($attempt = 1; $attempt <= self::AI_MAX_ATTEMPTS; $attempt++) {
+            try {
+                Log::info('[WIKI_CLAIM_EXTRACTION] AI extraction attempt.', [
+                    'run_id' => $run->id,
+                    'page_id' => $page->id,
+                    'attempt' => $attempt,
+                    'max_attempts' => self::AI_MAX_ATTEMPTS,
+                ]);
+
+                return $this->aiClient->extractClaims(
+                    pageTitle: $page->title,
+                    pageType: $page->page_type,
+                    contentMarkdown: (string) ($version->content_markdown ?? ''),
+                    languageCode: $languageCode,
+                );
+            } catch (Throwable $exception) {
+                $retry = $attempt < self::AI_MAX_ATTEMPTS
+                    && EnterpriseWikiTransientFailureClassifier::isTransient($exception->getMessage());
+
+                Log::warning('[WIKI_CLAIM_EXTRACTION] AI extraction attempt failed.', [
+                    'run_id' => $run->id,
+                    'page_id' => $page->id,
+                    'attempt' => $attempt,
+                    'max_attempts' => self::AI_MAX_ATTEMPTS,
+                    'retry_triggered' => $retry,
+                    'is_transient' => EnterpriseWikiTransientFailureClassifier::isTransient($exception->getMessage()),
+                    'exception' => get_class($exception),
+                    'error' => $exception->getMessage(),
+                ]);
+
+                if (! $retry) {
+                    throw $exception;
+                }
+
+                usleep(self::AI_RETRY_BACKOFF_MICROSECONDS);
+            }
+        }
+
+        throw new \LogicException('Claim extraction retry loop exited unexpectedly.');
     }
 
     /**

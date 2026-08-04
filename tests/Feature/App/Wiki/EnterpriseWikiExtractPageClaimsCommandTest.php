@@ -970,6 +970,103 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     }
 
     // =========================================================================
+    // Transient network retry for ordinary page claim extraction
+    // =========================================================================
+
+    public function test_transient_timeout_retries_once_and_second_attempt_persists_claims(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $attempts = 0;
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->twice()
+            ->andReturnUsing(function () use (&$attempts): array {
+                $attempts++;
+
+                if ($attempts === 1) {
+                    throw new RuntimeException('cURL error 28: Operation timed out');
+                }
+
+                return ['claims' => self::FAKE_CLAIMS];
+            });
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(1, $result['pages']);
+        $this->assertSame(count(self::FAKE_CLAIMS), $result['claims']);
+        $this->assertNotNull(EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $version->enterprise_wiki_page_id)
+            ->value('claims_extracted_at'));
+    }
+
+    public function test_two_transient_failures_stop_after_two_total_attempts(): void
+    {
+        $customer = $this->createCustomer();
+        [$run] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->twice()
+            ->andThrow(new RuntimeException('cURL error 28: Operation timed out'));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Operation timed out');
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+    }
+
+    public function test_permanent_failure_does_not_retry_claim_extraction(): void
+    {
+        $customer = $this->createCustomer();
+        [$run] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andThrow(new RuntimeException('OpenAI request failed with HTTP status [400].'));
+
+        $this->expectException(RuntimeException::class);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+    }
+
+    public function test_schema_or_json_failure_after_response_does_not_retry_claim_extraction(): void
+    {
+        $customer = $this->createCustomer();
+        [$run] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andThrow(new RuntimeException('WikiPageClaimExtractionAiClient: response did not include a claims array.'));
+
+        $this->expectException(RuntimeException::class);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+    }
+
+    public function test_completed_extraction_checkpoint_still_skips_ai_call_on_reentry(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->update(['claims_extracted_at' => now()]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(1, $result['skipped']);
+        $this->assertSame(0, $result['pages']);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
