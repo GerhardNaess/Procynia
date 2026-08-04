@@ -15,6 +15,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\User;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
+use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -357,6 +358,11 @@ class EnterpriseWikiDocumentFlowService
                 return null;
             }
 
+            EnterpriseWikiQueueTrace::log('claim_before_started_at', [
+                'run_id' => $run->id,
+                'current_status' => $run->status,
+            ]);
+
             $run->update([
                 'status' => EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
                 'started_at' => now(),
@@ -366,7 +372,15 @@ class EnterpriseWikiDocumentFlowService
                 'transient_failure' => null,
             ]);
 
-            return $run->fresh();
+            $freshRun = $run->fresh();
+
+            EnterpriseWikiQueueTrace::log('claim_after_started_at', [
+                'run_id' => $run->id,
+                'current_status' => EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+                'started_at' => $freshRun?->started_at?->format('Y-m-d\TH:i:s.v\Z'),
+            ]);
+
+            return $freshRun;
         });
     }
 

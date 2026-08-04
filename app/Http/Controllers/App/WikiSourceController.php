@@ -15,6 +15,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
+use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -421,7 +422,23 @@ class WikiSourceController extends Controller
         $run = $prepared['run'];
 
         if ($prepared['created']) {
+            EnterpriseWikiQueueTrace::log('dispatch_before', [
+                'run_id' => $run->id,
+                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
+                'job_uuid' => null,
+                'delay_seconds' => null,
+                'available_at' => null,
+            ], true, true);
+
             RunEnterpriseWikiDocumentFlow::dispatch($run->id);
+
+            EnterpriseWikiQueueTrace::log('dispatch_after', [
+                'run_id' => $run->id,
+                'queue_name' => RunEnterpriseWikiDocumentFlow::QUEUE_NAME,
+                'job_uuid' => null,
+                'delay_seconds' => null,
+                'available_at' => null,
+            ], true, true);
         }
 
         Log::info('[PROCYNIA][WIKI_SOURCE_INGEST] Queued ingest run.', [

@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemVersion;
+use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -219,7 +220,13 @@ class EnterpriseWikiIngestService
      */
     public function createQueuedRunForDocument(int $customerId, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
     {
-        return EnterpriseWikiIngestRun::query()->create([
+        EnterpriseWikiQueueTrace::log('run_create_before', [
+            'run_id' => null,
+            'customer_id' => $customerId,
+            'document_id' => $document->id,
+        ]);
+
+        $run = EnterpriseWikiIngestRun::query()->create([
             'uuid' => (string) Str::uuid(),
             'customer_id' => $customerId,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
@@ -228,6 +235,14 @@ class EnterpriseWikiIngestService
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
+
+        EnterpriseWikiQueueTrace::log('run_create_after', [
+            'run_id' => $run->id,
+            'customer_id' => $customerId,
+            'document_id' => $document->id,
+        ]);
+
+        return $run;
     }
 
     public function computeDocumentSourceHash(int $documentId, string $fileHash): string

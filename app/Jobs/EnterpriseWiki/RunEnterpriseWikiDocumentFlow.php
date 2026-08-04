@@ -4,6 +4,7 @@ namespace App\Jobs\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -26,6 +27,8 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public const QUEUE_NAME = 'enterprise-wiki';
+
     /**
      * Exposed as a class constant (not just the $timeout property below) so
      * EnterpriseWikiDocumentFlowService can compute how much of this job's own timeout budget
@@ -45,11 +48,28 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
 
     public function __construct(public readonly int $runId)
     {
-        $this->queue = 'enterprise-wiki';
+        $this->queue = self::QUEUE_NAME;
     }
 
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
     {
+        $payload = $this->job?->payload() ?? [];
+        $delaySeconds = isset($payload['delay']) ? (int) $payload['delay'] : null;
+        $createdAt = isset($payload['createdAt']) ? (int) $payload['createdAt'] : null;
+
+        EnterpriseWikiQueueTrace::log('handle_start', [
+            'run_id' => $this->runId,
+            'queue_name' => $this->job?->getQueue() ?? self::QUEUE_NAME,
+            'job_connection_name' => $this->job?->getConnectionName(),
+            'job_id' => $this->job?->getJobId(),
+            'job_uuid' => $this->job?->uuid(),
+            'payload_delay_seconds' => $delaySeconds,
+            'payload_created_at_epoch' => $createdAt,
+            'payload_available_at_epoch' => $delaySeconds !== null && $createdAt !== null
+                ? $createdAt + $delaySeconds
+                : null,
+        ], true, true);
+
         $flowService->run($this->runId);
     }
 
