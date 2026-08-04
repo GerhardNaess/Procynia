@@ -151,6 +151,43 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         return $this->merger->merge($globalPlan, $batchResults);
     }
 
+    /**
+     * Execute only the global-plan portion of the existing split decision and return the
+     * complete, independently executable candidate-batch inputs.
+     *
+     * @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>}
+     */
+    public function preparePersistedCandidateBatches(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        string $languageCode,
+        array $figureCandidates = [],
+        ?AiCallContext $context = null,
+    ): array {
+        $context ??= AiCallContext::none();
+        $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(
+            $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $figureCandidates, $context),
+        );
+        $mentions = $globalPlan['concept_candidate_mentions'];
+        $sizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::MODEL, count($mentions));
+        $offset = 0;
+        $batches = [];
+        $total = count($sizes);
+
+        foreach ($sizes as $index => $size) {
+            $batches[] = [
+                'global_plan' => $globalPlan,
+                'mentions' => array_slice($mentions, $offset, $size),
+                'batch_number' => $index + 1,
+                'total_batches' => $total,
+            ];
+            $offset += $size;
+        }
+
+        return ['global_plan' => $globalPlan, 'batches' => $batches];
+    }
+
     /** @return array<string, mixed> */
     private function decideGlobalPlan(
         array $sourceMeta,

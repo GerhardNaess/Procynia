@@ -14,12 +14,17 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use RuntimeException;
+use Throwable;
 
 class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public const QUEUE = 'enterprise-wiki-maintainer-batches';
+
+    public int $tries = 1;
+
+    public int $backoff = 60;
 
     public function __construct(public readonly int $runId)
     {
@@ -34,6 +39,8 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
         }
         $summary = $state->summary($this->runId);
         if ($summary['pending'] || $summary['running'] || $summary['total'] === 0) {
+            self::dispatch($this->runId)->delay(now()->addSeconds(30));
+
             return;
         }
         if ($summary['failed'] !== []) {
@@ -48,6 +55,13 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
         $document = EnterpriseWikiDocument::query()->where('customer_id', $run->customer_id)->findOrFail($run->source_id);
         $language = $run->customer()->with('language')->first()?->language?->code ?? 'no';
         $final = $decisionService->validateAndRepairForDocument($run->customer_id, $document, $language, $merged);
-        $flow->persistMaintainerDecision($run, $final);
+        if ($flow->persistMaintainerDecision($run, $final)) {
+            $flow->continueAfterMaintainerDecisionBatches($run->id);
+        }
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        app(EnterpriseWikiDocumentFlowService::class)->markMaintainerDecisionFailed($this->runId, $exception);
     }
 }

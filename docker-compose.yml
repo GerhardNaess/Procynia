@@ -367,6 +367,63 @@ services:
             start_period: 180s
         restart: unless-stopped
 
+    queue-enterprise-wiki-maintainer-batches:
+        build:
+            context: .
+            dockerfile: docker/php/Dockerfile
+        container_name: procynia-queue-enterprise-wiki-maintainer-batches
+        working_dir: /var/www/html
+        env_file:
+            - .env
+        environment:
+            APP_ENV: local
+            APP_DEBUG: "true"
+            APP_URL: http://localhost:8080
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${POSTGRES_DB}
+            DB_USERNAME: ${POSTGRES_USER}
+            DB_PASSWORD: ${POSTGRES_PASSWORD}
+            REDIS_CLIENT: phpredis
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            CACHE_STORE: redis
+            SESSION_DRIVER: redis
+            SESSION_CONNECTION: default
+            SESSION_STORE: redis
+            QUEUE_CONNECTION: redis
+            LOG_CHANNEL: stack
+            LOG_STACK: single
+            TZ: Europe/Oslo
+            REDIS_QUEUE_RETRY_AFTER: 2100
+        volumes:
+            - ./:/var/www/html
+            - ./storage:/var/www/html/storage
+            - ./bootstrap/cache:/var/www/html/bootstrap/cache
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        command:
+            - /bin/sh
+            - -lc
+            - |
+                printf '%s\n' '[Procynia][Queue] Starting 3 queue worker processes connection=redis queues=enterprise-wiki-maintainer-batches tries=1 backoff=60 timeout=1800 retry_after=2100'
+                trap 'kill -TERM 0' TERM INT
+                for i in 1 2 3; do
+                    php artisan queue:work redis --queue=enterprise-wiki-maintainer-batches --tries=1 --backoff=60 --timeout=1800 --sleep=3 &
+                done
+                wait
+        healthcheck:
+            test: ["CMD", "php", "artisan", "ops:queue-heartbeat-status", "enterprise-wiki-maintainer-batches"]
+            interval: 60s
+            timeout: 10s
+            retries: 35
+            start_period: 180s
+        restart: unless-stopped
+
     queue-enterprise-wiki-pages:
         build:
             context: .

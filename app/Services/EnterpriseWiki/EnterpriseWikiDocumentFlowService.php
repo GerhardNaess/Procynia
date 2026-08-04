@@ -5,9 +5,11 @@ namespace App\Services\EnterpriseWiki;
 use App\Data\Ai\AiCallContext;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiClaimVerification;
+use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiMaintainerDecisionBatches;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiMaintainerDecisionBatch;
 use App\Jobs\EnterpriseWiki\VerifyEnterpriseWikiClaim;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
@@ -52,6 +54,7 @@ class EnterpriseWikiDocumentFlowService
     public function __construct(
         private readonly EnterpriseWikiIngestService $ingestService,
         private readonly EnterpriseWikiMaintainerDecisionService $maintainerDecisionService,
+        private readonly EnterpriseWikiMaintainerDecisionBatchStateService $maintainerBatchStateService,
         private readonly EnterpriseWikiMaintainerDecisionApplyService $maintainerDecisionApplyService,
         private readonly EnterpriseWikiExtractPageClaimsService $extractPageClaimsService,
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
@@ -232,7 +235,9 @@ class EnterpriseWikiDocumentFlowService
         }
 
         try {
-            $this->performMaintainerDecision($run);
+            if (! $this->performMaintainerDecision($run)) {
+                return;
+            }
             $this->performApplyMaintainerDecision($run);
             $this->beginGeneratingPages($run);
         } catch (Throwable $e) {
@@ -444,9 +449,55 @@ class EnterpriseWikiDocumentFlowService
         });
     }
 
-    private function performMaintainerDecision(EnterpriseWikiIngestRun $run): void
+    private function performMaintainerDecision(EnterpriseWikiIngestRun $run): bool
     {
+        if ($run->maintainer_decision_generated_at !== null) {
+            return true;
+        }
+
+        $summary = $this->maintainerBatchStateService->summary($run->id);
+        if ($summary['total'] > 0) {
+            $this->dispatchMaintainerBatchWork($run);
+
+            return false;
+        }
+
         $run->increment('maintainer_decision_attempt_count');
+
+        $prepared = $this->maintainerDecisionService->preparePersistedCandidateBatchesForDocument(
+            $run->customer_id,
+            $run->source_id,
+            $this->resolveLanguageCode($run->customer_id),
+            $this->buildAiCallContext($run),
+        );
+
+        if ($prepared !== null) {
+            if ($prepared['batches'] === []) {
+                $document = EnterpriseWikiDocument::query()
+                    ->where('customer_id', $run->customer_id)
+                    ->findOrFail($run->source_id);
+                $decision = $this->maintainerDecisionService->validateAndRepairForDocument(
+                    $run->customer_id,
+                    $document,
+                    $this->resolveLanguageCode($run->customer_id),
+                    $this->maintainerDecisionService->mergePersistedCandidateBatchResults($prepared['global_plan'], []),
+                    $this->buildAiCallContext($run),
+                );
+                $this->persistMaintainerDecision($run, $decision);
+
+                return true;
+            }
+
+            $this->maintainerBatchStateService->createBatches($run->id, $prepared['batches']);
+            $this->dispatchMaintainerBatchWork($run);
+
+            Log::info('[WIKI_DOCUMENT_FLOW] Persisted maintainer candidate batches dispatched.', [
+                'run_id' => $run->id,
+                'batch_count' => count($prepared['batches']),
+            ]);
+
+            return false;
+        }
 
         $decision = $this->maintainerDecisionService->runForDocument(
             $run->customer_id,
@@ -464,6 +515,43 @@ class EnterpriseWikiDocumentFlowService
             'concept_pages' => count((array) data_get($decision, 'concept_pages', [])),
             'entity_pages' => count((array) data_get($decision, 'entity_pages', [])),
         ]);
+
+        return true;
+    }
+
+    private function dispatchMaintainerBatchWork(EnterpriseWikiIngestRun $run): void
+    {
+        foreach ($this->maintainerBatchStateService->resumableBatchNumbers($run->id) as $batchNumber) {
+            RunEnterpriseWikiMaintainerDecisionBatch::dispatch($run->id, $batchNumber);
+        }
+
+        FinalizeEnterpriseWikiMaintainerDecisionBatches::dispatch($run->id)
+            ->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
+    }
+
+    public function continueAfterMaintainerDecisionBatches(int $runId): void
+    {
+        $run = EnterpriseWikiIngestRun::query()->findOrFail($runId);
+        if ($run->isTerminal() || $run->maintainer_decision_generated_at === null) {
+            return;
+        }
+
+        try {
+            $this->performApplyMaintainerDecision($run);
+            $this->beginGeneratingPages($run);
+        } catch (Throwable $exception) {
+            $this->markRunFailed($run->fresh() ?? $run, $exception, false);
+
+            throw $exception;
+        }
+    }
+
+    public function markMaintainerDecisionFailed(int $runId, Throwable $exception): void
+    {
+        $run = EnterpriseWikiIngestRun::query()->find($runId);
+        if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
+            $this->markRunFailed($run, $exception, false, EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION);
+        }
     }
 
     /** @param array<string,mixed> $decision */

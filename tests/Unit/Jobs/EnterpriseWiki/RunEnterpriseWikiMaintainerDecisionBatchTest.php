@@ -6,6 +6,7 @@ use App\Jobs\EnterpriseWiki\RunEnterpriseWikiMaintainerDecisionBatch;
 use App\Models\EnterpriseWikiMaintainerDecisionBatch;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchEvaluator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateService;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -14,6 +15,7 @@ class RunEnterpriseWikiMaintainerDecisionBatchTest extends TestCase
 {
     public function test_job_uses_dedicated_queue_and_completes_reserved_batch(): void
     {
+        Queue::fake();
         $job = new RunEnterpriseWikiMaintainerDecisionBatch(12, 3);
         $batch = new EnterpriseWikiMaintainerDecisionBatch(['batch_number' => 3, 'input_payload' => ['candidates' => ['A']]]);
         $state = Mockery::mock(EnterpriseWikiMaintainerDecisionBatchStateService::class);

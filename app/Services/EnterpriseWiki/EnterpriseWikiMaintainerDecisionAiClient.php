@@ -137,6 +137,27 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
     }
 
+    public function requiresSplit(string $sourceText): bool
+    {
+        return $this->planCapacity(mb_strlen(trim($sourceText)), retryAttempt: 0)->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED;
+    }
+
+    /** @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>} */
+    public function preparePersistedCandidateBatches(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $figureCandidates = [], ?AiCallContext $context = null): array
+    {
+        if (! self::isAvailable()) {
+            throw new RuntimeException('EnterpriseWikiMaintainerDecisionAiClient: wiki AI is not enabled.');
+        }
+
+        return $this->splitCoordinator->preparePersistedCandidateBatches($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
+    }
+
+    /** @param list<array<string,mixed>> $batchResults @return array<string,mixed> */
+    public function mergePersistedBatchResults(array $globalPlan, array $batchResults): array
+    {
+        return $this->splitCoordinator->mergePersistedBatchResults($globalPlan, $batchResults);
+    }
+
     /**
      * Ask the AI to correct a decision that EnterpriseWikiMaintainerDecisionConsistencyValidator
      * found logically inconsistent — a single bounded pass, not a general re-decision. Preferred

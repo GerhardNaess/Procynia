@@ -57,6 +57,25 @@ class EnterpriseWikiMaintainerDecisionBatchStateService
         return EnterpriseWikiMaintainerDecisionBatch::query()->where('enterprise_wiki_ingest_run_id', $runId)->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_COMPLETED)->orderBy('batch_number')->pluck('result_payload')->all();
     }
 
+    /** @return list<int> */
+    public function resumableBatchNumbers(int $runId): array
+    {
+        $stale = now()->subSeconds(self::LEASE_SECONDS);
+
+        return EnterpriseWikiMaintainerDecisionBatch::query()
+            ->where('enterprise_wiki_ingest_run_id', $runId)
+            ->where(function ($query) use ($stale): void {
+                $query->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_PENDING)
+                    ->orWhere(function ($query) use ($stale): void {
+                        $query->where('status', EnterpriseWikiMaintainerDecisionBatch::STATUS_RUNNING)
+                            ->where('leased_at', '<', $stale);
+                    });
+            })
+            ->orderBy('batch_number')
+            ->pluck('batch_number')
+            ->all();
+    }
+
     /** @return array{pending: int,running: int,failed: list<array{batch_number:int,error_message:?string}>,completed: int,total: int} */
     public function summary(int $runId): array
     {

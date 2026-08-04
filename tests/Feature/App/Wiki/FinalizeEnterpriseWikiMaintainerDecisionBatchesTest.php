@@ -13,6 +13,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateServic
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Mockery;
 use RuntimeException;
@@ -24,6 +25,7 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatchesTest extends TestCase
 
     public function test_pending_batches_wait_failed_batches_throw_and_completed_batches_finalize_once(): void
     {
+        Queue::fake();
         $run = $this->ingestRun();
         $state = app(EnterpriseWikiMaintainerDecisionBatchStateService::class);
         $state->createBatches($run->id, [['global_plan' => ['plan' => true]], ['global_plan' => ['plan' => true]]]);
@@ -47,6 +49,7 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatchesTest extends TestCase
 
     public function test_completed_batches_merge_in_order_validate_and_persist_once(): void
     {
+        Queue::fake();
         $run = $this->ingestRun();
         $state = app(EnterpriseWikiMaintainerDecisionBatchStateService::class);
         $state->createBatches($run->id, [['global_plan' => ['plan' => true]], ['global_plan' => ['plan' => true]]]);
@@ -60,11 +63,13 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatchesTest extends TestCase
         $coordinator->shouldReceive('mergePersistedBatchResults')->once()->with(['plan' => true], [['batch' => 1], ['batch' => 2]])->andReturn(['merged' => true]);
         $decision->shouldReceive('validateAndRepairForDocument')->once()->andReturn(['final' => true]);
         $flow->shouldReceive('persistMaintainerDecision')->once()->andReturnTrue();
+        $flow->shouldReceive('continueAfterMaintainerDecisionBatches')->once()->with($run->id);
         (new FinalizeEnterpriseWikiMaintainerDecisionBatches($run->id))->handle($state, $coordinator, $decision, $flow);
         $run->update(['maintainer_decision_generated_at' => now()]);
         $coordinator->shouldNotReceive('mergePersistedBatchResults');
         $decision->shouldNotReceive('validateAndRepairForDocument');
         $flow->shouldNotReceive('persistMaintainerDecision');
+        $flow->shouldNotReceive('continueAfterMaintainerDecisionBatches');
         (new FinalizeEnterpriseWikiMaintainerDecisionBatches($run->id))->handle($state, $coordinator, $decision, $flow);
         $this->assertSame('enterprise-wiki-maintainer-batches', (new FinalizeEnterpriseWikiMaintainerDecisionBatches($run->id))->queue);
     }

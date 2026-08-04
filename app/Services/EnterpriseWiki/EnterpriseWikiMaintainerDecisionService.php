@@ -131,6 +131,35 @@ class EnterpriseWikiMaintainerDecisionService
         return $repaired;
     }
 
+    /** @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>}|null */
+    public function preparePersistedCandidateBatchesForDocument(int $customerId, int $documentId, string $languageCode = 'no', ?AiCallContext $context = null): ?array
+    {
+        $document = EnterpriseWikiDocument::query()->where('customer_id', $customerId)->where('id', $documentId)->first();
+        if ($document === null) {
+            throw new \InvalidArgumentException("Document [{$documentId}] not found for customer [{$customerId}].");
+        }
+
+        $sourceText = (string) ($document->extracted_text ?? '');
+        if (! $this->aiClient->requiresSplit($sourceText)) {
+            return null;
+        }
+
+        return $this->aiClient->preparePersistedCandidateBatches(
+            ['title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown', 'filename' => (string) $document->original_filename],
+            $sourceText,
+            $this->indexContextService->buildForCustomer($customerId),
+            $languageCode,
+            $this->figureCandidatesForDocument($document),
+            $context,
+        );
+    }
+
+    /** @param list<array<string,mixed>> $batchResults @return array<string,mixed> */
+    public function mergePersistedCandidateBatchResults(array $globalPlan, array $batchResults): array
+    {
+        return $this->aiClient->mergePersistedBatchResults($globalPlan, $batchResults);
+    }
+
     /**
      * Every showable (non-decorative/logo) figure already extracted and classified from this
      * document — EnterpriseWikiDocumentSourceElementService::inspect() has already excluded
