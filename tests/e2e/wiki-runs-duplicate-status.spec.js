@@ -15,13 +15,11 @@ async function loginAsDevDataUser(page) {
 }
 
 /**
- * Verifies the "Remove duplicate document-owner status badge" fix: for
- * awaiting_document_owner_approval, only ONE highlighted status badge (the main one) should
- * appear — the secondary "Avventer dokumenteier" pill duplicated it in different words and is
- * now hidden. Reuses WikiRunsStalledIndicatorE2EFixture (same fixture as the stalled-indicator
- * spec): it already seeds one awaiting_document_owner_approval run and one genuinely active run
- * side by side, which is exactly what's needed to prove the secondary pill is hidden for one and
- * preserved for the other.
+ * Verifies the owner-approval wait UI: for awaiting_document_owner_approval, only one main status
+ * badge should appear, and it must read as a waiting state rather than active processing.
+ * Reuses WikiRunsStalledIndicatorE2EFixture (same fixture as the stalled-indicator spec): it
+ * already seeds one awaiting_document_owner_approval run and one genuinely active run side by
+ * side, which is exactly what's needed to prove the waiting copy is isolated to the correct row.
  */
 test.describe.serial('Kjøringer duplicate status badge removal', () => {
     let activeRunId;
@@ -52,21 +50,11 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
         await expect(row).toBeVisible();
 
-        // Exactly one badge (the main one) — the second, shorter-worded pill that used to repeat
-        // the same fact ("Avventer dokumenteier") must not exist at all.
-        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
-        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
+        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
+        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
     });
 
-    test('2. the main status badge (Avventer dokumenteiergodkjenning) is still shown', async ({ page }) => {
-        await loginAsDevDataUser(page);
-        await page.goto('/app/wiki?tab=runs');
-
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toBeVisible();
-    });
-
-    test('3. the explanation text (Venter på dokumenteiergodkjenning) is still shown', async ({ page }) => {
+    test('2. the main status badge (Venter på dokumenteiergodkjenning) is still shown', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
@@ -74,32 +62,42 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
     });
 
-    test('4. the Dokumenteier step indicator is still shown', async ({ page }) => {
+    test('3. the explanation text says automatic processing is complete and the run is waiting', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Dokumenteier', { exact: true })).toBeVisible();
+        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
+        await expect(row.getByText('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.', { exact: true })).toBeVisible();
+        await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
-    test('4b. the redundant secondary badge (Avventer dokumenteier) is not shown', async ({ page }) => {
+    test('4. the document-owner approval step indicator is still shown', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Avventer dokumenteier', { exact: true })).toHaveCount(0);
+        await expect(row.getByText('Dokumenteiergodkjenning', { exact: true })).toBeVisible();
     });
 
-    test('5. secondary status is still shown for a status where it adds real information (active/generating_pages)', async ({ page }) => {
+    test('4b. the redundant old waiting badge is not shown', async ({ page }) => {
+        await loginAsDevDataUser(page);
+        await page.goto('/app/wiki?tab=runs');
+
+        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
+        await expect(row.locator('[class*="animate-pulse"]')).toHaveCount(0);
+    });
+
+    test('5. an active run still shows a progress line, unlike the waiting run', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${activeRunId}")`).first();
         await expect(row).toBeVisible();
         await expect(row.getByText('Genererer sider', { exact: true })).toBeVisible();
-        // "Arbeid pågår" (secondary pill) is genuinely new information beyond the main badge —
-        // it tells the reader automatic work is actively in flight, not merely which step.
-        await expect(row.getByText('Arbeid pågår', { exact: true })).toBeVisible();
+        await expect(row.getByText(/Siste fremdrift/)).toBeVisible();
+        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toHaveCount(0);
     });
 
     test('6. desktop layout renders both rows without console errors', async ({ page }) => {

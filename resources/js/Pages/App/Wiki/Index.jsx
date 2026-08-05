@@ -132,7 +132,7 @@ const INGEST_STATUS_LABELS = {
     post_claim_verification: 'Etterbehandler påstander',
     verification_linking: 'Verifisering og lenking',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Avventer dokumenteiergodkjenning',
+    awaiting_document_owner_approval: 'Venter på dokumenteiergodkjenning',
     completed: 'Fullført',
     failed: 'Feilet',
     escalated: 'Eskalert',
@@ -236,16 +236,16 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     if (!run) return null;
 
     const isActive = isActiveWikiRun(run);
+    const isOwnerApprovalWaiting = run.status === 'awaiting_document_owner_approval';
     const isEscalated = run.status === 'escalated';
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
-    const progressLabel = formatRelativeProgress(progressAt, locale);
-    const lastProgressLabel = progressLabel
-        ? `${tw.ingest_activity_last_progress ?? 'Siste fremdrift'} ${progressLabel}`
-        : null;
     // Deliberately NOT based on isActive/isActiveWikiRun — that list also covers
     // awaiting_document_owner_approval (kept "active" for polling/aria-live purposes), which must
     // never be flagged stalled: it is a normal, indefinite wait for a human, not a stuck pipeline.
     const seemsStalled = isRunStalled(run);
+    const statusSetAt = progressAt
+        ? `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim()
+        : null;
     const counters = [];
 
     if (showCounters) {
@@ -283,7 +283,21 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                 </span>
             )}
 
-            {isEscalated ? (
+            {isOwnerApprovalWaiting ? (
+                <div className="max-w-full space-y-1">
+                    <p className="text-base font-medium leading-6 text-slate-700">
+                        {tw.ingest_activity_owner_approval_complete ?? 'Automatisk behandling fullført'}
+                    </p>
+                    <p className="text-base leading-6 text-slate-600">
+                        {tw.ingest_activity_owner_approval_waiting ?? 'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.'}
+                    </p>
+                    {statusSetAt && (
+                        <p className="text-xs leading-5 text-slate-400">
+                            {(tw.ingest_activity_status_set ?? 'Satt i status')} {statusSetAt}
+                        </p>
+                    )}
+                </div>
+            ) : isEscalated ? (
                 <div className="max-w-sm space-y-1">
                     <p className="text-base font-medium leading-6 text-amber-800">
                         {escalation.primaryReason}
@@ -363,9 +377,9 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                 </p>
             )}
 
-            {lastProgressLabel && (
+            {!isOwnerApprovalWaiting && statusSetAt && (
                 <p className="text-xs leading-5 text-slate-400">
-                    {lastProgressLabel}
+                    {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
                 </p>
             )}
 
@@ -937,13 +951,14 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
 
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
+    const canRefresh = isInProgress && run.status !== 'awaiting_document_owner_approval';
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
     const errorMessage = run.qa_last_error ?? run.error_message;
     return (
         <div className="space-y-2">
             <div className="flex items-center gap-2">
                 <span className={`${BADGE} ${cls}`}>{label}</span>
-                {isInProgress && (
+                {canRefresh && (
                     <button
                         type="button"
                         onClick={onReload}
@@ -1788,6 +1803,13 @@ function SourcesTab({
                                         // should disable the Delete button. Mirrors
                                         // EnterpriseWikiDocumentDeletionService::hasActiveRun().
                                         const hasBlockingRun = !!source.latest_ingest_run?.expects_automatic_progress;
+                                        const ingestDisabledTitle = !wikiGenerationAvailable
+                                            ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
+                                            : (isInProgress
+                                                ? (source.latest_ingest_run?.status === 'awaiting_document_owner_approval'
+                                                    ? (tw.document_has_waiting_approval_run ?? 'Dokumentet venter på dokumenteiergodkjenning')
+                                                    : (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring'))
+                                                : undefined);
                                         const sourceOwnerLabel = source.owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier');
                                         return (
                                         <tr key={source.id} className="text-base leading-6 text-slate-700">
@@ -1882,11 +1904,7 @@ function SourcesTab({
                                                             <button
                                                                 type="button"
                                                                 disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
-                                                                title={
-                                                                    !wikiGenerationAvailable
-                                                                        ? (tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.')
-                                                                        : (isInProgress ? (tw.document_has_active_run ?? 'Dokumentet har en aktiv kjøring') : undefined)
-                                                                }
+                                                                title={ingestDisabledTitle}
                                                                 onClick={() => {
                                                                     if (ingestingIds.has(source.id)) return;
                                                                     setIngestingIds((prev) => new Set(prev).add(source.id));

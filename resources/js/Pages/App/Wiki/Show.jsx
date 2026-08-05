@@ -2000,6 +2000,9 @@ export default function WikiShow({
     }[status] ?? 'border-slate-200 bg-slate-50');
 
     const documentOwnerApprovalSentence = (approval) => approval.summary_text ?? '';
+    const pendingDocumentOwnerNames = documentOwnerApprovals
+        .filter((approval) => approval.approval_status === 'pending')
+        .map((approval) => approval.document_owner_name ?? (tw.document_owner_missing ?? 'Mangler Dokumenteier'));
 
     const isDraft = page.status === 'draft';
     const isPendingReview = page.status === 'pending_review';
@@ -2414,6 +2417,22 @@ export default function WikiShow({
                             </p>
                         )}
 
+                        {documentOwnerApprovalSummary?.total > 0 && (
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm font-medium text-slate-600">
+                                <p>
+                                    {(tw.document_owner_approval_received_count ?? ':approved av :total godkjenninger mottatt')
+                                        .replace(':approved', documentOwnerApprovalSummary.approved ?? 0)
+                                        .replace(':total', documentOwnerApprovalSummary.total ?? 0)}
+                                </p>
+                                {pendingDocumentOwnerNames.length > 0 && (
+                                    <p>
+                                        {(tw.document_owner_approval_missing_prefix ?? 'Mangler')}:{' '}
+                                        {pendingDocumentOwnerNames.join(', ')}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             {documentOwnerApprovals.map((approval) => (
                                 <article key={approval.id} className={`rounded-xl border p-4 ${documentOwnerApprovalCardClass(approval.approval_status, approval.is_override)}`}>
@@ -2483,7 +2502,9 @@ export default function WikiShow({
                                                     onClick={() => approveDocumentOwnerApproval(approval)}
                                                     className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                                                 >
-                                                    {documentOwnerApprovalProcessing === approval.id ? 'Behandler...' : 'Godkjenn'}
+                                                    {documentOwnerApprovalProcessing === approval.id
+                                                        ? 'Behandler...'
+                                                        : (tw.document_owner_approval_approve_button ?? 'Godkjenn dokument')}
                                                 </button>
                                                 <button
                                                     type="button"
