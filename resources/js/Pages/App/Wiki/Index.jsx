@@ -101,6 +101,9 @@ const INGEST_STATUS_STYLES = {
     maintainer_decision: 'bg-violet-100 text-violet-700',
     applying: 'bg-indigo-100 text-indigo-700',
     generating_pages: 'bg-sky-100 text-sky-700',
+    generating_concept_entity_pages: 'bg-sky-100 text-sky-700',
+    verifying_claims: 'bg-cyan-100 text-cyan-700',
+    post_claim_verification: 'bg-cyan-100 text-cyan-700',
     verification_linking: 'bg-cyan-100 text-cyan-700',
     qa: 'bg-fuchsia-100 text-fuchsia-700',
     awaiting_document_owner_approval: 'bg-amber-100 text-amber-700',
@@ -124,6 +127,9 @@ const INGEST_STATUS_LABELS = {
     maintainer_decision: 'Vedlikeholdersbeslutning',
     applying: 'Anvender beslutning',
     generating_pages: 'Genererer sider',
+    generating_concept_entity_pages: 'Genererer konsept- og entitetssider',
+    verifying_claims: 'Verifiserer påstander',
+    post_claim_verification: 'Etterbehandler påstander',
     verification_linking: 'Verifisering og lenking',
     qa: 'QA',
     awaiting_document_owner_approval: 'Avventer dokumenteiergodkjenning',
@@ -141,6 +147,9 @@ const IN_PROGRESS_STATUSES = [
     'maintainer_decision',
     'applying',
     'generating_pages',
+    'generating_concept_entity_pages',
+    'verifying_claims',
+    'post_claim_verification',
     'verification_linking',
     'qa',
     'awaiting_document_owner_approval',
@@ -184,101 +193,13 @@ function formatRelativeProgress(value, locale) {
     return `kl. ${formatTime(value, locale)}`;
 }
 
-function getIngestActivityCopy(run, tw) {
-    if (!run) {
-        return null;
-    }
-
-    const map = {
-        queued: {
-            label: tw.ingest_activity_queued ?? 'Venter i kø',
-            detail: tw.ingest_activity_queued ?? 'Venter i kø',
-            tone: 'waiting',
-        },
-        running: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_planning ?? 'Dokumentet struktureres',
-            tone: 'active',
-        },
-        sections_planned: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_planning ?? 'Dokumentet struktureres',
-            tone: 'active',
-        },
-        maintainer_decision: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_decision ?? 'Vedlikeholdersbeslutning behandles',
-            tone: 'active',
-        },
-        applying: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_applying ?? 'Anvender beslutning',
-            tone: 'active',
-        },
-        generating_pages: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_generating_pages ?? 'Oppretter Wiki-sider',
-            waiting: tw.ingest_activity_generating_pages_waiting ?? 'Venter på at sidejobbene blir ferdige',
-            tone: 'active',
-        },
-        generating_concept_entity_pages: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_generating_pages ?? 'Oppretter Wiki-sider',
-            waiting: tw.ingest_activity_generating_pages_waiting ?? 'Venter på at sidejobbene blir ferdige',
-            tone: 'active',
-        },
-        verification_linking: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_verifying ?? 'Verifiserer kilder og lenker',
-            waiting: tw.ingest_activity_verifying_waiting ?? 'Venter på at kontrolljobbene blir ferdige',
-            tone: 'active',
-        },
-        qa: {
-            label: tw.ingest_activity_active ?? 'Arbeid pågår',
-            detail: tw.ingest_activity_qa ?? 'Kvalitetssikrer innholdet',
-            tone: 'active',
-        },
-        awaiting_document_owner_approval: {
-            label: tw.ingest_activity_waiting_owner_approval ?? 'Avventer dokumenteier',
-            detail: tw.ingest_activity_waiting_owner_approval ?? 'Venter på dokumenteiergodkjenning',
-            tone: 'warning',
-        },
-        completed: {
-            label: tw.ingest_activity_completed ?? 'Fullført',
-            detail: tw.ingest_activity_completed ?? 'Fullført',
-            tone: 'done',
-        },
-        failed: {
-            label: tw.ingest_activity_failed ?? 'Feilet',
-            detail: tw.ingest_activity_failed ?? 'Feilet',
-            tone: 'error',
-        },
-        escalated: {
-            label: tw.ingest_activity_escalated ?? 'Eskalert',
-            detail: tw.ingest_activity_escalated ?? 'Eskalert',
-            tone: 'warning',
-        },
-        decision_only: {
-            label: tw.ingest_activity_decision_only ?? 'Beslutning lagret',
-            detail: tw.ingest_activity_decision_only ?? 'Beslutning lagret',
-            tone: 'decision',
-        },
-    };
-
-    return map[run.status] ?? {
-        label: run.status,
-        detail: run.status,
-        tone: 'waiting',
-    };
-}
-
 function RunTimeline({ run, tw }) {
     if (!run || run.status === 'decision_only') {
         return null;
     }
 
     return (
-        <ol className="mt-2 flex flex-wrap gap-2">
+        <ol className="mt-1 flex max-w-full gap-1 overflow-x-auto pb-1 whitespace-nowrap">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
                 const stateCls = state === 'done'
@@ -298,9 +219,9 @@ function RunTimeline({ run, tw }) {
                 return (
                     <li
                         key={step.key}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-base font-semibold leading-6 ${stateCls}`}
+                        className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold leading-5 ${stateCls}`}
                     >
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
                         {tw[step.labelKey] ?? step.fallback}
                     </li>
                 );
@@ -314,18 +235,8 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
 
     if (!run) return null;
 
-    const activity = getIngestActivityCopy(run, tw);
     const isActive = isActiveWikiRun(run);
     const isEscalated = run.status === 'escalated';
-    // The secondary activity pill only adds information while the automatic pipeline still
-    // expects to make technical progress (queued/running/generating/etc.) — for every other
-    // status (awaiting_document_owner_approval, decision_only, completed, failed, cancelled) it
-    // just restates the main status badge in slightly different words ("Avventer
-    // dokumenteiergodkjenning" vs "Avventer dokumenteier"). A literal string comparison against
-    // the main badge's label would miss that case entirely (different wording, same fact), so
-    // this reuses the same backend-computed, status-driven flag the stalled check already relies
-    // on rather than hardcoding a single text comparison.
-    const showSecondaryStatusPill = !!run.expects_automatic_progress;
     const progressAt = run.last_progress_at ?? run.updated_at ?? run.started_at ?? run.created_at;
     const progressLabel = formatRelativeProgress(progressAt, locale);
     const lastProgressLabel = progressLabel
@@ -365,39 +276,11 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
 
     return (
-        <div className="mt-2 space-y-2" aria-live={isActive ? 'polite' : 'off'}>
-            {!isEscalated && (showSecondaryStatusPill || seemsStalled) && (
-                <div className="flex flex-wrap items-center gap-2">
-                    {showSecondaryStatusPill && (
-                        activity?.tone === 'active' ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700">
-                                <span className="h-2 w-2 shrink-0 rounded-full bg-violet-500 animate-pulse" aria-hidden="true" />
-                                {activity.label}
-                            </span>
-                        ) : (
-                            <span
-                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-base font-semibold leading-6 ${
-                                    activity?.tone === 'done'
-                                        ? 'bg-emerald-50 text-emerald-700'
-                                        : activity?.tone === 'error'
-                                            ? 'bg-rose-50 text-rose-700'
-                                            : activity?.tone === 'warning'
-                                                ? 'bg-amber-50 text-amber-700'
-                                                : activity?.tone === 'decision'
-                                                    ? 'bg-violet-50 text-violet-700'
-                                                    : 'bg-slate-100 text-slate-500'
-                                }`}
-                            >
-                                {activity?.label ?? run.status}
-                            </span>
-                        )
-                    )}
-                    {seemsStalled && (
-                        <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1.5 text-base font-semibold leading-6 text-amber-700">
-                            {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
-                        </span>
-                    )}
-                </div>
+        <div className="mt-1 space-y-1" aria-live={isActive ? 'polite' : 'off'}>
+            {seemsStalled && (
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
+                    {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
+                </span>
             )}
 
             {isEscalated ? (
@@ -465,12 +348,7 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                         </button>
                     )}
                 </div>
-            ) : (
-                <p className="text-base leading-6 text-slate-500">
-                    {activity?.detail ?? run.status}
-                    {activity?.waiting ? ` · ${activity.waiting}` : ''}
-                </p>
-            )}
+            ) : null}
 
             {seemsStalled && (
                 <p className="text-base leading-6 text-amber-700">
@@ -486,7 +364,7 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
             )}
 
             {lastProgressLabel && (
-                <p className="text-base leading-6 text-slate-400">
+                <p className="text-xs leading-5 text-slate-400">
                     {lastProgressLabel}
                 </p>
             )}
@@ -1011,20 +889,20 @@ function getWikiQualityHelpSections(tw) {
     ];
 }
 
-function ingestStatusLabel(status, qaStatus = null) {
+function ingestStatusLabel(status, qaStatus = null, tw = {}) {
     if (status === 'completed' && qaStatus === 'passed') {
-        return 'Fullført / bestått';
+        return tw.ingest_status_completed_passed ?? 'Fullført / bestått';
     }
 
     if (status === 'escalated' || qaStatus === 'escalated') {
-        return 'Eskalert';
+        return tw.ingest_status_escalated ?? 'Eskalert';
     }
 
     if (status === 'failed' && qaStatus === 'failed') {
-        return 'Feilet';
+        return tw.ingest_status_failed ?? 'Feilet';
     }
 
-    return INGEST_STATUS_LABELS[status] ?? status;
+    return tw[`ingest_status_${status}`] ?? INGEST_STATUS_LABELS[status] ?? tw.ingest_status_unknown ?? 'Ukjent status';
 }
 
 function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision }) {
@@ -2448,7 +2326,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         'sections_planned',
                         'decision_only',
                     ].map((s) => (
-                        <option key={s} value={s}>{ingestStatusLabel(s)}</option>
+                        <option key={s} value={s}>{ingestStatusLabel(s, null, tw)}</option>
                     ))}
                 </select>
 
@@ -2551,7 +2429,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     className={`${BADGE} ${statusCls}`}
                                                     title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
                                                 >
-                                                    {ingestStatusLabel(run.status, run.qa_status)}
+                                                    {ingestStatusLabel(run.status, run.qa_status, tw)}
                                                 </span>
                                                 <RunActivityBlock
                                                     run={run}
