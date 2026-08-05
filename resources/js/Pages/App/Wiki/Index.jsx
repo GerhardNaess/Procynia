@@ -121,14 +121,14 @@ const SEVERITY_STYLES = {
     info: 'bg-slate-100 text-slate-700',
 };
 
-const RUN_TIMELINE_COMPACT_LABELS = {
+const RUN_TIMELINE_LABELS = {
     queued: 'Kø',
     maintainer_decision: 'Beslutning',
     applying: 'Sidestruktur',
     generating_pages: 'Sider',
     verification_linking: 'Verifisering',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Dokumenteier',
+    awaiting_document_owner_approval: 'Dokumenteiergodkjenning',
 };
 
 const INGEST_STATUS_LABELS = {
@@ -210,69 +210,54 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <>
-            <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:hidden">
-                {RUN_TIMELINE_STEPS.map((step, index) => {
-                    const state = getRunTimelineState(run, index);
-                    const stateCls = state === 'done'
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : state === 'active'
-                            ? 'border-violet-200 bg-violet-50 text-violet-700'
-                            : state === 'error'
-                                ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                : 'border-slate-200 bg-slate-50 text-slate-400';
-                    const dotCls = state === 'done'
-                        ? 'bg-emerald-500'
-                        : state === 'active'
-                            ? 'bg-violet-500 animate-pulse'
-                            : state === 'error'
-                                ? 'bg-rose-500'
-                                : 'bg-slate-300';
+        <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
+            {RUN_TIMELINE_STEPS.map((step, index) => {
+                const state = getRunTimelineState(run, index);
+                const stateCls = state === 'done'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : state === 'active'
+                        ? 'border-violet-200 bg-violet-50 text-violet-700'
+                        : state === 'error'
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-400';
+                const dotCls = state === 'done'
+                    ? 'bg-emerald-500'
+                    : state === 'active'
+                        ? 'bg-violet-500 animate-pulse'
+                        : state === 'error'
+                            ? 'bg-rose-500'
+                            : 'bg-slate-300';
                     return (
                         <li
                             key={step.key}
-                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold leading-5 ${stateCls}`}
+                            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-sm font-semibold leading-5 ${stateCls}`}
                         >
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
-                            {tw[step.labelKey] ?? step.fallback}
+                        {RUN_TIMELINE_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback}
                         </li>
                     );
                 })}
             </ol>
-            <ol className="mt-1 hidden min-w-0 max-w-full flex-wrap gap-0.5 overflow-visible pb-1 md:flex">
-                {RUN_TIMELINE_STEPS.map((step, index) => {
-                    const state = getRunTimelineState(run, index);
-                    const stateCls = state === 'done'
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : state === 'active'
-                            ? 'border-violet-200 bg-violet-50 text-violet-700'
-                            : state === 'error'
-                                ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                : 'border-slate-200 bg-slate-50 text-slate-400';
-                    const dotCls = state === 'done'
-                        ? 'bg-emerald-500'
-                        : state === 'active'
-                            ? 'bg-violet-500 animate-pulse'
-                            : state === 'error'
-                                ? 'bg-rose-500'
-                                : 'bg-slate-300';
-                    const label = RUN_TIMELINE_COMPACT_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback;
-                    return (
-                        <li
-                            key={step.key}
-                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-sm font-semibold leading-5 ${stateCls}`}
-                        >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
-                            {label}
-                        </li>
-                    );
-                })}
-            </ol>
-        </>
+        );
+}
+
+function RunProgressRow({ run, tw }) {
+    if (!run || run.status === 'decision_only') {
+        return null;
+    }
+
+    return (
+        <tr className="bg-slate-50/60">
+            <td colSpan={10} className="px-3 pb-4 pt-0">
+                <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white px-3 py-3 md:px-4">
+                    <RunTimeline run={run} tw={tw} />
+                </div>
+            </td>
+        </tr>
     );
 }
 
-function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline = false, onOpenFindings = null, onRetryMaintainerDecision = null }) {
+function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaintainerDecision = null }) {
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
     if (!run) return null;
@@ -288,20 +273,6 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const statusSetAt = progressAt
         ? `${formatDate(progressAt, locale)} ${formatTime(progressAt, locale) ?? ''}`.trim()
         : null;
-    const counters = [];
-
-    if (showCounters) {
-        if ((run.pages_count ?? 0) > 0) {
-            counters.push(`${run.pages_count} ${tw.runs_col_pages ?? 'Sider'}`);
-        }
-        if ((run.sections_count ?? 0) > 0) {
-            counters.push(`${run.sections_count} ${tw.runs_col_sections ?? 'Seksjoner'}`);
-        }
-        if ((run.lint_count ?? 0) > 0) {
-            counters.push(`${run.lint_count} ${tw.runs_col_lint ?? 'Funn'}`);
-        }
-    }
-
     // Escalated runs already show "Eskalert" as the row's main status badge — repeating the same
     // word here as a second (and, for the plain-text detail line, third) chip left the user with
     // no explanation of why. Route this one status straight to a real, data-backed explanation
@@ -413,20 +384,10 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                 </p>
             )}
 
-            {showCounters && counters.length > 0 && (
-                <p className="text-base leading-6 text-slate-400">
-                    {counters.join(' · ')}
-                </p>
-            )}
-
             {!isOwnerApprovalWaiting && statusSetAt && (
                 <p className="text-xs leading-5 text-slate-400">
                     {(tw.ingest_activity_last_progress ?? 'Siste fremdrift')} {formatRelativeProgress(progressAt, locale)}
                 </p>
-            )}
-
-            {showTimeline && (
-                <RunTimeline run={run} tw={tw} />
             )}
         </div>
     );
@@ -1016,7 +977,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     {tw.ingest_activity_queued_note ?? 'Behandlingen er ikke startet ennå.'}
                 </p>
             )}
-            <RunActivityBlock run={run} tw={tw} locale={locale} showCounters />
+            <RunActivityBlock run={run} tw={tw} locale={locale} />
             {run.status === 'failed' && errorMessage && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
                 <p
                     className="line-clamp-2 wrap-break-word text-base leading-6 text-rose-500"
@@ -2511,7 +2472,6 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                         run={run}
                                                         tw={tw}
                                                         locale={locale}
-                                                        showTimeline
                                                         onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
                                                         onRetryMaintainerDecision={handleRetryClick}
                                                     />
@@ -2609,6 +2569,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 )}
                                             </td>
                                         </tr>
+                                        <RunProgressRow run={run} tw={tw} />
                                         {activePanel !== null && (
                                             <tr>
                                                 <td colSpan={10} className="bg-slate-50/70 px-4 py-4">

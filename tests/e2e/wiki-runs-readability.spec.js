@@ -54,14 +54,15 @@ test.describe.serial('Kjøringer run row readability', () => {
         expect(await stalledPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(12);
     });
 
-    test('step timeline chips (Kø/Besl./Anv./Sider/Verif./QA/Eier) are readable', async ({ page }) => {
+    test('step timeline chips (Kø/Beslutning/Sidestruktur/Sider/Verifisering/QA/Dokumenteiergodkjenning) are readable', async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${runId}")`).first();
-        const desktopTimeline = row.locator('ol').nth(1);
-        for (const label of ['Kø', 'Beslutning', 'Sidestruktur', 'Sider', 'Verifisering', 'QA', 'Dokumenteier']) {
+        await expect(row.locator('ol')).toHaveCount(0);
+        const desktopTimeline = row.locator('xpath=following-sibling::tr[1]').locator('ol');
+        for (const label of ['Kø', 'Beslutning', 'Sidestruktur', 'Sider', 'Verifisering', 'QA', 'Dokumenteiergodkjenning']) {
             const chip = desktopTimeline.getByText(label, { exact: true });
             await expect(chip).toBeVisible();
             const size = await chip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));

@@ -74,15 +74,18 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         );
         const rowText = await row.evaluate((el) => el.textContent ?? '');
         expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
+        await expect(row.locator('ol')).toHaveCount(0);
         await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
-    test('4. the document-owner approval step indicator is still shown', async ({ page }) => {
+    test('4. the document-owner approval step indicator is shown below the row', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.locator('ol').nth(1).getByText('Dokumenteier', { exact: true })).toBeVisible();
+        const progressRow = row.locator('xpath=following-sibling::tr[1]');
+        await expect(progressRow).toBeVisible();
+        await expect(progressRow.getByText('Dokumenteiergodkjenning', { exact: true })).toBeVisible();
     });
 
     test('4b. the redundant old waiting badge is not shown', async ({ page }) => {
