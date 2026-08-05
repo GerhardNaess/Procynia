@@ -30,7 +30,7 @@ function formatTime(value, locale) {
     return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
-const BADGE = 'inline-flex items-center rounded-full px-3 py-1.5 text-base font-semibold leading-6 whitespace-nowrap';
+const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-base font-semibold leading-5 whitespace-nowrap';
 
 // Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
 // border, no hover/focus state) so an action always reads as a clickable control, never as a
@@ -40,7 +40,7 @@ const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-now
 const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
 const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
-const ACTION_BUTTON_DESTRUCTIVE_WRAP = 'inline-flex h-10 max-w-full items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3.5 text-base font-semibold leading-5 text-rose-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-50 whitespace-normal break-words text-center';
+const ACTION_BUTTON_DESTRUCTIVE_WRAP = 'inline-flex h-10 max-w-full items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 text-sm font-semibold leading-5 text-rose-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-50 whitespace-normal break-words text-center';
 
 const STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
@@ -119,6 +119,16 @@ const SEVERITY_STYLES = {
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
     info: 'bg-slate-100 text-slate-700',
+};
+
+const RUN_TIMELINE_COMPACT_LABELS = {
+    queued: 'Kø',
+    maintainer_decision: 'Besl.',
+    applying: 'Anv.',
+    generating_pages: 'Sider',
+    verification_linking: 'Verif.',
+    qa: 'QA',
+    awaiting_document_owner_approval: 'Eier',
 };
 
 const INGEST_STATUS_LABELS = {
@@ -200,34 +210,65 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
-            {RUN_TIMELINE_STEPS.map((step, index) => {
-                const state = getRunTimelineState(run, index);
-                const stateCls = state === 'done'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : state === 'active'
-                        ? 'border-violet-200 bg-violet-50 text-violet-700'
-                        : state === 'error'
-                            ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : 'border-slate-200 bg-slate-50 text-slate-400';
-                const dotCls = state === 'done'
-                    ? 'bg-emerald-500'
-                    : state === 'active'
-                        ? 'bg-violet-500 animate-pulse'
-                        : state === 'error'
-                            ? 'bg-rose-500'
-                            : 'bg-slate-300';
-                return (
-                    <li
-                        key={step.key}
-                        className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold leading-5 ${stateCls}`}
-                    >
-                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
-                        {tw[step.labelKey] ?? step.fallback}
-                    </li>
-                );
-            })}
-        </ol>
+        <>
+            <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:hidden">
+                {RUN_TIMELINE_STEPS.map((step, index) => {
+                    const state = getRunTimelineState(run, index);
+                    const stateCls = state === 'done'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : state === 'active'
+                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                            : state === 'error'
+                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-400';
+                    const dotCls = state === 'done'
+                        ? 'bg-emerald-500'
+                        : state === 'active'
+                            ? 'bg-violet-500 animate-pulse'
+                            : state === 'error'
+                                ? 'bg-rose-500'
+                                : 'bg-slate-300';
+                    return (
+                        <li
+                            key={step.key}
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold leading-5 ${stateCls}`}
+                        >
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
+                            {tw[step.labelKey] ?? step.fallback}
+                        </li>
+                    );
+                })}
+            </ol>
+            <ol className="mt-1 hidden min-w-0 max-w-full flex-nowrap gap-0.5 overflow-hidden pb-1 md:flex">
+                {RUN_TIMELINE_STEPS.map((step, index) => {
+                    const state = getRunTimelineState(run, index);
+                    const stateCls = state === 'done'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : state === 'active'
+                            ? 'border-violet-200 bg-violet-50 text-violet-700'
+                            : state === 'error'
+                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-400';
+                    const dotCls = state === 'done'
+                        ? 'bg-emerald-500'
+                        : state === 'active'
+                            ? 'bg-violet-500 animate-pulse'
+                            : state === 'error'
+                                ? 'bg-rose-500'
+                                : 'bg-slate-300';
+                    const label = RUN_TIMELINE_COMPACT_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback;
+                    return (
+                        <li
+                            key={step.key}
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-base font-semibold leading-5 ${stateCls}`}
+                        >
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
+                            {label}
+                        </li>
+                    );
+                })}
+            </ol>
+        </>
     );
 }
 
@@ -277,7 +318,7 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
 
     return (
-        <div className="mt-1 min-w-0 max-w-full space-y-1" aria-live={isActive ? 'polite' : 'off'}>
+        <div className="mt-1 min-w-0 max-w-full space-y-0.5" aria-live={isActive ? 'polite' : 'off'}>
             {seemsStalled && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
                     {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
@@ -285,12 +326,12 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
             )}
 
             {isOwnerApprovalWaiting ? (
-                <div className="min-w-0 max-w-full space-y-1 break-words">
-                    <p className="break-words text-base font-medium leading-6 text-slate-700">
+                <div className="min-w-0 max-w-full space-y-0.5 break-words">
+                    <p
+                        className="break-words text-base font-medium leading-6 text-slate-700"
+                        title={tw.ingest_activity_owner_approval_waiting ?? 'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.'}
+                    >
                         {tw.ingest_activity_owner_approval_complete ?? 'Automatisk behandling fullført'}
-                    </p>
-                    <p className="break-words text-base leading-6 text-slate-600">
-                        {tw.ingest_activity_owner_approval_waiting ?? 'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.'}
                     </p>
                     {statusSetAt && (
                         <p className="break-words text-xs leading-5 text-slate-400">
@@ -2401,18 +2442,18 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         <table className="w-full min-w-0 max-w-full table-fixed divide-y divide-slate-200">
                             <colgroup>
                                 <col style={{ width: '56px' }} />
-                                <col style={{ width: '144px' }} />
-                                <col style={{ width: '288px' }} />
-                                <col style={{ width: '104px' }} />
-                                <col style={{ width: '48px' }} />
-                                <col style={{ width: '48px' }} />
-                                <col style={{ width: '48px' }} />
-                                <col style={{ width: '88px' }} />
-                                <col style={{ width: '88px' }} />
-                                <col style={{ width: '112px' }} />
+                                <col style={{ width: '210px' }} />
+                                <col style={{ width: '272px' }} />
+                                <col style={{ width: '116px' }} />
+                                <col style={{ width: '56px' }} />
+                                <col style={{ width: '64px' }} />
+                                <col style={{ width: '56px' }} />
+                                <col style={{ width: '96px' }} />
+                                <col style={{ width: '96px' }} />
+                                <col style={{ width: '120px' }} />
                             </colgroup>
                             <thead className="bg-slate-50">
-                                <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
+                                <tr className="text-left text-sm font-semibold uppercase tracking-wide leading-5 text-slate-500">
                                     <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_document ?? 'Dokument'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
@@ -2436,15 +2477,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     const panelId = `run-panel-${run.id}`;
                                     return (
                                     <Fragment key={run.id}>
-                                        <tr className="text-base leading-6 text-slate-700">
-                                            <td className="min-w-0 px-4 py-3 text-right font-mono text-base text-slate-400 tabular-nums">
+                                        <tr className="text-base leading-5 text-slate-700">
+                                            <td className="min-w-0 px-3 py-2 text-right font-mono text-base text-slate-400 tabular-nums">
                                                 {run.id}
                                             </td>
-                                            <td className="min-w-0 max-w-full px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-3 py-2">
                                                 {run.source_id ? (
                                                     <Link
                                                         href={`/app/wiki?tab=sources`}
-                                                        className="block truncate text-base font-medium leading-6 text-slate-900 hover:text-violet-700 hover:underline"
+                                                        className="block truncate text-base font-medium leading-5 text-slate-900 hover:text-violet-700 hover:underline"
                                                         title={run.source_document_filename ?? ''}
                                                     >
                                                         {run.source_document_filename ?? '—'}
@@ -2458,7 +2499,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     </p>
                                                 )}
                                             </td>
-                                            <td className="min-w-0 max-w-full px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-3 py-2 align-top">
                                                 <span
                                                     className={statusBadgeClass}
                                                     title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
@@ -2476,27 +2517,27 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     />
                                                 </div>
                                             </td>
-                                            <td className="min-w-0 max-w-full px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-3 py-2 align-top">
                                                 {run.maintainer_decision_status === 'applied' ? (
-                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 text-emerald-700`}>
+                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
                                                         {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
                                                     </span>
                                                 ) : run.maintainer_decision_status === 'pending' ? (
-                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 text-slate-500`}>
+                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
                                                         {tw.run_decision_pending ?? 'Venter'}
                                                     </span>
                                                 ) : (
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums">
+                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums">
                                                 {run.pages_count > 0 ? (
                                                     <button
                                                         type="button"
                                                         onClick={() => togglePanel(run, 'pages', true)}
                                                         aria-expanded={activePanel === 'pages'}
                                                         aria-controls={panelId}
-                                                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                        className="inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                     >
                                                         {run.pages_count}
                                                         <svg
@@ -2512,10 +2553,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums text-slate-500">
+                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums text-slate-500">
                                                 {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums">
+                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums">
                                                 {run.lint_count > 0 ? (
                                                     <button
                                                         type="button"
@@ -2532,7 +2573,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                                 .replace(':total', run.lint_count)
                                                                 .replace(':blocking', run.findings_open_blocking_count)
                                                             : undefined}
-                                                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
+                                                        className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
                                                     >
                                                         {run.lint_count}
                                                         <svg
@@ -2548,18 +2589,18 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3 text-base text-slate-500">
+                                            <td className="min-w-0 px-3 py-2 text-base text-slate-500">
                                                 {formatDate(run.created_at, locale)}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3 text-base text-slate-500">
+                                            <td className="min-w-0 px-3 py-2 text-base text-slate-500">
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
-                                            <td className="min-w-0 px-4 py-3">
+                                            <td className="min-w-0 px-3 py-2 text-center">
                                                 {run.can_cancel ? (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleCancelClick(run)}
-                                                        className={ACTION_BUTTON_DESTRUCTIVE_WRAP}
+                                                        className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} text-sm leading-5`}
                                                     >
                                                         {tw.run_cancel_button ?? 'Avbryt kjøring'}
                                                     </button>

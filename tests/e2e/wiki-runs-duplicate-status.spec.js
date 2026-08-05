@@ -68,7 +68,12 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
         await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
-        await expect(row.getByText('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.', { exact: true })).toBeVisible();
+        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
+            'title',
+            'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.',
+        );
+        const rowText = await row.evaluate((el) => el.textContent ?? '');
+        expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
         await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
@@ -77,7 +82,7 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(row.getByText('Eier', { exact: true })).toBeVisible();
     });
 
     test('4b. the redundant old waiting badge is not shown', async ({ page }) => {
