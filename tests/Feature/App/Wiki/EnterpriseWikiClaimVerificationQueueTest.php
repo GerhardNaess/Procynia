@@ -57,6 +57,20 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->delay !== null);
     }
 
+    public function test_sentinel_is_a_no_op_when_run_is_waiting_on_document_owner_approval(): void
+    {
+        Queue::fake();
+        [$run] = $this->runWithVersion();
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL]);
+
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldNotReceive('lint');
+
+        app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
     public function test_sentinel_claims_post_verification_continuation_only_once(): void
     {
         Queue::fake();

@@ -289,6 +289,10 @@ class EnterpriseWikiDocumentFlowService
             return;
         }
 
+        if ($this->isWaitingOnHumanAction($run, 'continueAfterPagesGenerated')) {
+            return;
+        }
+
         if ($run->status === EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
             $this->dispatchClaimVerificationWork($run);
 
@@ -353,6 +357,10 @@ class EnterpriseWikiDocumentFlowService
         $run = $result['run'];
 
         if (! $run instanceof EnterpriseWikiIngestRun) {
+            return;
+        }
+
+        if ($this->isWaitingOnHumanAction($run, 'continueAfterClaimVerification')) {
             return;
         }
 
@@ -532,6 +540,9 @@ class EnterpriseWikiDocumentFlowService
     public function continueAfterMaintainerDecisionBatches(int $runId): void
     {
         $run = EnterpriseWikiIngestRun::query()->findOrFail($runId);
+        if ($this->isWaitingOnHumanAction($run, 'continueAfterMaintainerDecisionBatches')) {
+            return;
+        }
         if ($run->isTerminal() || $run->maintainer_decision_generated_at === null) {
             return;
         }
@@ -544,6 +555,22 @@ class EnterpriseWikiDocumentFlowService
 
             throw $exception;
         }
+    }
+
+    private function isWaitingOnHumanAction(EnterpriseWikiIngestRun $run, string $entryPoint): bool
+    {
+        if (! $run->isAwaitingHumanAction()) {
+            return false;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Run awaiting human action — automatic continuation skipped.', [
+            'run_id' => $run->id,
+            'entry_point' => $entryPoint,
+            'status' => $run->status,
+            'qa_status' => $run->qa_status,
+        ]);
+
+        return true;
     }
 
     public function markMaintainerDecisionFailed(int $runId, Throwable $exception): void

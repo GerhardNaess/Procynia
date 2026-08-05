@@ -243,6 +243,26 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_continue_after_maintainer_batches_is_a_no_op_when_run_is_waiting_on_document_owner_approval(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRunWithStatus($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
+        $run->update([
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'maintainer_decision_generated_at' => now(),
+        ]);
+
+        $this->mock(EnterpriseWikiMaintainerDecisionApplyService::class)->shouldNotReceive('apply');
+
+        $this->flowService()->continueAfterMaintainerDecisionBatches($run->id);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
     // =========================================================================
     // continueAfterPagesGenerated(): materialize -> extract -> verify -> lint -> qa
     //

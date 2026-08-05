@@ -110,6 +110,31 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         $this->assertNull($fresh->error_message);
     }
 
+    public function test_continuation_is_a_no_op_when_run_is_waiting_on_document_owner_approval(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $run = $this->createRunAwaitingContinuation($customer);
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+            'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PASSED,
+        ]);
+
+        $this->mock(EnterpriseWikiBuildPageLinksService::class)->shouldNotReceive('materializeWikilinksForRun');
+        $this->mock(EnterpriseWikiExtractPageClaimsService::class)->shouldNotReceive('extract');
+        $this->mock(EnterpriseWikiVerifyPageClaimsService::class)->shouldNotReceive('verify');
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldNotReceive('lint');
+        $this->mock(EnterpriseWikiPostIngestQaService::class)->shouldNotReceive('runForRun');
+
+        $this->flowService()->continueAfterPagesGenerated($run->id);
+
+        $fresh = $run->fresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $fresh->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $fresh->qa_status);
+        Queue::assertNothingPushed();
+    }
+
     public function test_continuation_finding_already_passed_qa_does_not_throw(): void
     {
         $customer = $this->createCustomer();
