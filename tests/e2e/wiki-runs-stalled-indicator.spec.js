@@ -46,10 +46,11 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${activeRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${activeRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
-        await expect(row.getByText('Ser ut til å stå stille', { exact: true })).toBeVisible();
-        await expect(row.getByText(/Ingen registrert fremdrift siden/)).toBeVisible();
+        await expect(mainRow.getByText('Ser ut til å stå stille', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText(/Ingen registrert fremdrift siden/)).toBeVisible();
     });
 
     test('an idle awaiting_document_owner_approval run never shows the stalled warning', async ({ page }) => {
@@ -57,41 +58,43 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
-        await expect(row.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
-        await expect(row.getByText(/Ingen registrert fremdrift siden/)).toHaveCount(0);
+        await expect(mainRow.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
+        await expect(mainRow.getByText(/Ingen registrert fremdrift siden/)).toHaveCount(0);
     });
 
     test('the waiting run shows normal owner-approval wait copy instead, without the redundant secondary badge', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
-        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
-        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
-        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
+        await expect(mainRow.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
             'title',
             'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.',
         );
         const rowText = await row.evaluate((el) => el.textContent ?? '');
         expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
-        const progressRow = row.locator('xpath=following-sibling::tr[1]');
+        const progressRow = row.locator('[data-run-progress-row]');
         await expect(progressRow).toBeVisible();
         await expect(progressRow.locator('[data-progress-step]')).toHaveCount(7);
         await expect(progressRow.locator('[data-progress-connector]')).toHaveCount(6);
         await expect(progressRow.locator('[data-progress-state="waiting"]')).toHaveCount(1);
         await expect(progressRow.getByText('Dokumenteiergodkjenning', { exact: true })).toBeVisible();
-        await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
+        await expect(mainRow.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
     test('the waiting run still shows no cancel action (previous fix stays intact)', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByRole('button', { name: 'Avbryt kjøring' })).toHaveCount(0);
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        await expect(row.locator('[data-run-main-row]').getByRole('button', { name: 'Avbryt kjøring' })).toHaveCount(0);
     });
 
     test('no console errors on desktop', async ({ page }) => {
@@ -102,7 +105,7 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
-        await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
+        await expect(page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first()).toBeVisible();
 
         expect(errors).toEqual([]);
     });
@@ -116,11 +119,12 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const mobileCard = row.locator('[data-run-mobile-card]');
         await expect(row).toBeVisible();
-        await expect(row.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
-        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
-        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
+        await expect(mobileCard.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
+        await expect(mobileCard.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(mobileCard.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
 
         const bodyOverflows = await page.evaluate(
             () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,

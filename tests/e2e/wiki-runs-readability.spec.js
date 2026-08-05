@@ -42,14 +42,15 @@ test.describe.serial('Kjøringer run row readability', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${runId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
 
-        const statusPill = row.getByText('Kjører', { exact: true });
+        const statusPill = mainRow.getByText('Kjører', { exact: true });
         await expect(statusPill).toBeVisible();
         expect(await statusPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
 
-        const stalledPill = row.getByText('Ser ut til å stå stille', { exact: true });
+        const stalledPill = mainRow.getByText('Ser ut til å stå stille', { exact: true });
         await expect(stalledPill).toBeVisible();
         expect(await stalledPill.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(12);
     });
@@ -59,8 +60,16 @@ test.describe.serial('Kjøringer run row readability', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${runId}")`).first();
-        const desktopTimeline = row.locator('xpath=following-sibling::tr[1]');
+        const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
+        await expect(row).toBeVisible();
+
+        const header = page.locator('[data-run-header]');
+        await expect(header).toBeVisible();
+        const rowTemplate = await row.locator('[data-run-main-row]').evaluate((el) => el.style.gridTemplateColumns);
+        const headerTemplate = await header.evaluate((el) => el.style.gridTemplateColumns);
+        expect(rowTemplate).toBe(headerTemplate);
+
+        const desktopTimeline = row.locator('[data-run-progress-row]');
         await expect(desktopTimeline).toBeVisible();
         await expect(desktopTimeline.locator('[data-progress-step]')).toHaveCount(7);
         await expect(desktopTimeline.locator('[data-progress-connector]')).toHaveCount(6);
@@ -81,7 +90,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${runId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
         await expect(row).toBeVisible();
 
         const overlaps = await countOverlaps(row);
@@ -98,7 +107,7 @@ test.describe.serial('Kjøringer run row readability', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${runId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${runId}"]`).first();
         await expect(row).toBeVisible();
 
         // The page body itself must never scroll horizontally — only the table's own container
@@ -121,7 +130,8 @@ test.describe.serial('Kjøringer run row readability', () => {
  */
 async function countOverlaps(rowLocator) {
     return rowLocator.evaluate((rowEl) => {
-        const textEls = Array.from(rowEl.querySelectorAll('span, p, td, button')).filter((el) => el.textContent.trim());
+        const textEls = Array.from(rowEl.querySelectorAll('span, p, div, button, a, h4'))
+            .filter((el) => el.textContent.trim() && el.children.length === 0);
         const rects = textEls.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
         let overlapCount = 0;
         for (let i = 0; i < rects.length; i++) {

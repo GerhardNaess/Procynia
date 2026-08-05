@@ -31,6 +31,7 @@ function formatTime(value, locale) {
 }
 
 const BADGE = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-base font-semibold leading-5 whitespace-nowrap';
+const RUNS_GRID_TEMPLATE = 'minmax(0,3.5rem) minmax(0,1.1fr) minmax(0,1.9fr) minmax(0,1fr) minmax(0,4rem) minmax(0,4.5rem) minmax(0,7rem) minmax(0,6.5rem) minmax(0,7rem)';
 
 // Shared row-action button styles — deliberately distinct from BADGE (status chips: h-6, no
 // border, no hover/focus state) so an action always reads as a clickable control, never as a
@@ -266,7 +267,7 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <div className="mt-1 min-w-0 max-w-full overflow-x-auto md:overflow-visible">
+        <div className="min-w-0 max-w-full overflow-x-auto md:overflow-visible">
             <div className="flex min-w-max items-center gap-0 md:min-w-0 md:flex-nowrap">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
@@ -310,13 +311,300 @@ function RunProgressRow({ run, tw }) {
     }
 
     return (
-        <tr className="bg-slate-50/40">
-            <td colSpan={9} className="px-3 pb-3 pt-0">
-                <div data-progress-scroll-area className="min-w-0 max-w-full rounded-xl border border-slate-200/60 bg-slate-50/60 px-3 py-2 shadow-none md:px-4">
-                    <RunTimeline run={run} tw={tw} />
+        <div data-run-progress-row className="border-t border-slate-100 bg-slate-50/40 px-4 py-4 lg:px-6">
+            <div data-progress-scroll-area className="min-w-0 max-w-full overflow-x-auto">
+                <RunTimeline run={run} tw={tw} />
+            </div>
+        </div>
+    );
+}
+
+function RunListItem({
+    run,
+    tw,
+    locale,
+    activePanel,
+    panelId,
+    onCancelClick,
+    onTogglePanel,
+    runPagesState,
+    runFindingsState,
+    onRetryMaintainerDecision,
+    onFetchRunPages,
+    onFetchRunFindings,
+}) {
+    const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+    const statusBadgeClass = run.status === 'awaiting_document_owner_approval'
+        ? `${BADGE} ${statusCls} max-w-full whitespace-normal break-words text-left leading-5`
+        : `${BADGE} ${statusCls}`;
+    const runError = run.qa_last_error ?? run.error_message;
+
+    const renderDecisionBadge = () => {
+        if (run.maintainer_decision_status === 'applied') {
+            return (
+                <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
+                    {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
+                </span>
+            );
+        }
+
+        if (run.maintainer_decision_status === 'pending') {
+            return (
+                <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
+                    {tw.run_decision_pending ?? 'Venter'}
+                </span>
+            );
+        }
+
+        return <span className="text-slate-400">—</span>;
+    };
+
+    const renderPagesCell = (compact = false) => {
+        if (run.pages_count > 0) {
+            return (
+                <button
+                    type="button"
+                    onClick={() => onTogglePanel(run, 'pages', true)}
+                    aria-expanded={activePanel === 'pages'}
+                    aria-controls={panelId}
+                    className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${compact ? 'text-sm' : ''}`}
+                >
+                    {run.pages_count}
+                    <svg
+                        className={`h-3.5 w-3.5 transition-transform ${activePanel === 'pages' ? 'rotate-180' : ''}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    >
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                    </svg>
+                </button>
+            );
+        }
+
+        return <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>;
+    };
+
+    const renderFindingsCell = (compact = false) => {
+        if (run.lint_count > 0) {
+            return (
+                <button
+                    type="button"
+                    onClick={() => onTogglePanel(run, 'findings', true)}
+                    aria-expanded={activePanel === 'findings'}
+                    aria-controls={panelId}
+                    aria-label={(run.findings_open_blocking_count ?? 0) > 0
+                        ? (tw.runs_findings_toggle_open_with_blocking ?? 'Vis :count kvalitetsfunn, hvorav :blocking blokkerende')
+                            .replace(':count', run.lint_count)
+                            .replace(':blocking', run.findings_open_blocking_count)
+                        : (tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
+                    title={(run.findings_open_blocking_count ?? 0) > 0
+                        ? (tw.runs_findings_count_tooltip_blocking ?? ':total funn totalt, :blocking av dem blokkerer fullføring')
+                            .replace(':total', run.lint_count)
+                            .replace(':blocking', run.findings_open_blocking_count)
+                        : undefined}
+                    className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)} ${compact ? 'text-sm' : ''}`}
+                >
+                    {run.lint_count}
+                    <svg
+                        className={`h-3.5 w-3.5 transition-transform ${activePanel === 'findings' ? 'rotate-180' : ''}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    >
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+                    </svg>
+                </button>
+            );
+        }
+
+        return <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>;
+    };
+
+    const renderActionCell = (compact = false) => {
+        if (run.can_cancel) {
+            return (
+                <button
+                    type="button"
+                    onClick={() => onCancelClick(run)}
+                    className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} ${compact ? 'text-sm' : 'text-sm'} leading-5`}
+                >
+                    {tw.run_cancel_button ?? 'Avbryt kjøring'}
+                </button>
+            );
+        }
+
+        return <span className="text-slate-300">—</span>;
+    };
+
+    const documentName = run.source_document_filename ?? '—';
+
+    return (
+        <div data-run-item data-run-id={run.id} className="border-b border-slate-200 last:border-b-0">
+            <div
+                data-run-main-row
+                className="hidden items-center gap-x-4 px-6 py-5 lg:grid"
+                style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}
+            >
+                <div className="min-w-0 text-right text-sm text-slate-400 tabular-nums">{run.id}</div>
+                <div className="min-w-0">
+                    {run.source_id ? (
+                        <Link
+                            href="/app/wiki?tab=sources"
+                            className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
+                            title={documentName}
+                        >
+                            {documentName}
+                        </Link>
+                    ) : (
+                        <span className="text-slate-400">—</span>
+                    )}
+                    {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
+                        <p className="mt-1 break-words text-sm leading-5 text-rose-500" title={runError}>
+                            {runError}
+                        </p>
+                    )}
                 </div>
-            </td>
-        </tr>
+                <div className="min-w-0 max-w-full">
+                    <div className="min-w-0 max-w-full space-y-1.5">
+                        <span
+                            className={statusBadgeClass}
+                            title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
+                        >
+                            {ingestStatusLabel(run.status, run.qa_status, tw)}
+                        </span>
+                        <div className="min-w-0 max-w-full">
+                            <RunActivityBlock
+                                run={run}
+                                tw={tw}
+                                locale={locale}
+                                onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
+                                onRetryMaintainerDecision={onRetryMaintainerDecision}
+                            />
+                        </div>
+                    </div>
+                </div>
+                <div className="min-w-0 max-w-full">
+                    {run.maintainer_decision_status === 'applied' ? (
+                        <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
+                            {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
+                        </span>
+                    ) : run.maintainer_decision_status === 'pending' ? (
+                        <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
+                            {tw.run_decision_pending ?? 'Venter'}
+                        </span>
+                    ) : (
+                        <span className="text-slate-400">—</span>
+                    )}
+                </div>
+                <div className="text-center text-sm font-semibold tabular-nums text-violet-600">
+                    {renderPagesCell()}
+                </div>
+                <div className="text-center text-sm font-semibold tabular-nums text-amber-600">
+                    {renderFindingsCell()}
+                </div>
+                <div className="text-sm leading-5 text-slate-500">
+                    {formatDate(run.created_at, locale)}
+                </div>
+                <div className="text-sm text-slate-400">
+                    {run.finished_at ? formatDate(run.finished_at, locale) : '—'}
+                </div>
+                <div className="flex justify-end">
+                    {renderActionCell()}
+                </div>
+            </div>
+
+            <div data-run-mobile-card className="space-y-4 px-4 py-4 lg:hidden">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <span>ID</span>
+                            <span className="font-mono text-sm text-slate-400 tabular-nums">{run.id}</span>
+                        </div>
+                        {run.source_id ? (
+                            <Link
+                                href="/app/wiki?tab=sources"
+                                className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
+                                title={documentName}
+                            >
+                                {documentName}
+                            </Link>
+                        ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                        )}
+                    </div>
+                    <div className="shrink-0">
+                        {renderActionCell(true)}
+                    </div>
+                </div>
+
+                <div className="space-y-3">
+                    <div className="min-w-0 max-w-full space-y-1.5">
+                        <span
+                            className={statusBadgeClass}
+                            title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
+                        >
+                            {ingestStatusLabel(run.status, run.qa_status, tw)}
+                        </span>
+                        <div className="min-w-0 max-w-full">
+                            <RunActivityBlock
+                                run={run}
+                                tw={tw}
+                                locale={locale}
+                                onOpenFindings={(targetRun) => onTogglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
+                                onRetryMaintainerDecision={onRetryMaintainerDecision}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-sm leading-5 text-slate-600">
+                        <div className="min-w-0">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Beslutning</div>
+                            <div className="mt-1">{renderDecisionBadge()}</div>
+                        </div>
+                        <div className="min-w-0 text-center">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sider</div>
+                            <div className="mt-1">{renderPagesCell(true)}</div>
+                        </div>
+                        <div className="min-w-0 text-center">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Funn</div>
+                            <div className="mt-1">{renderFindingsCell(true)}</div>
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Opprettet</div>
+                            <div className="mt-1">{formatDate(run.created_at, locale)}</div>
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fullført</div>
+                            <div className="mt-1">{run.finished_at ? formatDate(run.finished_at, locale) : '—'}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <RunProgressRow run={run} tw={tw} />
+
+            {activePanel !== null && (
+                <div data-run-detail-panel className="border-t border-slate-100 bg-slate-50/70 px-4 py-4 lg:px-6">
+                    {activePanel === 'pages' ? (
+                        <RunAffectedPagesPanel
+                            panelId={panelId}
+                            state={runPagesState[run.id]}
+                            onRetry={() => onFetchRunPages(run.id)}
+                            tw={tw}
+                        />
+                    ) : (
+                        <RunFindingsPanel
+                            panelId={panelId}
+                            state={runFindingsState[run.id]}
+                            onRetry={() => onFetchRunFindings(run.id)}
+                            tw={tw}
+                            locale={locale}
+                        />
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -2462,202 +2750,40 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 />
             ) : (
                 <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="max-w-full overflow-x-auto md:overflow-hidden">
-                        <table className="w-full min-w-0 max-w-full table-fixed divide-y divide-slate-200">
-                            <colgroup>
-                                <col style={{ width: '56px' }} />
-                                <col style={{ width: '214px' }} />
-                                <col style={{ width: '280px' }} />
-                                <col style={{ width: '128px' }} />
-                                <col style={{ width: '64px' }} />
-                                <col style={{ width: '88px' }} />
-                                <col style={{ width: '108px' }} />
-                                <col style={{ width: '108px' }} />
-                                <col style={{ width: '128px' }} />
-                            </colgroup>
-                            <thead className="bg-slate-50">
-                                <tr className="text-left text-sm font-semibold uppercase tracking-wide leading-5 text-slate-500">
-                                    <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
-                                    <th className="px-4 py-3">{tw.runs_col_document ?? 'Dokument'}</th>
-                                    <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
-                                    <th className="px-4 py-3">{tw.runs_col_decision ?? 'Beslutning'}</th>
-                                    <th className="px-4 py-3 text-right">{tw.runs_col_pages ?? 'Sider'}</th>
-                                    <th className="px-3 py-3 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
-                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_created ?? 'Opprettet'}</th>
-                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_finished ?? 'Fullført'}</th>
-                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_actions ?? 'Handlinger'}</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {runs.map((run) => {
-                                    const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
-                                    const statusBadgeClass = run.status === 'awaiting_document_owner_approval'
-                                        ? `${BADGE} ${statusCls} max-w-full whitespace-normal break-words text-left leading-5`
-                                        : `${BADGE} ${statusCls}`;
-                                    const runError = run.qa_last_error ?? run.error_message;
-                                    const activePanel = expandedRuns[run.id] ?? null;
-                                    const panelId = `run-panel-${run.id}`;
-                                    return (
-                                    <Fragment key={run.id}>
-                                        <tr className="text-base leading-5 text-slate-700">
-                                            <td className="min-w-0 px-3 py-2 text-right font-mono text-base text-slate-400 tabular-nums">
-                                                {run.id}
-                                            </td>
-                                            <td className="min-w-0 max-w-full px-3 py-2">
-                                                {run.source_id ? (
-                                                    <Link
-                                                        href={`/app/wiki?tab=sources`}
-                                                        className="block truncate text-base font-medium leading-5 text-slate-900 hover:text-violet-700 hover:underline"
-                                                        title={run.source_document_filename ?? ''}
-                                                    >
-                                                        {run.source_document_filename ?? '—'}
-                                                    </Link>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                                {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
-                                                    <p className="mt-1 break-words text-base leading-6 text-rose-500" title={runError}>
-                                                        {runError}
-                                                    </p>
-                                                )}
-                                            </td>
-                                            <td className="min-w-0 max-w-full px-3 py-2 align-top">
-                                                <span
-                                                    className={statusBadgeClass}
-                                                    title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
-                                                >
-                                                    {ingestStatusLabel(run.status, run.qa_status, tw)}
-                                                </span>
-                                                <div className="min-w-0 max-w-full">
-                                                    <RunActivityBlock
-                                                        run={run}
-                                                        tw={tw}
-                                                        locale={locale}
-                                                        onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
-                                                        onRetryMaintainerDecision={handleRetryClick}
-                                                    />
-                                                </div>
-                                            </td>
-                                            <td className="min-w-0 max-w-full px-3 py-2 align-top">
-                                                {run.maintainer_decision_status === 'applied' ? (
-                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 px-2 py-0.5 text-sm leading-5 text-emerald-700`}>
-                                                        {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
-                                                    </span>
-                                                ) : run.maintainer_decision_status === 'pending' ? (
-                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 px-2 py-0.5 text-sm leading-5 text-slate-500`}>
-                                                        {tw.run_decision_pending ?? 'Venter'}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums">
-                                                {run.pages_count > 0 ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => togglePanel(run, 'pages', true)}
-                                                        aria-expanded={activePanel === 'pages'}
-                                                        aria-controls={panelId}
-                                                        className="inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold text-violet-700 transition hover:bg-violet-50 hover:text-violet-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-                                                    >
-                                                        {run.pages_count}
-                                                        <svg
-                                                            className={`h-3.5 w-3.5 transition-transform ${activePanel === 'pages' ? 'rotate-180' : ''}`}
-                                                            viewBox="0 0 20 20"
-                                                            fill="currentColor"
-                                                            aria-hidden="true"
-                                                        >
-                                                            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>
-                                                )}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 pr-4 text-center tabular-nums text-slate-500">
-                                                {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 pl-4 text-center tabular-nums">
-                                                {run.lint_count > 0 ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => togglePanel(run, 'findings', true)}
-                                                        aria-expanded={activePanel === 'findings'}
-                                                        aria-controls={panelId}
-                                                        aria-label={(run.findings_open_blocking_count ?? 0) > 0
-                                                            ? (tw.runs_findings_toggle_open_with_blocking ?? 'Vis :count kvalitetsfunn, hvorav :blocking blokkerende')
-                                                                .replace(':count', run.lint_count)
-                                                                .replace(':blocking', run.findings_open_blocking_count)
-                                                            : (tw.runs_findings_toggle_open ?? 'Vis :count kvalitetsfunn').replace(':count', run.lint_count)}
-                                                        title={(run.findings_open_blocking_count ?? 0) > 0
-                                                            ? (tw.runs_findings_count_tooltip_blocking ?? ':total funn totalt, :blocking av dem blokkerer fullføring')
-                                                                .replace(':total', run.lint_count)
-                                                                .replace(':blocking', run.findings_open_blocking_count)
-                                                            : undefined}
-                                                        className={`inline-flex min-w-[2.75rem] items-center justify-center gap-1 rounded-md px-2 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 ${findingsCountToneClass(run)}`}
-                                                    >
-                                                        {run.lint_count}
-                                                        <svg
-                                                            className={`h-3.5 w-3.5 transition-transform ${activePanel === 'findings' ? 'rotate-180' : ''}`}
-                                                            viewBox="0 0 20 20"
-                                                            fill="currentColor"
-                                                            aria-hidden="true"
-                                                        >
-                                                            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-                                                        </svg>
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
-                                                )}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 text-base text-slate-500">
-                                                {formatDate(run.created_at, locale)}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 text-base text-slate-500">
-                                                {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
-                                            </td>
-                                            <td className="min-w-0 px-3 py-2 text-center">
-                                                {run.can_cancel ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleCancelClick(run)}
-                                                        className={`${ACTION_BUTTON_DESTRUCTIVE_WRAP} text-sm leading-5`}
-                                                    >
-                                                        {tw.run_cancel_button ?? 'Avbryt kjøring'}
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-slate-300">—</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                        <RunProgressRow run={run} tw={tw} />
-                                        {activePanel !== null && (
-                                            <tr>
-                                                <td colSpan={9} className="bg-slate-50/70 px-4 py-4">
-                                                    {activePanel === 'pages' ? (
-                                                        <RunAffectedPagesPanel
-                                                            panelId={panelId}
-                                                            state={runPagesState[run.id]}
-                                                            onRetry={() => fetchRunPages(run.id)}
-                                                            tw={tw}
-                                                        />
-                                                    ) : (
-                                                        <RunFindingsPanel
-                                                            panelId={panelId}
-                                                            state={runFindingsState[run.id]}
-                                                            onRetry={() => fetchRunFindings(run.id)}
-                                                            tw={tw}
-                                                            locale={locale}
-                                                        />
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </Fragment>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                    <div data-run-header className="hidden items-center gap-x-4 border-b border-slate-200 bg-slate-50/70 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid" style={{ gridTemplateColumns: RUNS_GRID_TEMPLATE }}>
+                        <div className="text-right">{tw.runs_col_id ?? 'ID'}</div>
+                        <div>{tw.runs_col_document ?? 'Dokument'}</div>
+                        <div>{tw.runs_col_status ?? 'Status'}</div>
+                        <div>{tw.runs_col_decision ?? 'Beslutning'}</div>
+                        <div className="text-center">{tw.runs_col_pages ?? 'Sider'}</div>
+                        <div className="text-center">{tw.runs_col_lint ?? 'Funn'}</div>
+                        <div>{tw.runs_col_created ?? 'Opprettet'}</div>
+                        <div>{tw.runs_col_finished ?? 'Fullført'}</div>
+                        <div className="text-right">{tw.runs_col_actions ?? 'Handlinger'}</div>
+                    </div>
+                    <div>
+                        {runs.map((run) => {
+                            const activePanel = expandedRuns[run.id] ?? null;
+                            const panelId = `run-panel-${run.id}`;
+
+                            return (
+                                <RunListItem
+                                    key={run.id}
+                                    run={run}
+                                    tw={tw}
+                                    locale={locale}
+                                    activePanel={activePanel}
+                                    panelId={panelId}
+                                    onCancelClick={handleCancelClick}
+                                    onTogglePanel={togglePanel}
+                                    runPagesState={runPagesState}
+                                    runFindingsState={runFindingsState}
+                                    onRetryMaintainerDecision={handleRetryClick}
+                                    onFetchRunPages={fetchRunPages}
+                                    onFetchRunFindings={fetchRunFindings}
+                                />
+                            );
+                        })}
                     </div>
                 </section>
             )}

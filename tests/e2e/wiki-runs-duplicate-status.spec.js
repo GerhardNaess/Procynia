@@ -47,42 +47,44 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
         await expect(row).toBeVisible();
+        const mainRow = row.locator('[data-run-main-row]');
 
-        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
-        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
+        await expect(mainRow.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
+        await expect(mainRow.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
     });
 
     test('2. the main status badge (Venter på dokumenteiergodkjenning) is still shown', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        await expect(row.locator('[data-run-main-row]').getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
     });
 
     test('3. the explanation text says automatic processing is complete and the run is waiting', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
-        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
+        await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
             'title',
             'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.',
         );
         const rowText = await row.evaluate((el) => el.textContent ?? '');
         expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
-        await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
+        await expect(mainRow.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
     test('4. the document-owner approval step indicator is shown below the row', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        const progressRow = row.locator('xpath=following-sibling::tr[1]');
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const progressRow = row.locator('[data-run-progress-row]');
         await expect(progressRow).toBeVisible();
         await expect(progressRow.locator('[data-progress-step]')).toHaveCount(7);
         await expect(progressRow.locator('[data-progress-connector]')).toHaveCount(6);
@@ -94,20 +96,22 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
-        await expect(row.locator('[class*="animate-pulse"]')).toHaveCount(0);
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
+        await expect(mainRow.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
+        await expect(mainRow.locator('[class*="animate-pulse"]')).toHaveCount(0);
     });
 
     test('5. an active run still shows a progress line, unlike the waiting run', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${activeRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${activeRunId}"]`).first();
+        const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
-        await expect(row.getByText('Genererer sider', { exact: true })).toBeVisible();
-        await expect(row.getByText(/Siste fremdrift/)).toBeVisible();
-        await expect(row.getByText('Automatisk behandling fullført', { exact: true })).toHaveCount(0);
+        await expect(mainRow.getByText('Genererer sider', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText(/Siste fremdrift/)).toBeVisible();
+        await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toHaveCount(0);
     });
 
     test('6. desktop layout renders both rows without console errors', async ({ page }) => {
@@ -119,8 +123,8 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
-        await expect(page.locator(`tr:has-text("${activeRunId}")`).first()).toBeVisible();
+        await expect(page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first()).toBeVisible();
+        await expect(page.locator(`[data-run-item][data-run-id="${activeRunId}"]`).first()).toBeVisible();
         const bodyOverflows = await page.evaluate(
             () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
         );
@@ -137,8 +141,8 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
-        await expect(page.locator(`tr:has-text("${activeRunId}")`).first()).toBeVisible();
+        await expect(page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first()).toBeVisible();
+        await expect(page.locator(`[data-run-item][data-run-id="${activeRunId}"]`).first()).toBeVisible();
 
         const bodyOverflows = await page.evaluate(
             () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
@@ -152,11 +156,12 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
-        const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
+        const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
         await expect(row).toBeVisible();
 
         const overlaps = await row.evaluate((rowEl) => {
-            const textEls = Array.from(rowEl.querySelectorAll('span, p, td')).filter((el) => el.textContent.trim());
+            const textEls = Array.from(rowEl.querySelectorAll('span, p, div, button, a, h4'))
+                .filter((el) => el.textContent.trim() && el.children.length === 0);
             const rects = textEls.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
             let overlapCount = 0;
             for (let i = 0; i < rects.length; i++) {
