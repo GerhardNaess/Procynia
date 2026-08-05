@@ -40,6 +40,7 @@ const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-now
 const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
 const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
+const ACTION_BUTTON_DESTRUCTIVE_WRAP = 'inline-flex h-10 max-w-full items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3.5 text-base font-semibold leading-5 text-rose-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-50 whitespace-normal break-words text-center';
 
 const STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
@@ -199,7 +200,7 @@ function RunTimeline({ run, tw }) {
     }
 
     return (
-        <ol className="mt-1 flex max-w-full gap-1 overflow-x-auto pb-1 whitespace-nowrap">
+        <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
                 const stateCls = state === 'done'
@@ -276,7 +277,7 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
     const transientFailure = isTransientMaintainerFailure ? getTransientFailureCopy(run, tw) : null;
 
     return (
-        <div className="mt-1 space-y-1" aria-live={isActive ? 'polite' : 'off'}>
+        <div className="mt-1 min-w-0 max-w-full space-y-1" aria-live={isActive ? 'polite' : 'off'}>
             {seemsStalled && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold leading-5 text-amber-700">
                     {tw.ingest_activity_stalled ?? 'Ser ut til å stå stille'}
@@ -284,30 +285,30 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
             )}
 
             {isOwnerApprovalWaiting ? (
-                <div className="max-w-full space-y-1">
-                    <p className="text-base font-medium leading-6 text-slate-700">
+                <div className="min-w-0 max-w-full space-y-1 break-words">
+                    <p className="break-words text-base font-medium leading-6 text-slate-700">
                         {tw.ingest_activity_owner_approval_complete ?? 'Automatisk behandling fullført'}
                     </p>
-                    <p className="text-base leading-6 text-slate-600">
+                    <p className="break-words text-base leading-6 text-slate-600">
                         {tw.ingest_activity_owner_approval_waiting ?? 'Runen fortsetter når alle nødvendige dokumenteiere har godkjent.'}
                     </p>
                     {statusSetAt && (
-                        <p className="text-xs leading-5 text-slate-400">
+                        <p className="break-words text-xs leading-5 text-slate-400">
                             {(tw.ingest_activity_status_set ?? 'Satt i status')} {statusSetAt}
                         </p>
                     )}
                 </div>
             ) : isEscalated ? (
-                <div className="max-w-sm space-y-1">
-                    <p className="text-base font-medium leading-6 text-amber-800">
+                <div className="min-w-0 max-w-full space-y-1 break-words">
+                    <p className="break-words text-base font-medium leading-6 text-amber-800">
                         {escalation.primaryReason}
                     </p>
                     {escalation.secondaryReason && (
-                        <p className="text-base leading-6 text-slate-600">
+                        <p className="break-words text-base leading-6 text-slate-600">
                             {escalation.secondaryReason}
                         </p>
                     )}
-                    <p className={`text-base leading-6 ${escalation.blockingCount > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
+                    <p className={`break-words text-base leading-6 ${escalation.blockingCount > 0 ? 'text-rose-700' : 'text-slate-600'}`}>
                         {escalation.blockingSummary}
                     </p>
                     {escalation.blockingCount > 0 && onOpenFindings && (
@@ -321,19 +322,19 @@ function RunActivityBlock({ run, tw, locale, showCounters = false, showTimeline 
                     )}
                 </div>
             ) : isTransientMaintainerFailure ? (
-                <div className="max-w-sm space-y-1">
-                    <p className="text-base font-medium leading-6 text-rose-800">
+                <div className="min-w-0 max-w-full space-y-1 break-words">
+                    <p className="break-words text-base font-medium leading-6 text-rose-800">
                         {transientFailure.primaryMessage}
                     </p>
-                    <p className="text-base leading-6 text-slate-600">
+                    <p className="break-words text-base leading-6 text-slate-600">
                         {transientFailure.failedInPhase}
                     </p>
                     {transientFailure.attemptSummary && (
-                        <p className="text-base leading-6 text-slate-500">
+                        <p className="break-words text-base leading-6 text-slate-500">
                             {transientFailure.attemptSummary}
                         </p>
                     )}
-                    <p className="text-base leading-6 text-slate-500">
+                    <p className="break-words text-base leading-6 text-slate-500">
                         {transientFailure.documentPreservedNote}
                     </p>
                     {transientFailure.technicalDetails && (
@@ -2396,8 +2397,20 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 />
             ) : (
                 <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-slate-200">
+                    <div className="max-w-full overflow-x-auto md:overflow-hidden">
+                        <table className="w-full min-w-0 max-w-full table-fixed divide-y divide-slate-200">
+                            <colgroup>
+                                <col style={{ width: '56px' }} />
+                                <col style={{ width: '144px' }} />
+                                <col style={{ width: '288px' }} />
+                                <col style={{ width: '104px' }} />
+                                <col style={{ width: '48px' }} />
+                                <col style={{ width: '48px' }} />
+                                <col style={{ width: '48px' }} />
+                                <col style={{ width: '88px' }} />
+                                <col style={{ width: '88px' }} />
+                                <col style={{ width: '112px' }} />
+                            </colgroup>
                             <thead className="bg-slate-50">
                                 <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                     <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
@@ -2415,16 +2428,19 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                             <tbody className="divide-y divide-slate-100">
                                 {runs.map((run) => {
                                     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+                                    const statusBadgeClass = run.status === 'awaiting_document_owner_approval'
+                                        ? `${BADGE} ${statusCls} max-w-full whitespace-normal break-words text-left leading-5`
+                                        : `${BADGE} ${statusCls}`;
                                     const runError = run.qa_last_error ?? run.error_message;
                                     const activePanel = expandedRuns[run.id] ?? null;
                                     const panelId = `run-panel-${run.id}`;
                                     return (
                                     <Fragment key={run.id}>
                                         <tr className="text-base leading-6 text-slate-700">
-                                            <td className="px-4 py-3 text-right font-mono text-base text-slate-400 tabular-nums">
+                                            <td className="min-w-0 px-4 py-3 text-right font-mono text-base text-slate-400 tabular-nums">
                                                 {run.id}
                                             </td>
-                                            <td className="max-w-[200px] px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-4 py-3">
                                                 {run.source_id ? (
                                                     <Link
                                                         href={`/app/wiki?tab=sources`}
@@ -2437,41 +2453,43 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                                 {run.status === 'failed' && runError && !(run.failed_phase === 'maintainer_decision' && run.transient_failure) && (
-                                                    <p className="mt-1 line-clamp-2 text-base leading-6 text-rose-500" title={runError}>
+                                                    <p className="mt-1 break-words text-base leading-6 text-rose-500" title={runError}>
                                                         {runError}
                                                     </p>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-4 py-3">
                                                 <span
-                                                    className={`${BADGE} ${statusCls}`}
+                                                    className={statusBadgeClass}
                                                     title={run.status === 'escalated' ? (run.error_message || run.findings_explanation || undefined) : undefined}
                                                 >
                                                     {ingestStatusLabel(run.status, run.qa_status, tw)}
                                                 </span>
-                                                <RunActivityBlock
-                                                    run={run}
-                                                    tw={tw}
-                                                    locale={locale}
-                                                    showTimeline
-                                                    onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
-                                                    onRetryMaintainerDecision={handleRetryClick}
-                                                />
+                                                <div className="min-w-0 max-w-full">
+                                                    <RunActivityBlock
+                                                        run={run}
+                                                        tw={tw}
+                                                        locale={locale}
+                                                        showTimeline
+                                                        onOpenFindings={(targetRun) => togglePanel(targetRun, 'findings', (targetRun.lint_count ?? 0) > 0)}
+                                                        onRetryMaintainerDecision={handleRetryClick}
+                                                    />
+                                                </div>
                                             </td>
-                                            <td className="px-4 py-3">
+                                            <td className="min-w-0 max-w-full px-4 py-3">
                                                 {run.maintainer_decision_status === 'applied' ? (
-                                                    <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>
+                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-emerald-100 text-emerald-700`}>
                                                         {tw.run_decision_applied ?? 'Sidestruktur opprettet'}
                                                     </span>
                                                 ) : run.maintainer_decision_status === 'pending' ? (
-                                                    <span className={`${BADGE} bg-slate-100 text-slate-500`}>
+                                                    <span className={`${BADGE} max-w-full whitespace-normal break-words bg-slate-100 text-slate-500`}>
                                                         {tw.run_decision_pending ?? 'Venter'}
                                                     </span>
                                                 ) : (
                                                     <span className="text-slate-400">—</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-right tabular-nums">
+                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums">
                                                 {run.pages_count > 0 ? (
                                                     <button
                                                         type="button"
@@ -2494,10 +2512,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-right tabular-nums text-slate-500">
+                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums text-slate-500">
                                                 {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
                                             </td>
-                                            <td className="px-4 py-3 text-right tabular-nums">
+                                            <td className="min-w-0 px-4 py-3 text-right tabular-nums">
                                                 {run.lint_count > 0 ? (
                                                     <button
                                                         type="button"
@@ -2530,18 +2548,18 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_findings_none ?? 'Ingen funn'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
+                                            <td className="min-w-0 px-4 py-3 text-base text-slate-500">
                                                 {formatDate(run.created_at, locale)}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-base text-slate-500">
+                                            <td className="min-w-0 px-4 py-3 text-base text-slate-500">
                                                 {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
                                             </td>
-                                            <td className="whitespace-nowrap px-4 py-3">
+                                            <td className="min-w-0 px-4 py-3">
                                                 {run.can_cancel ? (
                                                     <button
                                                         type="button"
                                                         onClick={() => handleCancelClick(run)}
-                                                        className={ACTION_BUTTON_DESTRUCTIVE}
+                                                        className={ACTION_BUTTON_DESTRUCTIVE_WRAP}
                                                     >
                                                         {tw.run_cancel_button ?? 'Avbryt kjøring'}
                                                     </button>

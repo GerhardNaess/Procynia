@@ -111,6 +111,10 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
 
         await expect(page.locator(`tr:has-text("${waitingRunId}")`).first()).toBeVisible();
         await expect(page.locator(`tr:has-text("${activeRunId}")`).first()).toBeVisible();
+        const bodyOverflows = await page.evaluate(
+            () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        );
+        expect(bodyOverflows).toBe(false);
         expect(errors).toEqual([]);
     });
 
