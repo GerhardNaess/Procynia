@@ -77,7 +77,7 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         );
         const rowText = await row.evaluate((el) => el.textContent ?? '');
         expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
-        await expect(row.getByText('Eier', { exact: true })).toBeVisible();
+        await expect(row.locator('ol').nth(1).getByText('Dokumenteier', { exact: true })).toBeVisible();
         await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 

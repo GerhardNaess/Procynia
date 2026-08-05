@@ -123,12 +123,12 @@ const SEVERITY_STYLES = {
 
 const RUN_TIMELINE_COMPACT_LABELS = {
     queued: 'Kø',
-    maintainer_decision: 'Besl.',
-    applying: 'Anv.',
+    maintainer_decision: 'Beslutning',
+    applying: 'Sidestruktur',
     generating_pages: 'Sider',
-    verification_linking: 'Verif.',
+    verification_linking: 'Verifisering',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Eier',
+    awaiting_document_owner_approval: 'Dokumenteier',
 };
 
 const INGEST_STATUS_LABELS = {
@@ -239,7 +239,7 @@ function RunTimeline({ run, tw }) {
                     );
                 })}
             </ol>
-            <ol className="mt-1 hidden min-w-0 max-w-full flex-nowrap gap-0.5 overflow-hidden pb-1 md:flex">
+            <ol className="mt-1 hidden min-w-0 max-w-full flex-wrap gap-0.5 overflow-visible pb-1 md:flex">
                 {RUN_TIMELINE_STEPS.map((step, index) => {
                     const state = getRunTimelineState(run, index);
                     const stateCls = state === 'done'
@@ -260,7 +260,7 @@ function RunTimeline({ run, tw }) {
                     return (
                         <li
                             key={step.key}
-                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-base font-semibold leading-5 ${stateCls}`}
+                            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-sm font-semibold leading-5 ${stateCls}`}
                         >
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
                             {label}
@@ -2446,8 +2446,8 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                 <col style={{ width: '272px' }} />
                                 <col style={{ width: '116px' }} />
                                 <col style={{ width: '56px' }} />
-                                <col style={{ width: '64px' }} />
-                                <col style={{ width: '56px' }} />
+                                <col style={{ width: '76px' }} />
+                                <col style={{ width: '76px' }} />
                                 <col style={{ width: '96px' }} />
                                 <col style={{ width: '96px' }} />
                                 <col style={{ width: '120px' }} />
@@ -2459,8 +2459,8 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_decision ?? 'Beslutning'}</th>
                                     <th className="px-4 py-3 text-right">{tw.runs_col_pages ?? 'Sider'}</th>
-                                    <th className="px-4 py-3 text-right">{tw.runs_col_sections ?? 'Seksjoner'}</th>
-                                    <th className="px-4 py-3 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
+                                    <th className="px-3 py-3 pr-4 text-right">{tw.runs_col_sections ?? 'Seksjoner'}</th>
+                                    <th className="px-3 py-3 pl-4 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_created ?? 'Opprettet'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_finished ?? 'Fullført'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_actions ?? 'Handlinger'}</th>
@@ -2553,10 +2553,10 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                     <span className="text-slate-400" title={tw.runs_pages_none ?? 'Ingen Wiki-sider'}>0</span>
                                                 )}
                                             </td>
-                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums text-slate-500">
+                                            <td className="min-w-0 px-3 py-2 pr-4 text-center tabular-nums text-slate-500">
                                                 {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
                                             </td>
-                                            <td className="min-w-0 px-3 py-2 text-center tabular-nums">
+                                            <td className="min-w-0 px-3 py-2 pl-4 text-center tabular-nums">
                                                 {run.lint_count > 0 ? (
                                                     <button
                                                         type="button"

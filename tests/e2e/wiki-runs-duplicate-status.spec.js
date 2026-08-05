@@ -82,7 +82,7 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
-        await expect(row.getByText('Eier', { exact: true })).toBeVisible();
+        await expect(row.locator('ol').nth(1).getByText('Dokumenteier', { exact: true })).toBeVisible();
     });
 
     test('4b. the redundant old waiting badge is not shown', async ({ page }) => {

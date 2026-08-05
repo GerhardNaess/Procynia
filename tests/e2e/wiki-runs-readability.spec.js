@@ -61,11 +61,11 @@ test.describe.serial('Kjøringer run row readability', () => {
 
         const row = page.locator(`tr:has-text("${runId}")`).first();
         const desktopTimeline = row.locator('ol').nth(1);
-        for (const label of ['Kø', 'Besl.', 'Anv.', 'Sider', 'Verif.', 'QA', 'Eier']) {
+        for (const label of ['Kø', 'Beslutning', 'Sidestruktur', 'Sider', 'Verifisering', 'QA', 'Dokumenteier']) {
             const chip = desktopTimeline.getByText(label, { exact: true });
             await expect(chip).toBeVisible();
             const size = await chip.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-            expect(size).toBeGreaterThanOrEqual(16);
+            expect(size).toBeGreaterThanOrEqual(14);
         }
     });
 
