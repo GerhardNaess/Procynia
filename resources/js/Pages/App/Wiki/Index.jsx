@@ -311,7 +311,7 @@ function RunProgressRow({ run, tw }) {
 
     return (
         <tr className="bg-slate-50/40">
-            <td colSpan={10} className="px-3 pb-3 pt-0">
+            <td colSpan={9} className="px-3 pb-3 pt-0">
                 <div data-progress-scroll-area className="min-w-0 max-w-full rounded-xl border border-slate-200/60 bg-slate-50/60 px-3 py-2 shadow-none md:px-4">
                     <RunTimeline run={run} tw={tw} />
                 </div>
@@ -2466,15 +2466,14 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                         <table className="w-full min-w-0 max-w-full table-fixed divide-y divide-slate-200">
                             <colgroup>
                                 <col style={{ width: '56px' }} />
-                                <col style={{ width: '210px' }} />
-                                <col style={{ width: '272px' }} />
-                                <col style={{ width: '116px' }} />
-                                <col style={{ width: '56px' }} />
-                                <col style={{ width: '76px' }} />
-                                <col style={{ width: '76px' }} />
-                                <col style={{ width: '96px' }} />
-                                <col style={{ width: '96px' }} />
-                                <col style={{ width: '120px' }} />
+                                <col style={{ width: '214px' }} />
+                                <col style={{ width: '280px' }} />
+                                <col style={{ width: '128px' }} />
+                                <col style={{ width: '64px' }} />
+                                <col style={{ width: '88px' }} />
+                                <col style={{ width: '108px' }} />
+                                <col style={{ width: '108px' }} />
+                                <col style={{ width: '128px' }} />
                             </colgroup>
                             <thead className="bg-slate-50">
                                 <tr className="text-left text-sm font-semibold uppercase tracking-wide leading-5 text-slate-500">
@@ -2483,8 +2482,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
                                     <th className="px-4 py-3">{tw.runs_col_decision ?? 'Beslutning'}</th>
                                     <th className="px-4 py-3 text-right">{tw.runs_col_pages ?? 'Sider'}</th>
-                                    <th className="px-3 py-3 pr-4 text-right">{tw.runs_col_sections ?? 'Seksjoner'}</th>
-                                    <th className="px-3 py-3 pl-4 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
+                                    <th className="px-3 py-3 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_created ?? 'Opprettet'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_finished ?? 'Fullført'}</th>
                                     <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_actions ?? 'Handlinger'}</th>
@@ -2635,7 +2633,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                         <RunProgressRow run={run} tw={tw} />
                                         {activePanel !== null && (
                                             <tr>
-                                                <td colSpan={10} className="bg-slate-50/70 px-4 py-4">
+                                                <td colSpan={9} className="bg-slate-50/70 px-4 py-4">
                                                     {activePanel === 'pages' ? (
                                                         <RunAffectedPagesPanel
                                                             panelId={panelId}
