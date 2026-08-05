@@ -74,7 +74,6 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         );
         const rowText = await row.evaluate((el) => el.textContent ?? '');
         expect(rowText).not.toContain('Runen fortsetter når alle nødvendige dokumenteiere har godkjent.');
-        await expect(row.locator('ol')).toHaveCount(0);
         await expect(row.getByText(/Siste fremdrift/)).toHaveCount(0);
     });
 
@@ -85,6 +84,9 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         const row = page.locator(`tr:has-text("${waitingRunId}")`).first();
         const progressRow = row.locator('xpath=following-sibling::tr[1]');
         await expect(progressRow).toBeVisible();
+        await expect(progressRow.locator('[data-progress-step]')).toHaveCount(7);
+        await expect(progressRow.locator('[data-progress-connector]')).toHaveCount(6);
+        await expect(progressRow.locator('[data-progress-state="waiting"]')).toHaveCount(1);
         await expect(progressRow.getByText('Dokumenteiergodkjenning', { exact: true })).toBeVisible();
     });
 

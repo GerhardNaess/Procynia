@@ -121,7 +121,7 @@ const SEVERITY_STYLES = {
     info: 'bg-slate-100 text-slate-700',
 };
 
-const RUN_TIMELINE_LABELS = {
+const RUN_TIMELINE_DISPLAY_LABELS = {
     queued: 'Kø',
     maintainer_decision: 'Beslutning',
     applying: 'Sidestruktur',
@@ -204,41 +204,104 @@ function formatRelativeProgress(value, locale) {
     return `kl. ${formatTime(value, locale)}`;
 }
 
+function TimelineStatusIcon({ state }) {
+    if (state === 'done') {
+        return (
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.2l3.1 3.1L15.6 5.3" />
+            </svg>
+        );
+    }
+
+    if (state === 'active' || state === 'waiting') {
+        return (
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 3.5h8v2l-2.2 3.2L14 12v2.5H6V12l2.2-3.3L6 5.5z" />
+            </svg>
+        );
+    }
+
+    if (state === 'error') {
+        return <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />;
+    }
+
+    return <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />;
+}
+
+function getTimelineToneClasses(state) {
+    if (state === 'done') {
+        return {
+            icon: 'border-emerald-200 bg-emerald-50 text-emerald-600',
+            text: 'text-emerald-700',
+            line: 'bg-emerald-300',
+        };
+    }
+
+    if (state === 'active' || state === 'waiting') {
+        return {
+            icon: 'border-amber-200 bg-amber-50 text-amber-700',
+            text: 'text-amber-800',
+            line: 'bg-amber-300',
+        };
+    }
+
+    if (state === 'error') {
+        return {
+            icon: 'border-rose-200 bg-rose-50 text-rose-600',
+            text: 'text-rose-700',
+            line: 'bg-rose-300',
+        };
+    }
+
+    return {
+        icon: 'border-slate-200 bg-slate-50 text-slate-400',
+        text: 'text-slate-500',
+        line: 'bg-slate-200',
+    };
+}
+
 function RunTimeline({ run, tw }) {
     if (!run || run.status === 'decision_only') {
         return null;
     }
 
     return (
-        <ol className="mt-1 flex min-w-0 max-w-full flex-nowrap gap-1 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
+        <div className="mt-1 min-w-0 max-w-full overflow-x-auto md:overflow-visible">
+            <div className="flex min-w-max items-center gap-0 md:min-w-0 md:flex-nowrap">
             {RUN_TIMELINE_STEPS.map((step, index) => {
                 const state = getRunTimelineState(run, index);
-                const stateCls = state === 'done'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : state === 'active'
-                        ? 'border-violet-200 bg-violet-50 text-violet-700'
-                        : state === 'error'
-                            ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : 'border-slate-200 bg-slate-50 text-slate-400';
-                const dotCls = state === 'done'
-                    ? 'bg-emerald-500'
-                    : state === 'active'
-                        ? 'bg-violet-500 animate-pulse'
-                        : state === 'error'
-                            ? 'bg-rose-500'
-                            : 'bg-slate-300';
-                    return (
-                        <li
-                            key={step.key}
-                            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-sm font-semibold leading-5 ${stateCls}`}
+                const tone = getTimelineToneClasses(state);
+                const isLast = index === RUN_TIMELINE_STEPS.length - 1;
+                const label = RUN_TIMELINE_DISPLAY_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback;
+
+                return (
+                    <div key={step.key} className="flex min-w-0 items-center">
+                        <div
+                            data-progress-step
+                            data-progress-state={state}
+                            className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-sm font-semibold leading-5 ${tone.text}`}
                         >
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotCls}`} aria-hidden="true" />
-                        {RUN_TIMELINE_LABELS[step.key] ?? tw[step.labelKey] ?? step.fallback}
-                        </li>
-                    );
-                })}
-            </ol>
-        );
+                            <span
+                                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${tone.icon}`}
+                                aria-hidden="true"
+                            >
+                                <TimelineStatusIcon state={state} />
+                            </span>
+                            <span className="whitespace-nowrap">{label}</span>
+                        </div>
+                        {!isLast && (
+                            <span
+                                data-progress-connector
+                                aria-hidden="true"
+                                className={`mx-3 h-0.5 w-10 flex-none rounded-full ${tone.line} md:w-12`}
+                            />
+                        )}
+                    </div>
+                );
+            })}
+            </div>
+        </div>
+    );
 }
 
 function RunProgressRow({ run, tw }) {
@@ -247,9 +310,9 @@ function RunProgressRow({ run, tw }) {
     }
 
     return (
-        <tr className="bg-slate-50/60">
-            <td colSpan={10} className="px-3 pb-4 pt-0">
-                <div className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white px-3 py-3 md:px-4">
+        <tr className="bg-slate-50/40">
+            <td colSpan={10} className="px-3 pb-3 pt-0">
+                <div data-progress-scroll-area className="min-w-0 max-w-full rounded-xl border border-slate-200/60 bg-slate-50/60 px-3 py-2 shadow-none md:px-4">
                     <RunTimeline run={run} tw={tw} />
                 </div>
             </td>
