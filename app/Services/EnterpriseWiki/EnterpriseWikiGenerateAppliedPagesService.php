@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
+use App\Services\Ai\Wiki\WikiLinkRevisionAiClient;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -47,6 +48,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
     public function __construct(
         private readonly WikiPageContentAiClient $aiClient,
+        private readonly WikiLinkRevisionAiClient $wikilinkRevisionClient,
         private readonly EnterpriseWikiLinkCatalogService $linkCatalogService,
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
@@ -620,6 +622,15 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $markdown = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
+        [$markdown, $generated['blocks']] = $this->repairMissingConceptWikilinks(
+            $run,
+            $page,
+            $markdown,
+            $generated['blocks'],
+            $catalogResult,
+            $languageCode,
+        );
+
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
         if (in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
@@ -1153,6 +1164,159 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $runPageCount,
             ));
         }
+    }
+
+    /**
+     * A concept page is not allowed to remain isolated when the run has linkable pages. If its
+     * first draft contains no attempted links at all, make one bounded, catalog-scoped revision
+     * before applying the unchanged deterministic validator. The strict block comparison accepts
+     * only inline-wikilink changes, preserving every block's source provenance and prose.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  array{catalog: list<array{slug: string, title: string, page_type: string}>, run_page_count: int}  $catalogResult
+     * @return array{0: string, 1: list<array<string, mixed>>}
+     */
+    private function repairMissingConceptWikilinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        string $markdown,
+        array $blocks,
+        array $catalogResult,
+        string $languageCode,
+    ): array {
+        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT
+            || $catalogResult['run_page_count'] === 0
+            || $catalogResult['catalog'] === []
+            || ! $this->hasNoAttemptedOrValidWikilinks($run, $page, $markdown)) {
+            return [$markdown, $blocks];
+        }
+
+        Log::info('[WIKI_PAGE_GENERATION] Concept page has no inline wikilinks — attempting one bounded link repair.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'available_link_targets' => count($catalogResult['catalog']),
+        ]);
+
+        $revision = $this->wikilinkRevisionClient->reviseLinks(
+            existingContent: $markdown,
+            pageType: $page->page_type,
+            linkCatalog: $catalogResult['catalog'],
+            instructions: 'The page currently contains no inline wikilinks, but it must link naturally to at least one page from the allowed catalog. Add exactly one natural inline wikilink at the most relevant existing mention. Do not change any prose, headings, formatting, or other content.',
+            languageCode: $languageCode,
+        );
+
+        if (! $revision['changed']) {
+            return [$markdown, $blocks];
+        }
+
+        $repairedBlocks = $this->replaceBlocksWithWikilinkOnlyRevision($blocks, $revision['markdown']);
+        $repairedBlocks = array_map(function (array $block) use ($catalogResult): array {
+            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+            return $block;
+        }, $repairedBlocks);
+        $repairedMarkdown = trim(implode("\n\n", array_column($repairedBlocks, 'markdown')));
+
+        Log::info('[WIKI_PAGE_GENERATION] Concept page inline wikilink repair attempted.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'repair_changed' => true,
+        ]);
+
+        return [$repairedMarkdown, $repairedBlocks];
+    }
+
+    private function hasNoAttemptedOrValidWikilinks(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $markdown): bool
+    {
+        $parsed = $this->linkParser->parse($markdown);
+
+        if ($this->linkParser->countRawOccurrences($markdown) !== count($parsed) || $parsed === []) {
+            return $parsed === [] && $this->linkParser->countRawOccurrences($markdown) === 0;
+        }
+
+        foreach ($this->linkResolver->resolveOccurrences($run->customer_id, $page, $parsed) as $occurrence) {
+            if ($occurrence['status'] === EnterpriseWikiLinkResolver::STATUS_VALID) {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $blocks
+     * @return list<array<string, mixed>>
+     */
+    private function replaceBlocksWithWikilinkOnlyRevision(array $blocks, string $revisedMarkdown): array
+    {
+        $originalMarkdown = trim(implode("\n\n", array_column($blocks, 'markdown')));
+
+        if ($this->stripWikilinks($revisedMarkdown) !== $originalMarkdown) {
+            throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed generated prose instead of only adding an inline wikilink.');
+        }
+
+        $searchOffset = 0;
+        foreach ($blocks as $index => $block) {
+            $original = (string) ($block['markdown'] ?? '');
+            $start = strpos($originalMarkdown, $original, $searchOffset);
+
+            if ($start === false) {
+                throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed the generated block structure.');
+            }
+
+            $revisedBlock = substr(
+                $revisedMarkdown,
+                $this->rawOffsetForPlainOffset($revisedMarkdown, $start),
+                $this->rawOffsetForPlainOffset($revisedMarkdown, $start + strlen($original))
+                    - $this->rawOffsetForPlainOffset($revisedMarkdown, $start),
+            );
+
+            if ($this->stripWikilinks($revisedBlock) !== $original) {
+                throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed the generated block structure.');
+            }
+
+            $blocks[$index]['markdown'] = $revisedBlock;
+            $searchOffset = $start + strlen($original);
+        }
+
+        return $blocks;
+    }
+
+    private function rawOffsetForPlainOffset(string $markdown, int $plainOffset): int
+    {
+        $rawOffset = 0;
+        $plainLength = 0;
+
+        while ($rawOffset < strlen($markdown) && $plainLength < $plainOffset) {
+            if (substr($markdown, $rawOffset, 2) === '[[') {
+                $end = strpos($markdown, ']]', $rawOffset);
+
+                if ($end !== false) {
+                    $link = substr($markdown, $rawOffset + 2, $end - $rawOffset - 2);
+                    $display = str_contains($link, '|') ? explode('|', $link, 2)[1] : $link;
+                    $plainLength += strlen($display);
+                    $rawOffset = $end + 2;
+
+                    continue;
+                }
+            }
+
+            $plainLength++;
+            $rawOffset++;
+        }
+
+        return $rawOffset;
+    }
+
+    private function stripWikilinks(string $markdown): string
+    {
+        return (string) preg_replace_callback(
+            '/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/',
+            static fn (array $match): string => $match[2] !== '' ? $match[2] : $match[1],
+            $markdown,
+        );
     }
 
     private function buildConceptEntityContextForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): string

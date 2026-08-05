@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Services\Ai\Wiki\WikiLinkRevisionAiClient;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -190,6 +191,72 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         }
 
         $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $summary->id)->exists());
+    }
+
+    public function test_concept_without_wikilinks_gets_one_catalog_scoped_repair_and_is_accepted_when_repaired(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$concept, $target]);
+
+        $this->mockAiResponse("# {$concept->title}\n\nTarget Page is important.");
+        $this->mock(WikiLinkRevisionAiClient::class)
+            ->shouldReceive('reviseLinks')
+            ->once()
+            ->withArgs(function (string $content, string $pageType, array $catalog): bool {
+                return $content === "# Concept\n\nTarget Page is important."
+                    && $pageType === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
+                    && $catalog === [['slug' => 'target-page', 'title' => 'Target Page', 'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE]];
+            })
+            ->andReturn(['changed' => true, 'markdown' => "# {$concept->title}\n\n[[target-page|Target Page]] is important."]);
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->where('is_current', true)->firstOrFail();
+        $this->assertStringContainsString('[[target-page|Target Page]]', $version->content_markdown);
+    }
+
+    public function test_concept_repair_that_still_has_no_wikilink_keeps_the_existing_exception(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$concept, $target]);
+
+        $this->mockAiResponse("# {$concept->title}\n\nNo links yet.");
+        $this->mock(WikiLinkRevisionAiClient::class)
+            ->shouldReceive('reviseLinks')->once()
+            ->andReturn(['changed' => true, 'markdown' => "# {$concept->title}\n\nNo links yet."]);
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('no valid inline wikilinks', $e->getMessage());
+        }
+    }
+
+    public function test_concept_with_valid_wikilink_is_not_repaired(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$concept, $target]);
+
+        $this->mockAiResponse("# {$concept->title}\n\nSee [[target-page]].");
+        $this->mock(WikiLinkRevisionAiClient::class)->shouldNotReceive('reviseLinks');
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
     public function test_page_with_empty_catalog_can_be_generated_without_a_wikilink(): void
