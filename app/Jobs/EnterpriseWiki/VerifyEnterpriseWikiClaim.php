@@ -34,8 +34,10 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
         $this->onQueue(self::QUEUE);
     }
 
-    public function handle(EnterpriseWikiVerifyPageClaimsService $verificationService): void
-    {
+    public function handle(
+        EnterpriseWikiVerifyPageClaimsService $verificationService,
+        EnterpriseWikiDocumentFlowService $flowService,
+    ): void {
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
         if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
@@ -43,6 +45,7 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
         }
 
         $verificationService->verifyClaimForRun($run, $this->claimId);
+        $flowService->continueAfterClaimVerification($this->runId);
     }
 
     public function failed(Throwable $exception): void

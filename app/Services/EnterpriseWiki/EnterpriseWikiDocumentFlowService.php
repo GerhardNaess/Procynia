@@ -45,11 +45,17 @@ class EnterpriseWikiDocumentFlowService
 {
     /**
      * How long to wait before re-dispatching the continuation job when a stage is busy —
-     * post-ingest QA claimed elsewhere but not yet terminal, or a claim extraction/verification
-     * lease is actively held by another live worker — short enough that a run doesn't sit idle
+     * post-ingest QA claimed elsewhere but not yet terminal, or a claim extraction lease is
+     * actively held by another live worker — short enough that a run doesn't sit idle
      * for long, long enough not to hammer the same busy row/claim in a tight loop.
      */
     private const STEP_BUSY_RETRY_DELAY_SECONDS = 30;
+
+    /**
+     * Recovery-only fallback for a worker/process crash between dispatch and completion of claim
+     * verification jobs. The normal path is driven by each completed claim job.
+     */
+    private const CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS = 60;
 
     public function __construct(
         private readonly EnterpriseWikiIngestService $ingestService,
@@ -294,7 +300,7 @@ class EnterpriseWikiDocumentFlowService
         }
 
         if ($run->status === EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
-            $this->dispatchClaimVerificationWork($run);
+            $this->continueAfterClaimVerification($run->id, true);
 
             return;
         }
@@ -330,28 +336,39 @@ class EnterpriseWikiDocumentFlowService
      * Fan-in entry point. Only the sentinel that atomically moves the run from
      * verifying_claims to post_claim_verification may continue into lint/semantic/QA.
      */
-    public function continueAfterClaimVerification(int $runId): void
+    public function continueAfterClaimVerification(int $runId, bool $recoverUndispatchedClaims = false): void
     {
-        $result = DB::transaction(function () use ($runId): array {
+        $result = DB::transaction(function () use ($runId, $recoverUndispatchedClaims): array {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
-                return ['run' => null, 'continue' => false, 'pending' => false];
+                return ['run' => null, 'continue' => false, 'pending' => false, 'recover' => false, 'reschedule_recovery' => false];
             }
 
             if ($run->status !== EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS) {
-                return ['run' => $run, 'continue' => false, 'pending' => false];
+                return ['run' => $run, 'continue' => false, 'pending' => false, 'recover' => false, 'reschedule_recovery' => false];
             }
 
             $pending = $this->verifyPageClaimsService->unverifiedClaimIdsForRun($run);
+            $hasActiveLease = $this->verifyPageClaimsService->hasActiveClaimLeaseForRun($run);
 
-            if ($pending !== [] || $this->verifyPageClaimsService->hasActiveClaimLeaseForRun($run)) {
-                return ['run' => $run, 'continue' => false, 'pending' => true];
+            if ($pending !== [] || $hasActiveLease) {
+                $recoveryReady = $recoverUndispatchedClaims
+                    && ! $hasActiveLease
+                    && $this->claimVerificationRecoveryWindowElapsed($run);
+
+                return [
+                    'run' => $run->fresh() ?? $run,
+                    'continue' => false,
+                    'pending' => true,
+                    'recover' => $recoveryReady,
+                    'reschedule_recovery' => $recoverUndispatchedClaims && ! $recoveryReady,
+                ];
             }
 
             $run->update(['status' => EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION]);
 
-            return ['run' => $run->fresh() ?? $run, 'continue' => true, 'pending' => false];
+            return ['run' => $run->fresh() ?? $run, 'continue' => true, 'pending' => false, 'recover' => false, 'reschedule_recovery' => false];
         });
 
         $run = $result['run'];
@@ -365,7 +382,11 @@ class EnterpriseWikiDocumentFlowService
         }
 
         if ($result['pending']) {
-            $this->dispatchClaimVerificationWork($run, true);
+            if ($result['recover']) {
+                $this->dispatchClaimVerificationWork($run);
+            } elseif ($result['reschedule_recovery']) {
+                $this->dispatchClaimVerificationRecoveryFallback($run);
+            }
 
             return;
         }
@@ -762,7 +783,7 @@ class EnterpriseWikiDocumentFlowService
         $this->dispatchClaimVerificationWork($run);
     }
 
-    private function dispatchClaimVerificationWork(EnterpriseWikiIngestRun $run, bool $delayedSentinel = false): void
+    private function dispatchClaimVerificationWork(EnterpriseWikiIngestRun $run): void
     {
         $fresh = $run->fresh() ?? $run;
 
@@ -776,18 +797,36 @@ class EnterpriseWikiDocumentFlowService
             VerifyEnterpriseWikiClaim::dispatch($fresh->id, $claimId);
         }
 
-        $sentinel = FinalizeEnterpriseWikiClaimVerification::dispatch($fresh->id);
+        if ($claimIds === []) {
+            $this->continueAfterClaimVerification($fresh->id);
 
-        if ($delayedSentinel) {
-            $sentinel->delay(now()->addSeconds(self::STEP_BUSY_RETRY_DELAY_SECONDS));
+            Log::info('[WIKI_DOCUMENT_FLOW] Claim verification skipped — no unverified claims.', [
+                'run_id' => $fresh->id,
+            ]);
+
+            return;
         }
+
+        $this->dispatchClaimVerificationRecoveryFallback($fresh);
 
         Log::info('[WIKI_DOCUMENT_FLOW] Claim verification jobs dispatched.', [
             'run_id' => $fresh->id,
             'claims_dispatched' => count($claimIds),
-            'sentinel_delayed' => $delayedSentinel,
+            'recovery_fallback_delay_seconds' => self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS,
             'queue' => VerifyEnterpriseWikiClaim::QUEUE,
         ]);
+    }
+
+    private function dispatchClaimVerificationRecoveryFallback(EnterpriseWikiIngestRun $run): void
+    {
+        FinalizeEnterpriseWikiClaimVerification::dispatch($run->id, true)
+            ->delay(now()->addSeconds(self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS));
+    }
+
+    private function claimVerificationRecoveryWindowElapsed(EnterpriseWikiIngestRun $run): bool
+    {
+        return $run->updated_at === null
+            || $run->updated_at->lte(now()->subSeconds(self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS));
     }
 
     private function performAppliedRunLint(EnterpriseWikiIngestRun $run): void

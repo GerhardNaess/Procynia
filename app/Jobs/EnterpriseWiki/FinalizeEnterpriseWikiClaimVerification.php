@@ -24,13 +24,15 @@ class FinalizeEnterpriseWikiClaimVerification implements ShouldQueue
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public readonly int $runId)
-    {
+    public function __construct(
+        public readonly int $runId,
+        public readonly bool $recoverUndispatchedClaims = false,
+    ) {
         $this->onQueue('enterprise-wiki');
     }
 
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
     {
-        $flowService->continueAfterClaimVerification($this->runId);
+        $flowService->continueAfterClaimVerification($this->runId, $this->recoverUndispatchedClaims);
     }
 }

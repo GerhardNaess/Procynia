@@ -15,6 +15,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -25,7 +26,24 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_dispatches_one_child_per_unverified_current_claim_and_skips_verified_claims(): void
+    public function test_recent_pending_claims_do_not_get_redispatched_by_fan_in(): void
+    {
+        Queue::fake();
+        [$run, $version] = $this->runWithVersion();
+        $this->claim($version);
+        $this->claim($version);
+        $this->claim($version, ['verified_at' => now()]);
+
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
+        app(EnterpriseWikiDocumentFlowService::class)->continueAfterPagesGenerated($run->id);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS, $run->fresh()->status);
+        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, 0);
+        Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, 1);
+        Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->recoverUndispatchedClaims === true && $job->delay !== null);
+    }
+
+    public function test_recovery_fallback_dispatches_unverified_claims_after_recovery_window(): void
     {
         Queue::fake();
         [$run, $version] = $this->runWithVersion();
@@ -34,15 +52,17 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
         $this->claim($version, ['verified_at' => now()]);
 
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
-        app(EnterpriseWikiDocumentFlowService::class)->continueAfterPagesGenerated($run->id);
+        $this->travel(61)->seconds();
+
+        app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id, true);
 
         Queue::assertPushed(VerifyEnterpriseWikiClaim::class, 2);
         Queue::assertPushed(VerifyEnterpriseWikiClaim::class, fn (VerifyEnterpriseWikiClaim $job) => $job->claimId === $first->id && $job->queue === VerifyEnterpriseWikiClaim::QUEUE);
         Queue::assertPushed(VerifyEnterpriseWikiClaim::class, fn (VerifyEnterpriseWikiClaim $job) => $job->claimId === $second->id && $job->queue === VerifyEnterpriseWikiClaim::QUEUE);
-        Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->runId === $run->id && $job->queue === 'enterprise-wiki');
+        Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->runId === $run->id && $job->queue === 'enterprise-wiki' && $job->recoverUndispatchedClaims === true && $job->delay !== null);
     }
 
-    public function test_sentinel_waits_and_redispatches_when_a_claim_is_still_active(): void
+    public function test_pending_or_leased_claim_blocks_fan_in_without_duplicate_dispatch(): void
     {
         Queue::fake();
         [$run, $version] = $this->runWithVersion();
@@ -53,8 +73,45 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
         app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id);
 
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS, $run->fresh()->status);
-        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, 1);
-        Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->delay !== null);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_last_claim_job_continues_fan_in_immediately(): void
+    {
+        Queue::fake();
+        [$run, $version] = $this->runWithVersion();
+        $claim = $this->claim($version);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
+
+        $verificationService = \Mockery::mock(EnterpriseWikiVerifyPageClaimsService::class);
+        $verificationService
+            ->shouldReceive('verifyClaimForRun')
+            ->once()
+            ->andReturnUsing(function (EnterpriseWikiIngestRun $handledRun, int $claimId) use ($run, $claim): array {
+                $this->assertSame($run->id, $handledRun->id);
+                $this->assertSame($claim->id, $claimId);
+                $claim->update(['verified_at' => now()]);
+
+                return ['pages' => 1, 'claims' => 1, 'references' => 0, 'skipped' => 0, 'no_support' => 1, 'busy' => 0, 'reused' => 0];
+            });
+
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('lint')
+            ->once()
+            ->andThrow(new RuntimeException('continued immediately'));
+
+        try {
+            (new VerifyEnterpriseWikiClaim($run->id, $claim->id))->handle(
+                $verificationService,
+                app(EnterpriseWikiDocumentFlowService::class),
+            );
+        } catch (RuntimeException $exception) {
+            $this->assertSame('continued immediately', $exception->getMessage());
+        }
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->fresh()->failed_phase);
+        Queue::assertNothingPushed();
     }
 
     public function test_sentinel_is_a_no_op_when_run_is_waiting_on_document_owner_approval(): void
@@ -92,6 +149,41 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
 
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->fresh()->failed_phase);
+    }
+
+    public function test_late_sentinel_is_no_op_after_fan_in_was_claimed(): void
+    {
+        Queue::fake();
+        [$run] = $this->runWithVersion();
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION]);
+
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldNotReceive('lint');
+
+        app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_POST_CLAIM_VERIFICATION, $run->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_zero_claims_continue_without_delayed_wait(): void
+    {
+        Queue::fake();
+        [$run] = $this->runWithVersion();
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
+
+        $this->mock(EnterpriseWikiAppliedRunLintService::class)
+            ->shouldReceive('lint')
+            ->once()
+            ->andThrow(new RuntimeException('continued with zero claims'));
+
+        try {
+            app(EnterpriseWikiDocumentFlowService::class)->continueAfterClaimVerification($run->id);
+        } catch (RuntimeException $exception) {
+            $this->assertSame('continued with zero claims', $exception->getMessage());
+        }
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
+        Queue::assertNothingPushed();
     }
 
     public function test_child_failure_marks_the_run_in_verification_linking_phase(): void

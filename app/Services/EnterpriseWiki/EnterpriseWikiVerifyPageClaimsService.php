@@ -222,9 +222,11 @@ class EnterpriseWikiVerifyPageClaimsService
 
     public function hasActiveClaimLeaseForRun(EnterpriseWikiIngestRun $run): bool
     {
+        $staleThreshold = now()->subSeconds(self::LEASE_SECONDS);
+
         return EnterpriseWikiClaim::query()
             ->whereIn('enterprise_wiki_page_version_id', $this->currentVersionIdsForRun($run))
-            ->whereNotNull('verification_claimed_at')
+            ->where('verification_claimed_at', '>=', $staleThreshold)
             ->exists();
     }
 
