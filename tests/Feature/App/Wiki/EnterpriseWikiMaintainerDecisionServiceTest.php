@@ -206,6 +206,70 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
 
+    public function test_run_692_source_article_guidance_shape_is_valid_without_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, ['original_filename' => 'Masterdata ITIL.docx']);
+
+        $decision = $this->validDecision();
+        $decision['source_article']['title'] = 'Masterdata ITIL';
+        $decision['source_article']['proposed_slug'] = 'masterdata-itil-ab1c2d';
+        $decision['source_summary']['title'] = 'Sammendrag: Masterdata ITIL';
+        $decision['source_summary']['proposed_slug'] = 'sammendrag-masterdata-itil-ab1c2d';
+        $decision['source_summary']['related_page_guidance'] = [
+            ['page_title' => 'Masterdata ITIL', 'relationship' => 'Point readers to the article for detail.'],
+        ];
+        $decision['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'ITIL',
+            'proposed_slug' => 'itil',
+            'reason' => 'Central framework in the source.',
+            'related_page_guidance' => [
+                ['page_title' => 'Masterdata ITIL', 'relationship' => 'Link to the article for source-specific application.'],
+            ],
+        ]];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $mock->shouldNotReceive('repair');
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame($decision, $result);
+    }
+
+    public function test_structural_related_page_guidance_title_drift_is_normalized_without_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, ['original_filename' => 'Masterdata ITIL.docx']);
+
+        $decision = $this->validDecision();
+        $decision['source_article']['title'] = 'Masterdata ITIL';
+        $decision['source_article']['proposed_slug'] = 'masterdata-itil-ab1c2d';
+        $decision['source_summary']['title'] = 'Sammendrag: Masterdata ITIL';
+        $decision['source_summary']['proposed_slug'] = 'sammendrag-masterdata-itil-ab1c2d';
+        $decision['source_summary']['related_page_guidance'] = [
+            ['page_title' => 'masterdata-itil.docx', 'relationship' => 'Point readers to the article for detail.'],
+        ];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $mock->shouldNotReceive('repair');
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame('Masterdata ITIL', $result['source_summary']['related_page_guidance'][0]['page_title']);
+        $this->assertSame(
+            $decision['source_summary']['related_page_guidance'][0]['relationship'],
+            $result['source_summary']['related_page_guidance'][0]['relationship'],
+        );
+        $this->assertSame($decision['source_article'], $result['source_article']);
+        $this->assertSame($decision['concept_pages'], $result['concept_pages']);
+    }
+
     public function test_inconsistent_decision_triggers_one_bounded_repair_pass(): void
     {
         $customer = $this->createCustomer();

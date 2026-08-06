@@ -50,6 +50,32 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
         $this->assertSame([], $this->validator()->findIssues($decision, []));
     }
 
+    public function test_related_page_guidance_pointing_to_exact_run_source_page_title_has_no_issue(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_summary']['related_page_guidance'] = [
+            ['page_title' => $decision['source_article']['title'], 'relationship' => 'Link to the article for detail.'],
+        ];
+        $decision['concept_pages'] = [
+            $this->conceptPageEntry('ITIL', relatedTo: $decision['source_article']['title']),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    public function test_run_source_page_matching_is_exact_and_does_not_hide_missing_concept_page(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['source_article']['related_page_guidance'] = [
+            ['page_title' => 'Incident Management', 'relationship' => 'See the concept page.'],
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('Incident Management', implode(' ', $issues));
+    }
+
     /**
      * The literal run-581 bug shape: article and summary both point onward to a concept page
      * that concept_pages never created, and no existing page in the index covers it either.

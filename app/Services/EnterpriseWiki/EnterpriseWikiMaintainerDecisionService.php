@@ -101,12 +101,43 @@ class EnterpriseWikiMaintainerDecisionService
         $issues = $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys);
 
         if ($issues === []) {
+            Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
+                'customer_id' => $customerId,
+                'document_id' => $document->id,
+                'validation_result' => 'valid_first_pass',
+                'issues' => 0,
+            ]);
+
             return $decision;
+        }
+
+        [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
+
+        if ($normalizations !== []) {
+            $normalizedIssues = $this->consistencyValidator->findIssues($normalizedDecision, $indexContext, $validFigureKeys);
+
+            if ($normalizedIssues === []) {
+                Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
+                    'customer_id' => $customerId,
+                    'document_id' => $document->id,
+                    'validation_result' => 'deterministic_normalization',
+                    'normalizations' => $normalizations,
+                    'issues_before' => count($issues),
+                    'issues_after' => 0,
+                ]);
+
+                return $normalizedDecision;
+            }
+
+            $decision = $normalizedDecision;
+            $issues = $normalizedIssues;
         }
 
         Log::warning('[WIKI_MAINTAINER_DECISION] Inconsistent decision detected — attempting one bounded repair pass.', [
             'customer_id' => $customerId,
             'document_id' => $document->id,
+            'validation_result' => 'ai_repair_required',
+            'normalizations' => $normalizations,
             'issues' => $issues,
         ]);
 
@@ -129,6 +160,115 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         return $repaired;
+    }
+
+    /**
+     * Structural cleanup only: canonicalize related_page_guidance.page_title to an already planned
+     * run-local source_article/source_summary title when the model returned the same title with
+     * harmless casing, punctuation, whitespace, or file-extension drift. No page choices, topic
+     * ownership, relationships, or concept decisions are invented or removed.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return array{0: array<string, mixed>, 1: list<array{path: string, from: string, to: string}>}
+     */
+    private function normalizeMaintainerDecisionStructure(array $decision): array
+    {
+        $localSourceTitles = array_values(array_filter(array_map(
+            fn (string $key): string => trim((string) data_get($decision, "{$key}.title", '')),
+            ['source_article', 'source_summary'],
+        )));
+
+        if ($localSourceTitles === []) {
+            return [$decision, []];
+        }
+
+        $normalizations = [];
+
+        foreach (['source_article', 'source_summary'] as $entryKey) {
+            $this->normalizeRelatedPageGuidanceTargets($decision, $entryKey, $localSourceTitles, $normalizations);
+        }
+
+        foreach (['concept_pages', 'entity_pages'] as $listKey) {
+            foreach ((array) ($decision[$listKey] ?? []) as $index => $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+
+                $this->normalizeRelatedPageGuidanceTargets($decision, "{$listKey}.{$index}", $localSourceTitles, $normalizations);
+            }
+        }
+
+        return [$decision, $normalizations];
+    }
+
+    /**
+     * @param  list<string>  $localSourceTitles
+     * @param  list<array{path: string, from: string, to: string}>  $normalizations
+     */
+    private function normalizeRelatedPageGuidanceTargets(array &$decision, string $entryPath, array $localSourceTitles, array &$normalizations): void
+    {
+        $guidancePath = "{$entryPath}.related_page_guidance";
+        $guidance = data_get($decision, $guidancePath);
+
+        if (! is_array($guidance)) {
+            return;
+        }
+
+        foreach ($guidance as $index => $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $pageTitle = trim((string) ($item['page_title'] ?? ''));
+            $canonical = $this->canonicalLocalSourcePageTitle($pageTitle, $localSourceTitles);
+
+            if ($canonical === null || $canonical === $pageTitle) {
+                continue;
+            }
+
+            data_set($decision, "{$guidancePath}.{$index}.page_title", $canonical);
+            $normalizations[] = [
+                'path' => "{$guidancePath}.{$index}.page_title",
+                'from' => $pageTitle,
+                'to' => $canonical,
+            ];
+        }
+    }
+
+    /** @param  list<string>  $localSourceTitles */
+    private function canonicalLocalSourcePageTitle(string $title, array $localSourceTitles): ?string
+    {
+        $normalizedTitle = $this->normalizeExactTitle($title);
+        $normalizedWithoutExtension = $this->normalizeExactTitle($this->stripKnownFileExtension($title));
+
+        foreach ($localSourceTitles as $localSourceTitle) {
+            $normalizedLocal = $this->normalizeExactTitle($localSourceTitle);
+
+            if ($normalizedLocal !== '' && in_array($normalizedLocal, [$normalizedTitle, $normalizedWithoutExtension], true)) {
+                return $localSourceTitle;
+            }
+        }
+
+        return null;
+    }
+
+    private function stripKnownFileExtension(string $title): string
+    {
+        $extension = mb_strtolower((string) pathinfo($title, PATHINFO_EXTENSION));
+
+        if ($extension !== '' && in_array($extension, ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md'], true)) {
+            return (string) pathinfo($title, PATHINFO_FILENAME);
+        }
+
+        return $title;
+    }
+
+    private function normalizeExactTitle(string $title): string
+    {
+        $normalized = mb_strtolower($title);
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $normalized) ?? '';
+
+        return trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
     }
 
     /** @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>}|null */

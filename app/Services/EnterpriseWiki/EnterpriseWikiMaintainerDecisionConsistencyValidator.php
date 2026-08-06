@@ -24,10 +24,12 @@ namespace App\Services\EnterpriseWiki;
  *     the AI drops the topic silently, without ever writing a dangling related_page_guidance
  *     reference for it.
  *
- * Title matching uses EnterpriseWikiConceptIdentityMatcher throughout — conservative subset
- * matching, not exact string equality, so title variants (e.g. "ITIL Incident Management" vs
- * "Incident Management") are recognised as the same concept without broad fuzzy matching that
- * could couple unrelated concepts.
+ * Concept/entity and index title matching uses EnterpriseWikiConceptIdentityMatcher —
+ * conservative subset matching, not exact string equality, so title variants (e.g. "ITIL
+ * Incident Management" vs "Incident Management") are recognised as the same concept without broad
+ * fuzzy matching that could couple unrelated concepts. The run-local source_article/source_summary
+ * titles are accepted only by exact normalized title match, so "Masterdata ITIL" is a valid local
+ * target while "ITIL" does not accidentally satisfy a missing concept page.
  */
 class EnterpriseWikiMaintainerDecisionConsistencyValidator
 {
@@ -48,9 +50,10 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
             $this->indexTitles($indexContext),
             $this->plannedTitles($decision),
         );
+        $localSourcePageTitles = $this->localSourcePageTitles($decision);
 
         return array_merge(
-            $this->findDanglingRelatedPageGuidance($decision, $knownTitles),
+            $this->findDanglingRelatedPageGuidance($decision, $knownTitles, $localSourcePageTitles),
             $this->findConceptCandidateContradictions($decision, $knownTitles),
             $this->findDanglingPlannedFigures($decision, $validFigureSourceElementKeys),
         );
@@ -97,9 +100,10 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
 
     /**
      * @param  string[]  $knownTitles
+     * @param  string[]  $localSourcePageTitles
      * @return string[]
      */
-    private function findDanglingRelatedPageGuidance(array $decision, array $knownTitles): array
+    private function findDanglingRelatedPageGuidance(array $decision, array $knownTitles, array $localSourcePageTitles): array
     {
         $issues = [];
 
@@ -107,7 +111,10 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
             foreach ((array) ($entry['related_page_guidance'] ?? []) as $guidance) {
                 $pageTitle = (string) ($guidance['page_title'] ?? '');
 
-                if ($pageTitle === '' || $this->titleIsKnown($pageTitle, $knownTitles)) {
+                if ($pageTitle === ''
+                    || $this->titleIsKnown($pageTitle, $knownTitles)
+                    || $this->titleIsExactLocalSourcePage($pageTitle, $localSourcePageTitles)
+                ) {
                     continue;
                 }
 
@@ -117,6 +124,23 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         }
 
         return $issues;
+    }
+
+    /** @return string[] */
+    private function localSourcePageTitles(array $decision): array
+    {
+        $titles = [];
+
+        foreach (['source_article', 'source_summary'] as $key) {
+            $entry = $decision[$key] ?? null;
+            $title = is_array($entry) ? trim((string) ($entry['title'] ?? '')) : '';
+
+            if ($title !== '') {
+                $titles[] = $title;
+            }
+        }
+
+        return $titles;
     }
 
     /** @return list<array{0: string, 1: array<string, mixed>}> */
@@ -234,5 +258,27 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         }
 
         return false;
+    }
+
+    /** @param  string[]  $localSourcePageTitles */
+    private function titleIsExactLocalSourcePage(string $title, array $localSourcePageTitles): bool
+    {
+        $normalizedTitle = $this->normalizeExactTitle($title);
+
+        foreach ($localSourcePageTitles as $known) {
+            if ($normalizedTitle !== '' && $normalizedTitle === $this->normalizeExactTitle($known)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function normalizeExactTitle(string $title): string
+    {
+        $normalized = mb_strtolower($title);
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $normalized) ?? '';
+
+        return trim(preg_replace('/\s+/', ' ', $normalized) ?? $normalized);
     }
 }

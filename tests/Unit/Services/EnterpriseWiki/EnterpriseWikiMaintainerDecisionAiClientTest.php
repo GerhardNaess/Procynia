@@ -145,6 +145,17 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertStringContainsString('No pages yet.', $userText);
     }
 
+    public function test_developer_prompt_allows_exact_local_source_page_guidance_without_concept_ownership(): void
+    {
+        $payload = $this->capturePayload();
+        $developerText = $this->developerMessageText($payload);
+
+        $this->assertStringContainsString('copy the exact', $developerText);
+        $this->assertStringContainsString('source_article/source_summary title', $developerText);
+        $this->assertStringContainsString('Never use source_article/source_summary as a', $developerText);
+        $this->assertStringContainsString('concept_candidates.owning_page_title', $developerText);
+    }
+
     // =========================================================================
     // decide() — happy path
     // =========================================================================
@@ -826,5 +837,10 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     private function userMessageText(array $payload): string
     {
         return (string) data_get($payload, 'input.1.content.0.text', '');
+    }
+
+    private function developerMessageText(array $payload): string
+    {
+        return (string) data_get($payload, 'input.0.content.0.text', '');
     }
 }
