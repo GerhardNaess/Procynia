@@ -14,6 +14,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
@@ -311,7 +312,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONFIDENCE_HIGH, $first->confidence);
     }
 
-    public function test_claim_stores_page_excerpt_block_key_and_source_based_origin_when_excerpt_matches_unique_block(): void
+    public function test_claim_stores_page_excerpt_block_key_and_best_practice_origin_when_excerpt_matches_unique_block(): void
     {
         $customer = $this->createCustomer();
         [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
@@ -323,7 +324,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->orderBy('position_order')
             ->firstOrFail();
 
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
         $this->assertSame('Supporting excerpt alpha.', $claim->page_excerpt);
         $this->assertSame('block-0002', $claim->content_block_key);
         $this->assertNull($claim->generation_issue);
@@ -491,60 +492,115 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     // No side effects
     // =========================================================================
 
-    public function test_command_creates_source_references_from_page_block_provenance_before_verification(): void
+    public function test_direct_source_blocks_keep_provenance_without_creating_claims(): void
     {
         $customer = $this->createCustomer();
         [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+
+        foreach ($blocks as $index => $block) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+            $blocks[$index]['best_practice_reason'] = null;
+        }
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
 
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $claim = EnterpriseWikiClaim::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->orderBy('position_order')
-            ->firstOrFail();
-
-        $reference = EnterpriseWikiSourceReference::query()
-            ->where('enterprise_wiki_claim_id', $claim->id)
-            ->firstOrFail();
-
-        $this->assertSame(123, $reference->source_id);
-        $this->assertSame('source-alpha', $reference->source_element_key);
-        $this->assertSame('Supporting excerpt alpha.', $reference->excerpt);
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+        $this->assertSame($blocks, $version->fresh()->content_blocks_json);
+        $this->assertNotNull(EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $version->enterprise_wiki_page_id)
+            ->value('claims_extracted_at'));
     }
 
-    public function test_source_based_claim_inherits_all_source_elements_from_block(): void
+    public function test_source_based_blocks_for_roles_requirements_dates_and_procedures_do_not_become_claims(): void
     {
         $customer = $this->createCustomer();
         [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
 
         $blocks = $version->content_blocks_json;
-        $blocks[1]['source_elements'][] = [
-            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id' => 456,
-            'source_label' => 'second-source.docx',
-            'source_hash' => str_pad('b', 64, '0'),
-            'document_version_hash' => str_pad('b', 64, '0'),
-            'source_element_key' => 'source-alpha-supporting',
-            'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_TABLE_ROW,
-            'source_row_key' => 'row-1',
-            'source_excerpt' => 'Additional support for alpha.',
-            'page_reference' => 'Tabell 1, rad 1',
+        $sourceStatements = [
+            'Dokumenteier er ansvarlig for godkjenning.',
+            'Kravet skal være oppfylt før 15. august 2026, og terskelen er 90 prosent.',
+            'Prosedyren beskriver månedlig kontroll og eskalering.',
         ];
-        $version->update(['content_blocks_json' => $blocks]);
+
+        foreach ($sourceStatements as $index => $statement) {
+            $blocks[$index]['markdown'] = $statement;
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+            $blocks[$index]['best_practice_reason'] = null;
+        }
+        $version->update([
+            'content_markdown' => implode("\n\n", $sourceStatements),
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
 
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $claim = EnterpriseWikiClaim::query()
-            ->where('enterprise_wiki_page_version_id', $version->id)
-            ->orderBy('position_order')
-            ->firstOrFail();
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+    }
 
-        $this->assertSame(2, EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count());
-        $this->assertTrue(EnterpriseWikiSourceReference::query()
-            ->where('enterprise_wiki_claim_id', $claim->id)
-            ->where('source_element_key', 'source-alpha-supporting')
-            ->where('source_row_key', 'row-1')
-            ->exists());
+    public function test_mixed_page_persists_only_procynia_content_even_if_ai_returns_a_direct_source_statement(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[0]['markdown'] = 'Dokumenteier godkjenner endringer før publisering.';
+        $blocks[0]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+        $blocks[0]['best_practice_reason'] = null;
+        $blocks[1]['markdown'] = 'Uavhengig kontroll før publisering reduserer operasjonell risiko.';
+        $blocks[1]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $blocks[1]['best_practice_reason'] = 'Procynia-anbefaling for tydelig kontroll.';
+        $version->update([
+            'content_markdown' => implode("\n\n", array_column($blocks, 'markdown')),
+            'content_blocks_json' => $blocks,
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => [
+                ['text' => 'Dokumenteier godkjenner endringer før publisering.', 'confidence' => 'high', 'excerpt' => 'Dokumenteier godkjenner endringer før publisering.', 'conflict_note' => null],
+                ['text' => 'Uavhengig kontroll før publisering reduserer operasjonell risiko.', 'confidence' => 'high', 'excerpt' => 'Uavhengig kontroll før publisering reduserer operasjonell risiko.', 'conflict_note' => 'Procynia peker på manglende uavhengig kontroll.'],
+            ]]);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->get();
+
+        $this->assertCount(1, $claims);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claims->first()->content_origin);
+        $this->assertTrue($claims->first()->conflict_flag);
+        $this->assertFalse($claims->contains('claim_text', 'Dokumenteier godkjenner endringer før publisering.'));
+    }
+
+    public function test_zero_source_claims_are_a_valid_input_for_verification(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+
+        foreach ($blocks as $index => $block) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+            $blocks[$index]['best_practice_reason'] = null;
+        }
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
+
+        $this->assertSame(0, $result['pages']);
+        $this->assertSame(0, $result['claims']);
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
     }
 
     public function test_claim_from_best_practice_block_gets_review_metadata_without_source_reference(): void
@@ -803,7 +859,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $result = app(EnterpriseWikiExtractPageClaimsService::class)
             ->extractClaimsForManualMixedBlock($run->fresh(), $version->fresh(), $blocks[1]);
 
-        $this->assertSame(3, $result['claims']);
+        $this->assertSame(2, $result['claims']);
 
         $createdClaims = EnterpriseWikiClaim::query()
             ->whereIn('id', $result['claim_ids'])
@@ -811,22 +867,13 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->get();
 
         $this->assertSame([
-            EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
             EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         ], $createdClaims->pluck('content_origin')->all());
 
-        $sourceBasedClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
         $bestPracticeClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE);
         $unsupportedClaim = $createdClaims->firstWhere('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
 
-        $this->assertSame(
-            ['source-alpha'],
-            EnterpriseWikiSourceReference::query()
-                ->where('enterprise_wiki_claim_id', $sourceBasedClaim->id)
-                ->pluck('source_element_key')
-                ->all(),
-        );
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $bestPracticeClaim->id)->exists());
         $this->assertFalse(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $unsupportedClaim->id)->exists());
         $this->assertSame('ai_manual_mixed_block_claim_origin', $bestPracticeClaim->review_metadata['classification_basis'] ?? null);
@@ -1152,9 +1199,8 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
     /**
      * A page (of the given type) attached to an EXISTING run's pivot, with a current version
      * whose content matches FAKE_CLAIMS' excerpts closely enough for the mocked AI client's
-     * default response to persist without erroring — deliberately no content_blocks_json, so
-     * claims land as content_origin=internal_error (irrelevant for cap tests, which only assert
-     * on claim ROW counts, never content_origin).
+     * default response to persist without erroring. The excerpts are explicitly marked as
+     * Procynia best-practice content so these cap tests exercise eligible claim candidates.
      *
      * @return array{page: EnterpriseWikiPage, version: EnterpriseWikiPageVersion}
      */
@@ -1173,6 +1219,24 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             'version_number' => 1,
             'is_current' => true,
             'content_markdown' => "# {$title}\n\nSupporting excerpt alpha.\n\nSupporting excerpt beta.",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => 'Supporting excerpt alpha.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'best_practice_reason' => 'Procynia-anbefaling for kontroll.',
+                    'source_elements' => [],
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => 'Supporting excerpt beta.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'best_practice_reason' => 'Procynia-anbefaling for kontroll.',
+                    'source_elements' => [],
+                ],
+            ],
             'generated_by_model' => 'gpt-5',
         ]);
 
@@ -1226,58 +1290,23 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
                         'source_excerpt' => 'Test Page',
                         'page_reference' => 'Tittel',
                     ]],
+                    'best_practice_reason' => null,
                 ],
                 [
                     'block_key' => 'block-0002',
                     'position' => 1,
                     'markdown' => 'Supporting excerpt alpha.',
-                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                    'source_id' => 123,
-                    'source_label' => 'source.docx',
-                    'source_hash' => str_pad('a', 64, '0'),
-                    'source_element_key' => 'source-alpha',
-                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
-                    'source_row_key' => null,
-                    'source_excerpt' => 'Supporting excerpt alpha.',
-                    'page_reference' => 'Avsnitt 1',
-                    'source_elements' => [[
-                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                        'source_id' => 123,
-                        'source_label' => 'source.docx',
-                        'source_hash' => str_pad('a', 64, '0'),
-                        'document_version_hash' => str_pad('a', 64, '0'),
-                        'source_element_key' => 'source-alpha',
-                        'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
-                        'source_row_key' => null,
-                        'source_excerpt' => 'Supporting excerpt alpha.',
-                        'page_reference' => 'Avsnitt 1',
-                    ]],
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'source_elements' => [],
+                    'best_practice_reason' => 'Procynia har lagt til en anbefalt kontrollpraksis.',
                 ],
                 [
                     'block_key' => 'block-0003',
                     'position' => 2,
                     'markdown' => 'Supporting excerpt beta.',
-                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                    'source_id' => 123,
-                    'source_label' => 'source.docx',
-                    'source_hash' => str_pad('a', 64, '0'),
-                    'source_element_key' => 'source-beta',
-                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
-                    'source_row_key' => null,
-                    'source_excerpt' => 'Supporting excerpt beta.',
-                    'page_reference' => 'Avsnitt 2',
-                    'source_elements' => [[
-                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                        'source_id' => 123,
-                        'source_label' => 'source.docx',
-                        'source_hash' => str_pad('a', 64, '0'),
-                        'document_version_hash' => str_pad('a', 64, '0'),
-                        'source_element_key' => 'source-beta',
-                        'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
-                        'source_row_key' => null,
-                        'source_excerpt' => 'Supporting excerpt beta.',
-                        'page_reference' => 'Avsnitt 2',
-                    ]],
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'source_elements' => [],
+                    'best_practice_reason' => 'Procynia har lagt til en anbefalt kontrollpraksis.',
                 ],
             ],
             'generated_by_model' => 'gpt-5',

@@ -5,7 +5,6 @@ namespace App\Services\EnterpriseWiki;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
-use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
@@ -73,7 +72,6 @@ class EnterpriseWikiExtractPageClaimsService
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiClaimAnchorTextNormalizer $textNormalizer,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
-        private readonly EnterpriseWikiTableBlockBuilder $tableBlockBuilder,
     ) {}
 
     /**
@@ -185,7 +183,10 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             try {
-                $result = $this->extractClaimsWithTransientRetry($run, $page, $version, $languageCode);
+                $claimCandidateMarkdown = $this->claimCandidateMarkdown($version);
+                $result = $claimCandidateMarkdown === ''
+                    ? ['claims' => []]
+                    : $this->extractClaimsWithTransientRetry($run, $page, $claimCandidateMarkdown, $languageCode);
             } catch (Throwable $e) {
                 $this->release($row->id, $token);
 
@@ -224,6 +225,32 @@ class EnterpriseWikiExtractPageClaimsService
     }
 
     /**
+     * Claims describe Procynia additions to the Wiki, never direct document statements. The
+     * persisted block origin is the authoritative boundary: source_based blocks retain their
+     * document/element provenance on the page but are excluded from the claim AI input.
+     */
+    private function claimCandidateMarkdown(EnterpriseWikiPageVersion $version): string
+    {
+        $blocks = collect((array) ($version->content_blocks_json ?? []))
+            ->filter(static function (mixed $block): bool {
+                if (! is_array($block)) {
+                    return false;
+                }
+
+                return in_array($block['content_origin'] ?? null, [
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                ], true);
+            })
+            ->sortBy(static fn (array $block): int => (int) ($block['position'] ?? PHP_INT_MAX))
+            ->pluck('markdown')
+            ->filter(static fn (mixed $markdown): bool => is_string($markdown) && trim($markdown) !== '')
+            ->map(static fn (string $markdown): string => trim($markdown));
+
+        return $blocks->implode("\n\n");
+    }
+
+    /**
      * Retry only a documented transient transport/provider failure once. The AI client either
      * returns a complete decoded response or throws, so a failed first attempt cannot leak a
      * partial response into the second attempt or persistence.
@@ -233,7 +260,7 @@ class EnterpriseWikiExtractPageClaimsService
     private function extractClaimsWithTransientRetry(
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
-        EnterpriseWikiPageVersion $version,
+        string $claimCandidateMarkdown,
         string $languageCode,
     ): array {
         for ($attempt = 1; $attempt <= self::AI_MAX_ATTEMPTS; $attempt++) {
@@ -248,7 +275,7 @@ class EnterpriseWikiExtractPageClaimsService
                 return $this->aiClient->extractClaims(
                     pageTitle: $page->title,
                     pageType: $page->page_type,
-                    contentMarkdown: (string) ($version->content_markdown ?? ''),
+                    contentMarkdown: $claimCandidateMarkdown,
                     languageCode: $languageCode,
                 );
             } catch (Throwable $exception) {
@@ -424,9 +451,17 @@ class EnterpriseWikiExtractPageClaimsService
                 $block = $this->contentBlockService->findUniqueBlockForExcerpt($version, $pageExcerpt);
                 $hasPageAnchor = $block !== null;
                 $blockOrigin = $hasPageAnchor ? (string) ($block['content_origin'] ?? '') : '';
+
+                // Direct document content is Wiki content with its own provenance, not a
+                // Procynia claim. This is deliberately enforced again after the AI response so
+                // an invalid response can never reintroduce source-based claims.
+                if ($blockOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                    continue;
+                }
+
                 $contentOrigin = match ($blockOrigin) {
-                    EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                     EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                     default => EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR,
                 };
 
@@ -482,18 +517,8 @@ class EnterpriseWikiExtractPageClaimsService
                     'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 ]);
 
-                if ($block !== null && $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
-                    foreach ($this->sourceReferencePayloadsForBlock($block, $pageExcerpt) as $sourceReferencePayload) {
-                        EnterpriseWikiSourceReference::query()->create(array_merge([
-                            'enterprise_wiki_claim_id' => $createdClaim->id,
-                        ], $sourceReferencePayload));
-                    }
-                }
-
                 $created++;
             }
-
-            $created += $this->createTableClaims($page, $version, $created);
 
             $row->update([
                 'claims_extracted_at' => now(),
@@ -503,79 +528,6 @@ class EnterpriseWikiExtractPageClaimsService
 
             return $created;
         });
-    }
-
-    /**
-     * Deterministic, non-AI claims for any "table" content block on this version — one claim per
-     * (row, non-label column) cell, built directly from the table's own structured data (see
-     * EnterpriseWikiTableBlockBuilder::tableClaimPayloads()). Never calls the AI claim-extraction
-     * client: a table's cell values are already exact, verbatim source data, so there is nothing
-     * for an LLM to usefully paraphrase, and generating these deterministically gives every table
-     * claim exact row+cell provenance by construction instead of by the AI faithfully restating a
-     * source_element_key.
-     *
-     * Runs inside the same reservation-guarded transaction as the AI-derived claims above, so it
-     * shares the same (run, page) idempotency checkpoint — a re-ingest that reuses an existing
-     * completed extraction never re-enters this method at all.
-     *
-     * @return int number of claims created
-     */
-    private function createTableClaims(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, int $startingPosition): int
-    {
-        $created = 0;
-        $position = $startingPosition;
-
-        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
-            if (! is_array($block) || ($block['block_type'] ?? null) !== 'table') {
-                continue;
-            }
-
-            $sourceId = (int) ($block['source_id'] ?? 0);
-
-            if ($sourceId <= 0) {
-                continue;
-            }
-
-            $document = EnterpriseWikiDocument::query()->find($sourceId);
-
-            if ($document === null) {
-                continue;
-            }
-
-            foreach ($this->tableBlockBuilder->tableClaimPayloads($document, $block) as $payload) {
-                $createdClaim = EnterpriseWikiClaim::query()->create([
-                    'enterprise_wiki_page_id' => $page->id,
-                    'enterprise_wiki_page_version_id' => $version->id,
-                    'claim_text' => $payload['claim_text'],
-                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                    'page_excerpt' => $payload['excerpt'],
-                    'content_block_key' => $block['block_key'] ?? null,
-                    'position_order' => $position++,
-                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-                    'conflict_flag' => false,
-                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-                ]);
-
-                EnterpriseWikiSourceReference::query()->create([
-                    'enterprise_wiki_claim_id' => $createdClaim->id,
-                    'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                    'source_id' => $document->id,
-                    'source_element_key' => $payload['source_row_key'],
-                    'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_TABLE_ROW,
-                    'source_row_key' => $payload['source_row_key'],
-                    'source_cell_key' => $payload['source_cell_key'],
-                    'source_column_key' => $payload['source_column_key'],
-                    'source_label' => $document->original_filename,
-                    'excerpt' => $payload['excerpt'],
-                    'source_hash' => $document->file_hash_sha256 ?? '',
-                    'page_reference' => $payload['page_reference'],
-                ]);
-
-                $created++;
-            }
-        }
-
-        return $created;
     }
 
     /**
@@ -613,6 +565,10 @@ class EnterpriseWikiExtractPageClaimsService
             $createdClaimIds = [];
 
             foreach ($claims as $claim) {
+                if ($claim['content_origin'] === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                    continue;
+                }
+
                 $contentOrigin = $claim['content_origin'];
                 $bestPracticeDrifted = $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
                     && ! $this->canonicalizationService->isEligibleForBestPractice($claim['text']);
@@ -700,46 +656,6 @@ class EnterpriseWikiExtractPageClaimsService
         }
 
         return array_values($deduped);
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function sourceReferencePayloadsForBlock(array $block, string $pageExcerpt): array
-    {
-        $sourceElements = (array) ($block['source_elements'] ?? []);
-
-        if ($sourceElements === [] && ($block['source_id'] ?? null) !== null) {
-            $sourceElements = [$block];
-        }
-
-        $payloads = [];
-
-        foreach ($sourceElements as $sourceElement) {
-            if (! is_array($sourceElement)) {
-                continue;
-            }
-
-            $sourceId = (int) ($sourceElement['source_id'] ?? 0);
-
-            if ($sourceId <= 0) {
-                continue;
-            }
-
-            $payloads[] = [
-                'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-                'source_id' => $sourceId,
-                'source_element_key' => $sourceElement['source_element_key'] ?? null,
-                'source_element_type' => $sourceElement['source_element_type'] ?? null,
-                'source_row_key' => $sourceElement['source_row_key'] ?? null,
-                'source_label' => (string) ($sourceElement['source_label'] ?? 'Kildedokument'),
-                'excerpt' => (string) ($sourceElement['source_excerpt'] ?? $pageExcerpt),
-                'source_hash' => (string) ($sourceElement['source_hash'] ?? ''),
-                'page_reference' => $sourceElement['page_reference'] ?? null,
-            ];
-        }
-
-        return $payloads;
     }
 
     /**
