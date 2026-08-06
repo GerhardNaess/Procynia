@@ -2186,6 +2186,7 @@ class WikiController extends Controller
                     'image_data' => $this->renderedImageData($block),
                     'source_label' => $block['source_label'] ?? null,
                     'page_reference' => $block['page_reference'] ?? null,
+                    'best_practice_reason' => $block['best_practice_reason'] ?? null,
                     'section_key' => $section['section_key'] ?? null,
                     'section_heading' => $section['heading_text'] ?? null,
                 ];

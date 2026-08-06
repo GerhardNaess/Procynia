@@ -54,7 +54,7 @@ class EnterpriseWikiBestPracticeSectionService
                 continue;
             }
 
-            if (($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+            if (! $this->hasRenderableBestPracticeMetadata($block)) {
                 // A non-best-practice block (source_based, table, image, link, ...) is a hard
                 // boundary: never merge best-practice text across it, and never include it in any
                 // section itself, regardless of its own markdown content.
@@ -113,5 +113,14 @@ class EnterpriseWikiBestPracticeSectionService
             'level' => strlen($matches[1]),
             'text' => trim($matches[2]),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $block
+     */
+    private function hasRenderableBestPracticeMetadata(array $block): bool
+    {
+        return ($block['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+            && trim((string) ($block['best_practice_reason'] ?? '')) !== '';
     }
 }

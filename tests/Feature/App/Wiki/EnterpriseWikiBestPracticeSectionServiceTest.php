@@ -133,6 +133,19 @@ class EnterpriseWikiBestPracticeSectionServiceTest extends TestCase
         $this->assertNull($map['p1']['heading_text']);
     }
 
+    public function test_best_practice_block_without_reason_is_not_rendered_as_a_best_practice_section(): void
+    {
+        $version = $this->versionWithBlocks([
+            array_merge($this->block('h1', 0, '## Mangler begrunnelse'), ['best_practice_reason' => null]),
+            $this->block('p1', 1, 'Gyldig beste-praksis-tekst etter ugyldig blokk.'),
+        ]);
+
+        $map = $this->service()->mapBlocksToSections($version);
+
+        $this->assertArrayNotHasKey('h1', $map);
+        $this->assertSame($version->id.'|p1', $map['p1']['section_key']);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -149,6 +162,9 @@ class EnterpriseWikiBestPracticeSectionServiceTest extends TestCase
             'position' => $position,
             'markdown' => $markdown,
             'content_origin' => $contentOrigin,
+            'best_practice_reason' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                ? 'Procynia-generert beste praksis.'
+                : null,
         ];
     }
 

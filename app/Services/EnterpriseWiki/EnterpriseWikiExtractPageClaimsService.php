@@ -130,20 +130,6 @@ class EnterpriseWikiExtractPageClaimsService
                 continue;
             }
 
-            // Defensive fallback for rows that already have claims but predate the
-            // checkpoint column being set (e.g. an interrupted write from before this
-            // checkpoint existed): record the checkpoint instead of calling AI again.
-            $hasExistingClaims = EnterpriseWikiClaim::query()
-                ->where('enterprise_wiki_page_version_id', $version->id)
-                ->exists();
-
-            if ($hasExistingClaims) {
-                $row->update(['claims_extracted_at' => now()]);
-                $skipped++;
-
-                continue;
-            }
-
             // Del 4 (v0.10, docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): a
             // sensible, run-wide ceiling on new claims — never a failure. Existing generation
             // order (article/summary first, then concept/entity — see
@@ -183,17 +169,38 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             try {
-                $claimCandidateMarkdown = $this->claimCandidateMarkdown($version);
-                $result = $claimCandidateMarkdown === ''
+                $allClaimCandidateBlocks = $this->claimCandidateBlocks($version);
+                $claimCandidateBlocks = $this->claimCandidateBlocksWithoutExistingClaims($version, $allClaimCandidateBlocks);
+
+                if ($allClaimCandidateBlocks->isNotEmpty() && $claimCandidateBlocks->isEmpty()) {
+                    $completed = $this->persist($row->id, $page, $version, $token, ['claims' => []], []);
+
+                    if ($completed === null) {
+                        $busy++;
+                    } else {
+                        $skipped++;
+                    }
+
+                    continue;
+                }
+
+                $result = $claimCandidateBlocks->isEmpty()
                     ? ['claims' => []]
-                    : $this->extractClaimsWithTransientRetry($run, $page, $claimCandidateMarkdown, $languageCode);
+                    : $this->extractClaimsWithTransientRetry($run, $page, $this->claimCandidateMarkdown($claimCandidateBlocks), $languageCode);
             } catch (Throwable $e) {
                 $this->release($row->id, $token);
 
                 throw $e;
             }
 
-            $pageClaimsCreated = $this->persist($row->id, $page, $version, $token, $result);
+            $pageClaimsCreated = $this->persist(
+                $row->id,
+                $page,
+                $version,
+                $token,
+                $result,
+                $claimCandidateBlocks->pluck('block_key')->all(),
+            );
 
             if ($pageClaimsCreated === null) {
                 // Another worker reclaimed this lease as stale while the AI call was in
@@ -229,9 +236,35 @@ class EnterpriseWikiExtractPageClaimsService
      * persisted block origin is the authoritative boundary: source_based blocks retain their
      * document/element provenance on the page but are excluded from the claim AI input.
      */
-    private function claimCandidateMarkdown(EnterpriseWikiPageVersion $version): string
+    private function claimCandidateMarkdown(Collection $blocks): string
     {
-        $blocks = collect((array) ($version->content_blocks_json ?? []))
+        return $blocks
+            ->pluck('markdown')
+            ->filter(static fn (mixed $markdown): bool => is_string($markdown) && trim($markdown) !== '')
+            ->map(static fn (string $markdown): string => trim($markdown))
+            ->implode("\n\n");
+    }
+
+    private function claimCandidateBlocksWithoutExistingClaims(EnterpriseWikiPageVersion $version, Collection $candidateBlocks): Collection
+    {
+        $claimedBlockKeys = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->whereNotNull('content_block_key')
+            ->pluck('content_block_key')
+            ->map(static fn (mixed $key): string => trim((string) $key))
+            ->filter(static fn (string $key): bool => $key !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        return $candidateBlocks
+            ->reject(static fn (array $block): bool => in_array((string) $block['block_key'], $claimedBlockKeys, true))
+            ->values();
+    }
+
+    private function claimCandidateBlocks(EnterpriseWikiPageVersion $version): Collection
+    {
+        return collect((array) ($version->content_blocks_json ?? []))
             ->filter(static function (mixed $block): bool {
                 if (! is_array($block)) {
                     return false;
@@ -243,11 +276,26 @@ class EnterpriseWikiExtractPageClaimsService
                 ], true);
             })
             ->sortBy(static fn (array $block): int => (int) ($block['position'] ?? PHP_INT_MAX))
-            ->pluck('markdown')
-            ->filter(static fn (mixed $markdown): bool => is_string($markdown) && trim($markdown) !== '')
-            ->map(static fn (string $markdown): string => trim($markdown));
+            ->map(function (array $block): array {
+                $blockKey = trim((string) ($block['block_key'] ?? ''));
+                $origin = (string) ($block['content_origin'] ?? '');
+                $markdown = trim((string) ($block['markdown'] ?? ''));
 
-        return $blocks->implode("\n\n");
+                if ($blockKey === '') {
+                    throw new \RuntimeException('Wiki claim extraction: generated claim candidate block has no stable content_block_key.');
+                }
+
+                if ($markdown === '') {
+                    throw new \RuntimeException("Wiki claim extraction: generated claim candidate block [{$blockKey}] has empty markdown.");
+                }
+
+                if ($origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE && trim((string) ($block['best_practice_reason'] ?? '')) === '') {
+                    throw new \RuntimeException("Wiki claim extraction: best-practice block [{$blockKey}] has no best_practice_reason.");
+                }
+
+                return array_merge($block, ['block_key' => $blockKey, 'markdown' => $markdown]);
+            })
+            ->values();
     }
 
     /**
@@ -431,9 +479,9 @@ class EnterpriseWikiExtractPageClaimsService
      *
      * @return int|null the number of claims created, or null if the reservation was lost
      */
-    private function persist(int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result): ?int
+    private function persist(int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, array $candidateBlockKeys): ?int
     {
-        return DB::transaction(function () use ($rowId, $page, $version, $token, $result): ?int {
+        return DB::transaction(function () use ($rowId, $page, $version, $token, $result, $candidateBlockKeys): ?int {
             $row = EnterpriseWikiIngestRunPage::query()
                 ->where('id', $rowId)
                 ->where('claims_claim_token', $token)
@@ -445,17 +493,23 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             $created = 0;
+            $candidateBlockKeySet = array_flip(array_map(static fn (mixed $key): string => (string) $key, $candidateBlockKeys));
 
             foreach ($this->dedupeClaims($result['claims']) as $i => $claim) {
                 $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
                 $block = $this->contentBlockService->findUniqueBlockForExcerpt($version, $pageExcerpt);
                 $hasPageAnchor = $block !== null;
                 $blockOrigin = $hasPageAnchor ? (string) ($block['content_origin'] ?? '') : '';
+                $blockKey = $hasPageAnchor ? trim((string) ($block['block_key'] ?? '')) : '';
 
                 // Direct document content is Wiki content with its own provenance, not a
                 // Procynia claim. This is deliberately enforced again after the AI response so
                 // an invalid response can never reintroduce source-based claims.
                 if ($blockOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                    continue;
+                }
+
+                if ($blockKey !== '' && ! array_key_exists($blockKey, $candidateBlockKeySet)) {
                     continue;
                 }
 
@@ -486,7 +540,7 @@ class EnterpriseWikiExtractPageClaimsService
                     'claim_text' => $claim['text'],
                     'content_origin' => $contentOrigin,
                     'page_excerpt' => $pageExcerpt !== '' ? $pageExcerpt : null,
-                    'content_block_key' => $block['block_key'] ?? null,
+                    'content_block_key' => $blockKey !== '' ? $blockKey : null,
                     'review_reason' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
                         ? (string) ($block['best_practice_reason'] ?? 'Vurder om anbefalingen skal beholdes som beste praksis.')
                         : null,

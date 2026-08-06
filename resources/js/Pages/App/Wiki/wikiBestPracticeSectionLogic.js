@@ -45,3 +45,14 @@ export function groupContentBlocksBySection(blocks) {
 
     return groups;
 }
+
+export function hasRenderableBestPracticeMetadata(block) {
+    return block?.content_origin === 'best_practice'
+        && typeof block?.best_practice_reason === 'string'
+        && block.best_practice_reason.trim() !== '';
+}
+
+export function hasInvalidBestPracticeMetadata(block) {
+    return block?.content_origin === 'best_practice'
+        && !hasRenderableBestPracticeMetadata(block);
+}

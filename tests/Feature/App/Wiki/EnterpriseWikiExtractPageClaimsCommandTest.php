@@ -426,16 +426,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $customer = $this->createCustomer();
         [$run, $page, $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
 
-        // Pre-create a claim for this version
-        EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $page->id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Existing claim',
-            'position_order' => 0,
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-        ]);
+        $this->createExistingClaimsForCandidateBlocks($page, $version);
 
         $claimsBefore = EnterpriseWikiClaim::query()->count();
 
@@ -449,15 +440,7 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $customer = $this->createCustomer();
         [$run, $page, $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
 
-        EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $page->id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Existing claim',
-            'position_order' => 0,
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-        ]);
+        $this->createExistingClaimsForCandidateBlocks($page, $version);
 
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
@@ -579,6 +562,131 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claims->first()->content_origin);
         $this->assertTrue($claims->first()->conflict_flag);
         $this->assertFalse($claims->contains('claim_text', 'Dokumenteier godkjenner endringer før publisering.'));
+    }
+
+    public function test_best_practice_block_is_sent_as_claim_candidate_even_when_page_already_has_source_based_claim(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[0]['markdown'] = 'Kunden har månedlig styringsmøte.';
+        $blocks[0]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+        $blocks[0]['best_practice_reason'] = null;
+        $blocks[1]['markdown'] = 'Det anbefales å dokumentere beslutninger fortløpende.';
+        $blocks[1]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $blocks[1]['best_practice_reason'] = 'Procynia-anbefaling for sporbar beslutningskontroll.';
+        $blocks[2]['markdown'] = 'Det anbefales å avklare eierskap før endring settes i drift.';
+        $blocks[2]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $blocks[2]['best_practice_reason'] = 'Procynia-anbefaling for tydelig ansvar.';
+        $version->update([
+            'content_markdown' => implode("\n\n", array_column($blocks, 'markdown')),
+            'content_blocks_json' => $blocks,
+        ]);
+
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $version->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => 'Historisk source-based claim beholdes.',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'content_block_key' => 'block-0001',
+            'position_order' => 0,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        $capturedMarkdown = null;
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $contentMarkdown,
+            ) use (&$capturedMarkdown): array {
+                $capturedMarkdown = $contentMarkdown;
+
+                return ['claims' => [
+                    [
+                        'text' => 'Det anbefales å dokumentere beslutninger fortløpende.',
+                        'confidence' => 'medium',
+                        'excerpt' => 'Det anbefales å dokumentere beslutninger fortløpende.',
+                        'conflict_note' => null,
+                    ],
+                    [
+                        'text' => 'Det anbefales å avklare eierskap før endring settes i drift.',
+                        'confidence' => 'medium',
+                        'excerpt' => 'Det anbefales å avklare eierskap før endring settes i drift.',
+                        'conflict_note' => null,
+                    ],
+                ]];
+            });
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(1, $result['pages']);
+        $this->assertSame(2, $result['claims']);
+        $this->assertStringNotContainsString('Kunden har månedlig styringsmøte.', $capturedMarkdown);
+        $this->assertStringContainsString('Det anbefales å dokumentere beslutninger fortløpende.', $capturedMarkdown);
+        $this->assertStringContainsString('Det anbefales å avklare eierskap før endring settes i drift.', $capturedMarkdown);
+
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->orderBy('position_order')
+            ->get();
+
+        $this->assertCount(3, $claims);
+        $this->assertSame(['block-0001', 'block-0002', 'block-0003'], $claims->pluck('content_block_key')->all());
+        $this->assertSame(2, $claims->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)->count());
+    }
+
+    public function test_best_practice_block_missing_reason_is_rejected_before_ai_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $blocks = $version->content_blocks_json;
+        $blocks[1]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE;
+        $blocks[1]['best_practice_reason'] = null;
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('best-practice block [block-0002] has no best_practice_reason');
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+    }
+
+    public function test_claim_response_for_already_claimed_best_practice_block_is_not_duplicated(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        foreach ($version->content_blocks_json as $block) {
+            if (($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+                continue;
+            }
+
+            EnterpriseWikiClaim::query()->create([
+                'enterprise_wiki_page_id' => $version->enterprise_wiki_page_id,
+                'enterprise_wiki_page_version_id' => $version->id,
+                'claim_text' => 'Eksisterende claim for '.$block['block_key'],
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'content_block_key' => $block['block_key'],
+                'position_order' => (int) ($block['position'] ?? 0),
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
+                'conflict_flag' => false,
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            ]);
+        }
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(1, $result['skipped']);
+        $this->assertSame(2, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
     }
 
     public function test_zero_source_claims_are_a_valid_input_for_verification(): void
@@ -1241,6 +1349,27 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         ]);
 
         return ['page' => $page, 'version' => $version];
+    }
+
+    private function createExistingClaimsForCandidateBlocks(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version): void
+    {
+        foreach ($version->content_blocks_json as $block) {
+            if (($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE) {
+                continue;
+            }
+
+            EnterpriseWikiClaim::query()->create([
+                'enterprise_wiki_page_id' => $page->id,
+                'enterprise_wiki_page_version_id' => $version->id,
+                'claim_text' => 'Existing claim for '.$block['block_key'],
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'content_block_key' => $block['block_key'],
+                'position_order' => (int) ($block['position'] ?? 0),
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'conflict_flag' => false,
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            ]);
+        }
     }
 
     /**

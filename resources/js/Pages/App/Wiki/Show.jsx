@@ -9,7 +9,11 @@ import {
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
 import { formatFindingUserId } from './runFindingsLogic';
-import { groupContentBlocksBySection } from './wikiBestPracticeSectionLogic';
+import {
+    groupContentBlocksBySection,
+    hasInvalidBestPracticeMetadata,
+    hasRenderableBestPracticeMetadata,
+} from './wikiBestPracticeSectionLogic';
 
 function getWikiShowHelpSections(tw) {
     return [
@@ -2249,15 +2253,8 @@ export default function WikiShow({
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
-                                        // A block's own content_origin is set once at generation time and never
-                                        // rewritten — but claim verification can later re-classify a specific claim
-                                        // (e.g. AI-mistagged source_based text that reads as genuine best-practice
-                                        // advice gets promoted, see EnterpriseWikiVerifyPageClaimsService). Checking
-                                        // the block's linked claims too keeps the reader-facing label in sync with
-                                        // that reclassification instead of showing a stale origin.
-                                        const claimsForBlock = claims.filter((claim) => claim.content_block_key === block.block_key);
-                                        const isBestPracticeBlock = block.content_origin === 'best_practice'
-                                            || (claimsForBlock.length > 0 && claimsForBlock.every((claim) => claim.content_origin === 'best_practice'));
+                                        const isBestPracticeBlock = hasRenderableBestPracticeMetadata(block);
+                                        const hasBestPracticeMetadataIssue = hasInvalidBestPracticeMetadata(block);
                                         const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
                                         const canSaveBlockEdit = Boolean(
                                             canEditWikiClaims
@@ -2335,7 +2332,14 @@ export default function WikiShow({
                                                         <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
                                                     </div>
                                                 ) : (
-                                                    <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                    <>
+                                                        {hasBestPracticeMetadataIssue && (
+                                                            <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
+                                                                {tw.wiki_best_practice_metadata_missing ?? 'Beste-praksis-metadata mangler. Blokken merkes ikke som beste praksis før lagret opprinnelse og begrunnelse er konsistente.'}
+                                                            </div>
+                                                        )}
+                                                        <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
+                                                    </>
                                                 )}
                                                 {isTargetBlock && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">

@@ -455,7 +455,13 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Blokkanker');
         $version = $this->createVersion($page, true);
         $version->update(['content_blocks_json' => [
-            ['block_key' => 'block-0001', 'position' => 0, 'markdown' => 'Blokktekst.'],
+            [
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => 'Blokktekst.',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'best_practice_reason' => 'Procynia-generert faglig anbefaling.',
+            ],
         ]]);
 
         $response = $this->actingAs($user)->get("/app/wiki/{$page->slug}");
@@ -464,7 +470,10 @@ class EnterpriseWikiBestPracticeSuggestionTest extends TestCase
         $response->assertViewHas('page', function (array $inertia): bool {
             $blocks = data_get($inertia, 'props.current_version.content_blocks_json');
 
-            return is_array($blocks) && ($blocks[0]['block_key'] ?? null) === 'block-0001';
+            return is_array($blocks)
+                && ($blocks[0]['block_key'] ?? null) === 'block-0001'
+                && ($blocks[0]['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                && ($blocks[0]['best_practice_reason'] ?? null) === 'Procynia-generert faglig anbefaling.';
         });
     }
 

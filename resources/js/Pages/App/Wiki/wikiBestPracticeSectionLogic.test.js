@@ -1,6 +1,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { groupContentBlocksBySection } from './wikiBestPracticeSectionLogic.js';
+import {
+    groupContentBlocksBySection,
+    hasInvalidBestPracticeMetadata,
+    hasRenderableBestPracticeMetadata,
+} from './wikiBestPracticeSectionLogic.js';
 
 describe('groupContentBlocksBySection', () => {
     test('consecutive blocks sharing the same section_key become one section group', () => {
@@ -74,5 +78,34 @@ describe('groupContentBlocksBySection', () => {
     test('empty input returns an empty list', () => {
         assert.deepEqual(groupContentBlocksBySection([]), []);
         assert.deepEqual(groupContentBlocksBySection(undefined), []);
+    });
+
+    test('best-practice display requires persistent origin and reason', () => {
+        assert.equal(hasRenderableBestPracticeMetadata({
+            content_origin: 'best_practice',
+            best_practice_reason: 'Procynia-generert faglig anbefaling.',
+        }), true);
+
+        assert.equal(hasRenderableBestPracticeMetadata({
+            content_origin: 'source_based',
+            best_practice_reason: 'Procynia-generert faglig anbefaling.',
+        }), false);
+
+        assert.equal(hasRenderableBestPracticeMetadata({
+            content_origin: 'best_practice',
+            best_practice_reason: '   ',
+        }), false);
+    });
+
+    test('best-practice metadata issue is flagged only for blocks with best-practice origin but missing reason', () => {
+        assert.equal(hasInvalidBestPracticeMetadata({
+            content_origin: 'best_practice',
+            best_practice_reason: '',
+        }), true);
+
+        assert.equal(hasInvalidBestPracticeMetadata({
+            content_origin: 'source_based',
+            best_practice_reason: '',
+        }), false);
     });
 });
