@@ -153,6 +153,20 @@ class WikiPageContentAiClientTest extends TestCase
         }
     }
 
+    public function test_concept_prompt_requires_exact_planned_section_headings(): void
+    {
+        $conceptPrompt = $this->developerPromptTextFromPayload($this->capturePayload(pageType: 'concept'));
+
+        $this->assertStringContainsString('the heading line must be exactly "## " followed by that item text copied verbatim', $conceptPrompt);
+        $this->assertStringContainsString('Do not paraphrase, shorten, use ###, bold labels, or plain paragraph labels', $conceptPrompt);
+
+        foreach (['article', 'summary'] as $pageType) {
+            $developerPrompt = $this->developerPromptTextFromPayload($this->capturePayload(pageType: $pageType));
+
+            $this->assertStringNotContainsString('the heading line must be exactly "## " followed by that item text copied verbatim', $developerPrompt);
+        }
+    }
+
     public function test_best_practice_rule_requires_necessity_not_just_accuracy(): void
     {
         $payload = $this->capturePayload(pageType: 'concept');

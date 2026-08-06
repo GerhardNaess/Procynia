@@ -1048,6 +1048,150 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
+    public function test_concept_planned_topic_labels_are_normalized_without_ai_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $document->update([
+            'extracted_text' => 'ITIL beskrives som rammeverk med relevans for drift og forvaltning. Kilden nevner sentrale praksiser på høyt nivå.',
+        ]);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'ITIL');
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata ITIL');
+
+        $firstTopic = 'Oversikt over ITIL som rammeverk og relevans for drift og forvaltning';
+        $secondTopic = 'Kort forklaring av sentrale praksiser nevnt i kilden på høyt nivå';
+        $firstBody = 'ITIL brukes som rammeverk for å beskrive strukturert tjenestestyring i drift og forvaltning.';
+        $secondBody = "Incident Management og Change Management omtales som sentrale praksiser på overordnet nivå. See [[{$article->slug}]] for details.";
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'r',
+                'owned_topics' => [$firstTopic, $secondTopic],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultFromBlocks([
+                "# {$pageTitle}",
+                'ITIL er et begrep brukt om strukturert tjenestestyring.',
+                "### {$firstTopic}\n\n{$firstBody}",
+                "**{$secondTopic}**\n\n{$secondBody}",
+            ], $sourceElements))
+            ->shouldNotReceive('repairPlannedSections');
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+
+        $this->assertStringContainsString("## {$firstTopic}\n\n{$firstBody}", $version->content_markdown);
+        $this->assertStringContainsString("## {$secondTopic}\n\n{$secondBody}", $version->content_markdown);
+        $this->assertStringContainsString('ITIL er et begrep brukt om strukturert tjenestestyring.', $version->content_markdown);
+        $this->assertStringNotContainsString("### {$firstTopic}", $version->content_markdown);
+        $this->assertStringNotContainsString("**{$secondTopic}**", $version->content_markdown);
+    }
+
+    public function test_concept_planned_heading_normalization_does_not_apply_to_articles(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $document->update([
+            'extracted_text' => 'Dokumentet beskriver tjenestestyring og rammeverk i leveransen.',
+        ]);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Tjenestestyring');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag');
+
+        $plannedTopic = 'Rammeverk for tjenestestyring';
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => [
+                'action' => 'create',
+                'title' => $article->title,
+                'proposed_slug' => $article->slug,
+                'reason' => 'r',
+                'owned_topics' => [$plannedTopic],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ],
+            'source_summary' => ['action' => 'create', 'title' => $summary->title, 'proposed_slug' => $summary->slug, 'reason' => 'r'],
+            'concept_pages' => [],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultFromBlocks([
+                "# {$pageTitle}",
+                "### {$plannedTopic}\n\nTjenestestyring beskrives i kilden. See [[{$summary->slug}]] for details.",
+            ], $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $existingMarkdown,
+                array $issues,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => [
+                $this->repairedSectionResult(
+                    $plannedTopic,
+                    "Tjenestestyring beskrives i kilden. See [[{$summary->slug}]] for details.",
+                    $sourceElements,
+                ),
+            ]);
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->firstOrFail();
+
+        $this->assertStringContainsString("## {$plannedTopic}", $version->content_markdown);
+    }
+
     // =========================================================================
     // Wiki run-587: planned figure coverage — gating, placement, repair, and hard block
     // =========================================================================

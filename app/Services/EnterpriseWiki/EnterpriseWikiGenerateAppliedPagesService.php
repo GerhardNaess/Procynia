@@ -741,7 +741,47 @@ class EnterpriseWikiGenerateAppliedPagesService
         $blocking = array_values(array_filter($issues, [EnterpriseWikiPlannedSectionCoverageValidator::class, 'isBlocking']));
 
         if ($blocking === []) {
+            Log::info('[WIKI_PAGE_GENERATION] Planned section coverage check completed.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'page_type' => $page->page_type,
+                'planned_section_count' => count($plannedTopics),
+                'coverage_result' => 'valid_first_pass',
+                'blocking_issues' => 0,
+            ]);
+
             return [$markdown, $blocks];
+        }
+
+        [$normalizedMarkdown, $normalizedBlocks, $normalizedTopics] = $this->normalizeConceptPlannedSectionHeadingStructure(
+            $page,
+            $plannedTopics,
+            $markdown,
+            $blocks,
+        );
+
+        if ($normalizedTopics !== []) {
+            $normalizedIssues = $this->sectionCoverageValidator->validate($plannedTopics, $normalizedMarkdown, $page->page_type, $sourceText);
+            $normalizedBlocking = array_values(array_filter($normalizedIssues, [EnterpriseWikiPlannedSectionCoverageValidator::class, 'isBlocking']));
+
+            if ($normalizedBlocking === []) {
+                Log::info('[WIKI_PAGE_GENERATION] Planned section coverage check completed.', [
+                    'run_id' => $run->id,
+                    'page_id' => $page->id,
+                    'page_type' => $page->page_type,
+                    'planned_section_count' => count($plannedTopics),
+                    'coverage_result' => 'deterministic_normalization',
+                    'normalized_planned_topics' => $normalizedTopics,
+                    'blocking_issues_before' => count($blocking),
+                    'blocking_issues_after' => 0,
+                ]);
+
+                return [$normalizedMarkdown, $normalizedBlocks];
+            }
+
+            $markdown = $normalizedMarkdown;
+            $blocks = $normalizedBlocks;
+            $blocking = $normalizedBlocking;
         }
 
         Log::info('[WIKI_PAGE_GENERATION] Planned section coverage issue(s) detected — attempting one bounded repair.', [
@@ -749,6 +789,8 @@ class EnterpriseWikiGenerateAppliedPagesService
             'page_id' => $page->id,
             'page_type' => $page->page_type,
             'planned_section_count' => count($plannedTopics),
+            'coverage_result' => 'ai_repair_required',
+            'normalized_planned_topics' => $normalizedTopics,
             'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'planned_topic' => $i['planned_topic']], $blocking),
         ]);
 
@@ -808,6 +850,120 @@ class EnterpriseWikiGenerateAppliedPagesService
         }
 
         return [$repairedMarkdown, $repairedBlocks];
+    }
+
+    /**
+     * Concept pages sometimes contain the planned topic label, but as `###`, bold text, or a
+     * plain label instead of the required `##` heading. That is a structural markdown mismatch,
+     * not missing subject-matter content, so it is safe to normalize before deciding AI repair is
+     * needed. Body prose and provenance metadata remain unchanged.
+     *
+     * @param  list<string>  $plannedTopics
+     * @param  list<array<string, mixed>>  $blocks
+     * @return array{0: string, 1: list<array<string, mixed>>, 2: list<string>}
+     */
+    private function normalizeConceptPlannedSectionHeadingStructure(
+        EnterpriseWikiPage $page,
+        array $plannedTopics,
+        string $markdown,
+        array $blocks,
+    ): array {
+        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT || $plannedTopics === []) {
+            return [$markdown, $blocks, []];
+        }
+
+        $topicByNormalizedLabel = [];
+
+        foreach ($plannedTopics as $topic) {
+            $normalized = EnterpriseWikiPlannedSectionCoverageValidator::normalize($topic);
+
+            if ($normalized !== '') {
+                $topicByNormalizedLabel[$normalized] = $topic;
+            }
+        }
+
+        if ($topicByNormalizedLabel === []) {
+            return [$markdown, $blocks, []];
+        }
+
+        $normalizedTopics = [];
+
+        foreach ($blocks as $index => $block) {
+            [$normalizedBlockMarkdown, $blockTopics] = $this->normalizePlannedSectionHeadingLines(
+                (string) ($block['markdown'] ?? ''),
+                $topicByNormalizedLabel,
+            );
+
+            if ($blockTopics === []) {
+                continue;
+            }
+
+            $blocks[$index]['markdown'] = $normalizedBlockMarkdown;
+            $normalizedTopics = [...$normalizedTopics, ...$blockTopics];
+        }
+
+        if ($normalizedTopics === []) {
+            return [$markdown, $blocks, []];
+        }
+
+        return [
+            trim(implode("\n\n", array_column($blocks, 'markdown'))),
+            $blocks,
+            array_values(array_unique($normalizedTopics)),
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $topicByNormalizedLabel
+     * @return array{0: string, 1: list<string>}
+     */
+    private function normalizePlannedSectionHeadingLines(string $markdown, array $topicByNormalizedLabel): array
+    {
+        $lines = preg_split('/\R/', $markdown) ?: [];
+        $normalizedTopics = [];
+
+        foreach ($lines as $lineIndex => $line) {
+            $label = $this->plannedTopicLabelFromLine($line, $lineIndex === 0);
+
+            if ($label === null) {
+                continue;
+            }
+
+            $normalizedLabel = EnterpriseWikiPlannedSectionCoverageValidator::normalize($label);
+            $plannedTopic = $topicByNormalizedLabel[$normalizedLabel] ?? null;
+
+            if ($plannedTopic === null) {
+                continue;
+            }
+
+            $lines[$lineIndex] = '## '.$plannedTopic;
+            $normalizedTopics[] = $plannedTopic;
+        }
+
+        if ($normalizedTopics === []) {
+            return [$markdown, []];
+        }
+
+        return [trim(implode("\n", $lines)), $normalizedTopics];
+    }
+
+    private function plannedTopicLabelFromLine(string $line, bool $isFirstLine): ?string
+    {
+        $trimmed = trim($line);
+
+        if (preg_match('/^#{3,6}\s+(.+?)\s*$/u', $trimmed, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        if (preg_match('/^\*\*(.+?)\*\*:?\s*$/u', $trimmed, $matches) === 1) {
+            return rtrim(trim($matches[1]), " \t:");
+        }
+
+        if ($isFirstLine && preg_match('/^[\p{L}\p{N}][^.!?]{2,160}:?$/u', $trimmed) === 1) {
+            return rtrim($trimmed, " \t:");
+        }
+
+        return null;
     }
 
     /**

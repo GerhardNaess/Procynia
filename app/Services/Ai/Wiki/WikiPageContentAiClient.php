@@ -806,6 +806,7 @@ class WikiPageContentAiClient
                 '- First line must be a # heading containing the concept name',
                 '- Follow with a definition paragraph (2-4 sentences) explaining what the concept is',
                 '- Add AT MOST one ## section per item in this page\'s own content responsibility (see PAGE RESPONSIBILITY below) — never a section for a reference-only or excluded topic, and never more sections than that list has items. When no content-responsibility guidance is given, add at most one or two sections and only for what the source material itself supports.',
+                '- When you add a section for an own content responsibility item, the heading line must be exactly "## " followed by that item text copied verbatim. Do not paraphrase, shorten, use ###, bold labels, or plain paragraph labels for those planned sections.',
                 '- Write flowing prose — no bullet lists',
                 '- Inline-link relevant article, concept, and entity pages from the allowed targets',
                 '',
