@@ -49,12 +49,13 @@ class EnterpriseWikiPageVersionClaimRepairService
             'pages_already_synced' => 0,
         ];
 
-        if ($onlyRun?->isAwaitingHumanAction() === true) {
+        if ($onlyRun?->isTerminal() === true || $onlyRun?->isAwaitingHumanAction() === true) {
             return $result;
         }
 
         $query = EnterpriseWikiIngestRun::query()
-            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED);
+            ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+            ->nonTerminal();
 
         if ($onlyRun !== null) {
             $query->where('id', $onlyRun->id);
@@ -67,7 +68,7 @@ class EnterpriseWikiPageVersionClaimRepairService
 
         $query->orderBy('id')->chunkById(50, function ($runs) use (&$result, $apply): void {
             foreach ($runs as $run) {
-                if ($run->isAwaitingHumanAction()) {
+                if ($run->isTerminal() || $run->isAwaitingHumanAction()) {
                     continue;
                 }
 

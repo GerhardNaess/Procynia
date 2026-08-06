@@ -163,7 +163,7 @@ class EnterpriseWikiDocumentFlowService
         foreach ($runIds as $runId) {
             $run = EnterpriseWikiIngestRun::query()->find($runId);
 
-            if ($run instanceof EnterpriseWikiIngestRun) {
+            if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
                 $this->reconcileRunDocumentOwnerApprovalState($run);
             }
         }
@@ -325,7 +325,14 @@ class EnterpriseWikiDocumentFlowService
 
         try {
             $this->performMaterializeWikilinks($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
             $this->performIncrementalRelinking($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
 
             if (! $this->performExtractPageClaims($run)) {
                 // Another live worker holds an active reservation on at least one page's
@@ -410,7 +417,14 @@ class EnterpriseWikiDocumentFlowService
 
         try {
             $this->performAppliedRunLint($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
             $this->performLinkSemanticRepair($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
 
             $currentStage = EnterpriseWikiIngestRun::STATUS_QA;
 
@@ -491,6 +505,10 @@ class EnterpriseWikiDocumentFlowService
 
     private function performMaintainerDecision(EnterpriseWikiIngestRun $run): bool
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return false;
+        }
+
         if ($run->maintainer_decision_generated_at !== null) {
             return true;
         }
@@ -504,6 +522,10 @@ class EnterpriseWikiDocumentFlowService
 
         $run->increment('maintainer_decision_attempt_count');
 
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return false;
+        }
+
         $prepared = $this->maintainerDecisionService->preparePersistedCandidateBatchesForDocument(
             $run->customer_id,
             $run->source_id,
@@ -512,6 +534,10 @@ class EnterpriseWikiDocumentFlowService
         );
 
         if ($prepared !== null) {
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return false;
+            }
+
             if ($prepared['batches'] === []) {
                 $document = EnterpriseWikiDocument::query()
                     ->where('customer_id', $run->customer_id)
@@ -539,6 +565,10 @@ class EnterpriseWikiDocumentFlowService
             return false;
         }
 
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return false;
+        }
+
         $decision = $this->maintainerDecisionService->runForDocument(
             $run->customer_id,
             $run->source_id,
@@ -561,8 +591,20 @@ class EnterpriseWikiDocumentFlowService
 
     private function dispatchMaintainerBatchWork(EnterpriseWikiIngestRun $run): void
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return;
+        }
+
         foreach ($this->maintainerBatchStateService->resumableBatchNumbers($run->id) as $batchNumber) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return;
+            }
+
             RunEnterpriseWikiMaintainerDecisionBatch::dispatch($run->id, $batchNumber);
+        }
+
+        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+            return;
         }
 
         FinalizeEnterpriseWikiMaintainerDecisionBatches::dispatch($run->id)
@@ -618,7 +660,7 @@ class EnterpriseWikiDocumentFlowService
     {
         return DB::transaction(function () use ($run, $decision): bool {
             $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->findOrFail($run->id);
-            if ($locked->maintainer_decision_generated_at !== null) {
+            if ($locked->isTerminal() || $locked->maintainer_decision_generated_at !== null) {
                 return false;
             }
             $locked->update(['maintainer_decision_json' => $decision, 'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING, 'maintainer_decision_generated_at' => now()]);
@@ -649,7 +691,14 @@ class EnterpriseWikiDocumentFlowService
 
     private function performApplyMaintainerDecision(EnterpriseWikiIngestRun $run): void
     {
-        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_APPLYING]);
+        $updated = EnterpriseWikiIngestRun::query()
+            ->whereKey($run->id)
+            ->nonTerminal()
+            ->update(['status' => EnterpriseWikiIngestRun::STATUS_APPLYING]);
+
+        if ($updated === 0) {
+            return;
+        }
 
         $result = $this->maintainerDecisionApplyService->apply($run->fresh() ?? $run);
 
@@ -677,7 +726,14 @@ class EnterpriseWikiDocumentFlowService
      */
     private function beginGeneratingPages(EnterpriseWikiIngestRun $run): void
     {
-        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES]);
+        $updated = EnterpriseWikiIngestRun::query()
+            ->whereKey($run->id)
+            ->nonTerminal()
+            ->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES]);
+
+        if ($updated === 0) {
+            return;
+        }
 
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
@@ -694,6 +750,10 @@ class EnterpriseWikiDocumentFlowService
         $pageIds = $initialRows->pluck('enterprise_wiki_page_id');
 
         foreach ($pageIds as $pageId) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return;
+            }
+
             GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pageId);
         }
 
@@ -872,7 +932,21 @@ class EnterpriseWikiDocumentFlowService
 
     private function beginClaimVerification(EnterpriseWikiIngestRun $run): void
     {
-        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
+        $run = DB::transaction(function () use ($run): ?EnterpriseWikiIngestRun {
+            $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $locked instanceof EnterpriseWikiIngestRun || $locked->isTerminal()) {
+                return null;
+            }
+
+            $locked->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
+
+            return $locked->fresh() ?? $locked;
+        });
+
+        if (! $run instanceof EnterpriseWikiIngestRun) {
+            return;
+        }
 
         $this->dispatchClaimVerificationWork($run);
     }
@@ -971,7 +1045,21 @@ class EnterpriseWikiDocumentFlowService
      */
     private function performPostIngestQa(EnterpriseWikiIngestRun $run): bool
     {
-        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_QA]);
+        $run = DB::transaction(function () use ($run): ?EnterpriseWikiIngestRun {
+            $locked = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $locked instanceof EnterpriseWikiIngestRun || $locked->isTerminal()) {
+                return null;
+            }
+
+            $locked->update(['status' => EnterpriseWikiIngestRun::STATUS_QA]);
+
+            return $locked->fresh() ?? $locked;
+        });
+
+        if (! $run instanceof EnterpriseWikiIngestRun) {
+            return false;
+        }
 
         $result = $this->postIngestQaService->runForRun($run->fresh() ?? $run);
 
@@ -1095,6 +1183,10 @@ class EnterpriseWikiDocumentFlowService
      */
     public function reconcileRunDocumentOwnerApprovalState(EnterpriseWikiIngestRun $run): void
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return;
+        }
+
         if (! in_array($run->qa_status, [
             EnterpriseWikiIngestRun::QA_STATUS_PASSED,
             EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
@@ -1105,7 +1197,7 @@ class EnterpriseWikiDocumentFlowService
         $gate = $this->documentOwnerApprovalService->evaluateRunCompletionGate($run);
 
         if (! $gate['ready']) {
-            $run->update([
+            EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
                 'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
                 'finished_at' => null,
                 'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
@@ -1133,12 +1225,15 @@ class EnterpriseWikiDocumentFlowService
 
     private function markVerificationStage(EnterpriseWikiIngestRun $run): void
     {
-        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING]);
+        EnterpriseWikiIngestRun::query()
+            ->whereKey($run->id)
+            ->nonTerminal()
+            ->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING]);
     }
 
     private function completeRun(EnterpriseWikiIngestRun $run): void
     {
-        $run->update([
+        $updated = EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
             'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
             'finished_at' => now(),
             'error_message' => null,
@@ -1146,14 +1241,16 @@ class EnterpriseWikiDocumentFlowService
             'transient_failure' => null,
         ]);
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Run completed.', [
-            'run_id' => $run->id,
-        ]);
+        if ($updated > 0) {
+            Log::info('[WIKI_DOCUMENT_FLOW] Run completed.', [
+                'run_id' => $run->id,
+            ]);
+        }
     }
 
     private function escalateRun(EnterpriseWikiIngestRun $run): void
     {
-        $run->update([
+        $updated = EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
             'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
             'finished_at' => now(),
             'error_message' => null,
@@ -1161,9 +1258,11 @@ class EnterpriseWikiDocumentFlowService
             'transient_failure' => null,
         ]);
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
-            'run_id' => $run->id,
-        ]);
+        if ($updated > 0) {
+            Log::info('[WIKI_DOCUMENT_FLOW] Run escalated.', [
+                'run_id' => $run->id,
+            ]);
+        }
     }
 
     /**
@@ -1214,7 +1313,14 @@ class EnterpriseWikiDocumentFlowService
             $update['qa_last_error'] = mb_substr($exception->getMessage(), 0, 1000);
         }
 
-        $run->update($update);
+        $updated = EnterpriseWikiIngestRun::query()
+            ->whereKey($run->id)
+            ->nonTerminal()
+            ->update($update);
+
+        if ($updated === 0) {
+            return;
+        }
 
         Log::error('[WIKI_DOCUMENT_FLOW] Run failed.', [
             'run_id' => $run->id,

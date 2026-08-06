@@ -63,7 +63,7 @@ class EnterpriseWikiPageVersionClaimRepairServiceTest extends TestCase
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
-        $run = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_ESCALATED);
+        $run = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING);
         $page = $this->createPage($customer, 'Applied Run Page');
         $version = $this->createVersion($page, 'Current content for claim resync.');
         $this->attachPageToRun($run, $page, $version);

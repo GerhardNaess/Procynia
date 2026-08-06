@@ -73,14 +73,20 @@ class EnterpriseWikiMaintainerDecisionApplyService
         $updated = 0;
 
         DB::transaction(function () use ($run, $decision, $customerId, &$created, &$updated): void {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return;
+            }
+
             foreach ($this->collectEntries($decision) as [$entry, $pageType]) {
-                $wasCreated = $this->applyEntry($run, $entry, $pageType, $customerId);
+                $wasCreated = $this->applyEntry($lockedRun, $entry, $pageType, $customerId);
 
                 $wasCreated ? $created++ : $updated++;
             }
 
-            $run->maintainer_decision_status = EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED;
-            $run->save();
+            $lockedRun->maintainer_decision_status = EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED;
+            $lockedRun->save();
         });
 
         return ['created' => $created, 'updated' => $updated];

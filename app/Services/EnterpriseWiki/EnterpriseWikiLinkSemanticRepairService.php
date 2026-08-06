@@ -61,6 +61,10 @@ class EnterpriseWikiLinkSemanticRepairService
      */
     public function repairForRun(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return ['pages_reviewed' => 0, 'applied' => 0, 'skipped' => 0, 'failed' => 0];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have link semantic repair run."
@@ -84,6 +88,10 @@ class EnterpriseWikiLinkSemanticRepairService
         $this->pendingClaimResyncRunIds = [];
 
         foreach ($pivotRows as $row) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $page = $row->page;
 
             if ($page === null) {
@@ -99,7 +107,7 @@ class EnterpriseWikiLinkSemanticRepairService
         // Re-run deterministic lint so findings reflect the state after any repair — closes
         // findings for links that were fixed, opens findings for anything still wrong. Only
         // needed when a repair actually changed a page; skip the extra pass otherwise.
-        if ($counts['applied'] > 0) {
+        if ($counts['applied'] > 0 && ! (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal() ?? true)) {
             // A revised page is a brand-new EnterpriseWikiPageVersion — its claims must be
             // re-extracted/verified against this version, not left pointing at the superseded
             // one (see EnterpriseWikiPageVersionClaimSyncService). pendingClaimResyncRunIds
@@ -133,6 +141,12 @@ class EnterpriseWikiLinkSemanticRepairService
     private function attemptPageRepair(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $languageCode): string
     {
         $claimed = DB::transaction(function () use ($run, $page): bool {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return false;
+            }
+
             $exists = EnterpriseWikiPageLinkQaAttempt::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('enterprise_wiki_page_id', $page->id)
@@ -177,6 +191,10 @@ class EnterpriseWikiLinkSemanticRepairService
         $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
 
         try {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED;
+            }
+
             $diagnosis = $this->qaClient->review($markdown, $page->page_type, $catalogResult['catalog'], $languageCode);
 
             if ($diagnosis['assessment'] !== 'repair_recommended'
@@ -186,6 +204,10 @@ class EnterpriseWikiLinkSemanticRepairService
             }
 
             $instructions = $this->buildInstructions($diagnosis, $catalogResult['catalog']);
+
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED;
+            }
 
             $revision = $this->revisionClient->reviseLinks(
                 existingContent: $markdown,
@@ -201,13 +223,27 @@ class EnterpriseWikiLinkSemanticRepairService
 
             $this->validateRevision($run, $page, $markdown, $revision['markdown'], $diagnosis);
 
-            $newVersion = $this->writeNewCurrentVersion($page->id, $revision['markdown']);
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
-            $this->buildPageLinksService->materializeWikilinksForPage($page, $run->id);
-            $this->pendingClaimResyncRunIds = array_merge(
-                $this->pendingClaimResyncRunIds,
-                $this->claimSyncService->markPageForResync($page),
-            );
+            $newVersion = DB::transaction(function () use ($run, $page, $revision): ?EnterpriseWikiPageVersion {
+                $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+                if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                    return null;
+                }
+
+                $version = $this->writeNewCurrentVersion($run->id, $page->id, $revision['markdown']);
+                $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
+                $this->buildPageLinksService->materializeWikilinksForPage($page, $run->id);
+                $this->pendingClaimResyncRunIds = array_merge(
+                    $this->pendingClaimResyncRunIds,
+                    $this->claimSyncService->markPageForResync($page),
+                );
+
+                return $version;
+            });
+
+            if (! $newVersion instanceof EnterpriseWikiPageVersion) {
+                return EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED;
+            }
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_APPLIED, null, $newVersion->id);
         } catch (EnterpriseWikiInvalidWikilinksException $e) {
@@ -345,9 +381,15 @@ class EnterpriseWikiLinkSemanticRepairService
         return implode("\n", $lines);
     }
 
-    private function writeNewCurrentVersion(int $pageId, string $markdown): EnterpriseWikiPageVersion
+    private function writeNewCurrentVersion(int $runId, int $pageId, string $markdown): ?EnterpriseWikiPageVersion
     {
-        return DB::transaction(function () use ($pageId, $markdown): EnterpriseWikiPageVersion {
+        return DB::transaction(function () use ($runId, $pageId, $markdown): ?EnterpriseWikiPageVersion {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
+
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return null;
+            }
+
             $next = ((int) EnterpriseWikiPageVersion::query()
                 ->where('enterprise_wiki_page_id', $pageId)
                 ->max('version_number')) + 1;
@@ -412,17 +454,25 @@ class EnterpriseWikiLinkSemanticRepairService
         ?string $reason,
         ?int $createdPageVersionId = null,
     ): string {
-        EnterpriseWikiPageLinkQaAttempt::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->where('enterprise_wiki_page_id', $page->id)
-            ->update([
-                'status' => $status,
-                'reason' => $reason,
-                'created_page_version_id' => $createdPageVersionId,
-                'attempted_at' => now(),
-            ]);
+        $updated = DB::transaction(function () use ($run, $page, $status, $reason, $createdPageVersionId): bool {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
-        return $status;
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return false;
+            }
+
+            return EnterpriseWikiPageLinkQaAttempt::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->update([
+                    'status' => $status,
+                    'reason' => $reason,
+                    'created_page_version_id' => $createdPageVersionId,
+                    'attempted_at' => now(),
+                ]) > 0;
+        });
+
+        return $updated ? $status : EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED;
     }
 
     private function existingAttemptStatus(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): string

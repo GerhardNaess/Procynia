@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -57,9 +58,17 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
             return;
         }
 
+        if ($run->isTerminal()) {
+            return;
+        }
+
         try {
             $service->generatePageForRun($run, $page);
         } catch (Throwable $e) {
+            if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+                return;
+            }
+
             $this->markPivotFailed($e);
 
             Log::error('[WIKI_PAGE_GENERATION][FAILED]', [
@@ -78,6 +87,10 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
             throw $e;
         }
 
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         Log::info('[WIKI_PAGE_GENERATION][COMPLETED]', [
             'run_id' => $this->runId,
             'page_id' => $this->pageId,
@@ -89,6 +102,10 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         $this->markPivotFailed($exception);
 
         Log::error('[WIKI_PAGE_GENERATION][JOB_FAILED]', [
@@ -112,18 +129,27 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
      */
     private function markPivotFailed(Throwable $exception): void
     {
-        $pivot = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $this->runId)
-            ->where('enterprise_wiki_page_id', $this->pageId)
-            ->first();
+        DB::transaction(function () use ($exception): void {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($this->runId);
 
-        if ($pivot === null || $pivot->isGenerationTerminal()) {
-            return;
-        }
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return;
+            }
 
-        $pivot->update([
-            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
-            'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($exception), $exception->getMessage()), 0, 1000),
-        ]);
+            $pivot = EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $this->runId)
+                ->where('enterprise_wiki_page_id', $this->pageId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($pivot === null || $pivot->isGenerationTerminal()) {
+                return;
+            }
+
+            $pivot->update([
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+                'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($exception), $exception->getMessage()), 0, 1000),
+            ]);
+        });
     }
 }

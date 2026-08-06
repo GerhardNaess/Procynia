@@ -45,11 +45,20 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
         }
 
         $verificationService->verifyClaimForRun($run, $this->claimId);
+
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         $flowService->continueAfterClaimVerification($this->runId);
     }
 
     public function failed(Throwable $exception): void
     {
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         app(EnterpriseWikiDocumentFlowService::class)->markClaimVerificationFailed($this->runId, $exception);
     }
 }

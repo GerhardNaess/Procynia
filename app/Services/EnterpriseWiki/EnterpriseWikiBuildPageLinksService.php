@@ -238,6 +238,19 @@ class EnterpriseWikiBuildPageLinksService
      */
     public function materializeWikilinksForRun(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return [
+                'pages_processed' => 0,
+                'occurrences_found' => 0,
+                'valid_links' => 0,
+                'broken_slugs' => 0,
+                'self_links' => 0,
+                'created' => 0,
+                'updated' => 0,
+                'stale_links_removed' => 0,
+            ];
+        }
+
         $pages = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->with('page')
@@ -257,6 +270,10 @@ class EnterpriseWikiBuildPageLinksService
         ];
 
         foreach ($pages as $page) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $result = $this->materializeWikilinksForPage($page, $run->id);
 
             $aggregate['pages_processed']++;
@@ -306,6 +323,23 @@ class EnterpriseWikiBuildPageLinksService
         $resolution = $this->linkResolver->resolve($page->customer_id, $page, $parsed);
 
         return DB::transaction(function () use ($page, $currentVersion, $ingestRunId, $resolution) {
+            if ($ingestRunId !== null) {
+                $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($ingestRunId);
+
+                if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                    return [
+                        'page_id' => $page->id,
+                        'occurrences_found' => 0,
+                        'valid_links' => 0,
+                        'broken_slugs' => [],
+                        'self_link_slugs' => [],
+                        'created' => 0,
+                        'updated' => 0,
+                        'stale_links_removed' => 0,
+                    ];
+                }
+            }
+
             $targetPageIds = array_map(
                 fn (array $target) => $target['to_page']->id,
                 $resolution['resolved'],

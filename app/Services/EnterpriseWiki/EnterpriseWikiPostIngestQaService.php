@@ -94,11 +94,11 @@ class EnterpriseWikiPostIngestQaService
     /**
      * Run post-ingest QA for a single applied run.
      *
-     * Returns the QA result array, or null if the run was skipped (already
-     * running, or failed/escalated/passed without $retry).
+     * Returns the QA result array, or null if the run was skipped (terminal,
+     * already running, or failed/escalated/passed without $retry).
      *
-     * @param  bool  $retry  When true, also claims runs in 'failed', 'escalated', or 'passed'
-     *                       status — an explicit operator decision to re-evaluate, e.g. after a
+     * @param  bool  $retry  When true, also claims non-terminal runs whose QA result is
+     *                       'failed', 'escalated', or 'passed' — an explicit operator decision to re-evaluate, e.g. after a
      *                       QA-gating fix means a previously recorded 'passed' verdict is now
      *                       known to be wrong for content already generated (see the run-34 claim-
      *                       integrity gating fix). findPendingRuns()/findRetryableRuns() never
@@ -111,6 +111,10 @@ class EnterpriseWikiPostIngestQaService
      */
     public function runForRun(EnterpriseWikiIngestRun $run, bool $retry = false): ?array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return null;
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can be QA-checked."
@@ -134,6 +138,7 @@ class EnterpriseWikiPostIngestQaService
         $claimed = $this->scopeToRunsReadyForQa(
             DB::table('enterprise_wiki_ingest_runs')
                 ->where('id', $run->id)
+                ->whereNotIn('status', EnterpriseWikiIngestRun::TERMINAL_STATUSES)
                 ->where(function ($q) use ($eligibleStatuses): void {
                     $q->whereNull('qa_status')
                         ->orWhereIn('qa_status', $eligibleStatuses);
@@ -155,30 +160,39 @@ class EnterpriseWikiPostIngestQaService
         try {
             return $this->executeQa($fresh);
         } catch (\Throwable $e) {
-            // A technical failure here (e.g. an unexpected DB error) is not itself a verdict
-            // about the run's content — never record it as qa_status=failed. Escalate instead,
-            // so a human can investigate without the run being wrongly flagged as having a
-            // real content defect.
-            $fresh->update([
-                'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
-                'qa_completed_at' => now(),
-                'qa_last_error' => $e->getMessage(),
-            ]);
+            $persisted = DB::transaction(function () use ($fresh, $e): bool {
+                $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($fresh->id);
+
+                if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                    return false;
+                }
+
+                $lockedRun->update([
+                    'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
+                    'qa_completed_at' => now(),
+                    'qa_last_error' => $e->getMessage(),
+                ]);
+
+                try {
+                    $this->snapshotService->capture($lockedRun, []);
+                } catch (\Throwable $snapshotException) {
+                    Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot for escalated run', [
+                        'run_id' => $lockedRun->id,
+                        'error' => $snapshotException->getMessage(),
+                    ]);
+                }
+
+                return true;
+            });
+
+            if (! $persisted) {
+                return null;
+            }
 
             Log::error('[WIKI_QA] QA execution failed with an unexpected technical error — escalated, not failed.', [
                 'run_id' => $run->id,
                 'error' => $e->getMessage(),
             ]);
-
-            // Snapshot the escalated attempt. Errors here must not suppress the original exception.
-            try {
-                $this->snapshotService->capture($fresh, []);
-            } catch (\Throwable $snapshotException) {
-                Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot for escalated run', [
-                    'run_id' => $run->id,
-                    'error' => $snapshotException->getMessage(),
-                ]);
-            }
 
             throw $e;
         }
@@ -280,7 +294,8 @@ class EnterpriseWikiPostIngestQaService
     }
 
     /**
-     * Find applied runs eligible for explicit retry (null, pending, repair_required, failed, escalated).
+     * Find non-terminal applied runs eligible for explicit retry (null, pending,
+     * repair_required, failed, escalated).
      *
      * Use only when operator has explicitly requested a retry via --retry flag. Does not
      * include a run still owned by the ordinary document flow (see
@@ -318,7 +333,9 @@ class EnterpriseWikiPostIngestQaService
         }
 
         return $this->scopeToRunsReadyForQa(
-            $this->baseEligibleQuery($qaStatuses)->whereNotIn('status', self::ACTIVE_DOCUMENT_FLOW_STATUSES)
+            $this->baseEligibleQuery($qaStatuses)
+                ->nonTerminal()
+                ->whereNotIn('status', self::ACTIVE_DOCUMENT_FLOW_STATUSES)
         )
             ->orderBy('id')
             ->get();
@@ -363,7 +380,7 @@ class EnterpriseWikiPostIngestQaService
     // Internal QA execution
     // =========================================================================
 
-    private function executeQa(EnterpriseWikiIngestRun $run): array
+    private function executeQa(EnterpriseWikiIngestRun $run): ?array
     {
         $evaluation = $this->evaluate($run);
 
@@ -383,16 +400,24 @@ class EnterpriseWikiPostIngestQaService
             'claim_qa_signals' => $evaluation['claim_qa_signals'],
         ];
 
-        $run->update([
-            'qa_status' => $evaluation['verdict'],
-            'qa_completed_at' => now(),
-            'qa_last_error' => $evaluation['reason'],
-            'qa_result' => $result,
-        ]);
+        return DB::transaction(function () use ($run, $evaluation, $result): ?array {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
-        $this->captureSnapshot($run, $result);
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return null;
+            }
 
-        return $result;
+            $lockedRun->update([
+                'qa_status' => $evaluation['verdict'],
+                'qa_completed_at' => now(),
+                'qa_last_error' => $evaluation['reason'],
+                'qa_result' => $result,
+            ]);
+
+            $this->captureSnapshot($lockedRun, $result);
+
+            return $result;
+        });
     }
 
     /**

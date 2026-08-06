@@ -78,6 +78,10 @@ class EnterpriseWikiIncrementalRelinkService
      */
     public function relinkForRun(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return ['triggers_processed' => 0, 'candidates_considered' => 0, 'applied' => 0, 'skipped' => 0, 'failed' => 0];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can trigger incremental relinking."
@@ -110,6 +114,10 @@ class EnterpriseWikiIncrementalRelinkService
         $this->pendingClaimResyncRunIds = [];
 
         foreach ($triggers as $trigger) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $counts['triggers_processed']++;
 
             $candidates = $this->findCandidates($run, $trigger, $runPageIds);
@@ -123,7 +131,7 @@ class EnterpriseWikiIncrementalRelinkService
             }
         }
 
-        if ($counts['applied'] > 0) {
+        if ($counts['applied'] > 0 && ! (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal() ?? true)) {
             // A relinked candidate is a brand-new EnterpriseWikiPageVersion — its claims must be
             // re-extracted/verified against this version (see
             // EnterpriseWikiPageVersionClaimSyncService), not left pointing at the superseded one.
@@ -185,6 +193,12 @@ class EnterpriseWikiIncrementalRelinkService
         string $languageCode,
     ): string {
         $claimed = DB::transaction(function () use ($run, $trigger, $candidate): bool {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return false;
+            }
+
             $exists = EnterpriseWikiPageRelinkAttempt::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('trigger_page_id', $trigger->id)
@@ -235,6 +249,10 @@ class EnterpriseWikiIncrementalRelinkService
         }
 
         try {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return EnterpriseWikiPageRelinkAttempt::STATUS_SKIPPED;
+            }
+
             $catalog = [[
                 'slug' => $trigger->slug,
                 'title' => $trigger->title,
@@ -268,13 +286,27 @@ class EnterpriseWikiIncrementalRelinkService
                 return $this->finalize($run, $trigger, $candidate, EnterpriseWikiPageRelinkAttempt::STATUS_SKIPPED, EnterpriseWikiPageRelinkAttempt::REASON_AI_DECLINED_LINK);
             }
 
-            $newVersion = $this->writeNewCurrentVersion($candidate->id, $revisedMarkdown);
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($candidate->id);
-            $this->buildPageLinksService->materializeWikilinksForPage($candidate, $run->id);
-            $this->pendingClaimResyncRunIds = array_merge(
-                $this->pendingClaimResyncRunIds,
-                $this->claimSyncService->markPageForResync($candidate),
-            );
+            $newVersion = DB::transaction(function () use ($run, $candidate, $revisedMarkdown): ?EnterpriseWikiPageVersion {
+                $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+                if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                    return null;
+                }
+
+                $version = $this->writeNewCurrentVersion($run->id, $candidate->id, $revisedMarkdown);
+                $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($candidate->id);
+                $this->buildPageLinksService->materializeWikilinksForPage($candidate, $run->id);
+                $this->pendingClaimResyncRunIds = array_merge(
+                    $this->pendingClaimResyncRunIds,
+                    $this->claimSyncService->markPageForResync($candidate),
+                );
+
+                return $version;
+            });
+
+            if (! $newVersion instanceof EnterpriseWikiPageVersion) {
+                return EnterpriseWikiPageRelinkAttempt::STATUS_SKIPPED;
+            }
 
             return $this->finalize(
                 $run,
@@ -381,24 +413,32 @@ class EnterpriseWikiIncrementalRelinkService
         ]);
     }
 
-    private function writeNewCurrentVersion(int $pageId, string $markdown): EnterpriseWikiPageVersion
+    private function writeNewCurrentVersion(int $runId, int $pageId, string $markdown): ?EnterpriseWikiPageVersion
     {
-        $next = ((int) EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->max('version_number')) + 1;
+        return DB::transaction(function () use ($runId, $pageId, $markdown): ?EnterpriseWikiPageVersion {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
-        EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->where('is_current', true)
-            ->update(['is_current' => false]);
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return null;
+            }
 
-        return EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $pageId,
-            'version_number' => $next,
-            'is_current' => true,
-            'content_markdown' => $markdown,
-            'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
-        ]);
+            $next = ((int) EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->max('version_number')) + 1;
+
+            EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->where('is_current', true)
+                ->update(['is_current' => false]);
+
+            return EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $pageId,
+                'version_number' => $next,
+                'is_current' => true,
+                'content_markdown' => $markdown,
+                'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
+            ]);
+        });
     }
 
     private function finalize(
@@ -409,18 +449,26 @@ class EnterpriseWikiIncrementalRelinkService
         ?string $reason,
         ?int $createdPageVersionId = null,
     ): string {
-        EnterpriseWikiPageRelinkAttempt::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->where('trigger_page_id', $trigger->id)
-            ->where('candidate_page_id', $candidate->id)
-            ->update([
-                'status' => $status,
-                'reason' => $reason,
-                'created_page_version_id' => $createdPageVersionId,
-                'attempted_at' => now(),
-            ]);
+        $updated = DB::transaction(function () use ($run, $trigger, $candidate, $status, $reason, $createdPageVersionId): bool {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
-        return $status;
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return false;
+            }
+
+            return EnterpriseWikiPageRelinkAttempt::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->where('trigger_page_id', $trigger->id)
+                ->where('candidate_page_id', $candidate->id)
+                ->update([
+                    'status' => $status,
+                    'reason' => $reason,
+                    'created_page_version_id' => $createdPageVersionId,
+                    'attempted_at' => now(),
+                ]) > 0;
+        });
+
+        return $updated ? $status : EnterpriseWikiPageRelinkAttempt::STATUS_SKIPPED;
     }
 
     private function existingAttemptStatus(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $trigger, EnterpriseWikiPage $candidate): string

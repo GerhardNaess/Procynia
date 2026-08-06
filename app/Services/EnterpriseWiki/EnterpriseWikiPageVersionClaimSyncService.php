@@ -55,6 +55,7 @@ class EnterpriseWikiPageVersionClaimSyncService
     {
         $pivots = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_page_id', $page->id)
+            ->whereHas('run', fn ($query) => $query->nonTerminal())
             ->get(['id', 'enterprise_wiki_ingest_run_id']);
 
         if ($pivots->isEmpty()) {
@@ -84,7 +85,7 @@ class EnterpriseWikiPageVersionClaimSyncService
                 continue;
             }
 
-            if ($run->isAwaitingHumanAction()) {
+            if ($run->isTerminal() || $run->isAwaitingHumanAction()) {
                 continue;
             }
 
@@ -108,7 +109,7 @@ class EnterpriseWikiPageVersionClaimSyncService
      */
     public function syncRun(EnterpriseWikiIngestRun $run): array
     {
-        if ($run->isAwaitingHumanAction()) {
+        if (($run->fresh() ?? $run)->isTerminal() || $run->isAwaitingHumanAction()) {
             return [
                 'extraction' => [
                     'pages' => 0,

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -318,7 +319,17 @@ class EnterpriseWikiIngestRun extends Model
 
     public function isTerminal(): bool
     {
-        return in_array($this->status, self::TERMINAL_STATUSES, true);
+        return self::isTerminalStatus($this->status);
+    }
+
+    public static function isTerminalStatus(?string $status): bool
+    {
+        return in_array($status, self::TERMINAL_STATUSES, true);
+    }
+
+    public function scopeNonTerminal(Builder $query): Builder
+    {
+        return $query->whereNotIn($this->qualifyColumn('status'), self::TERMINAL_STATUSES);
     }
 
     /**

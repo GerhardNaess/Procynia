@@ -82,6 +82,10 @@ class EnterpriseWikiExtractPageClaimsService
      */
     public function extract(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return $this->emptyExtractionCounts();
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have claims extracted."
@@ -105,6 +109,16 @@ class EnterpriseWikiExtractPageClaimsService
         $cappedPages = 0;
 
         foreach ($pivotRows as $row) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                return [
+                    'pages' => $pages,
+                    'claims' => $claims,
+                    'skipped' => $skipped,
+                    'busy' => $busy,
+                    'capped_pages' => $cappedPages,
+                ];
+            }
+
             $page = $row->page;
 
             if ($page === null) {
@@ -140,7 +154,20 @@ class EnterpriseWikiExtractPageClaimsService
             // (EnterpriseWikiPostIngestQaService::findIncompleteSteps()) and the run still
             // completes normally.
             if (($persistedClaimCount + $claims) >= $maxNewClaims) {
-                $row->update(['claims_extracted_at' => now()]);
+                $updated = EnterpriseWikiIngestRunPage::query()
+                    ->whereKey($row->id)
+                    ->whereHas('run', fn ($query) => $query->nonTerminal())
+                    ->update(['claims_extracted_at' => now()]);
+
+                if ($updated === 0) {
+                    return [
+                        'pages' => $pages,
+                        'claims' => $claims,
+                        'skipped' => $skipped,
+                        'busy' => $busy,
+                        'capped_pages' => $cappedPages,
+                    ];
+                }
                 $cappedPages++;
                 $skipped++;
 
@@ -154,7 +181,7 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             $token = (string) Str::uuid();
-            $reservation = $this->reserve($row, $token);
+            $reservation = $this->reserve($run->id, $row, $token);
 
             if ($reservation === 'completed') {
                 $skipped++;
@@ -173,7 +200,7 @@ class EnterpriseWikiExtractPageClaimsService
                 $claimCandidateBlocks = $this->claimCandidateBlocksWithoutExistingClaims($version, $allClaimCandidateBlocks);
 
                 if ($allClaimCandidateBlocks->isNotEmpty() && $claimCandidateBlocks->isEmpty()) {
-                    $completed = $this->persist($row->id, $page, $version, $token, ['claims' => []], []);
+                    $completed = $this->persist($run->id, $row->id, $page, $version, $token, ['claims' => []], []);
 
                     if ($completed === null) {
                         $busy++;
@@ -184,16 +211,27 @@ class EnterpriseWikiExtractPageClaimsService
                     continue;
                 }
 
+                if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                    return [
+                        'pages' => $pages,
+                        'claims' => $claims,
+                        'skipped' => $skipped,
+                        'busy' => $busy,
+                        'capped_pages' => $cappedPages,
+                    ];
+                }
+
                 $result = $claimCandidateBlocks->isEmpty()
                     ? ['claims' => []]
                     : $this->extractClaimsWithTransientRetry($run, $page, $this->claimCandidateMarkdown($claimCandidateBlocks), $languageCode);
             } catch (Throwable $e) {
-                $this->release($row->id, $token);
+                $this->release($run->id, $row->id, $token);
 
                 throw $e;
             }
 
             $pageClaimsCreated = $this->persist(
+                $run->id,
                 $row->id,
                 $page,
                 $version,
@@ -432,20 +470,28 @@ class EnterpriseWikiExtractPageClaimsService
      *
      * @return string one of 'reserved', 'completed', 'busy'
      */
-    private function reserve(EnterpriseWikiIngestRunPage $row, string $token): string
+    private function reserve(int $runId, EnterpriseWikiIngestRunPage $row, string $token): string
     {
-        $staleThreshold = now()->subSeconds(self::LEASE_SECONDS);
+        $claimed = DB::transaction(function () use ($runId, $row, $token): int {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
-        $claimed = EnterpriseWikiIngestRunPage::query()
-            ->where('id', $row->id)
-            ->whereNull('claims_extracted_at')
-            ->where(function ($q) use ($staleThreshold): void {
-                $q->whereNull('claims_claimed_at')->orWhere('claims_claimed_at', '<', $staleThreshold);
-            })
-            ->update([
-                'claims_claimed_at' => now(),
-                'claims_claim_token' => $token,
-            ]);
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return 0;
+            }
+
+            $staleThreshold = now()->subSeconds(self::LEASE_SECONDS);
+
+            return EnterpriseWikiIngestRunPage::query()
+                ->where('id', $row->id)
+                ->whereNull('claims_extracted_at')
+                ->where(function ($q) use ($staleThreshold): void {
+                    $q->whereNull('claims_claimed_at')->orWhere('claims_claimed_at', '<', $staleThreshold);
+                })
+                ->update([
+                    'claims_claimed_at' => now(),
+                    'claims_claim_token' => $token,
+                ]);
+        });
 
         if ($claimed > 0) {
             return 'reserved';
@@ -460,8 +506,12 @@ class EnterpriseWikiExtractPageClaimsService
      * Release a reservation this worker still owns — a no-op if the token no longer matches
      * (already reclaimed by another worker as stale).
      */
-    private function release(int $rowId, string $token): void
+    private function release(int $runId, int $rowId, string $token): void
     {
+        if (EnterpriseWikiIngestRun::query()->find($runId)?->isTerminal()) {
+            return;
+        }
+
         EnterpriseWikiIngestRunPage::query()
             ->where('id', $rowId)
             ->where('claims_claim_token', $token)
@@ -479,9 +529,15 @@ class EnterpriseWikiExtractPageClaimsService
      *
      * @return int|null the number of claims created, or null if the reservation was lost
      */
-    private function persist(int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, array $candidateBlockKeys): ?int
+    private function persist(int $runId, int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, array $candidateBlockKeys): ?int
     {
-        return DB::transaction(function () use ($rowId, $page, $version, $token, $result, $candidateBlockKeys): ?int {
+        return DB::transaction(function () use ($runId, $rowId, $page, $version, $token, $result, $candidateBlockKeys): ?int {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
+
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return null;
+            }
+
             $row = EnterpriseWikiIngestRunPage::query()
                 ->where('id', $rowId)
                 ->where('claims_claim_token', $token)
@@ -582,6 +638,12 @@ class EnterpriseWikiExtractPageClaimsService
 
             return $created;
         });
+    }
+
+    /** @return array{pages: int, claims: int, skipped: int, busy: int, capped_pages: int} */
+    private function emptyExtractionCounts(): array
+    {
+        return ['pages' => 0, 'claims' => 0, 'skipped' => 0, 'busy' => 0, 'capped_pages' => 0];
     }
 
     /**

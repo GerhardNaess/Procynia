@@ -43,6 +43,27 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->recoverUndispatchedClaims === true && $job->delay !== null);
     }
 
+    public function test_cancelled_run_skips_claim_verification_and_recovery_dispatch(): void
+    {
+        Queue::fake();
+        [$run, $version] = $this->runWithVersion();
+        $claim = $this->claim($version);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+        $verification = \Mockery::mock(EnterpriseWikiVerifyPageClaimsService::class);
+        $verification->shouldNotReceive('verifyClaimForRun');
+        $flow = \Mockery::mock(EnterpriseWikiDocumentFlowService::class);
+        $flow->shouldNotReceive('continueAfterClaimVerification');
+
+        (new VerifyEnterpriseWikiClaim($run->id, $claim->id))->handle($verification, $flow);
+        (new FinalizeEnterpriseWikiClaimVerification($run->id, true))->handle(
+            app(EnterpriseWikiDocumentFlowService::class),
+        );
+
+        $this->assertNull($claim->fresh()->verified_at);
+        Queue::assertNothingPushed();
+    }
+
     public function test_recovery_fallback_dispatches_unverified_claims_after_recovery_window(): void
     {
         Queue::fake();

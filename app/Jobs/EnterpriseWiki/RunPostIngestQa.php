@@ -45,12 +45,16 @@ class RunPostIngestQa implements ShouldQueue
             return;
         }
 
+        if ($run->isTerminal()) {
+            return;
+        }
+
         try {
             $qaService->runForRun($run);
         } catch (\InvalidArgumentException $e) {
             Log::warning('[WIKI_QA] Job skipped: invalid run state', [
                 'run_id' => $this->runId,
-                'error'  => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
         }
     }

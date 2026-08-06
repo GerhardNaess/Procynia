@@ -43,6 +43,24 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
         $this->assertFalse($pending->pluck('id')->contains($run->id));
     }
 
+    public function test_scheduled_qa_excludes_every_terminal_run_but_keeps_valid_candidates(): void
+    {
+        $customer = $this->createCustomer();
+        $valid = $this->createRun($customer, status: EnterpriseWikiIngestRun::STATUS_DECISION_ONLY, qaStatus: null);
+
+        foreach (EnterpriseWikiIngestRun::TERMINAL_STATUSES as $status) {
+            $terminal = $this->createRun($customer, status: $status, qaStatus: null);
+
+            $this->assertFalse($this->service()->findPendingRuns()->contains('id', $terminal->id));
+            $this->assertFalse($this->service()->findRetryableRuns()->contains('id', $terminal->id));
+            $this->assertNull($this->service()->runForRun($terminal, retry: true));
+            $this->assertSame($status, $terminal->fresh()->status);
+            $this->assertNull($terminal->fresh()->qa_status);
+        }
+
+        $this->assertTrue($this->service()->findPendingRuns()->contains('id', $valid->id));
+    }
+
     // =========================================================================
     // 14: the same run is not claimed even with an explicit --retry
     // =========================================================================
@@ -95,7 +113,7 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
         $this->assertTrue($pending->pluck('id')->contains($run->id));
     }
 
-    public function test_a_run_that_failed_during_qa_itself_remains_eligible_for_retry(): void
+    public function test_a_terminal_run_that_failed_during_qa_is_not_automatically_retryable(): void
     {
         $customer = $this->createCustomer();
         // status=failed but qa_status=failed (set together by markRunFailed(qaContext: true))
@@ -105,7 +123,7 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
 
         $retryable = $this->service()->findRetryableRuns();
 
-        $this->assertTrue($retryable->pluck('id')->contains($run->id));
+        $this->assertFalse($retryable->pluck('id')->contains($run->id));
     }
 
     // =========================================================================
@@ -191,7 +209,7 @@ class EnterpriseWikiPostIngestQaGatingTest extends TestCase
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
-        $this->assertStringContainsString('article/summary', $run->error_message);
+        $this->assertStringContainsString('initial', $run->error_message);
         $this->assertStringContainsString('Sammendrag', $run->error_message);
         $this->assertStringContainsString('summary', $run->error_message);
         $this->assertStringContainsString('Advania', $run->error_message);

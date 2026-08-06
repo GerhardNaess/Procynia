@@ -63,6 +63,21 @@ class EnterpriseWikiAppliedRunLintService
      */
     public function lint(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return [
+                'pages_checked' => 0,
+                'claims_checked' => 0,
+                'source_refs_checked' => 0,
+                'links_checked' => 0,
+                'findings_created' => 0,
+                'findings_skipped' => 0,
+                'findings_resolved' => 0,
+                'errors' => 0,
+                'warnings' => 0,
+                'info' => 0,
+            ];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can be linted."

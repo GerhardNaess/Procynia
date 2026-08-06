@@ -23,6 +23,28 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatchesTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_cancelled_run_does_not_poll_validate_persist_or_continue(): void
+    {
+        Queue::fake();
+        $run = $this->ingestRun();
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+        $state = Mockery::mock(EnterpriseWikiMaintainerDecisionBatchStateService::class);
+        $state->shouldNotReceive('summary');
+        $coordinator = Mockery::mock(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
+        $coordinator->shouldNotReceive('mergePersistedBatchResults');
+        $decision = Mockery::mock(EnterpriseWikiMaintainerDecisionService::class);
+        $decision->shouldNotReceive('validateAndRepairForDocument');
+        $flow = Mockery::mock(EnterpriseWikiDocumentFlowService::class);
+        $flow->shouldNotReceive('persistMaintainerDecision');
+        $flow->shouldNotReceive('continueAfterMaintainerDecisionBatches');
+
+        (new FinalizeEnterpriseWikiMaintainerDecisionBatches($run->id))->handle($state, $coordinator, $decision, $flow);
+
+        Queue::assertNothingPushed();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+    }
+
     public function test_pending_batches_wait_failed_batches_throw_and_completed_batches_finalize_once(): void
     {
         Queue::fake();

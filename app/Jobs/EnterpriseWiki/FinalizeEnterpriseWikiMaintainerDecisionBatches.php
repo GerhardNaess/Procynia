@@ -34,11 +34,15 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator, EnterpriseWikiMaintainerDecisionService $decisionService, EnterpriseWikiDocumentFlowService $flow): void
     {
         $run = EnterpriseWikiIngestRun::query()->findOrFail($this->runId);
-        if ($run->maintainer_decision_generated_at !== null) {
+        if ($run->isTerminal() || $run->maintainer_decision_generated_at !== null) {
             return;
         }
         $summary = $state->summary($this->runId);
         if ($summary['pending'] || $summary['running'] || $summary['total'] === 0) {
+            if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+                return;
+            }
+
             self::dispatch($this->runId)->delay(now()->addSeconds(30));
 
             return;
@@ -54,7 +58,17 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
         $merged = $coordinator->mergePersistedBatchResults($global, $state->completedResults($this->runId));
         $document = EnterpriseWikiDocument::query()->where('customer_id', $run->customer_id)->findOrFail($run->source_id);
         $language = $run->customer()->with('language')->first()?->language?->code ?? 'no';
+
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         $final = $decisionService->validateAndRepairForDocument($run->customer_id, $document, $language, $merged);
+
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         if ($flow->persistMaintainerDecision($run, $final)) {
             $flow->continueAfterMaintainerDecisionBatches($run->id);
         }
@@ -62,6 +76,10 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         app(EnterpriseWikiDocumentFlowService::class)->markMaintainerDecisionFailed($this->runId, $exception);
     }
 }

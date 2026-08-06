@@ -239,6 +239,24 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
     // Semantic QA + repair
     // =========================================================================
 
+    public function test_cancelled_run_skips_semantic_repair_without_ai_or_writes(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Original content.');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+        $this->mock(WikiLinkSemanticQaAiClient::class)->shouldNotReceive('review');
+        $this->mock(WikiLinkRevisionAiClient::class)->shouldNotReceive('reviseLinks');
+
+        $result = $this->repairService()->repairForRun($run->fresh());
+
+        $this->assertSame(['pages_reviewed' => 0, 'applied' => 0, 'skipped' => 0, 'failed' => 0], $result);
+        $this->assertDatabaseCount('enterprise_wiki_page_link_qa_attempts', 0);
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->count());
+    }
+
     public function test_semantic_qa_recommends_a_missing_link_and_repair_adds_it(): void
     {
         $customer = $this->createCustomer();

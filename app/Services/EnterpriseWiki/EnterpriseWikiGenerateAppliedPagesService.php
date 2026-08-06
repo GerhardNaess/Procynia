@@ -372,6 +372,10 @@ class EnterpriseWikiGenerateAppliedPagesService
      */
     public function generate(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return ['article' => 0, 'summary' => 0, 'concept' => 0, 'entity' => 0, 'skipped' => 0];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have pages generated."
@@ -422,6 +426,10 @@ class EnterpriseWikiGenerateAppliedPagesService
         )->values();
 
         foreach ($articleFirstPivotRows as $row) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $page = $row->page;
 
             if ($page === null || ! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
@@ -440,6 +448,10 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $document,
                 $this->sourceElementService->inspect($document)['elements'],
             );
+
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
 
             $generated = $this->aiClient->generatePageFromSource(
                 pageTitle: $page->title,
@@ -463,7 +475,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $markdown, $contentBlocks);
             [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-            $this->writeVersion($page->id, $markdown, $contentBlocks);
+            $this->writeVersion($run->id, $page->id, $markdown, $contentBlocks);
             $counts[$page->page_type]++;
         }
 
@@ -472,6 +484,10 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         // --- Pass 2: concept and entity ---
         foreach ($pivotRows as $row) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $page = $row->page;
 
             if ($page === null || ! in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)) {
@@ -491,6 +507,10 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $this->sourceElementService->inspect($document)['elements'],
             );
 
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $generated = $this->aiClient->generatePageFromSource(
                 pageTitle: $page->title,
                 pageType: $page->page_type,
@@ -503,7 +523,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
             $generated['markdown'] = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
-            $this->writeVersion($page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
+            $this->writeVersion($run->id, $page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
                 $generated['blocks'],
                 $sourceElements,
@@ -529,6 +549,10 @@ class EnterpriseWikiGenerateAppliedPagesService
      */
     public function generatePageForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return;
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have pages generated."
@@ -542,6 +566,12 @@ class EnterpriseWikiGenerateAppliedPagesService
         }
 
         $claimed = DB::transaction(function () use ($run, $page): ?EnterpriseWikiIngestRunPage {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return null;
+            }
+
             $pivot = EnterpriseWikiIngestRunPage::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('enterprise_wiki_page_id', $page->id)
@@ -595,6 +625,10 @@ class EnterpriseWikiGenerateAppliedPagesService
             $document,
             $this->sourceElementService->inspect($document)['elements'],
         );
+
+        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+            return;
+        }
 
         $generated = $this->aiClient->generatePageFromSource(
             pageTitle: $page->title,
@@ -673,6 +707,12 @@ class EnterpriseWikiGenerateAppliedPagesService
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
         DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return;
+            }
+
             $pivot = EnterpriseWikiIngestRunPage::query()
                 ->where('enterprise_wiki_ingest_run_id', $run->id)
                 ->where('enterprise_wiki_page_id', $page->id)
@@ -794,6 +834,10 @@ class EnterpriseWikiGenerateAppliedPagesService
             'normalized_planned_topics' => $normalizedTopics,
             'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'planned_topic' => $i['planned_topic']], $blocking),
         ]);
+
+        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+            return [$markdown, $blocks];
+        }
 
         $repairedSections = $this->aiClient->repairPlannedSections(
             pageTitle: $page->title,
@@ -1087,6 +1131,10 @@ class EnterpriseWikiGenerateAppliedPagesService
             'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'source_element_key' => $i['source_element_key'], 'required' => $i['required']], $blocking),
         ]);
 
+        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+            return [$markdown, $contentBlocks];
+        }
+
         $repaired = $this->aiClient->repairPlannedFigures(
             pageTitle: $page->title,
             pageType: $page->page_type,
@@ -1355,6 +1403,10 @@ class EnterpriseWikiGenerateAppliedPagesService
             'available_link_targets' => count($catalogResult['catalog']),
         ]);
 
+        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+            return [$markdown, $blocks];
+        }
+
         $revision = $this->wikilinkRevisionClient->reviseLinks(
             existingContent: $markdown,
             pageType: $page->page_type,
@@ -1611,20 +1663,28 @@ class EnterpriseWikiGenerateAppliedPagesService
         return [trim($markdown."\n\n".$linkBlock['markdown']), $contentBlocks];
     }
 
-    private function writeVersion(int $pageId, string $markdown, array $contentBlocks = []): void
+    private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = []): void
     {
-        $next = ((int) EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->max('version_number')) + 1;
+        DB::transaction(function () use ($runId, $pageId, $markdown, $contentBlocks): void {
+            $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
-        EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $pageId,
-            'version_number' => $next,
-            'is_current' => true,
-            'content_markdown' => $markdown,
-            'content_blocks_json' => $contentBlocks,
-            'generated_by_model' => WikiPageContentAiClient::MODEL,
-        ]);
+            if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
+                return;
+            }
+
+            $next = ((int) EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->max('version_number')) + 1;
+
+            EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $pageId,
+                'version_number' => $next,
+                'is_current' => true,
+                'content_markdown' => $markdown,
+                'content_blocks_json' => $contentBlocks,
+                'generated_by_model' => WikiPageContentAiClient::MODEL,
+            ]);
+        });
     }
 
     private function loadSharedContext(array $pageIds): string

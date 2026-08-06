@@ -2,6 +2,7 @@
 
 namespace App\Jobs\EnterpriseWiki;
 
+use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchEvaluator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateService;
@@ -32,6 +33,12 @@ class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
 
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionBatchEvaluator $evaluator): void
     {
+        $run = EnterpriseWikiIngestRun::query()->find($this->runId);
+
+        if ($run instanceof EnterpriseWikiIngestRun && $run->isTerminal()) {
+            return;
+        }
+
         $reservation = $state->reserve($this->runId, $this->batchNumber);
         if ($reservation === null) {
             return;
@@ -39,11 +46,20 @@ class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
 
         try {
             $result = $evaluator->evaluate($this->runId, $reservation['batch']);
+
+            if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+                return;
+            }
+
             if (! $state->complete($this->runId, $this->batchNumber, $reservation['token'], $result)) {
                 throw new RuntimeException("Maintainer candidate batch [{$this->batchNumber}] lost its lease before completion.");
             }
             FinalizeEnterpriseWikiMaintainerDecisionBatches::dispatch($this->runId);
         } catch (Throwable $exception) {
+            if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+                return;
+            }
+
             $message = "Maintainer candidate batch [{$this->batchNumber}] failed: {$exception->getMessage()}";
             $state->fail($this->runId, $this->batchNumber, $reservation['token'], $message);
             throw new RuntimeException($message, 0, $exception);
@@ -52,6 +68,10 @@ class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         app(EnterpriseWikiDocumentFlowService::class)->markMaintainerDecisionFailed($this->runId, $exception);
     }
 }

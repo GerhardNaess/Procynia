@@ -28,6 +28,21 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         $this->assertSame('enterprise-wiki', $job->queue);
     }
 
+    public function test_late_finalizer_cannot_reactivate_or_dispatch_for_cancelled_run(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_CANCELLED, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
     // =========================================================================
     // Phase 1: initial page-generation wave
     // =========================================================================

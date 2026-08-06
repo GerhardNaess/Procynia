@@ -34,7 +34,7 @@ class EnterpriseWikiPageVersionClaimSyncServiceTest extends TestCase
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
         $waitingRun = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL);
-        $appliedRun = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_ESCALATED);
+        $appliedRun = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING);
 
         $this->mock(EnterpriseWikiExtractPageClaimsService::class)
             ->shouldReceive('extract')
@@ -100,7 +100,7 @@ class EnterpriseWikiPageVersionClaimSyncServiceTest extends TestCase
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
-        $run = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_ESCALATED);
+        $run = $this->createRun($customer, $document, EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING);
         $page = $this->createPage($customer, 'Applied Run Page');
         $version = $this->createVersion($page, 'Current content for claim sync.');
         $this->attachPageToRun($run, $page, $version);

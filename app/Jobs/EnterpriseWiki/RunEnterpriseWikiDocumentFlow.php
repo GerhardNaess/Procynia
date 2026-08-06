@@ -81,7 +81,7 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
             return;
         }
 
-        $run->update([
+        EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
             'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
             'error_message' => mb_substr($exception->getMessage(), 0, 1000),
             'finished_at' => now(),

@@ -74,6 +74,10 @@ class EnterpriseWikiVerifyPageClaimsService
      */
     public function verify(EnterpriseWikiIngestRun $run): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return ['pages' => 0, 'claims' => 0, 'references' => 0, 'skipped' => 0, 'no_support' => 0, 'busy' => 0, 'reused' => 0];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException(
                 "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can have claims verified."
@@ -109,6 +113,10 @@ class EnterpriseWikiVerifyPageClaimsService
         $reused = 0;
 
         foreach ($pivotRows as $row) {
+            if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
+                break;
+            }
+
             $page = $row->page;
 
             if ($page === null) {
@@ -165,6 +173,10 @@ class EnterpriseWikiVerifyPageClaimsService
      */
     public function verifyClaimForRun(EnterpriseWikiIngestRun $run, int $claimId): array
     {
+        if (($run->fresh() ?? $run)->isTerminal()) {
+            return ['pages' => 0, 'claims' => 0, 'references' => 0, 'skipped' => 1, 'no_support' => 0, 'busy' => 0, 'reused' => 0];
+        }
+
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException("Run [{$run->id}] is not applied.");
         }
@@ -652,6 +664,7 @@ class EnterpriseWikiVerifyPageClaimsService
             'allow_canonical_reuse' => true,
             'allow_canonical_recording' => true,
             'verify_unsupported_without_ai' => false,
+            'require_non_terminal_run' => true,
         ];
     }
 
@@ -680,6 +693,7 @@ class EnterpriseWikiVerifyPageClaimsService
             'allow_canonical_reuse' => true,
             'allow_canonical_recording' => false,
             'verify_unsupported_without_ai' => true,
+            'require_non_terminal_run' => false,
         ];
     }
 
@@ -730,7 +744,17 @@ class EnterpriseWikiVerifyPageClaimsService
         }
 
         $token = (string) Str::uuid();
-        $reservation = $this->reserve($claim, $token);
+        $reservation = $this->withRunPersistenceGuard(
+            $run,
+            $policy,
+            fn (): string => $this->reserve($claim, $token),
+        );
+
+        if ($reservation === null) {
+            $counts['skipped']++;
+
+            return $counts;
+        }
 
         if ($reservation === 'completed') {
             $counts['skipped']++;
@@ -749,10 +773,14 @@ class EnterpriseWikiVerifyPageClaimsService
         $anchorFailure = $this->claimAnchorFailureReason($claim, $version);
 
         if ($anchorFailure !== null) {
-            $updated = $this->markInternalGenerationError(
-                $claim,
-                $anchorFailure,
-                $policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES ? $token : null,
+            $updated = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): bool => $this->markInternalGenerationError(
+                    $claim,
+                    $anchorFailure,
+                    $policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES ? $token : null,
+                ),
             );
             $counts[$updated ? 'no_support' : 'busy']++;
 
@@ -769,12 +797,16 @@ class EnterpriseWikiVerifyPageClaimsService
         if ($claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
             && $this->canonicalizationService->isEligibleForBestPractice($claim->claim_text)
         ) {
-            $outcome = $this->persistBestPracticeVerification(
-                $claim->id,
-                $token,
-                $run->customer_id,
-                $version,
-                $policy['allow_canonical_recording'],
+            $outcome = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): ?array => $this->persistBestPracticeVerification(
+                    $claim->id,
+                    $token,
+                    $run->customer_id,
+                    $version,
+                    $policy['allow_canonical_recording'],
+                ),
             );
 
             if ($outcome === null) {
@@ -792,18 +824,22 @@ class EnterpriseWikiVerifyPageClaimsService
         if ($policy['verify_unsupported_without_ai']
             && $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT
         ) {
-            $outcome = $this->persist(
-                $claim->id,
-                $token,
-                $document,
-                $this->unsupportedGeneratedContentVerificationResult(),
-                $version,
-                null,
-                '',
-                [],
-                false,
-                false,
-                $policy['allow_canonical_recording'],
+            $outcome = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): ?array => $this->persist(
+                    $claim->id,
+                    $token,
+                    $document,
+                    $this->unsupportedGeneratedContentVerificationResult(),
+                    $version,
+                    null,
+                    '',
+                    [],
+                    false,
+                    false,
+                    $policy['allow_canonical_recording'],
+                ),
             );
 
             if ($outcome === null) {
@@ -825,7 +861,11 @@ class EnterpriseWikiVerifyPageClaimsService
             && $claim->content_origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
             && $candidateElements === []
         ) {
-            $updated = $this->markInternalGenerationError($claim, 'source_based_claim_missing_source_reference', $token);
+            $updated = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): bool => $this->markInternalGenerationError($claim, 'source_based_claim_missing_source_reference', $token),
+            );
             $counts[$updated ? 'no_support' : 'busy']++;
 
             return $counts;
@@ -858,7 +898,11 @@ class EnterpriseWikiVerifyPageClaimsService
                 'verification_status' => $reusableFact->verification_status,
             ]);
 
-            $outcome = $this->persistReusedFact($claim->id, $token, $reusableFact, $policy['allow_claim_decision_reset']);
+            $outcome = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): ?string => $this->persistReusedFact($claim->id, $token, $reusableFact, $policy['allow_claim_decision_reset']),
+            );
 
             if ($outcome === null) {
                 $counts['busy']++;
@@ -885,16 +929,20 @@ class EnterpriseWikiVerifyPageClaimsService
             $claim->claim_text,
             array_column($candidateElements, 'excerpt'),
         )) {
-            $outcome = $this->persistDeterministicSupport(
-                $claim->id,
-                $token,
-                $document,
-                $version,
-                $evidence['block_for_safety_net'],
-                $evidence['elements_by_key'],
-                $policy['allow_claim_decision_reset'],
-                $policy['allow_best_practice_promotion'],
-                $policy['allow_canonical_recording'],
+            $outcome = $this->withRunPersistenceGuard(
+                $run,
+                $policy,
+                fn (): ?array => $this->persistDeterministicSupport(
+                    $claim->id,
+                    $token,
+                    $document,
+                    $version,
+                    $evidence['block_for_safety_net'],
+                    $evidence['elements_by_key'],
+                    $policy['allow_claim_decision_reset'],
+                    $policy['allow_best_practice_promotion'],
+                    $policy['allow_canonical_recording'],
+                ),
             );
 
             if ($outcome === null) {
@@ -914,6 +962,12 @@ class EnterpriseWikiVerifyPageClaimsService
             return $counts;
         }
 
+        if (($policy['require_non_terminal_run'] ?? false)
+            && (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal() ?? true)
+        ) {
+            return $counts;
+        }
+
         try {
             $result = $this->aiClient->verifyClaim(
                 claimText: $claim->claim_text,
@@ -924,23 +978,27 @@ class EnterpriseWikiVerifyPageClaimsService
                 documentLabel: $document->original_filename,
             );
         } catch (Throwable $e) {
-            $this->release($claim->id, $token);
+            $this->withRunPersistenceGuard($run, $policy, fn (): bool => $this->releaseAndReport($claim->id, $token));
 
             throw $e;
         }
 
-        $outcome = $this->persist(
-            $claim->id,
-            $token,
-            $document,
-            $result,
-            $version,
-            $evidence['block_for_safety_net'],
-            $evidence['fallback_source_text'],
-            $evidence['elements_by_key'],
-            $policy['allow_claim_decision_reset'],
-            $policy['allow_best_practice_promotion'],
-            $policy['allow_canonical_recording'],
+        $outcome = $this->withRunPersistenceGuard(
+            $run,
+            $policy,
+            fn (): ?array => $this->persist(
+                $claim->id,
+                $token,
+                $document,
+                $result,
+                $version,
+                $evidence['block_for_safety_net'],
+                $evidence['fallback_source_text'],
+                $evidence['elements_by_key'],
+                $policy['allow_claim_decision_reset'],
+                $policy['allow_best_practice_promotion'],
+                $policy['allow_canonical_recording'],
+            ),
         );
 
         if ($outcome === null) {
@@ -1183,6 +1241,30 @@ class EnterpriseWikiVerifyPageClaimsService
                 'verification_claimed_at' => null,
                 'verification_claim_token' => null,
             ]);
+    }
+
+    private function releaseAndReport(int $claimId, string $token): bool
+    {
+        $this->release($claimId, $token);
+
+        return true;
+    }
+
+    private function withRunPersistenceGuard(EnterpriseWikiIngestRun $run, array $policy, callable $callback): mixed
+    {
+        if (! ($policy['require_non_terminal_run'] ?? false)) {
+            return $callback();
+        }
+
+        return DB::transaction(function () use ($run, $callback): mixed {
+            $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
+
+            if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
+                return null;
+            }
+
+            return $callback();
+        });
     }
 
     /**

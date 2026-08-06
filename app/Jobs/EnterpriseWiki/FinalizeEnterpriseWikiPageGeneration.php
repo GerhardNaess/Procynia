@@ -85,6 +85,10 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             };
         });
 
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
         match ($result['outcome']) {
             'dispatch_concept_entity' => $this->dispatchConceptEntityPhase($result['page_ids']),
             'completed' => ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($this->runId),
@@ -184,7 +188,15 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     private function dispatchConceptEntityPhase(Collection $pageIds): void
     {
         foreach ($pageIds as $pageId) {
+            if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+                return;
+            }
+
             GenerateEnterpriseWikiAppliedPage::dispatch($this->runId, $pageId);
+        }
+
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
         }
 
         // Safety net for the case where every concept/entity page already has a version, or
@@ -344,7 +356,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 
         if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
-            $run->update([
+            EnterpriseWikiIngestRun::query()->whereKey($run->id)->nonTerminal()->update([
                 'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
                 'error_message' => mb_substr($exception->getMessage(), 0, 1000),
                 'finished_at' => now(),

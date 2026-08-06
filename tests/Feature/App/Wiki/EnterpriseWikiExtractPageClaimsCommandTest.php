@@ -86,6 +86,20 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_cancelled_run_does_not_extract_or_persist_claims(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(0, $result['claims']);
+        $this->assertFalse(EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->exists());
+    }
+
     public function test_command_creates_claims_for_article_page(): void
     {
         $customer = $this->createCustomer();

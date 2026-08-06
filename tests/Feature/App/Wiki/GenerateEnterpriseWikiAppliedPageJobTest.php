@@ -84,6 +84,47 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }
 
+    public function test_cancelled_run_is_a_no_op_before_page_generation_starts(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+        $this->mock(WikiPageContentAiClient::class)->shouldNotReceive('generatePageFromSource');
+
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class),
+        );
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+        Queue::assertNotPushed(FinalizeEnterpriseWikiPageGeneration::class);
+    }
+
+    public function test_cancellation_during_ai_prevents_page_version_persistence_and_continuation(): void
+    {
+        Queue::fake();
+        $customer = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (...$arguments) use ($run): array {
+                $run->update(['status' => EnterpriseWikiIngestRun::STATUS_CANCELLED]);
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN, $arguments['sourceElements'] ?? $arguments[6] ?? []);
+            });
+
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class),
+        );
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+        Queue::assertNotPushed(FinalizeEnterpriseWikiPageGeneration::class);
+    }
+
     public function test_generation_status_transitions_to_completed_and_persists_version_id(): void
     {
         $customer = $this->createCustomer();
