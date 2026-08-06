@@ -1,8 +1,8 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.24
-Dato: 2026-08-01
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Neste planlagt: Fase 9 — Wiki-svar på eksisterende ekstraherte krav — produktbeslutning tatt 2026-07-13, ikke implementert** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet**
+Versjon: 0.25
+Dato: 2026-08-06
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Arkitekturbeslutning oppdatert 2026-08-06: claims gjelder Procynias egne påstander og innvendinger; direkte kildeinnhold skal spores via provenance, kildekobling og blokk-/elementreferanser, ikke via claims** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -14,11 +14,9 @@ Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 
 >
 > **Kvalitetsstrategikorrigering (v0.7, 2026-07-21):** Procynia har lov til å bruke beste praksis og tilføre nyttig tekst utover kildedokumentet. Det eneste brukeren skal varsles om er konkrete tekstområder systemet har lagt til som ikke kan støttes av kilden — aldri interne verifiseringskategorier (negasjon, modalitet, aktør, scope, teknisk usikkerhet). Denne regelen er bindende og overstyrer tidligere claim-/verifiseringsspråk der de er i konflikt. Se det dedikerte arkitekturnotatet ved slutten av dokumentet (rett før «Produksjonsaktivering») for full presisering. Gjelder nye dokumentimporter — eksisterende kjøringer migreres ikke.
 >
-> **Presisering (v0.8, 2026-07-21):** v0.7 gjør interne verifiseringssignaler usynlige som *brukersaker* — det betyr ikke at claims som datastruktur er mindre viktige. Claims er og forblir Procynias atomære, maskinlesbare kunnskapslag: semantiske relasjoner, wikilenker, kunnskapsgraf, begreper/enheter, Wiki-søk og Wiki-baserte svar, med sporbarhet til claim/tekstblokk/sideversjon/kilde og grunnlagstype (`source_based`/`best_practice`/`mixed`). Claims skal aldri fjernes, deaktiveres eller reduseres til kun en verifiseringsmekanisme. Samtidig er QA-portvakten rettet: et internt signal (negasjon/modalitet/aktør/scope/subjekt-avvik, teknisk usikkerhet) skal aldri alene sette en kjøring til `repair_required` — kun en reell brukersak eller en eksplisitt menneskelig blokkeringsbeslutning gjør det. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
+> **Arkitekturbeslutning (v0.11, 2026-08-06):** Claims skal ikke brukes til å modellere direkte kildeutsagn. Når kildedokumentet selv sier noe eksplisitt, skal det gå direkte inn i Wikien med kildekobling, provenance, dokumentreferanse, blokk-/elementreferanse og revisjonsspor. Claims er reservert for Procynias egne påstander, vurderinger, anbefalinger og innvendinger. «Beste praksis» er en systemgenerert klassifisering av Procynias tilføyelser, ikke en etikett på kildedokumentets egne fakta. Denne beslutningen erstatter alle tidligere formuleringer i dokumentet som antyder at direkte kildefakta skal claim-verifiseres.
 >
-> **Presisering (v0.9, 2026-07-21):** Det konkrete proveniens-gapet v0.8 kartla (Wiki-baserte svar skilte ikke `source_based` fra `best_practice` når claims ble brukt som grunnlag) er lukket. `content_origin` bæres nå gjennom hele forsknings-/rangerings-/svargenereringsflyten, og hver svarseksjon får en deterministisk (ikke AI-selvrapportert) `provenance_type`. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
->
-> **Produktstrategikorrigering (v0.10, 2026-08-01):** Claims og QA er en frivillig, ikke-blokkerende kvalitetssløyfe — ikke en obligatorisk godkjenningsport. Dette overstyrer v0.8-setningen om at «en reell brukersak ... setter en kjøring til `repair_required`»: heller ikke en reell brukersak skal blokkere Wiki-generering, publisering eller bruk. Selgere (Procynias primære brukere av Enterprise Wiki) skal ikke måtte forholde seg til claims for å generere, publisere, forbedre og bruke Wiki i anbudsarbeid. Claims skal være få, vesentlige og dedupliserte faglige kontrollpunkter for kundens frivillige QA-fagpersoner — aldri en automatisk faglig fasit over merket beste praksis. Se det dedikerte arkitekturnotatet ved slutten av dokumentet for full presisering og identifiserte tekniske konsekvenser.
+> **Presisering (v0.10, 2026-08-01):** claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger. QA-portvakten er rettet slik at interne signaler aldri alene setter en kjøring til `repair_required`; bare en reell brukersak eller en eksplisitt menneskelig blokkeringsbeslutning gjør det. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
 
 ## Arkitekturnotat — v0.6 kurskorrigering: Karpathy-lenking og inkrementelt vedlikehold
 
@@ -68,7 +66,7 @@ raw source
 
 Enterprise LLM Wiki er et parallelt kunnskapssystem for Procynia, inspirert av Karpathy Wiki-mønsteret og tilpasset enterprise-krav: kundescoping, rollestyrt godkjenning, sporbar revisjon, kildebevis og trygg menneskelig review.
 
-Det sentrale produktet er **en kompilert, vedlikeholdt Markdown-wiki**, ikke dokumentoppsummeringer alene og ikke claim-lister.
+Det sentrale produktet er **en kompilert, vedlikeholdt Markdown-wiki**, ikke dokumentoppsummeringer alene og ikke claim-lister. Direkte kildeutsagn går inn som wikiinnhold med provenance; claims brukes bare når Procynia selv legger til, vurderer eller utfordrer innhold.
 
 Systemet skal fungere som et kompilert og vedlikeholdt kunnskapslag:
 
@@ -94,7 +92,7 @@ Systemet er ikke en erstatning for dagens Kunnskapsbase eller RAG-pipeline. Det 
 - oppretter og oppdaterer concept/entity-sider på tvers av kilder
 - finner relevante eksisterende wiki-sider før nye concept/entity-sider opprettes
 - lagrer lesbart Markdown-innhold i `enterprise_wiki_page_versions.content_markdown`
-- bruker claims, excerpts, source references og lint som verifikasjonslag rundt wikiinnholdet
+- bruker claims for Procynias egne påstander og innvendinger, samt excerpts, source references, provenance og lint som verifikasjonslag rundt wikiinnholdet
 - lar mennesker lese, vurdere, redigere, godkjenne eller avvise wikiinnhold
 - først i senere faser kan sammenlignes mot dagens RAG — uten automatisk kobling
 
@@ -109,13 +107,13 @@ Kjerneprinsipper:
 - **Råkilder er immutable.** Kilder leses og spores, men endres ikke av AI.
 - **Verifikasjon som støtte.** Claims, excerpts, kildekoblinger og lint skal støtte review — ikke være hovedopplevelsen.
 - AI foreslår. Mennesker godkjenner.
-- Ingen sentrale påstander uten kildegrunnlag.
+- Ingen Procynia-påstander uten kildegrunnlag eller tydelig beste-praksis-/innvendingmerking.
 - Ingen skrivetilgang til eksisterende Kunnskapsbase/RAG-modeller eller tabeller.
 - Kundeisolasjon fra dag én.
 
 Konsekvens av v0.5-korrigeringen:
 
-- Eksisterende claim extraction beholdes som grounding/review-lag.
+- Eksisterende claim extraction beholdes som et lag for Procynias egne påstander, vurderinger og innvendinger.
 - Eksisterende lint/helsekontroll beholdes.
 - Eksisterende upload/extract/ingest-grunnmur beholdes.
 - `WikiArticleAiClient` beholdes som teknisk writer/valideringspunkt for `article`-sider.
@@ -207,7 +205,7 @@ Viktig skille:
 - **Backlinks** er en deterministisk avledet lenkegraf — projisert fra inline `[[wikilinks]]` i `content_markdown`, ikke en uavhengig AI-generert sannhet (v0.6, se §4.10).
 - **Artikkelinnhold** lagres som `content_markdown` på `enterprise_wiki_page_versions`.
 - **Claims** er verifikasjonsenheter som støtter artikkel, reviewer og lint.
-- **Source references** dokumenterer hvor claims og sentrale artikkelutsagn kommer fra.
+- **Source references** dokumenterer hvor claims og sentrale, direkte kildeutsagn kommer fra.
 - **Lint/helsekontroll** hjelper reviewer å finne mangler før godkjenning.
 
 Forbud i målmodellen:
@@ -296,7 +294,7 @@ Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner o
 
 ### 4.3 `enterprise_wiki_claims`
 
-Én konkret, verifiserbar påstand per rad. En side kan ha mange påstander. Etter v0.3 er påstander **ikke** sluttproduktet; de er verifikasjonsenheter som støtter wikiartikkelen, reviewer og lint.
+Én konkret Procynia-påstand, vurdering eller innvending per rad. En side kan ha mange slike rader. Direkte kildeutsagn skal normalt ikke bli claims; de skal inn i wikiinnholdet med provenance og kildekobling. Claims er verifikasjonsenheter for Procynias egne påstander og utfordringer, og støtter reviewer og lint.
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
@@ -316,7 +314,7 @@ Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner o
 
 ### 4.4 `enterprise_wiki_source_references`
 
-Kildebevis på påstandsnivå. Ingen påstand kan eksistere uten minst én kildereferanse.
+Kildebevis på claim- og kildeutsagnsnivå. Når en claim finnes, skal den ha minst én kildereferanse; direkte kildeutsagn skal ha provenance og blokkreferanse selv om de ikke er claims.
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
@@ -330,7 +328,7 @@ Kildebevis på påstandsnivå. Ingen påstand kan eksistere uten minst én kilde
 | `page_reference` | varchar nullable | Sidenummer eller avsnitt |
 | `created_at` | timestamp | |
 
-Constraint: Minst én rad per `enterprise_wiki_claim_id`. Håndheves i applikasjonslaget ved ingest.
+Constraint: Minst én rad per `enterprise_wiki_claim_id`. Håndheves i applikasjonslaget ved ingest. Direkte kildeinnhold uten claim får i stedet provenance-/referansesporing på sideversjonen.
 
 ---
 
@@ -521,7 +519,7 @@ Enterprise Wiki må ikke presentere AI-generert innhold som ferdig sannhet før 
 UI-et skal ha to tydelige lag:
 
 1. **Wikiinnhold-laget** — primær visning: lesbar Markdown-side med riktig page type (`article`, `summary`, `concept`, `entity` eller `index`).
-2. **Verifikasjonslaget** — sekundær visning: claims, excerpts, kildekoblinger, kvalitetssignaler, konflikter og lint.
+2. **Verifikasjonslaget** — sekundær visning: Procynia-claims, excerpts, kildekoblinger, kvalitetssignaler, konflikter og lint.
 
 Bindende UX-prinsipper:
 
@@ -530,7 +528,7 @@ Bindende UX-prinsipper:
 - Pending innhold skal tydelig merkes som utkast.
 - Godkjenning skal ikke være en «blind» knapp.
 - Brukeren skal kunne åpne verifikasjonsgrunnlaget for artikkelen.
-- Påstander skal kunne spores tilbake til raw kildedokument.
+- Procynia-påstander skal kunne spores tilbake til raw kildedokument.
 - Kildegrunnlag skal være synlig nok til at bruker kan kontrollere kvalitet.
 - Svake, manglende eller uklare kilder skal vises tydelig.
 - Det skal være vanskelig å godkjenne innhold ved et uhell.
@@ -604,7 +602,7 @@ source document
 
 Konsekvenser:
 
-- `ProcessEnterpriseWikiSection` kan fortsatt ekstrahere claims.
+- `ProcessEnterpriseWikiSection` kan fortsatt ekstrahere claims for Procynias egne påstander, vurderinger og innvendinger.
 - Claims skal fortsatt lagres og brukes til review/lint.
 - `WikiArticleAiClient` kan brukes som writer for `article`-sider.
 - Det manglende laget er **Karpathy compile workflow**: schema, page types, index, log, backlinks og beslutning om hvilke sider som skal oppdateres/opprettes.
@@ -674,8 +672,8 @@ Konsekvenser:
        - no_action_reason hvis kilden ikke gir nyttig wikiinnhold
        - warnings/conflicts
 
-7. Verification extraction
-   └─ Ekstraherer claims, excerpts og conflict_note
+7. Assertion and provenance capture
+   └─ Ekstraherer Procynia-påstander, vurderinger og innvendinger der det er relevant
    └─ Lagrer enterprise_wiki_claims og enterprise_wiki_source_references
 
 8. Page writing/update (v0.6: inkluderer inline wikilinks)
@@ -684,7 +682,7 @@ Konsekvenser:
    └─ Oppretter/oppdaterer relevante concept/entity-sider, med kontekst om relevante eksisterende sider (index lookup)
    └─ For hver berørt side opprettes ny EnterpriseWikiPageVersion
    └─ content_markdown skrives som lesbar Markdown, **med semantiske inline `[[wikilinks]]` i brødteksten** der begreper allerede omtales andre steder i Wikien
-   └─ Claims/source references knyttes til riktig sideversjon der de brukes som verifikasjon
+   └─ Claims/source references knyttes til riktig sideversjon der de brukes som verifikasjon; direkte kildeutsagn får provenance og side-/blokkreferanse, ikke claim-fisering
 
 9. Deterministisk lenkeparsing og materialisering (v0.6 — nytt steg, se Fase 8I)
    └─ Parser `content_markdown` for `[[wikilinks]]` per oppdatert/opprettet side
@@ -699,11 +697,11 @@ Konsekvenser:
 
 11. Review
    └─ Brukeren leser article/summary/concept/entity-sider, med klikkbare inline-lenker
-   └─ Brukeren kontrollerer claims/kilder/lint
+   └─ Brukeren kontrollerer Procynia-claims, kilder, provenance og lint
    └─ System Owner godkjenner eller avviser
 ```
 
-**Viktig prinsipp etter v0.6:** AI kan returnere strukturert JSON som inneholder compile-beslutning, Markdown-innhold (med inline wikilinks) og verifikasjonsgrunnlag. `content_markdown` er hovedinnholdet på en wiki-side og den kanoniske kilden til relasjoner. Output deles i Karpathy-lag: `article`, `summary`, `concept/entity`, `index`, `log`. Backlinks og graf er **ikke** egne AI-output-lag lenger — de avledes deterministisk av wikilinkene i `content_markdown` (se §4.10).
+**Viktig prinsipp etter v0.6:** AI kan returnere strukturert JSON som inneholder compile-beslutning, Markdown-innhold (med inline wikilinks) og verifikasjonsgrunnlag. `content_markdown` er hovedinnholdet på en wiki-side og den kanoniske kilden til relasjoner. Output deles i Karpathy-lag: `article`, `summary`, `concept/entity`, `index`, `log`. Backlinks og graf er **ikke** egne AI-output-lag lenger — de avledes deterministisk av wikilinkene i `content_markdown` (se §4.10). Claims skal kun brukes for Procynias egne påstander, vurderinger og innvendinger.
 
 ## 8. Queue-mønster
 
@@ -721,7 +719,7 @@ ProcessEnterpriseWikiIngest          (orchestrator)
 | Jobbnavn | Køy | Formål |
 |---|---|---|
 | `ProcessEnterpriseWikiIngest` | `enterprise-wiki` | Orchestrator: leser kilde, splitter, dispatcherer seksjonsjobber |
-| `ProcessEnterpriseWikiSection` | `enterprise-wiki` | Sender én seksjon til AI, lagrer claims og kilder |
+| `ProcessEnterpriseWikiSection` | `enterprise-wiki` | Sender én seksjon til AI, lagrer claims for Procynias egne påstander/innvendinger og kilder |
 | `FinalizeEnterpriseWikiIngest` | `enterprise-wiki` | Slår sammen resultater. Midlertidig én side; skal senere koordinere article/summary/concept/entity-output og ingest-run |
 
 Ny queue: `enterprise-wiki`. Holdes separat fra `ai-requirements` for å unngå ressurskonflikter med produksjonsflyt.
@@ -736,17 +734,17 @@ Planlagte lint-kontroller som kan kjøres on-demand eller som scheduled job:
 
 | Check-type | Alvorlighet | Beskrivelse |
 |---|---|---|
-| `claim_without_source` | error | Claim-rad mangler minst én source_reference |
+| `claim_without_source` | error | Procynia-claim-rad mangler minst én source_reference |
 | `source_reference_missing_excerpt` | warning | Kildereferanse finnes, men mangler excerpt |
 | `document_ingest_failed` | warning | Kildedokument feilet ingest/extract |
 | `broken_wiki_link` | error | `[[wikilink]]` peker til side som ikke finnes |
 | `orphan_page` | info | Wiki-side uten inbound links |
 | `stub_page` | info | Side er for kort/tynn til å være nyttig |
 | `missing_backlinks` | info | Backlinks/lenkegraf er ikke oppdatert |
-| `conflicting_claims` | warning | To claims eller sider motsier hverandre |
+| `conflicting_claims` | warning | To Procynia-claims eller sider motsier hverandre |
 | `source_version_superseded` | warning | Kildeversjon har `approval_status = superseded` |
 | `stale_approved_page` | warning | Godkjent side, men kildens `file_hash_sha256` er endret siden `last_source_hash` ble beregnet |
-| `low_confidence_page` | info | Mer enn halvparten av claims har `confidence = low` eller `uncertain` |
+| `low_confidence_page` | info | Mer enn halvparten av Procynia-claims har `confidence = low` eller `uncertain` |
 | `missing_owner` | info | `owner_user_id` er null |
 | `overdue_review` | warning | Godkjent side uten review de siste N dager (konfigurerbart) |
 | `missing_topics` | info | Siden har ingen `enterprise_wiki_page_topics`-rader |
@@ -784,10 +782,10 @@ Korrigert pilotmål:
 | **Index** | Eksisterende wiki-sider vurderes før nye concept/entity-sider opprettes |
 | **Schema** | Eget maintainer-regelverk styrer page types, navngiving, lenking, ingest/compile, query og lint |
 | **Backlinks** | Lenkegraf bygges/vedlikeholdes systematisk |
-| **Sekundær output** | Claims, excerpts, kildereferanser og lint |
+| **Sekundær output** | Procynia-claims, excerpts, kildereferanser og lint |
 | **Primær UI** | Wiki-side som ligner en lesbar wiki, med riktig page type |
 | **Review UI** | Verifikasjonslag rundt artikkel/concept/summary |
-| **Godkjenning** | Godkjenning av wikiinnhold, støttet av claim-/kildekontroll |
+| **Godkjenning** | Godkjenning av wikiinnhold, støttet av claim-/kildekontroll for Procynias egne påstander |
 | **Produksjonsaktivering** | Først etter at Karpathy compile-flyten fungerer |
 
 Mål med neste pilot: verifisere at Enterprise Wiki kan bruke en opplastet kilde til å produsere source article, source summary, relevante concept/entity-oppdateringer, index/log/backlinks og sporbar verifikasjon.
@@ -2789,15 +2787,15 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 
 **Teknisk implementasjon:** gjenbruker eksisterende `content_blocks_json`/`content_block_key`/`source_elements`, eksisterende `EnterpriseWikiClaim.content_origin` (`best_practice`/`unsupported_generated_content`), eksisterende godkjenn/rediger/avvis-flyt (`WikiClaimController`), og eksisterende Kjøringer→Funn-panel (`EnterpriseWikiRunFindingsService`) — se `EnterpriseWikiClaimFindingExplainer::isUserFacingAddition()` for det ene, sentrale filteret som avgjør hva som er en brukersak versus en intern diagnostikk-detalj. Ingen ny claim- eller markeringsmodell er innført.
 
-## Arkitekturnotat — v0.8: claims som obligatorisk aktiv kunnskapsstruktur (2026-07-21)
+## Arkitekturnotat — v0.8: historisk claim-kartlegging (superseded av v0.11) (2026-07-21)
 
-> **Presisering (v0.10, 2026-08-01):** «obligatorisk» i tittelen og notatet under gjelder utelukkende *datastrukturen* — at claims ikke skal fjernes/deaktiveres som kunnskapslag for søk, graf og Wiki-baserte svar. Det har aldri betydd, og betyr fortsatt ikke, at claims må behandles eller godkjennes før Wiki kan genereres, publiseres eller brukes. Se Arkitekturnotat v0.10 for den bindende, ikke-blokkerende claim-/QA-strategien.
+> **Presisering (v0.11, 2026-08-06):** Dette notatet er beholdt som historisk kontekst for de gamle claims-fløyene i systemet. Den bindende regelen nå er at direkte kildeutsagn ikke blir claims; claims brukes kun for Procynias egne påstander, vurderinger, anbefalinger og innvendinger. Se arkitekturbeslutningen øverst i dokumentet for gjeldende modell.
 
-**Bindende presisering, som en direkte konsekvens av v0.7 (og for å hindre en feillesning av den):** v0.7 gjorde negasjon/modalitet/aktør/scope/subjekt-avvik og teknisk usikkerhet usynlige som *brukersaker*. Dette må aldri leses som at claims som datastruktur er mindre viktige, kan fjernes, eller reduseres til bare en verifiseringsmekanisme.
+**Bindende presisering, som en direkte konsekvens av v0.11:** v0.7 gjorde negasjon/modalitet/aktør/scope/subjekt-avvik og teknisk usikkerhet usynlige som *brukersaker*. Det betyr fortsatt ikke at direkte kildeutsagn skal claim-fiseres. Claims er nå avgrenset til Procynias egne påstander, vurderinger, anbefalinger og innvendinger. Direkte kildeutsagn skal spores via provenance, kildekobling og blokk-/elementreferanser.
 
-**Bindende regel:**
+**Historisk regel, ikke gjeldende produktregel:**
 
-> Claims skal beholdes og brukes aktivt som Procynias atomære, maskinlesbare kunnskapslag. De brukes til semantiske relasjoner mellom Wiki-sider, wikilenker og kunnskapsgraf, begreper/enheter/roller/prosesser/systemer, avhengigheter/eierskap/rekkefølge/årsak–virkning, Wiki-søk og Wiki-baserte svar, og forklarbarhet/proveniens for relasjoner. En relasjon skal så langt mulig kunne spores til: claim(s), `content_block_key`, sideversjon, kildedokument og `source_elements`, og grunnlagstype (`source_based`, `best_practice` eller `mixed`). Beste-praksis-claims og -relasjoner er tillatt, men skal aldri fremstilles som dokumentert kundefakta. Claims skal ikke fjernes, deaktiveres eller reduseres til kun en verifiseringsmekanisme.
+> Claims ble tidligere behandlet som et bredt, maskinlesbart kunnskapslag. Den modellen er nå avgrenset: claims skal kun brukes for Procynias egne påstander, vurderinger, anbefalinger og innvendinger. Direkte kildeutsagn skal ikke representeres som claims; de skal gå direkte inn i wikiinnholdet med provenance, dokumentreferanse og blokk-/elementreferanser. Beste-praksis-innhold er fortsatt tillatt, men er en klassifisering av Procynias egne tilføyelser, ikke en etikett på kildedokumentets egne fakta.
 
 **Kartlegging (read-only, 2026-07-21) — hva som faktisk bruker claims i dag:**
 
@@ -2821,7 +2819,7 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 
 **Bindende regel (uendret produktprinsipp, nå håndhevet i kode):**
 
-> Claims brukes fortsatt aktivt til søk, rangering, resonnering og Wiki-baserte svar. Både kildebasert kunnskap og beste praksis er tillatt. Systemet skal alltid tydelig skille: `source_based` (dokumentert i kundens kildedokumenter), `best_practice` (nyttig anbefaling/tilføyelse som ikke er dokumentert i kundens kilder), og `mixed` (et svar som inneholder begge deler). Beste praksis skal ikke fjernes fra søk/resonnering, men skal aldri fremstilles som dokumentert kundefakta eller brukes som kildebevis for en kundepåstand.
+> Claims brukes fortsatt aktivt til søk, rangering, resonnering og Wiki-baserte svar. I denne modellen er claims Procynias egne påstander eller innvendinger; `source_based` betyr at claimen er støttet av kundens kildedokumenter, `best_practice` betyr at claimen er Procynias egen anbefaling/tilføyelse, og `mixed` betyr at et svar kombinerer begge. Beste praksis skal ikke fjernes fra søk/resonnering, men skal aldri fremstilles som dokumentert kundefakta eller brukes som kildebevis for en kundepåstand.
 
 **Hvor proveniens forsvant (bevist read-only før implementering):** `RequirementWikiResearchService::supportingClaimIds()` returnerte bare claim-id-er uten `content_origin`. Dette fløt uendret gjennom `RequirementWikiAnswerService::claimTextsByPageId()` → `pagesForAi()` — en flat `claim_texts`-liste uten opprinnelse — inn i alle tre AI-klienter, der `RequirementWikiAnswerAiClient` merket blokken «VERIFIED FACTS» uansett faktisk `content_origin`. `alignment_status` (aligned/partially_aligned/best_practice/possible_conflict) er en AI-vurdering av tekstlig/semantisk forankring i Wiki-siden — aldri avledet av claims' faktiske `content_origin`.
 
@@ -2840,7 +2838,7 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 
 **Bindende produktregel, overordnet enhver tidligere claim-, QA- eller godkjenningsstrategi i dette dokumentet der de er i konflikt:**
 
-> Claims er en frivillig, ikke-blokkerende kvalitetssløyfe for kunder som ønsker å bruke intern spisskompetanse til å profesjonalisere og forbedre Enterprise Wiki over tid. Ubehandlede claims er aldri en feiltilstand — verken for siden, kjøringen eller wikien som helhet.
+> Claims er en frivillig, ikke-blokkerende kvalitetssløyfe for kunder som ønsker å bruke intern spisskompetanse til å profesjonalisere og forbedre Enterprise Wiki over tid. I den gjeldende modellen er dette Procynias egne claims, ikke direkte kildefakta. Ubehandlede claims er aldri en feiltilstand — verken for siden, kjøringen eller wikien som helhet.
 
 **Bakgrunn:** v0.7–v0.9 fjernet interne verifiseringssignaler (negasjon/modalitet/aktør/scope/subjekt, teknisk usikkerhet) som *brukersaker*, men rørte ikke selve gate-logikken: `EnterpriseWikiPostIngestQaService`/8G-modellen fortsetter å beskrive QA som en obligatorisk "completion gate", og `EnterpriseWikiClaimFindingExplainer::buildContentFinding()` markerer fortsatt enhver gjenværende brukersak (inkludert den mer forbeholdne kategorien "mulig avvik") som blokkerende. Dette notatet er den bindende presiseringen av at **selve blokkeringen** — ikke bare hvilke claim-kategorier som vises som brukersaker — er i strid med produktstrategien, og opphever den delen av tidligere faseplaner.
 
@@ -2877,7 +2875,7 @@ Dersom et fullstendig revisjonsspor over alle godkjennings-/angre-hendelser (hve
 **Hva dette opphever/presiserer i tidligere deler av dette dokumentet — les i lys av v0.10 der de er i konflikt:**
 - **Fase 8G, «QA som arkitektonisk senter»:** setningene «Post-ingest QA er **completion gate** for alle applied ingest-kjøringer» og «En applied run regnes ikke som ferdig før all QA er bestått» beskriver en gjennomført teknisk fase korrekt historisk, men uttrykker en obligatorisk-portvakt-strategi som v0.10 opphever som produktprinsipp. En kjørings/sides tilgjengelighet for bruk i anbudsarbeid skal aldri avhenge av at QA er fullført.
 - **Fase 8G, «Hva coverage/eval måler»:** `claim_coverage_pct` og rød/gul/grønn-scoringen (der «approved uten claims» gir rødt) kan fortsatt vises som et **informativt helsesignal**, men skal aldri tolkes eller presenteres som at siden er ugyldig, feil, eller ikke kan brukes.
-- **v0.8-tittelen** («claims som obligatorisk aktiv kunnskapsstruktur»): «obligatorisk» gjelder fortsatt kun *datastrukturen* — claims skal ikke fjernes/deaktiveres som kunnskapslag for søk, graf og Wiki-baserte svar (uendret av v0.10). Det har aldri betydd, og betyr fortsatt ikke, at claims må behandles eller godkjennes før Wiki kan brukes eller publiseres.
+- **v0.8-tittelen** (historisk; nå superseded av v0.11): claims skal ikke fjernes som datastruktur, men de er ikke et generelt kunnskapslag for direkte kildefakta. De skal kun brukes for Procynias egne påstander og innvendinger, ikke som et obligatorisk mellomlager for alt Wiki-innhold.
 - **§B.5 Claim-/verifikasjonsregler:** oppdatert til å vise til dette notatet — se nedenfor.
 
 **Tekniske konsekvenser identifisert for senere arbeid (dokumentert her, ikke implementert i v0.10-notatet selv — se realiseringen rett under):**
@@ -3162,7 +3160,7 @@ Spesifikke regler:
 
 ### B.5 Claim-/verifikasjonsregler
 
-Se Arkitekturnotat v0.10 for den bindende produktstrategien: claims er en frivillig, ikke-blokkerende kvalitetssløyfe for kundens QA-fagpersoner, aldri en obligatorisk godkjenningsport og aldri en automatisk faglig fasit over merket beste praksis.
+Se arkitekturbeslutningen og Arkitekturnotat v0.10 for den bindende produktstrategien: claims er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger, aldri en obligatorisk godkjenningsport og aldri en automatisk faglig fasit over merket beste praksis eller direkte kildefakta.
 
 Claims skal:
 
