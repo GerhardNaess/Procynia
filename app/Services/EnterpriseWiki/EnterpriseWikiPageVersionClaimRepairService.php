@@ -49,6 +49,10 @@ class EnterpriseWikiPageVersionClaimRepairService
             'pages_already_synced' => 0,
         ];
 
+        if ($onlyRun?->isAwaitingHumanAction() === true) {
+            return $result;
+        }
+
         $query = EnterpriseWikiIngestRun::query()
             ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED);
 
@@ -56,8 +60,17 @@ class EnterpriseWikiPageVersionClaimRepairService
             $query->where('id', $onlyRun->id);
         }
 
+        $query->whereNotIn('status', [
+            EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+            EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+        ]);
+
         $query->orderBy('id')->chunkById(50, function ($runs) use (&$result, $apply): void {
             foreach ($runs as $run) {
+                if ($run->isAwaitingHumanAction()) {
+                    continue;
+                }
+
                 $this->repairRun($run, $apply, $result);
             }
         });
@@ -70,6 +83,10 @@ class EnterpriseWikiPageVersionClaimRepairService
      */
     private function repairRun(EnterpriseWikiIngestRun $run, bool $apply, array &$result): void
     {
+        if ($run->isAwaitingHumanAction()) {
+            return;
+        }
+
         $result['runs_checked']++;
 
         $pivotRows = EnterpriseWikiIngestRunPage::query()

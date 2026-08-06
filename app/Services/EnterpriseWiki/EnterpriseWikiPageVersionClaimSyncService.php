@@ -84,6 +84,10 @@ class EnterpriseWikiPageVersionClaimSyncService
                 continue;
             }
 
+            if ($run->isAwaitingHumanAction()) {
+                continue;
+            }
+
             try {
                 $this->syncRun($run);
             } catch (Throwable $e) {
@@ -104,6 +108,27 @@ class EnterpriseWikiPageVersionClaimSyncService
      */
     public function syncRun(EnterpriseWikiIngestRun $run): array
     {
+        if ($run->isAwaitingHumanAction()) {
+            return [
+                'extraction' => [
+                    'pages' => 0,
+                    'claims' => 0,
+                    'skipped' => 0,
+                    'busy' => 0,
+                    'capped_pages' => 0,
+                ],
+                'verification' => [
+                    'pages' => 0,
+                    'claims' => 0,
+                    'references' => 0,
+                    'skipped' => 0,
+                    'no_support' => 0,
+                    'busy' => 0,
+                    'reused' => 0,
+                ],
+            ];
+        }
+
         $extraction = $this->extractService->extract($run);
         $verification = $this->verifyService->verify($run);
 
