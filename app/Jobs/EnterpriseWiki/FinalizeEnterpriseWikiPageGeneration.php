@@ -20,12 +20,12 @@ use Throwable;
  * Checks whether the current applied-page-generation phase for a run has finished
  * (successfully or not) and advances the run, or marks it failed.
  *
- * Two-phase design: article/summary pages must all finish before concept/entity pages are
- * dispatched, because concept/entity generation reads the finished article/summary content
- * as context. Dispatching everything in one wave would make that context dependent on queue
- * timing rather than guaranteed. The run's own status is the phase marker:
- *   - generating_pages                 -> phase 1 (article/summary) in flight
- *   - generating_concept_entity_pages  -> phase 2 (concept/entity) in flight
+ * Two-phase design: article, summary, and independently-scoped concept pages run in the first
+ * wave. Concept pages without explicit owned_topics, and entity pages, remain in the deferred
+ * concept/entity wave so they can use finished article/summary content as context. The run's own
+ * status is the phase marker:
+ *   - generating_pages                 -> initial wave in flight
+ *   - generating_concept_entity_pages  -> deferred concept/entity wave in flight
  *
  * Dispatched by every GenerateEnterpriseWikiAppliedPage job on completion or failure — the
  * page job that finishes last for a given phase is the one whose invocation actually advances
@@ -40,9 +40,10 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    private const ARTICLE_SUMMARY_TYPES = [
+    private const INITIAL_WAVE_TYPES = [
         EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
         EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+        EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
     ];
 
     private const CONCEPT_ENTITY_TYPES = [
@@ -78,8 +79,8 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             }
 
             return match ($run->status) {
-                EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES => $this->finalizeArticleSummaryPhase($run, $buildPageLinksService),
-                EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES => $this->finalizeConceptEntityPhase($run),
+                EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES => $this->finalizeInitialPhase($run, $buildPageLinksService),
+                EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES => $this->finalizeDeferredConceptEntityPhase($run),
                 default => ['outcome' => 'already_advanced'],
             };
         });
@@ -94,9 +95,9 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     /**
      * @return array{outcome: string, page_ids?: Collection}
      */
-    private function finalizeArticleSummaryPhase(EnterpriseWikiIngestRun $run, EnterpriseWikiBuildPageLinksService $buildPageLinksService): array
+    private function finalizeInitialPhase(EnterpriseWikiIngestRun $run, EnterpriseWikiBuildPageLinksService $buildPageLinksService): array
     {
-        $pivots = $this->pivotsForTypes(self::ARTICLE_SUMMARY_TYPES);
+        $pivots = $this->initialWavePivots($run);
 
         if ($this->hasPending($pivots)) {
             return ['outcome' => 'pending'];
@@ -105,46 +106,56 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         $failed = $this->failedPivots($pivots);
 
         if ($failed->isNotEmpty()) {
-            $this->markRunFailed($run, $failed, $pivots->count(), 'article/summary');
+            $this->markRunFailed($run, $failed, $pivots->count(), 'initial');
 
             return ['outcome' => 'failed'];
         }
 
-        // Article and summary pages both exist and generated successfully — this is the exact,
-        // single, guaranteed-once point to build the structural article<->summary link graph
-        // (co-membership, not content-derived — see
+        // Article and summary pages exist and generated successfully before any later flow stage
+        // runs — this is the exact, single, guaranteed-once point to build the structural
+        // article<->summary link graph (co-membership, not content-derived — see
         // EnterpriseWikiBuildPageLinksService::buildArticleSummaryLinks()). Deliberately narrower
         // than build(): concept/entity combinatoric linking stays an explicit, opt-in operation
         // (wiki:build-page-links), unaffected by this automatic step.
         $buildPageLinksService->buildArticleSummaryLinks($run);
 
-        // All article/summary pages are done — this is the single atomic claim that
-        // guarantees concept/entity jobs are dispatched exactly once: a concurrent
-        // invocation of this job blocks on the row lock, then sees status !== generating_pages
-        // and returns 'already_advanced' above instead of dispatching a second wave.
+        $deferredPageIds = $this->deferredConceptEntityPivots($run)
+            ->whereNull('generated_page_version_id')
+            ->pluck('enterprise_wiki_page_id')
+            ->values();
+
+        if ($deferredPageIds->isEmpty()) {
+            $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING]);
+
+            Log::info('[WIKI_PAGE_GENERATION_FINALIZE] All initial-wave pages generated — continuing document flow.', [
+                'run_id' => $this->runId,
+                'initial_pages' => $pivots->count(),
+            ]);
+
+            return ['outcome' => 'completed'];
+        }
+
+        // All initial-wave pages are done — this is the single atomic claim that guarantees
+        // deferred concept/entity jobs are dispatched exactly once: a concurrent invocation
+        // blocks on the row lock, then sees status !== generating_pages and returns
+        // 'already_advanced' above instead of dispatching a second wave.
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES]);
 
-        $conceptEntityPageIds = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $this->runId)
-            ->whereNull('generated_page_version_id')
-            ->whereHas('page', fn ($query) => $query->whereIn('page_type', self::CONCEPT_ENTITY_TYPES))
-            ->pluck('enterprise_wiki_page_id');
-
-        Log::info('[WIKI_PAGE_GENERATION_FINALIZE] Article/summary pages generated — dispatching concept/entity pages.', [
+        Log::info('[WIKI_PAGE_GENERATION_FINALIZE] Initial-wave pages generated — dispatching deferred concept/entity pages.', [
             'run_id' => $this->runId,
-            'article_summary_pages' => $pivots->count(),
-            'concept_entity_pages_dispatched' => $conceptEntityPageIds->count(),
+            'initial_pages' => $pivots->count(),
+            'concept_entity_pages_dispatched' => $deferredPageIds->count(),
         ]);
 
-        return ['outcome' => 'dispatch_concept_entity', 'page_ids' => $conceptEntityPageIds];
+        return ['outcome' => 'dispatch_concept_entity', 'page_ids' => $deferredPageIds];
     }
 
     /**
      * @return array{outcome: string}
      */
-    private function finalizeConceptEntityPhase(EnterpriseWikiIngestRun $run): array
+    private function finalizeDeferredConceptEntityPhase(EnterpriseWikiIngestRun $run): array
     {
-        $pivots = $this->pivotsForTypes(self::CONCEPT_ENTITY_TYPES);
+        $pivots = $this->deferredConceptEntityPivots($run);
 
         if ($this->hasPending($pivots)) {
             return ['outcome' => 'pending'];
@@ -164,7 +175,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
         Log::info('[WIKI_PAGE_GENERATION_FINALIZE] All applied pages generated — continuing document flow.', [
             'run_id' => $this->runId,
-            'concept_entity_pages' => $pivots->count(),
+            'deferred_concept_entity_pages' => $pivots->count(),
         ]);
 
         return ['outcome' => 'completed'];
@@ -188,6 +199,89 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
             ->whereHas('page', fn ($query) => $query->whereIn('page_type', $pageTypes))
             ->with('page')
             ->get();
+    }
+
+    private function initialWavePivots(EnterpriseWikiIngestRun $run): Collection
+    {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        return $this->pivotsForTypes(self::INITIAL_WAVE_TYPES)
+            ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => $this->isInitialWavePage($row->page, $decisionJson))
+            ->values();
+    }
+
+    private function deferredConceptEntityPivots(EnterpriseWikiIngestRun $run): Collection
+    {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        return $this->pivotsForTypes(self::CONCEPT_ENTITY_TYPES)
+            ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => ! $this->isInitialWavePage($row->page, $decisionJson))
+            ->values();
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function isInitialWavePage(?EnterpriseWikiPage $page, array $decisionJson): bool
+    {
+        if (! $page instanceof EnterpriseWikiPage) {
+            return false;
+        }
+
+        return match ($page->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => true,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->conceptCanGenerateWithoutArticleSummaryContext($page, $decisionJson),
+            default => false,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function conceptCanGenerateWithoutArticleSummaryContext(EnterpriseWikiPage $page, array $decisionJson): bool
+    {
+        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT) {
+            return false;
+        }
+
+        $entry = $this->conceptDecisionEntry($page, $decisionJson);
+
+        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     * @return array<string, mixed>|null
+     */
+    private function conceptDecisionEntry(EnterpriseWikiPage $page, array $decisionJson): ?array
+    {
+        foreach ((array) data_get($decisionJson, 'concept_pages', []) as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            if (($entry['title'] ?? null) === $page->title) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function nonEmptyStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(fn ($item): string => trim((string) $item), $value),
+            fn (string $item): bool => $item !== '',
+        ));
     }
 
     private function hasPending(Collection $pivots): bool

@@ -22,8 +22,9 @@ use InvalidArgumentException;
  * Generates content_markdown and EnterpriseWikiPageVersion records for all four wiki page types
  * (article, summary, concept, entity) linked to an applied maintainer decision run.
  *
- * Processing order: article and summary first, then concept and entity — so article/summary
- * content is available as context when generating concept/entity pages.
+ * Processing order: article, summary, and independently-scoped concept pages first; concept
+ * pages without explicit owned_topics, and entity pages, run afterward so article/summary
+ * content is available as context when they need it.
  * Idempotent: pages that already have any version record are skipped.
  * Does not touch claims, source references, or ProcessEnterpriseWikiIngest.
  */
@@ -1479,14 +1480,24 @@ class EnterpriseWikiGenerateAppliedPagesService
     {
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
-        $articleSummaryPageIds = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->whereHas('page', fn ($query) => $query->whereIn('page_type', self::ARTICLE_SUMMARY_TYPES))
-            ->pluck('enterprise_wiki_page_id');
+        $sharedContext = '';
 
-        $sharedContext = $this->loadSharedContext($articleSummaryPageIds->all());
+        if (! $this->conceptCanGenerateWithoutArticleSummaryContext($run, $page)) {
+            $articleSummaryPageIds = EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_ingest_run_id', $run->id)
+                ->whereHas('page', fn ($query) => $query->whereIn('page_type', self::ARTICLE_SUMMARY_TYPES))
+                ->pluck('enterprise_wiki_page_id');
+
+            $sharedContext = $this->loadSharedContext($articleSummaryPageIds->all());
+        }
 
         return $this->buildConceptEntityContext($page, $decisionJson, $sharedContext);
+    }
+
+    private function conceptCanGenerateWithoutArticleSummaryContext(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): bool
+    {
+        return $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
+            && $this->plannedOwnedTopicsForPage($run, $page) !== [];
     }
 
     /**

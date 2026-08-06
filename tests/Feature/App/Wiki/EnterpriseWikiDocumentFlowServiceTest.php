@@ -43,10 +43,10 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     // =========================================================================
-    // run(): maintainer decision -> apply -> dispatch phase 1 (article/summary) jobs only
+    // run(): maintainer decision -> apply -> dispatch initial page-generation wave
     // =========================================================================
 
-    public function test_run_executes_maintainer_decision_and_apply_then_dispatches_only_article_and_summary_jobs(): void
+    public function test_run_executes_maintainer_decision_and_apply_then_dispatches_article_summary_and_independent_concept_jobs(): void
     {
         Queue::fake();
 
@@ -69,23 +69,19 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $this->assertNotNull($run->started_at);
         $this->assertNull($run->error_message);
 
-        foreach (['article', 'summary'] as $type) {
+        foreach (['article', 'summary', 'concept'] as $type) {
             Queue::assertPushed(
                 GenerateEnterpriseWikiAppliedPage::class,
                 fn (GenerateEnterpriseWikiAppliedPage $job) => $job->runId === $run->id && $job->pageId === $pages[$type]->id,
             );
         }
 
-        // Concept/entity must NOT be dispatched yet — only after phase 1 completes
-        // (see FinalizeEnterpriseWikiPageGenerationTest for that transition).
-        foreach (['concept', 'entity'] as $type) {
-            Queue::assertNotPushed(
-                GenerateEnterpriseWikiAppliedPage::class,
-                fn (GenerateEnterpriseWikiAppliedPage $job) => $job->pageId === $pages[$type]->id,
-            );
-        }
+        Queue::assertNotPushed(
+            GenerateEnterpriseWikiAppliedPage::class,
+            fn (GenerateEnterpriseWikiAppliedPage $job) => $job->pageId === $pages['entity']->id,
+        );
 
-        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 2);
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 3);
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
     }
 
@@ -117,7 +113,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
             ->all();
 
         $this->assertSame(
-            [$pages['article']->id, $pages['summary']->id],
+            [$pages['article']->id, $pages['summary']->id, $pages['concept']->id],
             $pushedPageIds,
         );
     }
@@ -132,7 +128,12 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $this->assertPageTypeDispatched(EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
     }
 
-    public function test_run_does_not_dispatch_concept_or_entity_jobs_before_phase_1_completes(): void
+    public function test_run_dispatches_independent_concept_page_job(): void
+    {
+        $this->assertPageTypeDispatched(EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+    }
+
+    public function test_run_does_not_dispatch_dependent_concept_or_entity_jobs_before_initial_wave_completes(): void
     {
         Queue::fake();
 
@@ -143,7 +144,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $pages = $this->attachAllPageTypes($run);
 
         $callOrder = [];
-        $this->configureStage1Mocks($customer, $document, $callOrder);
+        $this->configureStage1Mocks($customer, $document, $callOrder, null, $this->baseDecision(withConceptOwnedTopics: false));
 
         $this->flowService()->run($run->id);
 
@@ -186,8 +187,8 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
             GenerateEnterpriseWikiAppliedPage::class,
             fn (GenerateEnterpriseWikiAppliedPage $job) => $job->pageId === $pages['article']->id,
         );
-        // Only the summary job remains for phase 1 (concept/entity aren't dispatched yet).
-        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 1);
+        // Summary and the independent concept remain in the initial generation wave.
+        Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 2);
     }
 
     #[DataProvider('stage1FailingStepProvider')]
@@ -650,8 +651,9 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         EnterpriseWikiDocument $document,
         array &$callOrder,
         ?string $failingStep = null,
+        ?array $decisionOverride = null,
     ): void {
-        $decision = $this->baseDecision();
+        $decision = $decisionOverride ?? $this->baseDecision();
         $stages = ['maintainer_decision', 'apply'];
         $failingStageIndex = $failingStep !== null ? array_search($failingStep, $stages, true) : false;
         $shouldExpect = function (string $stage) use ($failingStageIndex, $stages): bool {
@@ -664,7 +666,15 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         $shouldFail = fn (string $stage): bool => $failingStep === $stage;
 
         if ($shouldExpect('maintainer_decision')) {
-            $this->mock(EnterpriseWikiMaintainerDecisionService::class)
+            $maintainerDecisionService = $this->mock(EnterpriseWikiMaintainerDecisionService::class);
+
+            $maintainerDecisionService
+                ->shouldReceive('preparePersistedCandidateBatchesForDocument')
+                ->once()
+                ->with($customer->id, $document->id, 'no', Mockery::type(AiCallContext::class))
+                ->andReturn(null);
+
+            $maintainerDecisionService
                 ->shouldReceive('runForDocument')
                 ->once()
                 ->ordered('enterprise-wiki-document-flow')
@@ -679,7 +689,9 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
                     return $decision;
                 });
         } else {
-            $this->mock(EnterpriseWikiMaintainerDecisionService::class)->shouldNotReceive('runForDocument');
+            $maintainerDecisionService = $this->mock(EnterpriseWikiMaintainerDecisionService::class);
+            $maintainerDecisionService->shouldNotReceive('preparePersistedCandidateBatchesForDocument');
+            $maintainerDecisionService->shouldNotReceive('runForDocument');
         }
 
         if ($shouldExpect('apply')) {
@@ -872,8 +884,14 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         ]);
     }
 
-    private function baseDecision(): array
+    private function baseDecision(bool $withConceptOwnedTopics = true): array
     {
+        $conceptPage = ['action' => 'create', 'title' => 'Konsept', 'proposed_slug' => 'konsept-ab1c2d', 'reason' => 'Key concept.'];
+
+        if ($withConceptOwnedTopics) {
+            $conceptPage['owned_topics'] = ['Forklar Konsept som selvstendig styringsbegrep.'];
+        }
+
         return [
             'source_article' => [
                 'action' => 'create',
@@ -887,9 +905,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
                 'proposed_slug' => 'sammendrag-enterprise-wiki-ab1c2d',
                 'reason' => 'Summary page.',
             ],
-            'concept_pages' => [
-                ['action' => 'create', 'title' => 'Konsept', 'proposed_slug' => 'konsept-ab1c2d', 'reason' => 'Key concept.'],
-            ],
+            'concept_pages' => [$conceptPage],
             'entity_pages' => [
                 ['action' => 'create', 'title' => 'Entitet', 'proposed_slug' => 'entitet-ab1c2d', 'reason' => 'Key entity.'],
             ],

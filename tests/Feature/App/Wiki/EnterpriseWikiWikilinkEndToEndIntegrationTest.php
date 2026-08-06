@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
@@ -27,6 +28,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -60,7 +62,14 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
             'warnings' => [],
         ];
 
-        $this->mock(EnterpriseWikiMaintainerDecisionService::class)
+        $maintainerDecisionService = $this->mock(EnterpriseWikiMaintainerDecisionService::class);
+        $maintainerDecisionService
+            ->shouldReceive('preparePersistedCandidateBatchesForDocument')
+            ->once()
+            ->with($customer->id, $document->id, 'no', Mockery::type(AiCallContext::class))
+            ->andReturn(null);
+
+        $maintainerDecisionService
             ->shouldReceive('runForDocument')
             ->once()
             ->andReturn($decision);
@@ -92,7 +101,10 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
         // Claims/verification/lint/QA are mocked to isolate this test to the wikilink flow —
         // their own AI calls and behavior are covered by EnterpriseWikiDocumentFlowServiceTest.
         $this->mock(EnterpriseWikiExtractPageClaimsService::class)->shouldReceive('extract')->once()->andReturn(['pages' => 4, 'claims' => 0, 'skipped' => 0]);
-        $this->mock(EnterpriseWikiVerifyPageClaimsService::class)->shouldReceive('verify')->once()->andReturn(['pages' => 4, 'claims' => 0, 'references' => 0, 'skipped' => 0, 'no_support' => 0]);
+        $verifyPageClaimsService = $this->mock(EnterpriseWikiVerifyPageClaimsService::class);
+        $verifyPageClaimsService->shouldReceive('unverifiedClaimIdsForRun')->twice()->andReturn([]);
+        $verifyPageClaimsService->shouldReceive('hasActiveClaimLeaseForRun')->once()->andReturn(false);
+        $verifyPageClaimsService->shouldNotReceive('verify');
         $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldReceive('lint')->once()->andReturn(['pages_checked' => 4, 'claims_checked' => 0, 'source_refs_checked' => 0, 'links_checked' => 0, 'findings_created' => 0, 'findings_skipped' => 0, 'findings_resolved' => 0, 'errors' => 0, 'warnings' => 0, 'info' => 0]);
         $this->mock(EnterpriseWikiLinkSemanticRepairService::class)->shouldReceive('repairForRun')->once()->andReturn(['pages_reviewed' => 4, 'applied' => 0, 'skipped' => 4, 'failed' => 0]);
         $this->mock(EnterpriseWikiPostIngestQaService::class)

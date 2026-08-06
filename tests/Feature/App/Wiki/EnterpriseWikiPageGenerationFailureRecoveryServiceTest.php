@@ -138,6 +138,43 @@ class EnterpriseWikiPageGenerationFailureRecoveryServiceTest extends TestCase
         $this->assertNull($run->error_message);
     }
 
+    public function test_independent_concept_failure_is_set_back_to_generating_pages(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run, $pivots] = $this->createRun593LikeFixture($customer);
+        $this->markFailedConceptAsIndependent($run, $pivots['failed']);
+
+        $this->service()->attempt($run->id, caller: 'test');
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, $run->status);
+        $this->assertNull($run->finished_at);
+        $this->assertNull($run->error_message);
+
+        Queue::assertPushed(
+            GenerateEnterpriseWikiAppliedPage::class,
+            fn ($job) => $job->runId === $run->id && $job->pageId === $pivots['failed']->enterprise_wiki_page_id
+        );
+    }
+
+    public function test_mixed_initial_and_deferred_failed_pages_are_rejected(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run, $pivots] = $this->createRun593LikeFixture($customer, secondFailedPage: true);
+        $this->markFailedConceptAsIndependent($run, $pivots['failed']);
+
+        $result = $this->service()->attempt($run->id, caller: 'test');
+
+        $this->assertSame(EnterpriseWikiRunRecoveryResult::OUTCOME_NOT_RECOVERABLE, $result->outcome);
+        $this->assertStringContainsString('both initial and deferred generation phases', $result->reason);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->fresh()->status);
+        Queue::assertNothingPushed();
+    }
+
     public function test_run_without_any_failed_page_is_rejected(): void
     {
         Queue::fake();
@@ -307,6 +344,28 @@ class EnterpriseWikiPageGenerationFailureRecoveryServiceTest extends TestCase
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
+    }
+
+    private function markFailedConceptAsIndependent(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiIngestRunPage $failedPivot,
+    ): void {
+        $page = EnterpriseWikiPage::query()->findOrFail($failedPivot->enterprise_wiki_page_id);
+
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => 'Masterdata Samhandling', 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => 'Masterdata Samhandling — kort oppsummering', 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'title' => $page->title,
+                'proposed_slug' => $page->slug,
+                'reason' => 'Scoped concept.',
+                'owned_topics' => ['Forklar styringsnivåene som selvstendig begrep.'],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
     }
 
     private function attachPivot(

@@ -57,6 +57,17 @@ class EnterpriseWikiDocumentFlowService
      */
     private const CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS = 60;
 
+    private const ARTICLE_SUMMARY_PAGE_TYPES = [
+        EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+        EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+    ];
+
+    private const INITIAL_PAGE_GENERATION_TYPES = [
+        EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+        EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+        EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+    ];
+
     public function __construct(
         private readonly EnterpriseWikiIngestService $ingestService,
         private readonly EnterpriseWikiMaintainerDecisionService $maintainerDecisionService,
@@ -652,10 +663,10 @@ class EnterpriseWikiDocumentFlowService
     }
 
     /**
-     * Dispatch phase 1 of applied page generation: article and summary pages only.
-     * Concept and entity pages are deliberately NOT dispatched here — they read the
-     * finished article/summary content as context, so FinalizeEnterpriseWikiPageGeneration
-     * dispatches them only once every article/summary job has completed successfully.
+     * Dispatch the initial applied-page generation wave: article, summary, and concept pages
+     * whose maintainer-plan entry already contains explicit owned_topics. Concept pages without
+     * that scoped responsibility, and entity pages, still wait for the deferred concept/entity
+     * phase so they can use finished article/summary context.
      *
      * Article dispatched before summary (best effort, not a hard guarantee under a
      * multi-worker queue): EnterpriseWikiGenerateAppliedPagesService::buildArticleSummaryContextForRun()
@@ -668,31 +679,114 @@ class EnterpriseWikiDocumentFlowService
     {
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES]);
 
-        $pageIds = EnterpriseWikiIngestRunPage::query()
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+
+        $initialRows = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->whereNull('generated_page_version_id')
-            ->whereHas('page', fn ($query) => $query->whereIn('page_type', [
-                EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-                EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
-            ]))
+            ->whereHas('page', fn ($query) => $query->whereIn('page_type', self::INITIAL_PAGE_GENERATION_TYPES))
             ->with('page')
             ->get()
-            ->sortBy(fn (EnterpriseWikiIngestRunPage $row): int => $row->page?->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 0 : 1)
-            ->pluck('enterprise_wiki_page_id');
+            ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => $this->isInitialPageGenerationWavePage($row->page, $decisionJson))
+            ->sortBy(fn (EnterpriseWikiIngestRunPage $row): int => $this->initialPageGenerationSortOrder($row->page))
+            ->values();
+
+        $pageIds = $initialRows->pluck('enterprise_wiki_page_id');
 
         foreach ($pageIds as $pageId) {
             GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pageId);
         }
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Article/summary page generation jobs dispatched.', [
+        Log::info('[WIKI_DOCUMENT_FLOW] Initial page generation jobs dispatched.', [
             'run_id' => $run->id,
             'pages_dispatched' => $pageIds->count(),
+            'article_summary_pages' => $initialRows
+                ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => $row->page !== null && in_array($row->page->page_type, self::ARTICLE_SUMMARY_PAGE_TYPES, true))
+                ->count(),
+            'independent_concept_pages' => $initialRows
+                ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => $row->page?->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT)
+                ->count(),
         ]);
 
-        // Safety net for the case where every article/summary page already has a version
+        // Safety net for the case where every initial-wave page already has a version
         // (e.g. a resumed run): no page job will fire to trigger the phase check, so trigger
         // it once here. This is a cheap no-op if pages are still pending.
         FinalizeEnterpriseWikiPageGeneration::dispatch($run->id);
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function isInitialPageGenerationWavePage(?EnterpriseWikiPage $page, array $decisionJson): bool
+    {
+        if (! $page instanceof EnterpriseWikiPage) {
+            return false;
+        }
+
+        return match ($page->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => true,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->conceptCanGenerateWithoutArticleSummaryContext($page, $decisionJson),
+            default => false,
+        };
+    }
+
+    private function initialPageGenerationSortOrder(?EnterpriseWikiPage $page): int
+    {
+        return match ($page?->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => 0,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => 1,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => 2,
+            default => 3,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function conceptCanGenerateWithoutArticleSummaryContext(EnterpriseWikiPage $page, array $decisionJson): bool
+    {
+        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT) {
+            return false;
+        }
+
+        $entry = $this->conceptDecisionEntry($page, $decisionJson);
+
+        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     * @return array<string, mixed>|null
+     */
+    private function conceptDecisionEntry(EnterpriseWikiPage $page, array $decisionJson): ?array
+    {
+        foreach ((array) data_get($decisionJson, 'concept_pages', []) as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            if (($entry['title'] ?? null) === $page->title) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function nonEmptyStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(fn ($item): string => trim((string) $item), $value),
+            fn (string $item): bool => $item !== '',
+        ));
     }
 
     /**

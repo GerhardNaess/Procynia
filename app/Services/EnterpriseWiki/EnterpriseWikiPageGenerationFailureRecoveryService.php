@@ -44,9 +44,10 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiPageGenerationFailureRecoveryService
 {
-    private const ARTICLE_SUMMARY_TYPES = [
+    private const INITIAL_WAVE_TYPES = [
         EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
         EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+        EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
     ];
 
     /**
@@ -197,6 +198,22 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
             ];
         }
 
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
+        $failedPhases = $failed
+            ->map(fn (EnterpriseWikiIngestRunPage $p): string => $this->isInitialWavePage($p->page, $decisionJson) ? 'initial' : 'deferred')
+            ->unique()
+            ->values();
+
+        if ($failedPhases->count() > 1) {
+            return [
+                'result' => EnterpriseWikiRunRecoveryResult::notRecoverable(
+                    "Run [{$run->id}] has failed page(s) across both initial and deferred generation phases — ".
+                    'refusing to retry a mixed-phase failure because it could duplicate deferred dispatch.'
+                ),
+                'failedPivots' => $none,
+            ];
+        }
+
         return [
             'result' => EnterpriseWikiRunRecoveryResult::resumed(
                 "Run [{$run->id}] has {$failed->count()} failed page-generation job(s) with every other page ".
@@ -219,8 +236,9 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
      */
     private function resume(EnterpriseWikiIngestRun $run, Collection $failedPivots): void
     {
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
         $targetStatus = $failedPivots->contains(
-            fn (EnterpriseWikiIngestRunPage $p): bool => in_array($p->page?->page_type, self::ARTICLE_SUMMARY_TYPES, true)
+            fn (EnterpriseWikiIngestRunPage $p): bool => $this->isInitialWavePage($p->page, $decisionJson)
         )
             ? EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES
             : EnterpriseWikiIngestRun::STATUS_GENERATING_CONCEPT_ENTITY_PAGES;
@@ -241,5 +259,57 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
 
             GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pivot->enterprise_wiki_page_id);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     */
+    private function isInitialWavePage(?EnterpriseWikiPage $page, array $decisionJson): bool
+    {
+        if (! $page instanceof EnterpriseWikiPage || ! in_array($page->page_type, self::INITIAL_WAVE_TYPES, true)) {
+            return false;
+        }
+
+        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT) {
+            return true;
+        }
+
+        $entry = $this->conceptDecisionEntry($page, $decisionJson);
+
+        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $decisionJson
+     * @return array<string, mixed>|null
+     */
+    private function conceptDecisionEntry(EnterpriseWikiPage $page, array $decisionJson): ?array
+    {
+        foreach ((array) data_get($decisionJson, 'concept_pages', []) as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            if (($entry['title'] ?? null) === $page->title) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function nonEmptyStringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            array_map(fn ($item): string => trim((string) $item), $value),
+            fn (string $item): bool => $item !== '',
+        ));
     }
 }

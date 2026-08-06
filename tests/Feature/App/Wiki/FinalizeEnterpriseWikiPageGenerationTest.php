@@ -29,7 +29,7 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
     }
 
     // =========================================================================
-    // Phase 1: article/summary
+    // Phase 1: initial page-generation wave
     // =========================================================================
 
     public function test_phase_1_does_not_advance_while_article_or_summary_is_pending(): void
@@ -49,7 +49,25 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, $run->fresh()->status);
     }
 
-    public function test_phase_1_completion_dispatches_concept_and_entity_jobs_not_continuation(): void
+    public function test_phase_1_does_not_advance_while_independent_concept_is_pending(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+        ], independentConcept: true);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        Queue::assertNotPushed(GenerateEnterpriseWikiAppliedPage::class);
+        Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, $run->fresh()->status);
+    }
+
+    public function test_phase_1_completion_dispatches_deferred_concept_and_entity_jobs_not_continuation(): void
     {
         Queue::fake();
 
@@ -76,7 +94,7 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         );
         Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 2);
 
-        // The safety net for the "zero/already-done concept/entity pages" case.
+        // The safety net for the "zero/already-done deferred concept/entity pages" case.
         Queue::assertPushed(FinalizeEnterpriseWikiPageGeneration::class, fn ($job) => $job->runId === $run->id);
 
         // Claim extraction (via the continuation) must NOT start yet — phase 2 hasn't run.
@@ -100,7 +118,7 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
         $this->assertNotNull($run->finished_at);
-        $this->assertStringContainsString('1 of 2 article/summary page(s) failed', $run->error_message);
+        $this->assertStringContainsString('1 of 2 initial page(s) failed', $run->error_message);
 
         Queue::assertNotPushed(GenerateEnterpriseWikiAppliedPage::class);
         Queue::assertNotPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class);
@@ -127,6 +145,42 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
         // for phase 1's own type filter, so it can only dispatch each page once: verify no
         // page id is dispatched twice.
         Queue::assertPushed(GenerateEnterpriseWikiAppliedPage::class, 2);
+    }
+
+    public function test_phase_1_completion_continues_directly_when_no_deferred_pages_remain(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ], independentConcept: true);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        Queue::assertNotPushed(GenerateEnterpriseWikiAppliedPage::class);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, fn ($job) => $job->runId === $run->id);
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->fresh()->status);
+    }
+
+    public function test_phase_1_direct_continuation_dispatched_only_once_even_if_finalize_runs_twice(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        [$run] = $this->createRun($customer, EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES, [
+            'article' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'summary' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            'concept' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ], independentConcept: true);
+
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+        (new FinalizeEnterpriseWikiPageGeneration($run->id))->handle();
+
+        Queue::assertPushed(ContinueEnterpriseWikiDocumentFlowAfterPages::class, 1);
     }
 
     // =========================================================================
@@ -280,10 +334,10 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
     }
 
     /**
-     * @param array<string, string> $pagesByType page_type => generation_status
+     * @param  array<string, string>  $pagesByType  page_type => generation_status
      * @return array{0: EnterpriseWikiIngestRun, 1: array<string, EnterpriseWikiPage>}
      */
-    private function createRun(Customer $customer, string $runStatus, array $pagesByType): array
+    private function createRun(Customer $customer, string $runStatus, array $pagesByType, bool $independentConcept = false): array
     {
         $document = $this->createDocument($customer);
 
@@ -320,6 +374,23 @@ class FinalizeEnterpriseWikiPageGenerationTest extends TestCase
             ]);
 
             $pages[$pageType] = $page;
+        }
+
+        if ($independentConcept && isset($pages['concept'])) {
+            $run->update(['maintainer_decision_json' => [
+                'source_article' => ['action' => 'create', 'title' => $pages['article']->title ?? 'Article', 'reason' => 'r'],
+                'source_summary' => ['action' => 'create', 'title' => $pages['summary']->title ?? 'Summary', 'reason' => 'r'],
+                'concept_pages' => [[
+                    'action' => 'create',
+                    'title' => $pages['concept']->title,
+                    'proposed_slug' => $pages['concept']->slug,
+                    'reason' => 'Scoped concept.',
+                    'owned_topics' => ['Forklar concept som selvstendig styringsbegrep.'],
+                ]],
+                'entity_pages' => [],
+                'no_action_reason' => null,
+                'warnings' => [],
+            ]]);
         }
 
         return [$run, $pages];

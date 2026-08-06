@@ -252,6 +252,78 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertStringContainsString('Kort sammendrag av kontrollert tilbudsarbeid', $capturedContext);
     }
 
+    public function test_independent_concept_page_does_not_receive_finished_article_or_summary_content_as_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel om Procynia');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag om Procynia');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Nøkkelbegrep');
+
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
+            'source_summary' => ['action' => 'create', 'title' => $summary->title, 'proposed_slug' => $summary->slug, 'reason' => 'r'],
+            'concept_pages' => [[
+                'action' => 'create',
+                'page_id' => null,
+                'title' => $concept->title,
+                'proposed_slug' => $concept->slug,
+                'reason' => 'Selvstendig nøkkelbegrep.',
+                'owned_topics' => ['Forklar nøkkelbegrepet som selvstendig styringsbegrep.'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+            'no_action_reason' => null,
+            'warnings' => [],
+        ]]);
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Artikkel om Procynia'."\n\nProcynia styrer hele tilbudsprosessen.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $summary->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Sammendrag om Procynia'."\n\nKort sammendrag av kontrollert tilbudsarbeid.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $capturedContext = null;
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(function (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ) use (&$capturedContext, $article): array {
+                $capturedContext = $additionalContext;
+
+                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $sourceElements);
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class)
+        );
+
+        $this->assertStringContainsString('Forklar nøkkelbegrepet som selvstendig styringsbegrep.', $capturedContext);
+        $this->assertStringNotContainsString('Procynia styrer hele tilbudsprosessen', $capturedContext);
+        $this->assertStringNotContainsString('Kort sammendrag av kontrollert tilbudsarbeid', $capturedContext);
+    }
+
     public function test_concept_page_receives_its_own_maintainer_assigned_responsibility_as_context(): void
     {
         $customer = $this->createCustomer();
