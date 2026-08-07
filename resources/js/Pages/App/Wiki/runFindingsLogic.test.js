@@ -1,6 +1,15 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUN_TIMELINE_STEPS, matchesFindingsLocalFilter, getRunTimelineState, getEscalationCopy, isRunStalled, formatFindingUserId } from './runFindingsLogic.js';
+import {
+    RUN_TIMELINE_STEPS,
+    ACTIVE_WIKI_RUN_STATUSES,
+    matchesFindingsLocalFilter,
+    getRunTimelineState,
+    getEscalationCopy,
+    isRunStalled,
+    isActiveWikiRun,
+    formatFindingUserId,
+} from './runFindingsLogic.js';
 
 describe('formatFindingUserId', () => {
     test('strips the claim-defect prefix, leaving only the stable numeric id', () => {
@@ -208,6 +217,94 @@ describe('getRunTimelineState — failed run uses failed_phase, not the generic 
 
         for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
             assert.equal(getRunTimelineState(run, i), 'empty');
+        }
+    });
+});
+
+describe('getRunTimelineState — verifying_claims/post_claim_verification map to the Verifisering step (Wiki run status visibility fix)', () => {
+    const verificationIndex = RUN_TIMELINE_STEPS.findIndex((step) => step.key === 'verification_linking');
+
+    test('verifying_claims marks the Verifisering step active, never blank', () => {
+        const run = { status: 'verifying_claims' };
+
+        assert.equal(getRunTimelineState(run, verificationIndex), 'active');
+    });
+
+    test('post_claim_verification marks the Verifisering step active, never blank', () => {
+        const run = { status: 'post_claim_verification' };
+
+        assert.equal(getRunTimelineState(run, verificationIndex), 'active');
+    });
+
+    test('verifying_claims marks every earlier step done and every later step empty — the timeline is never fully blank', () => {
+        const run = { status: 'verifying_claims' };
+
+        for (let i = 0; i < verificationIndex; i++) {
+            assert.equal(getRunTimelineState(run, i), 'done', `step ${i} should be done`);
+        }
+        assert.equal(getRunTimelineState(run, verificationIndex + 1), 'empty');
+    });
+
+    test('a genuinely unknown/future status never crashes and renders every step neutral, not blank-as-error', () => {
+        const run = { status: 'some_future_unknown_status' };
+
+        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
+            assert.doesNotThrow(() => getRunTimelineState(run, i));
+            assert.equal(getRunTimelineState(run, i), 'empty');
+        }
+    });
+});
+
+describe('ACTIVE_WIKI_RUN_STATUSES / isActiveWikiRun — polling contract (Wiki run status visibility fix)', () => {
+    // Wiki run-XXX: EnterpriseWikiIngestRun::EXPECTS_AUTOMATIC_PROGRESS_STATUSES on the backend —
+    // every one of these must keep the frontend polling, or a run can silently stop refreshing.
+    const backendAutomaticProgressStatuses = [
+        'running',
+        'sections_planned',
+        'maintainer_decision',
+        'applying',
+        'generating_pages',
+        'generating_concept_entity_pages',
+        'verification_linking',
+        'verifying_claims',
+        'post_claim_verification',
+        'qa',
+    ];
+
+    test('every backend automatic-progress status is active (keeps polling)', () => {
+        for (const status of backendAutomaticProgressStatuses) {
+            assert.equal(isActiveWikiRun({ status }), true, `expected ${status} to be active`);
+        }
+    });
+
+    test('verifying_claims and post_claim_verification are active — the exact statuses that previously stopped polling', () => {
+        assert.equal(isActiveWikiRun({ status: 'verifying_claims' }), true);
+        assert.equal(isActiveWikiRun({ status: 'post_claim_verification' }), true);
+    });
+
+    test('awaiting_document_owner_approval is kept active — existing product intent (an approval completed elsewhere must still be picked up)', () => {
+        assert.equal(isActiveWikiRun({ status: 'awaiting_document_owner_approval' }), true);
+    });
+
+    test('every terminal status stops polling', () => {
+        for (const status of ['completed', 'failed', 'escalated', 'cancelled']) {
+            assert.equal(isActiveWikiRun({ status }), false, `expected ${status} to be inactive`);
+        }
+    });
+
+    test('a null/undefined run is never active', () => {
+        assert.equal(isActiveWikiRun(null), false);
+        assert.equal(isActiveWikiRun(undefined), false);
+    });
+
+    test('an unknown/future status is never active — safe fallback, never crashes', () => {
+        assert.doesNotThrow(() => isActiveWikiRun({ status: 'some_future_unknown_status' }));
+        assert.equal(isActiveWikiRun({ status: 'some_future_unknown_status' }), false);
+    });
+
+    test('ACTIVE_WIKI_RUN_STATUSES contains every backend automatic-progress status', () => {
+        for (const status of backendAutomaticProgressStatuses) {
+            assert.ok(ACTIVE_WIKI_RUN_STATUSES.includes(status), `expected ACTIVE_WIKI_RUN_STATUSES to include ${status}`);
         }
     });
 });

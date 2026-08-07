@@ -166,6 +166,41 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    /**
+     * Regression: claims_count on the Pages tab must count only the CURRENT page version's
+     * claims, matching the scope EnterpriseWikiRunFindingsService already uses for the Kjøringer
+     * "Funn" count — previously this was a raw historical total (withCount('claims'), no version
+     * filter), so a page with claims on old, superseded versions showed an inflated total no
+     * finding list anywhere ever agreed with.
+     */
+    public function test_index_claims_count_only_counts_current_version_claims(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side med historikk');
+
+        $oldVersion = $this->createVersion($page, false);
+        $this->createClaim($page, $oldVersion, 'Gammel påstand 1', 0);
+        $this->createClaim($page, $oldVersion, 'Gammel påstand 2', 1);
+
+        $currentVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => '# '.$page->title,
+        ]);
+        $this->createClaim($page, $currentVersion, 'Gjeldende påstand', 0);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+            $row = collect(data_get($inertia, 'props.pages', []))->firstWhere('id', $page->id);
+
+            return $row !== null && $row['claims_count'] === 1;
+        });
+    }
+
     // =========================================================================
     // show() — basic returns
     // =========================================================================

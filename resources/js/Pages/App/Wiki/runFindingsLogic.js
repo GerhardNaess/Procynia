@@ -77,13 +77,54 @@ export function matchesFindingsLocalFilter(finding, filterKey) {
 /**
  * Matches a status-like value (run.status while active, or run.failed_phase for a failed run) to
  * its RUN_TIMELINE_STEPS index, applying the same aliasing either one may need: 'queued' covers
- * the early 'running'/'sections_planned' sub-states, and 'generating_pages' also covers
- * 'generating_concept_entity_pages' (phase 2 of page generation). Returns -1 when nothing matches.
+ * the early 'running'/'sections_planned' sub-states, 'generating_pages' also covers
+ * 'generating_concept_entity_pages' (phase 2 of page generation), and 'verification_linking' also
+ * covers 'verifying_claims' and 'post_claim_verification' — both are backend sub-phases of the
+ * same broader verification stage (claim-by-claim verification, then the brief hand-off before
+ * lint/semantic-repair/QA) and were previously entirely unmapped here, which made
+ * getRunTimelineState() return 'empty' for every step (a fully blank timeline) whenever a run sat
+ * in either status. Their own distinct status badge text ("Verifiserer påstander"/"Etterbehandler
+ * påstander", INGEST_STATUS_LABELS in Index.jsx) is unaffected — this only fixes which existing
+ * timeline step lights up. Returns -1 when nothing matches.
  */
 function findTimelineStepIndex(statusLike) {
     return RUN_TIMELINE_STEPS.findIndex((step) => step.key === statusLike
         || (step.key === 'queued' && ['queued', 'running', 'sections_planned'].includes(statusLike))
-        || (step.key === 'generating_pages' && statusLike === 'generating_concept_entity_pages'));
+        || (step.key === 'generating_pages' && statusLike === 'generating_concept_entity_pages')
+        || (step.key === 'verification_linking' && ['verifying_claims', 'post_claim_verification'].includes(statusLike)));
+}
+
+/**
+ * Every backend status (EnterpriseWikiIngestRun::EXPECTS_AUTOMATIC_PROGRESS_STATUSES) for which
+ * the pipeline is expected to keep moving on its own without further human input, plus
+ * 'awaiting_document_owner_approval' — technically a human-action wait, but one the frontend has
+ * always kept polling for so an approval completed elsewhere (e.g. by the document owner in a
+ * different session) is picked up automatically. Deliberately excludes 'decision_only' and
+ * 'queued': 'decision_only' waits on an explicit user action from a different flow (never
+ * resolves via background polling), and 'queued' is handled by callers via a direct
+ * `status === 'queued'` check rather than this list, matching existing behavior.
+ *
+ * This is the single shared source for "should we keep polling for this run" — previously
+ * duplicated ad hoc in Index.jsx as a plain local array that had silently drifted out of sync
+ * with the backend enum (missing 'verifying_claims'/'post_claim_verification' entirely, which
+ * made Sources/Runs-tab polling stop dead for a run sitting in either status).
+ */
+export const ACTIVE_WIKI_RUN_STATUSES = [
+    'running',
+    'sections_planned',
+    'maintainer_decision',
+    'applying',
+    'generating_pages',
+    'generating_concept_entity_pages',
+    'verification_linking',
+    'verifying_claims',
+    'post_claim_verification',
+    'qa',
+    'awaiting_document_owner_approval',
+];
+
+export function isActiveWikiRun(run) {
+    return !!run && ACTIVE_WIKI_RUN_STATUSES.includes(run.status);
 }
 
 /**

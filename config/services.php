@@ -94,6 +94,16 @@ return [
         // cap never fails the run — remaining pages simply complete their extraction step with
         // zero new claims (see EnterpriseWikiExtractPageClaimsService::extract()).
         'max_new_claims_per_run' => (int) env('ENTERPRISE_WIKI_MAX_NEW_CLAIMS_PER_RUN', 60),
+
+        // Wiki run status visibility fix: EnterpriseWikiQueueReservationTrace::logReservationCycle()
+        // fires on every JobPopping event (i.e. every queue-worker poll attempt against the
+        // enterprise-wiki queues, often every ~3 seconds), regardless of whether anything was
+        // actually found. Off by default so ordinary empty polling never hits the log or performs
+        // the Redis pendingSize/delayedSize/reservedSize lookups that call only existed to report —
+        // real events (a job actually reserved, a dispatch, a state transition, a recovery, or an
+        // exception) are logged unconditionally elsewhere and are never gated by this flag. Turn on
+        // only while actively diagnosing a queue-throughput issue.
+        'queue_reservation_trace_debug' => (bool) env('ENTERPRISE_WIKI_QUEUE_RESERVATION_TRACE_DEBUG', false),
     ],
 
 ];

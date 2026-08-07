@@ -14,6 +14,7 @@ import {
     getTransientFailureCopy,
     isRunStalled,
     formatFindingUserId,
+    isActiveWikiRun,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -168,21 +169,8 @@ const IN_PROGRESS_STATUSES = [
     'decision_only',
 ];
 
-const ACTIVE_WIKI_RUN_STATUSES = [
-    'running',
-    'sections_planned',
-    'maintainer_decision',
-    'applying',
-    'generating_pages',
-    'generating_concept_entity_pages',
-    'verification_linking',
-    'qa',
-    'awaiting_document_owner_approval',
-];
-
-function isActiveWikiRun(run) {
-    return !!run && ACTIVE_WIKI_RUN_STATUSES.includes(run.status);
-}
+// ACTIVE_WIKI_RUN_STATUSES / isActiveWikiRun now live in runFindingsLogic.js — the single shared,
+// unit-testable source for "should we keep polling for this run" (see that file's docblock).
 
 function formatRelativeProgress(value, locale) {
     if (!value) return null;

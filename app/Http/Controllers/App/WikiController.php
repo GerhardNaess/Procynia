@@ -128,7 +128,6 @@ class WikiController extends Controller
         $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('status', $this->visibleStatuses($user))
-            ->withCount('claims')
             ->with([
                 'currentVersion.claims.sourceReferences',
                 'currentVersion.documentOwnerApprovals.documentOwner',
@@ -183,7 +182,14 @@ class WikiController extends Controller
             'page_type' => $page->page_type,
             'status' => $page->status,
             'document_owner_summary' => $this->documentOwnerSummaryForPage($page),
-            'claims_count' => $page->claims_count,
+            // Current-version claims only — matches the scope EnterpriseWikiRunFindingsService
+            // already uses for the Kjøringer "Funn" count (both filter to is_current page
+            // versions). Previously this was withCount('claims'), a raw historical total across
+            // every version the page ever had, which could show e.g. "12 påstander" here while
+            // the run that produced the *current* version reported far fewer findings — two
+            // silently different universes for what a user reads as "the same claims". No new
+            // query: currentVersion.claims is already eager-loaded above for sourceReferences.
+            'claims_count' => $page->currentVersion?->claims->count() ?? 0,
             'updated_at' => $page->updated_at,
         ]);
 

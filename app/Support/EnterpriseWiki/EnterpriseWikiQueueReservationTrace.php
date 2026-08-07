@@ -36,8 +36,21 @@ final class EnterpriseWikiQueueReservationTrace
         ]));
     }
 
+    /**
+     * JobPopping fires on every queue-worker poll attempt — often every ~3 seconds per worker,
+     * whether or not anything is actually queued. This is diagnostic polling noise, not a real
+     * Wiki event (a real reservation, dispatch, state transition, recovery, or failure is always
+     * logged elsewhere in this class or the job/service that experienced it, unconditionally).
+     * Silently no-ops unless services.enterprise_wiki.queue_reservation_trace_debug is explicitly
+     * enabled — including skipping the Redis pendingSize/delayedSize/reservedSize lookups
+     * queueState() performs, which otherwise ran on every empty cycle purely to feed this log.
+     */
     public static function logReservationCycle(JobPopping $event): void
     {
+        if (! config('services.enterprise_wiki.queue_reservation_trace_debug')) {
+            return;
+        }
+
         if (! self::isEnterpriseWikiQueue($event->connectionName, $event->queue)) {
             return;
         }
@@ -55,7 +68,7 @@ final class EnterpriseWikiQueueReservationTrace
             'delayed_jobs' => $queueState['delayed_jobs'],
             'reserved_jobs' => $queueState['reserved_jobs'],
             'queue_empty' => $queueState['available_jobs'] === 0,
-        ]));
+        ]), debug: true);
     }
 
     public static function logReservation(JobPopped $event): void
@@ -224,10 +237,23 @@ final class EnterpriseWikiQueueReservationTrace
         return CarbonImmutable::now('UTC')->format('Y-m-d\TH:i:s.v\Z');
     }
 
-    private static function log(string $event, array $context): void
+    /**
+     * $debug=true routes reservation_cycle to Log::debug() instead of Log::info() — it is only
+     * ever reached when the explicit debug gate in logReservationCycle() is already on, so this
+     * is purely about keeping it at the correct log level, not a second gate. job_reserved and
+     * dispatch_enqueued (real events) always pass $debug=false and stay at Log::info().
+     */
+    private static function log(string $event, array $context, bool $debug = false): void
     {
-        Log::info('[PROCYNIA][WIKI_QUEUE_RESERVATION_TRACE] '.$event, array_merge([
-            'event' => $event,
-        ], $context));
+        $message = '[PROCYNIA][WIKI_QUEUE_RESERVATION_TRACE] '.$event;
+        $payload = array_merge(['event' => $event], $context);
+
+        if ($debug) {
+            Log::debug($message, $payload);
+
+            return;
+        }
+
+        Log::info($message, $payload);
     }
 }
