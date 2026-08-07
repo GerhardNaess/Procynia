@@ -227,6 +227,7 @@ class EnterpriseWikiClaimClassificationService
 
         if ($authoritative) {
             $fields['verified_at'] = now();
+            $fields['verification_dispatched_at'] = null;
             $fields['verification_claimed_at'] = null;
             $fields['verification_claim_token'] = null;
         }

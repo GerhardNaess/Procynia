@@ -252,6 +252,9 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
         foreach ($failedPivots as $pivot) {
             $pivot->update([
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+                'generation_dispatched_at' => null,
+                'generation_claimed_at' => null,
+                'generation_claim_token' => null,
                 'generation_started_at' => null,
                 'generation_completed_at' => null,
                 'generation_error' => null,

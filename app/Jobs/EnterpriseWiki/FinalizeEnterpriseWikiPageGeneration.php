@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
+use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -32,6 +33,15 @@ use Throwable;
  * the run. All earlier invocations are cheap no-ops guarded by the locked run row and its
  * status, mirroring FinalizeEnterpriseWikiIngest's "last section wins" pattern for the legacy
  * section pipeline.
+ *
+ * Crash-recovery sentinel: also self-redispatched every CRASH_RECOVERY_DELAY_SECONDS with
+ * $recoverStalePages=true whenever a wave has pages still outstanding (from
+ * EnterpriseWikiDocumentFlowService::beginGeneratingPages() and dispatchConceptEntityPhase()) —
+ * the page-generation equivalent of FinalizeEnterpriseWikiClaimVerification. A recovery pass
+ * only ever redispatches a pivot EnterpriseWikiGenerateAppliedPagesService::redispatchablePageIdsForRun()
+ * classifies as genuinely lost (stale dispatched or stale running); each candidate still goes
+ * through reservePageForDispatch()'s own atomic compare-and-swap, so concurrent recovery
+ * invocations can never enqueue the same page job twice.
  */
 class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 {
@@ -51,14 +61,24 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         EnterpriseWikiPage::PAGE_TYPE_ENTITY,
     ];
 
+    /**
+     * Recovery-only fallback for a worker/process crash between dispatch and completion of
+     * page-generation jobs — the same rationale as
+     * EnterpriseWikiDocumentFlowService::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS. The
+     * normal path is driven by each completing/failing GenerateEnterpriseWikiAppliedPage job.
+     */
+    private const CRASH_RECOVERY_DELAY_SECONDS = 60;
+
     public int $tries = 3;
 
     public int $timeout = 120;
 
     public bool $failOnTimeout = true;
 
-    public function __construct(public readonly int $runId)
-    {
+    public function __construct(
+        public readonly int $runId,
+        public readonly bool $recoverStalePages = false,
+    ) {
         $this->queue = 'enterprise-wiki';
     }
 
@@ -68,6 +88,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         // frequently constructed and its handle() called directly in tests (bypassing queue
         // dispatch, and therefore Laravel's automatic method-injection).
         $buildPageLinksService = app(EnterpriseWikiBuildPageLinksService::class);
+        $generateAppliedPagesService = app(EnterpriseWikiGenerateAppliedPagesService::class);
 
         $result = DB::transaction(function () use ($buildPageLinksService): array {
             $run = EnterpriseWikiIngestRun::query()
@@ -90,10 +111,50 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         }
 
         match ($result['outcome']) {
-            'dispatch_concept_entity' => $this->dispatchConceptEntityPhase($result['page_ids']),
+            'dispatch_concept_entity' => $this->dispatchConceptEntityPhase($result['page_ids'], $generateAppliedPagesService),
             'completed' => ContinueEnterpriseWikiDocumentFlowAfterPages::dispatch($this->runId),
+            'pending' => $this->attemptStalePageRecovery($generateAppliedPagesService),
             default => null,
         };
+    }
+
+    /**
+     * Fan-in-safe recovery pass: only redispatches pivots that
+     * EnterpriseWikiGenerateAppliedPagesService::redispatchablePageIdsForRun() classifies as
+     * genuinely lost (stale dispatched or stale running) — never one still legitimately queued
+     * or actively leased. Each candidate still goes through reservePageForDispatch()'s own
+     * atomic compare-and-swap, so two concurrent recovery-sentinel invocations for the same run
+     * can never both enqueue the same page job. A no-op (this->recoverStalePages === false) for
+     * every ordinary invocation dispatched by a completing/failing page job — only the delayed
+     * self-redispatch below opts back in.
+     */
+    private function attemptStalePageRecovery(EnterpriseWikiGenerateAppliedPagesService $service): void
+    {
+        if (! $this->recoverStalePages) {
+            return;
+        }
+
+        if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
+            return;
+        }
+
+        $candidatePageIds = $service->redispatchablePageIdsForRun($this->runId);
+        $redispatched = 0;
+
+        foreach ($candidatePageIds as $pageId) {
+            if ($service->reservePageForDispatch($this->runId, $pageId)) {
+                GenerateEnterpriseWikiAppliedPage::dispatch($this->runId, $pageId);
+                $redispatched++;
+            }
+        }
+
+        Log::info('[WIKI_PAGE_GENERATION_FINALIZE] Stale page-generation recovery pass evaluated.', [
+            'run_id' => $this->runId,
+            'candidates' => count($candidatePageIds),
+            'redispatched' => $redispatched,
+        ]);
+
+        self::dispatch($this->runId, true)->delay(now()->addSeconds(self::CRASH_RECOVERY_DELAY_SECONDS));
     }
 
     /**
@@ -185,14 +246,16 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         return ['outcome' => 'completed'];
     }
 
-    private function dispatchConceptEntityPhase(Collection $pageIds): void
+    private function dispatchConceptEntityPhase(Collection $pageIds, EnterpriseWikiGenerateAppliedPagesService $service): void
     {
         foreach ($pageIds as $pageId) {
             if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
                 return;
             }
 
-            GenerateEnterpriseWikiAppliedPage::dispatch($this->runId, $pageId);
+            if ($service->reservePageForDispatch($this->runId, $pageId)) {
+                GenerateEnterpriseWikiAppliedPage::dispatch($this->runId, $pageId);
+            }
         }
 
         if (EnterpriseWikiIngestRun::query()->find($this->runId)?->isTerminal()) {
@@ -202,6 +265,10 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
         // Safety net for the case where every concept/entity page already has a version, or
         // there are none at all: no page job will fire to trigger the next phase check.
         FinalizeEnterpriseWikiPageGeneration::dispatch($this->runId);
+
+        // Crash-recovery sentinel for this wave, mirroring the initial wave's fallback dispatched
+        // from EnterpriseWikiDocumentFlowService::beginGeneratingPages().
+        self::dispatch($this->runId, true)->delay(now()->addSeconds(self::CRASH_RECOVERY_DELAY_SECONDS));
     }
 
     private function pivotsForTypes(array $pageTypes): Collection
@@ -300,6 +367,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     {
         return $pivots->whereIn('generation_status', [
             EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+            EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED,
             EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING,
         ])->isNotEmpty();
     }

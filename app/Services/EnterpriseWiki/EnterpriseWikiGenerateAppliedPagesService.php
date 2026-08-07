@@ -16,6 +16,7 @@ use App\Services\Ai\Wiki\WikiLinkRevisionAiClient;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 /**
@@ -46,6 +47,21 @@ class EnterpriseWikiGenerateAppliedPagesService
         EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
         EnterpriseWikiPage::PAGE_TYPE_ENTITY,
     ];
+
+    /**
+     * Execution-lease duration for a page-generation reservation (generation_claimed_at) —
+     * comfortably above GenerateEnterpriseWikiAppliedPage::timeout (420s) so a live worker mid-AI
+     * call is never mistaken for a crashed one, mirroring
+     * EnterpriseWikiVerifyPageClaimsService::LEASE_SECONDS' rationale.
+     */
+    private const GENERATION_LEASE_SECONDS = 420 + 300;
+
+    /**
+     * How long a page may sit dispatched-but-not-yet-leased (generation_status=dispatched) before
+     * a redispatch attempt is allowed to treat it as lost rather than merely queued — see
+     * EnterpriseWikiVerifyPageClaimsService::DISPATCH_STALE_SECONDS for the same rationale.
+     */
+    private const DISPATCH_STALE_SECONDS = 90;
 
     public function __construct(
         private readonly WikiPageContentAiClient $aiClient,
@@ -544,6 +560,14 @@ class EnterpriseWikiGenerateAppliedPagesService
      * intentionally differs from generate()'s pageHasVersion() check (any version, any run) so
      * that a new run can regenerate a page even though an older run already produced a version.
      *
+     * Execution lease: before calling AI, this claims the pivot with a fresh
+     * generation_claim_token (generation_status -> running), the same compare-and-swap shape as
+     * EnterpriseWikiVerifyPageClaimsService's claim lease. A pivot already running with a live,
+     * non-stale lease belongs to another worker genuinely in flight right now — this call
+     * silently no-ops before the AI call. Persisting the result re-checks the token is still
+     * owned by this worker (not reclaimed as stale by someone else in the meantime) before
+     * writing anything, exactly like EnterpriseWikiVerifyPageClaimsService::persist().
+     *
      * @throws InvalidArgumentException if the run is not in a state that permits generation,
      *                                  or the page is not linked to the run
      * @throws \RuntimeException if AI is unavailable or generation fails
@@ -566,7 +590,9 @@ class EnterpriseWikiGenerateAppliedPagesService
             );
         }
 
-        $claimed = DB::transaction(function () use ($run, $page): ?EnterpriseWikiIngestRunPage {
+        $token = (string) Str::uuid();
+
+        $claimed = DB::transaction(function () use ($run, $page, $token): ?EnterpriseWikiIngestRunPage {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -589,8 +615,29 @@ class EnterpriseWikiGenerateAppliedPagesService
                 return null;
             }
 
+            // Execution lease: only a pivot that is pending/dispatched (never leased, or a fresh
+            // reset by EnterpriseWikiPageGenerationFailureRecoveryService), or whose previous
+            // lease has gone stale (a genuinely crashed worker), may be claimed here. A pivot
+            // still generation_status=running with a live, non-stale generation_claimed_at is
+            // owned by another worker actually in flight right now — this invocation is a stale
+            // or duplicate job and must no-op before ever calling AI.
+            $leaseStaleThreshold = now()->subSeconds(self::GENERATION_LEASE_SECONDS);
+            $eligible = in_array($pivot->generation_status, [
+                EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING,
+                EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED,
+            ], true) || (
+                $pivot->generation_status === EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING
+                && ($pivot->generation_claimed_at === null || $pivot->generation_claimed_at->lt($leaseStaleThreshold))
+            );
+
+            if (! $eligible) {
+                return null;
+            }
+
             $pivot->update([
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING,
+                'generation_claimed_at' => now(),
+                'generation_claim_token' => $token,
                 'generation_started_at' => now(),
                 'generation_error' => null,
             ]);
@@ -707,7 +754,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-        DB::transaction(function () use ($run, $page, $markdown, $contentBlocks): void {
+        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks): void {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -720,8 +767,13 @@ class EnterpriseWikiGenerateAppliedPagesService
                 ->lockForUpdate()
                 ->first();
 
-            if ($pivot === null || $pivot->generated_page_version_id !== null) {
-                // Another worker already registered a version for this run/page — discard this result.
+            if ($pivot === null
+                || $pivot->generated_page_version_id !== null
+                || $pivot->generation_claim_token !== $token
+            ) {
+                // Another worker already registered a version for this run/page, or this
+                // worker's lease was reclaimed as stale and a different token now owns the
+                // pivot — discard this result rather than overwrite whatever that worker writes.
                 return;
             }
 
@@ -731,10 +783,90 @@ class EnterpriseWikiGenerateAppliedPagesService
             $pivot->update([
                 'generated_page_version_id' => $version->id,
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+                'generation_dispatched_at' => null,
+                'generation_claimed_at' => null,
+                'generation_claim_token' => null,
                 'generation_completed_at' => now(),
                 'generation_error' => null,
             ]);
         });
+    }
+
+    /**
+     * Atomic dispatch-side compare-and-swap for one run/page pivot — the page-generation
+     * equivalent of EnterpriseWikiVerifyPageClaimsService::reserveClaimForDispatch(). Marks the
+     * pivot generation_status=dispatched (recording generation_dispatched_at) only if it is not
+     * completed and not currently owned by a live worker, so two concurrent dispatchers (or a
+     * fresh dispatch racing a recovery redispatch) can never both enqueue
+     * GenerateEnterpriseWikiAppliedPage for the same pivot — the UPDATE...WHERE is a single
+     * atomic statement, so only one caller's row-count is > 0.
+     *
+     * Eligible predecessor states: pending (never dispatched, or reset by
+     * EnterpriseWikiPageGenerationFailureRecoveryService), dispatched-but-stale (a dispatch whose
+     * Redis enqueue never actually happened, or whose job never started within
+     * DISPATCH_STALE_SECONDS), or running-but-stale (a worker that crashed mid-generation without
+     * ever reaching its own failure handling). A pivot genuinely dispatched within its wait
+     * window, or genuinely running with a live lease, fails this CAS and is left untouched.
+     */
+    public function reservePageForDispatch(int $runId, int $pageId): bool
+    {
+        $dispatchStaleThreshold = now()->subSeconds(self::DISPATCH_STALE_SECONDS);
+        $leaseStaleThreshold = now()->subSeconds(self::GENERATION_LEASE_SECONDS);
+
+        return EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $runId)
+            ->where('enterprise_wiki_page_id', $pageId)
+            ->whereNull('generated_page_version_id')
+            ->where(function ($query) use ($dispatchStaleThreshold, $leaseStaleThreshold): void {
+                $query->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_PENDING)
+                    ->orWhere(function ($q) use ($dispatchStaleThreshold): void {
+                        $q->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED)
+                            ->where('generation_dispatched_at', '<', $dispatchStaleThreshold);
+                    })
+                    ->orWhere(function ($q) use ($leaseStaleThreshold): void {
+                        $q->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING)
+                            ->where(function ($q2) use ($leaseStaleThreshold): void {
+                                $q2->whereNull('generation_claimed_at')->orWhere('generation_claimed_at', '<', $leaseStaleThreshold);
+                            });
+                    });
+            })
+            ->update([
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED,
+                'generation_dispatched_at' => now(),
+            ]) > 0;
+    }
+
+    /**
+     * @return list<int> enterprise_wiki_page_id for every pivot on this run that
+     *                   reservePageForDispatch() would currently accept — i.e. genuinely lost
+     *                   work (stale dispatched or stale running), never work still legitimately
+     *                   queued or in flight. Used by the page-generation recovery sentinel to
+     *                   decide whether a redispatch attempt is even worth making.
+     */
+    public function redispatchablePageIdsForRun(int $runId): array
+    {
+        $dispatchStaleThreshold = now()->subSeconds(self::DISPATCH_STALE_SECONDS);
+        $leaseStaleThreshold = now()->subSeconds(self::GENERATION_LEASE_SECONDS);
+
+        return EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $runId)
+            ->whereNull('generated_page_version_id')
+            ->where(function ($query) use ($dispatchStaleThreshold, $leaseStaleThreshold): void {
+                $query->where(function ($q) use ($dispatchStaleThreshold): void {
+                    $q->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_DISPATCHED)
+                        ->where('generation_dispatched_at', '<', $dispatchStaleThreshold);
+                })
+                    ->orWhere(function ($q) use ($leaseStaleThreshold): void {
+                        $q->where('generation_status', EnterpriseWikiIngestRunPage::GENERATION_STATUS_RUNNING)
+                            ->where(function ($q2) use ($leaseStaleThreshold): void {
+                                $q2->whereNull('generation_claimed_at')->orWhere('generation_claimed_at', '<', $leaseStaleThreshold);
+                            });
+                    });
+            })
+            ->orderBy('id')
+            ->pluck('enterprise_wiki_page_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
     }
 
     /**

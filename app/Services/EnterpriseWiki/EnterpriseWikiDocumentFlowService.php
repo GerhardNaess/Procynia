@@ -57,6 +57,13 @@ class EnterpriseWikiDocumentFlowService
      */
     private const CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS = 60;
 
+    /**
+     * Recovery-only fallback for a worker/process crash between dispatch and completion of
+     * applied-page generation jobs — see FinalizeEnterpriseWikiPageGeneration's crash-recovery
+     * sentinel docblock. The normal path is driven by each completing/failing page job.
+     */
+    private const PAGE_GENERATION_CRASH_RECOVERY_DELAY_SECONDS = 60;
+
     private const ARTICLE_SUMMARY_PAGE_TYPES = [
         EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
         EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
@@ -75,6 +82,7 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiMaintainerDecisionApplyService $maintainerDecisionApplyService,
         private readonly EnterpriseWikiExtractPageClaimsService $extractPageClaimsService,
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
+        private readonly EnterpriseWikiGenerateAppliedPagesService $generateAppliedPagesService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiIncrementalRelinkService $incrementalRelinkService,
         private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
@@ -174,10 +182,11 @@ class EnterpriseWikiDocumentFlowService
     /**
      * Manually cancel a non-terminal run so its source document becomes eligible for deletion.
      *
-     * Any active claim-extraction (page-level) or claim-verification lease held for the run is
-     * released so a worker that still holds one cannot write back into a run that has already
-     * moved to a terminal status — see EnterpriseWikiExtractPageClaimsService::reserve()/release()
-     * and EnterpriseWikiVerifyPageClaimsService for the matching lease lifecycle. Generated
+     * Any active claim-extraction (page-level), claim-verification, or page-generation
+     * dispatch/lease state held for the run is released so a worker that still holds one cannot
+     * write back into a run that has already moved to a terminal status — see
+     * EnterpriseWikiExtractPageClaimsService::reserve()/release(), EnterpriseWikiVerifyPageClaimsService,
+     * and EnterpriseWikiGenerateAppliedPagesService for the matching lease lifecycles. Generated
      * pages, page versions, and claims are left untouched: cancelling a run only stops it from
      * progressing further, it does not undo Wiki content the run already produced.
      */
@@ -195,6 +204,9 @@ class EnterpriseWikiDocumentFlowService
                 ->update([
                     'claims_claimed_at' => null,
                     'claims_claim_token' => null,
+                    'generation_dispatched_at' => null,
+                    'generation_claimed_at' => null,
+                    'generation_claim_token' => null,
                     'updated_at' => now(),
                 ]);
 
@@ -202,13 +214,14 @@ class EnterpriseWikiDocumentFlowService
                 ->join('enterprise_wiki_page_versions as pv', 'pv.id', '=', 'c.enterprise_wiki_page_version_id')
                 ->join('enterprise_wiki_ingest_run_pages as rp', 'rp.enterprise_wiki_page_id', '=', 'pv.enterprise_wiki_page_id')
                 ->where('rp.enterprise_wiki_ingest_run_id', $locked->id)
-                ->whereNotNull('c.verification_claimed_at')
+                ->where(fn ($q) => $q->whereNotNull('c.verification_claimed_at')->orWhereNotNull('c.verification_dispatched_at'))
                 ->pluck('c.id');
 
             if ($claimIds->isNotEmpty()) {
                 DB::table('enterprise_wiki_claims')
                     ->whereIn('id', $claimIds)
                     ->update([
+                        'verification_dispatched_at' => null,
                         'verification_claimed_at' => null,
                         'verification_claim_token' => null,
                         'updated_at' => now(),
@@ -371,9 +384,13 @@ class EnterpriseWikiDocumentFlowService
             $hasActiveLease = $this->verifyPageClaimsService->hasActiveClaimLeaseForRun($run);
 
             if ($pending !== [] || $hasActiveLease) {
-                $recoveryReady = $recoverUndispatchedClaims
-                    && ! $hasActiveLease
-                    && $this->claimVerificationRecoveryWindowElapsed($run);
+                // No run-wide time window here: whether anything actually gets redispatched is
+                // decided per claim, atomically, by
+                // EnterpriseWikiVerifyPageClaimsService::reserveClaimForDispatch() inside
+                // dispatchClaimVerificationWork() — a claim genuinely still queued within its own
+                // dispatch-wait window, or still actively leased, loses that compare-and-swap and
+                // is left untouched regardless of how long this run itself has been idle.
+                $recoveryReady = $recoverUndispatchedClaims && ! $hasActiveLease;
 
                 return [
                     'run' => $run->fresh() ?? $run,
@@ -748,18 +765,23 @@ class EnterpriseWikiDocumentFlowService
             ->values();
 
         $pageIds = $initialRows->pluck('enterprise_wiki_page_id');
+        $dispatched = 0;
 
         foreach ($pageIds as $pageId) {
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
                 return;
             }
 
-            GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pageId);
+            if ($this->generateAppliedPagesService->reservePageForDispatch($run->id, $pageId)) {
+                GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pageId);
+                $dispatched++;
+            }
         }
 
         Log::info('[WIKI_DOCUMENT_FLOW] Initial page generation jobs dispatched.', [
             'run_id' => $run->id,
-            'pages_dispatched' => $pageIds->count(),
+            'pages_considered' => $pageIds->count(),
+            'pages_dispatched' => $dispatched,
             'article_summary_pages' => $initialRows
                 ->filter(fn (EnterpriseWikiIngestRunPage $row): bool => $row->page !== null && in_array($row->page->page_type, self::ARTICLE_SUMMARY_PAGE_TYPES, true))
                 ->count(),
@@ -772,6 +794,14 @@ class EnterpriseWikiDocumentFlowService
         // (e.g. a resumed run): no page job will fire to trigger the phase check, so trigger
         // it once here. This is a cheap no-op if pages are still pending.
         FinalizeEnterpriseWikiPageGeneration::dispatch($run->id);
+
+        if ($pageIds->isNotEmpty()) {
+            // Crash-recovery sentinel: catches a page whose dispatch-CAS committed but whose
+            // Redis enqueue was lost, or a worker that crashed mid-generation — see
+            // FinalizeEnterpriseWikiPageGeneration::attemptStalePageRecovery().
+            FinalizeEnterpriseWikiPageGeneration::dispatch($run->id, true)
+                ->delay(now()->addSeconds(self::PAGE_GENERATION_CRASH_RECOVERY_DELAY_SECONDS));
+        }
     }
 
     /**
@@ -951,6 +981,24 @@ class EnterpriseWikiDocumentFlowService
         $this->dispatchClaimVerificationWork($run);
     }
 
+    /**
+     * Dispatches a VerifyEnterpriseWikiClaim job for each currently unverified claim — but only
+     * the ones that atomically win EnterpriseWikiVerifyPageClaimsService::reserveClaimForDispatch()
+     * right now. That single per-claim compare-and-swap is what makes this method safe to call
+     * both for the very first dispatch (every claim wins, since none has a
+     * verification_dispatched_at yet) and for a recovery pass (only genuinely stale/never-
+     * dispatched claims win — one still legitimately queued or actively leased loses the CAS and
+     * is silently left alone). Two dispatchers calling this concurrently for the same run can
+     * never enqueue the same claim twice, because the CAS is a single atomic UPDATE at the
+     * database level.
+     *
+     * Crash window: if the process dies after reserveClaimForDispatch() commits but before
+     * VerifyEnterpriseWikiClaim::dispatch() reaches Redis, the claim is left marked "dispatched"
+     * with no job actually queued. This is by design left unrecovered until
+     * EnterpriseWikiVerifyPageClaimsService::DISPATCH_STALE_SECONDS elapses — the very next
+     * recovery sentinel pass then finds the same claim still unverified, still not leased, and
+     * now past the dispatch-stale window, so it wins the CAS again and gets a real job dispatched.
+     */
     private function dispatchClaimVerificationWork(EnterpriseWikiIngestRun $run): void
     {
         $fresh = $run->fresh() ?? $run;
@@ -960,9 +1008,13 @@ class EnterpriseWikiDocumentFlowService
         }
 
         $claimIds = $this->verifyPageClaimsService->unverifiedClaimIdsForRun($fresh);
+        $dispatched = 0;
 
         foreach ($claimIds as $claimId) {
-            VerifyEnterpriseWikiClaim::dispatch($fresh->id, $claimId);
+            if ($this->verifyPageClaimsService->reserveClaimForDispatch($claimId)) {
+                VerifyEnterpriseWikiClaim::dispatch($fresh->id, $claimId);
+                $dispatched++;
+            }
         }
 
         if ($claimIds === []) {
@@ -979,7 +1031,8 @@ class EnterpriseWikiDocumentFlowService
 
         Log::info('[WIKI_DOCUMENT_FLOW] Claim verification jobs dispatched.', [
             'run_id' => $fresh->id,
-            'claims_dispatched' => count($claimIds),
+            'claims_considered' => count($claimIds),
+            'claims_dispatched' => $dispatched,
             'recovery_fallback_delay_seconds' => self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS,
             'queue' => VerifyEnterpriseWikiClaim::QUEUE,
         ]);
@@ -989,12 +1042,6 @@ class EnterpriseWikiDocumentFlowService
     {
         FinalizeEnterpriseWikiClaimVerification::dispatch($run->id, true)
             ->delay(now()->addSeconds(self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS));
-    }
-
-    private function claimVerificationRecoveryWindowElapsed(EnterpriseWikiIngestRun $run): bool
-    {
-        return $run->updated_at === null
-            || $run->updated_at->lte(now()->subSeconds(self::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS));
     }
 
     private function performAppliedRunLint(EnterpriseWikiIngestRun $run): void

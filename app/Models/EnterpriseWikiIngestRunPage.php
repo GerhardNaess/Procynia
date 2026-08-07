@@ -27,6 +27,9 @@ class EnterpriseWikiIngestRunPage extends Model
 
     public const GENERATION_STATUS_PENDING = 'pending';
 
+    /** Enqueued (a GenerateEnterpriseWikiAppliedPage job exists or was believed to exist) but not yet leased by a worker. */
+    public const GENERATION_STATUS_DISPATCHED = 'dispatched';
+
     public const GENERATION_STATUS_RUNNING = 'running';
 
     public const GENERATION_STATUS_COMPLETED = 'completed';
@@ -35,6 +38,7 @@ class EnterpriseWikiIngestRunPage extends Model
 
     public const GENERATION_STATUSES = [
         self::GENERATION_STATUS_PENDING,
+        self::GENERATION_STATUS_DISPATCHED,
         self::GENERATION_STATUS_RUNNING,
         self::GENERATION_STATUS_COMPLETED,
         self::GENERATION_STATUS_FAILED,
@@ -46,6 +50,9 @@ class EnterpriseWikiIngestRunPage extends Model
         'action',
         'generated_page_version_id',
         'generation_status',
+        'generation_dispatched_at',
+        'generation_claimed_at',
+        'generation_claim_token',
         'generation_started_at',
         'generation_completed_at',
         'generation_error',
@@ -57,6 +64,8 @@ class EnterpriseWikiIngestRunPage extends Model
     protected function casts(): array
     {
         return [
+            'generation_dispatched_at' => 'datetime',
+            'generation_claimed_at' => 'datetime',
             'generation_started_at' => 'datetime',
             'generation_completed_at' => 'datetime',
             'claims_extracted_at' => 'datetime',

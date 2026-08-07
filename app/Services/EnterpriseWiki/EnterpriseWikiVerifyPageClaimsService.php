@@ -54,6 +54,16 @@ class EnterpriseWikiVerifyPageClaimsService
      */
     private const LEASE_SECONDS = ContinueEnterpriseWikiDocumentFlowAfterPages::TIMEOUT_SECONDS + self::TIMEOUT_SAFETY_MARGIN_SECONDS;
 
+    /**
+     * How long a claim may sit dispatched-but-not-yet-leased (verification_dispatched_at set,
+     * verification_claimed_at still null) before the recovery sentinel is willing to treat it as
+     * lost rather than merely queued. Set below the sentinel's own ~60s re-check interval
+     * (EnterpriseWikiDocumentFlowService::CLAIM_VERIFICATION_CRASH_RECOVERY_DELAY_SECONDS) doubled,
+     * so a genuinely stuck dispatch converges within two sentinel passes (~120s wall clock)
+     * instead of three.
+     */
+    private const DISPATCH_STALE_SECONDS = 90;
+
     private const EVIDENCE_SCOPE_BLOCK = 'block';
 
     private const EVIDENCE_SCOPE_CLAIM_REFERENCES = 'claim_references';
@@ -240,6 +250,40 @@ class EnterpriseWikiVerifyPageClaimsService
             ->whereIn('enterprise_wiki_page_version_id', $this->currentVersionIdsForRun($run))
             ->where('verification_claimed_at', '>=', $staleThreshold)
             ->exists();
+    }
+
+    /**
+     * Atomic dispatch-side compare-and-swap: marks a claim "dispatched" only if it is not
+     * completed, not actively leased/running, and not already sitting inside a valid
+     * dispatch-wait window — i.e. only if this call is the one legitimately allowed to enqueue a
+     * VerifyEnterpriseWikiClaim job for it right now. Two concurrent callers racing the same
+     * claim id can never both succeed: the UPDATE...WHERE is a single atomic statement at the
+     * database level, so only one affects a row and returns true.
+     *
+     * The SAME method serves both the very first dispatch (verification_dispatched_at is null)
+     * and a recovery redispatch (verification_dispatched_at is stale) — a claim genuinely still
+     * queued or genuinely still running always fails this CAS and is left untouched, which is
+     * exactly the "only real lost work gets redispatched" guarantee the recovery sentinel needs.
+     *
+     * Deliberately does not hold a transaction/row lock — this is a plain conditional UPDATE, so
+     * nothing is held open while the caller goes on to actually enqueue (or skip enqueuing) the
+     * job on Redis.
+     */
+    public function reserveClaimForDispatch(int $claimId): bool
+    {
+        $leaseStaleThreshold = now()->subSeconds(self::LEASE_SECONDS);
+        $dispatchStaleThreshold = now()->subSeconds(self::DISPATCH_STALE_SECONDS);
+
+        return EnterpriseWikiClaim::query()
+            ->where('id', $claimId)
+            ->whereNull('verified_at')
+            ->where(function ($q) use ($leaseStaleThreshold): void {
+                $q->whereNull('verification_claimed_at')->orWhere('verification_claimed_at', '<', $leaseStaleThreshold);
+            })
+            ->where(function ($q) use ($dispatchStaleThreshold): void {
+                $q->whereNull('verification_dispatched_at')->orWhere('verification_dispatched_at', '<', $dispatchStaleThreshold);
+            })
+            ->update(['verification_dispatched_at' => now()]) > 0;
     }
 
     private function currentVersionIdsForRun(EnterpriseWikiIngestRun $run)
@@ -1230,7 +1274,10 @@ class EnterpriseWikiVerifyPageClaimsService
 
     /**
      * Release a reservation this worker still owns — a no-op if the token no longer matches
-     * (already reclaimed by another worker as stale).
+     * (already reclaimed by another worker as stale). Also clears verification_dispatched_at:
+     * a real AI-call failure must return the claim to a freely re-dispatchable state rather than
+     * leaving it looking permanently "dispatched" until the dispatch-stale window happens to
+     * elapse on its own.
      */
     private function release(int $claimId, string $token): void
     {
@@ -1238,6 +1285,7 @@ class EnterpriseWikiVerifyPageClaimsService
             ->where('id', $claimId)
             ->where('verification_claim_token', $token)
             ->update([
+                'verification_dispatched_at' => null,
                 'verification_claimed_at' => null,
                 'verification_claim_token' => null,
             ]);
@@ -2158,6 +2206,7 @@ class EnterpriseWikiVerifyPageClaimsService
                 'review_reason' => null,
                 'generation_issue' => $issue,
                 'verified_at' => now(),
+                'verification_dispatched_at' => null,
                 'verification_claimed_at' => null,
                 'verification_claim_token' => null,
             ]) > 0;

@@ -26,19 +26,32 @@ class EnterpriseWikiClaimVerificationQueueTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_recent_pending_claims_do_not_get_redispatched_by_fan_in(): void
+    /**
+     * Durable dispatch state (verification_dispatched_at): a claim that was genuinely never
+     * dispatched is distinct from one merely sitting in Redis within its wait window or one
+     * actively leased — see EnterpriseWikiVerifyPageClaimsService::reserveClaimForDispatch(). The
+     * fan-in/recovery entry point is safe to dispatch such a claim immediately regardless of
+     * which caller reaches it first: the atomic per-claim compare-and-swap on
+     * verification_dispatched_at guarantees only one dispatch ever wins even if the ordinary
+     * dispatch path and this recovery path raced for the same claim.
+     */
+    public function test_pending_never_dispatched_claims_are_dispatched_exactly_once_by_fan_in(): void
     {
         Queue::fake();
         [$run, $version] = $this->runWithVersion();
-        $this->claim($version);
-        $this->claim($version);
+        $first = $this->claim($version);
+        $second = $this->claim($version);
         $this->claim($version, ['verified_at' => now()]);
 
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS]);
         app(EnterpriseWikiDocumentFlowService::class)->continueAfterPagesGenerated($run->id);
 
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFYING_CLAIMS, $run->fresh()->status);
-        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, 0);
+        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, 2);
+        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, fn (VerifyEnterpriseWikiClaim $job) => $job->claimId === $first->id);
+        Queue::assertPushed(VerifyEnterpriseWikiClaim::class, fn (VerifyEnterpriseWikiClaim $job) => $job->claimId === $second->id);
+        $this->assertNotNull($first->fresh()->verification_dispatched_at);
+        $this->assertNotNull($second->fresh()->verification_dispatched_at);
         Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, 1);
         Queue::assertPushed(FinalizeEnterpriseWikiClaimVerification::class, fn (FinalizeEnterpriseWikiClaimVerification $job) => $job->recoverUndispatchedClaims === true && $job->delay !== null);
     }

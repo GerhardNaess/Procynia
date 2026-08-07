@@ -148,6 +148,9 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
 
             $pivot->update([
                 'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED,
+                'generation_dispatched_at' => null,
+                'generation_claimed_at' => null,
+                'generation_claim_token' => null,
                 'generation_error' => mb_substr(sprintf('[%s] %s', class_basename($exception), $exception->getMessage()), 0, 1000),
             ]);
         });

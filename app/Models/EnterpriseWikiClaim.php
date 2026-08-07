@@ -99,6 +99,7 @@ class EnterpriseWikiClaim extends Model
         'approved_at',
         'approval_comment',
         'verified_at',
+        'verification_dispatched_at',
         'verification_claimed_at',
         'verification_claim_token',
     ];
@@ -112,6 +113,7 @@ class EnterpriseWikiClaim extends Model
             'blocking_override_at' => 'datetime',
             'approved_at' => 'datetime',
             'verified_at' => 'datetime',
+            'verification_dispatched_at' => 'datetime',
             'verification_claimed_at' => 'datetime',
             'review_metadata' => 'array',
         ];
