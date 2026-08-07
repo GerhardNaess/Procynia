@@ -17,9 +17,13 @@ use Illuminate\Support\Facades\Log;
  *
  * After the AI decision passes schema validation, EnterpriseWikiMaintainerDecisionConsistencyValidator
  * checks it for logical self-contradictions (e.g. the run-581 "ITIL Incident Management" incident:
- * the article/summary pointed the reader onward to a concept that concept_pages never created).
- * When found, one bounded AI repair pass is attempted; if the repaired decision is still
- * inconsistent, this throws rather than silently applying an unresolved contradiction.
+ * the article/summary pointed the reader onward to a concept that concept_pages never created), and
+ * EnterpriseWikiMaintainerDecisionHierarchyValidator checks it for overfragmentation (e.g. several
+ * short practices under one framework each getting their own page). Both run on the same, complete
+ * decision — for a split/batch decision this is always AFTER EnterpriseWikiMaintainerDecisionMerger
+ * has combined every batch, so overfragmentation spanning multiple batches is still caught. When
+ * either check finds issues, one bounded AI repair pass is attempted; if the repaired decision is
+ * still inconsistent or overfragmented, this throws rather than silently applying it.
  */
 class EnterpriseWikiMaintainerDecisionService
 {
@@ -27,6 +31,7 @@ class EnterpriseWikiMaintainerDecisionService
         private readonly EnterpriseWikiIndexContextService $indexContextService,
         private readonly EnterpriseWikiMaintainerDecisionAiClient $aiClient,
         private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
+        private readonly EnterpriseWikiMaintainerDecisionHierarchyValidator $hierarchyValidator,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
 
@@ -98,7 +103,7 @@ class EnterpriseWikiMaintainerDecisionService
         $indexContext = $this->indexContextService->buildForCustomer($customerId);
         $figureCandidates = $this->figureCandidatesForDocument($document);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
-        $issues = $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys);
+        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys);
 
         if ($issues === []) {
             Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -114,7 +119,7 @@ class EnterpriseWikiMaintainerDecisionService
         [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
 
         if ($normalizations !== []) {
-            $normalizedIssues = $this->consistencyValidator->findIssues($normalizedDecision, $indexContext, $validFigureKeys);
+            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys);
 
             if ($normalizedIssues === []) {
                 Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -142,7 +147,7 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context);
-        $remainingIssues = $this->consistencyValidator->findIssues($repaired, $indexContext, $validFigureKeys);
+        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys);
 
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
@@ -160,6 +165,20 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         return $repaired;
+    }
+
+    /**
+     * @param  array<string, mixed>  $decision
+     * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  string[]  $validFigureKeys
+     * @return string[]
+     */
+    private function findAllIssues(array $decision, array $indexContext, array $validFigureKeys): array
+    {
+        return array_merge(
+            $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
+            $this->hierarchyValidator->findIssues($decision),
+        );
     }
 
     /**

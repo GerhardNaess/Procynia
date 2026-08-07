@@ -331,6 +331,97 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
 
+    public function test_overfragmented_decision_triggers_one_bounded_repair_pass(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $overfragmented = $this->validDecision();
+        $overfragmented['concept_candidates'] = [[
+            'name' => 'Incident Logging',
+            'concept_type' => 'practice',
+            'independent_reason' => 'A short practice under the framework.',
+            'mentioned_context' => 'bullet list in section 2',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Named as a practice.',
+            'owning_page_title' => null,
+            'necessary_for_article' => false,
+            'has_separate_source_evidence' => false,
+            'has_reuse_value' => false,
+        ]];
+        $overfragmented['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'Incident Logging',
+            'proposed_slug' => 'incident-logging',
+            'reason' => 'Practice under framework.',
+        ]];
+
+        $repaired = $this->validDecision();
+        $repaired['concept_candidates'] = $overfragmented['concept_candidates'];
+        $repaired['concept_candidates'][0]['decision'] = 'reference_only';
+        $repaired['concept_candidates'][0]['owning_page_title'] = 'Test Artikkel';
+        $repaired['concept_pages'] = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($overfragmented);
+        $mock->shouldReceive('repair')
+            ->once()
+            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $issues) use ($overfragmented): bool {
+                return $decision === $overfragmented
+                    && $issues !== []
+                    && str_contains(implode(' ', $issues), 'Incident Logging');
+            })
+            ->andReturn($repaired);
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame([], $result['concept_pages']);
+        $this->assertSame('reference_only', $result['concept_candidates'][0]['decision']);
+    }
+
+    public function test_decision_still_overfragmented_after_repair_throws(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $overfragmented = $this->validDecision();
+        $overfragmented['concept_candidates'] = [[
+            'name' => 'Incident Logging',
+            'concept_type' => 'practice',
+            'independent_reason' => 'A short practice under the framework.',
+            'mentioned_context' => 'bullet list in section 2',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Named as a practice.',
+            'owning_page_title' => null,
+            'necessary_for_article' => false,
+            'has_separate_source_evidence' => false,
+            'has_reuse_value' => false,
+        ]];
+        $overfragmented['concept_pages'] = [[
+            'action' => 'create',
+            'page_id' => null,
+            'title' => 'Incident Logging',
+            'proposed_slug' => 'incident-logging',
+            'reason' => 'Practice under framework.',
+        ]];
+
+        // Repair pass returns the exact same unresolved overfragmentation.
+        $stillOverfragmented = $overfragmented;
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($overfragmented);
+        $mock->shouldReceive('repair')->once()->andReturn($stillOverfragmented);
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionInconsistentException::class);
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
     public function test_composed_decision_validation_does_not_call_decide_or_persist(): void
     {
         $customer = $this->createCustomer();

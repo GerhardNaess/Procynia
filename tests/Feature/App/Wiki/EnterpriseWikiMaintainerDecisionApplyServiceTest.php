@@ -146,6 +146,65 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Hierarchy / overfragmentation guard (apply must not bypass it)
+    // =========================================================================
+
+    public function test_apply_throws_when_hierarchy_validation_still_finds_overfragmentation(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision($this->overfragmentedConceptOverrides());
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/overfragmentation/');
+
+        $this->service->apply($run);
+    }
+
+    public function test_apply_persists_nothing_when_hierarchy_validation_still_finds_overfragmentation(): void
+    {
+        $customer = $this->createCustomer();
+        $decision = $this->baseDecision($this->overfragmentedConceptOverrides());
+        $run = $this->createDecisionOnlyRun($customer, $decision);
+
+        try {
+            $this->service->apply($run);
+            $this->fail('Expected apply() to throw for an overfragmented decision.');
+        } catch (\InvalidArgumentException) {
+            // expected
+        }
+
+        $this->assertSame(0, EnterpriseWikiPage::query()->where('customer_id', $customer->id)->count());
+        $this->assertSame(
+            EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            $run->fresh()->maintainer_decision_status,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function overfragmentedConceptOverrides(): array
+    {
+        return [
+            'concept_candidates' => [[
+                'name' => 'Incident Logging',
+                'concept_type' => 'practice',
+                'independent_reason' => 'A practice named under the incident management framework.',
+                'mentioned_context' => 'bullet list in section 2',
+                'existing_page_title' => null,
+                'decision' => 'create',
+                'justification' => 'Named as one of several practices.',
+                'owning_page_title' => null,
+                'necessary_for_article' => false,
+                'has_separate_source_evidence' => false,
+                'has_reuse_value' => false,
+            ]],
+            'concept_pages' => [
+                ['action' => 'create', 'page_id' => null, 'title' => 'Incident Logging', 'proposed_slug' => 'incident-logging-ab12', 'reason' => 'Practice under framework.'],
+            ],
+        ];
+    }
+
+    // =========================================================================
     // update action
     // =========================================================================
 

@@ -27,9 +27,19 @@ use Illuminate\Support\Facades\Log;
  *  - No OpenAI calls.
  *  - Customer-scoped: every lookup (by page_id or by slug) is gated to run->customer_id.
  *  - Idempotency guard: throws if maintainer_decision_status is already 'applied'.
+ *  - Hierarchy guard: refuses to apply at all if EnterpriseWikiMaintainerDecisionHierarchyValidator
+ *    still finds overfragmentation issues in the stored decision — apply() never persists a page
+ *    the combined hierarchy validation would have rejected or consolidated, even if some upstream
+ *    caller stored an unvalidated/unrepaired decision on the run. This is a defensive re-check, not
+ *    a substitute for EnterpriseWikiMaintainerDecisionService::validateAndRepairForDocument(), which
+ *    is still the normal place a decision gets repaired before ever reaching a run.
  */
 class EnterpriseWikiMaintainerDecisionApplyService
 {
+    public function __construct(
+        private readonly EnterpriseWikiMaintainerDecisionHierarchyValidator $hierarchyValidator,
+    ) {}
+
     /**
      * @return array{created: int, updated: int}
      *
@@ -68,6 +78,16 @@ class EnterpriseWikiMaintainerDecisionApplyService
         }
 
         $decision = $run->maintainer_decision_json;
+
+        $hierarchyIssues = $this->hierarchyValidator->findIssues($decision);
+
+        if ($hierarchyIssues !== []) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] maintainer decision still has unresolved overfragmentation issues: ".
+                implode(' | ', $hierarchyIssues)
+            );
+        }
+
         $customerId = $run->customer_id;
         $created = 0;
         $updated = 0;

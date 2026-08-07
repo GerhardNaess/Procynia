@@ -111,14 +111,14 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertContains('concept_candidates', $this->schemaRequired());
     }
 
-    public function test_schema_concept_candidate_items_require_all_nine_fields(): void
+    public function test_schema_concept_candidate_items_require_all_eleven_fields(): void
     {
         $items = $this->schemaProps()['concept_candidates']['items'];
 
         foreach ([
             'name', 'concept_type', 'independent_reason', 'mentioned_context',
             'existing_page_title', 'decision', 'justification', 'owning_page_title',
-            'necessary_for_article',
+            'necessary_for_article', 'has_separate_source_evidence', 'has_reuse_value',
         ] as $field) {
             $this->assertContains($field, $items['required']);
             $this->assertArrayHasKey($field, $items['properties']);
@@ -546,6 +546,41 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
         $this->assertNotEmpty($errors);
         $this->assertStringContainsString('necessary_for_article', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_absent_evidence_and_reuse_flags_is_accepted(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        unset($candidate['has_separate_source_evidence'], $candidate['has_reuse_value']);
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertEmpty($errors);
+    }
+
+    public function test_concept_candidate_non_boolean_has_separate_source_evidence_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['has_separate_source_evidence'] = 'yes';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('has_separate_source_evidence', implode(' ', $errors));
+    }
+
+    public function test_concept_candidate_non_boolean_has_reuse_value_is_rejected(): void
+    {
+        $decision = $this->validDecision();
+        $candidate = $this->validConceptCandidate();
+        $candidate['has_reuse_value'] = 'yes';
+        $decision['concept_candidates'] = [$candidate];
+
+        $errors = EnterpriseWikiMaintainerDecisionPrompt::validate($decision);
+        $this->assertNotEmpty($errors);
+        $this->assertStringContainsString('has_reuse_value', implode(' ', $errors));
     }
 
     public function test_parse_normalises_missing_concept_candidates_to_empty_array(): void

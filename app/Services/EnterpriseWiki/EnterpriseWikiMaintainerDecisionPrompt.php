@@ -59,6 +59,18 @@ namespace App\Services\EnterpriseWiki;
  * candidates (and related_page_guidance) against concept_pages/entity_pages/the existing wiki
  * index and flags the specific self-contradiction where a concept is necessary for the article but
  * neither created, reused, nor given an owning page. Same optional-in-PHP treatment as above.
+ *
+ * has_separate_source_evidence / has_reuse_value (added against overfragmentation — see the Wiki
+ * "short ITIL document exploded into 9 pages" incident: a short document whose practices are each
+ * mentioned only briefly under one overarching framework produced six thin standalone concept
+ * pages that should have been sections of that framework page instead): a "create" decision is
+ * only structurally sound when the candidate has its own separate, substantial source basis (not
+ * just a brief mention alongside sibling candidates) AND independent reuse value from other,
+ * unrelated wiki pages — EnterpriseWikiMaintainerDecisionHierarchyValidator enforces this
+ * deterministically on the merged decision, flagging any "create" candidate that itself reports
+ * either flag false. Same optional-in-PHP treatment as every other responsibility field above —
+ * both default to true (structurally sound) when absent, so a legacy decision predating these
+ * fields is never retroactively flagged.
  */
 class EnterpriseWikiMaintainerDecisionPrompt
 {
@@ -267,6 +279,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'justification' => ['type' => 'string'],
                 'owning_page_title' => ['type' => ['string', 'null']],
                 'necessary_for_article' => ['type' => 'boolean'],
+                'has_separate_source_evidence' => ['type' => 'boolean'],
+                'has_reuse_value' => ['type' => 'boolean'],
             ],
             'required' => [
                 'name',
@@ -278,6 +292,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'justification',
                 'owning_page_title',
                 'necessary_for_article',
+                'has_separate_source_evidence',
+                'has_reuse_value',
             ],
             'additionalProperties' => false,
         ];
@@ -697,6 +713,12 @@ class EnterpriseWikiMaintainerDecisionPrompt
 
         if (array_key_exists('necessary_for_article', $entry) && ! is_bool($entry['necessary_for_article'])) {
             $errors[] = "{$ctx}.necessary_for_article must be a boolean.";
+        }
+
+        foreach (['has_separate_source_evidence', 'has_reuse_value'] as $field) {
+            if (array_key_exists($field, $entry) && ! is_bool($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be a boolean.";
+            }
         }
 
         return $errors;
