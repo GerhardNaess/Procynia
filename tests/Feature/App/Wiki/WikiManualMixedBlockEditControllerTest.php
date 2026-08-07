@@ -177,6 +177,7 @@ class WikiManualMixedBlockEditControllerTest extends TestCase
     {
         $fixture = $this->createManualEditFixture();
         $staleVersion = $fixture['version'];
+        $staleVersion->update(['is_current' => false]);
         $newCurrent = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $fixture['page']->id,
             'version_number' => 2,
@@ -186,7 +187,6 @@ class WikiManualMixedBlockEditControllerTest extends TestCase
             'content_blocks_json' => $staleVersion->content_blocks_json,
             'generated_by_model' => 'gpt-5',
         ]);
-        $staleVersion->update(['is_current' => false]);
 
         $this->mock(EnterpriseWikiClaimContentRepairService::class)
             ->shouldReceive('applyManualMixedBlockEdit')

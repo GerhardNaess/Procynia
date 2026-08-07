@@ -6,6 +6,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * `is_current` is the single source of truth for a page's live/active Wiki version — ordinary
+ * page display, the graph, lint, coverage, and claim/QA reads all resolve "the current version"
+ * through this flag, never through any ingest run's `generated_page_version_id`. Enforced at the
+ * database level by the `ewpv_page_single_current_unique` partial unique index (at most one
+ * current row per page) and `ewpv_page_version_number_unique` (version_number unique per page) —
+ * see the `add_authoritative_version_constraints_to_enterprise_wiki_page_versions_table` migration.
+ * All writes that create a new current version or promote an existing one must go through
+ * EnterpriseWikiPageVersionWriter, which takes the page-row lock these constraints assume.
+ */
 class EnterpriseWikiPageVersion extends Model
 {
     protected $fillable = [

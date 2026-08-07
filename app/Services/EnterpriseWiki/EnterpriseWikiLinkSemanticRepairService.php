@@ -52,6 +52,7 @@ class EnterpriseWikiLinkSemanticRepairService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
         private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -390,19 +391,7 @@ class EnterpriseWikiLinkSemanticRepairService
                 return null;
             }
 
-            $next = ((int) EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->max('version_number')) + 1;
-
-            EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->where('is_current', true)
-                ->update(['is_current' => false]);
-
-            $version = EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $next,
-                'is_current' => true,
+            $version = $this->versionWriter->writeNewCurrentVersion($pageId, [
                 'content_markdown' => $markdown,
                 'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
             ]);

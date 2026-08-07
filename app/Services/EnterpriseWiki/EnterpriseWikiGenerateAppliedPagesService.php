@@ -63,6 +63,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiDuplicateContentRemover $duplicateContentRemover,
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -1606,25 +1607,11 @@ class EnterpriseWikiGenerateAppliedPagesService
 
     private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = []): EnterpriseWikiPageVersion
     {
-        $next = ((int) EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->max('version_number')) + 1;
-
-        EnterpriseWikiPageVersion::query()
-            ->where('enterprise_wiki_page_id', $pageId)
-            ->where('is_current', true)
-            ->update(['is_current' => false]);
-
-        $version = EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $pageId,
-            'version_number' => $next,
-            'is_current' => true,
+        return $this->versionWriter->writeNewCurrentVersion($pageId, [
             'content_markdown' => $markdown,
             'content_blocks_json' => $contentBlocks,
             'generated_by_model' => WikiPageContentAiClient::MODEL,
         ]);
-
-        return $version;
     }
 
     private function pageHasVersion(int $pageId): bool
@@ -1672,14 +1659,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 return;
             }
 
-            $next = ((int) EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->max('version_number')) + 1;
-
-            EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $next,
-                'is_current' => true,
+            $this->versionWriter->writeNewCurrentVersion($pageId, [
                 'content_markdown' => $markdown,
                 'content_blocks_json' => $contentBlocks,
                 'generated_by_model' => WikiPageContentAiClient::MODEL,

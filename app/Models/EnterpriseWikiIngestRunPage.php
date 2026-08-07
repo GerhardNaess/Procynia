@@ -5,6 +5,15 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * `generated_page_version_id` is a historical, immutable pointer to the EnterpriseWikiPageVersion
+ * this specific run actually produced (via ordinary generation) or last promoted (via a repair or
+ * manual-edit flow acting on behalf of this run) — it is set once per generation/promotion event
+ * and is never rewritten to follow later repairs made on behalf of a *different* run. Run-detail
+ * and run-history views must read this field, never `EnterpriseWikiPageVersion::is_current`.
+ * It must never be treated as a synonym for the page's current version — see
+ * EnterpriseWikiPageVersion's docblock for that contract.
+ */
 class EnterpriseWikiIngestRunPage extends Model
 {
     public const ACTION_CREATED = 'created';

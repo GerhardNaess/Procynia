@@ -11,7 +11,6 @@ use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\User;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -54,6 +53,7 @@ class EnterpriseWikiOrphanConceptLinkService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -248,23 +248,13 @@ class EnterpriseWikiOrphanConceptLinkService
             $blocks,
         )));
 
-        DB::transaction(function () use ($conceptPage, $currentVersion, $blocks, $markdown): void {
-            EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $conceptPage->id)
-                ->where('is_current', true)
-                ->update(['is_current' => false]);
+        $this->versionWriter->writeNewCurrentVersion($conceptPage, [
+            'content_markdown' => $markdown,
+            'content_blocks_json' => $blocks,
+            'generated_by_model' => 'deterministic/orphan-concept-link',
+        ]);
 
-            EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $conceptPage->id,
-                'version_number' => (int) $currentVersion->version_number + 1,
-                'is_current' => true,
-                'content_markdown' => $markdown,
-                'content_blocks_json' => $blocks,
-                'generated_by_model' => 'deterministic/orphan-concept-link',
-            ]);
-
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($conceptPage->id);
-        });
+        $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($conceptPage->id);
 
         $this->buildPageLinksService->materializeWikilinksForPage($conceptPage->fresh());
 

@@ -30,6 +30,7 @@ class EnterpriseWikiSemanticRepairService
         private readonly WikiSemanticReviserAiClient $aiClient,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -115,7 +116,6 @@ class EnterpriseWikiSemanticRepairService
 
         $newVersion = $this->createRevisedVersion(
             (int) $articleVersion->enterprise_wiki_page_id,
-            (int) $articleVersion->version_number + 1,
             $revisedMarkdown,
         );
 
@@ -135,28 +135,18 @@ class EnterpriseWikiSemanticRepairService
         ];
     }
 
-    private function createRevisedVersion(int $pageId, int $versionNumber, string $content): EnterpriseWikiPageVersion
+    private function createRevisedVersion(int $pageId, string $content): EnterpriseWikiPageVersion
     {
-        return DB::transaction(function () use ($pageId, $versionNumber, $content): EnterpriseWikiPageVersion {
-            DB::table('enterprise_wiki_page_versions')
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->where('is_current', true)
-                ->update(['is_current' => false, 'updated_at' => now()]);
+        $version = $this->versionWriter->writeNewCurrentVersion($pageId, [
+            'content_markdown' => $content,
+            'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
+        ]);
 
-            $version = EnterpriseWikiPageVersion::create([
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $versionNumber,
-                'is_current' => true,
-                'content_markdown' => $content,
-                'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
-            ]);
+        $this->restoreBlockProvenance($pageId, $version);
 
-            $this->restoreBlockProvenance($pageId, $version);
+        $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
 
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
-
-            return $version;
-        });
+        return $version;
     }
 
     /**

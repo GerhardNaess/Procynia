@@ -63,6 +63,7 @@ class EnterpriseWikiClaimContentRepairService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -1064,32 +1065,22 @@ class EnterpriseWikiClaimContentRepairService
      */
     private function createRevisedVersion(EnterpriseWikiPageVersion $previousVersion, array $blocks): EnterpriseWikiPageVersion
     {
-        return DB::transaction(function () use ($previousVersion, $blocks): EnterpriseWikiPageVersion {
-            $pageId = (int) $previousVersion->enterprise_wiki_page_id;
+        $pageId = (int) $previousVersion->enterprise_wiki_page_id;
 
-            DB::table('enterprise_wiki_page_versions')
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->where('is_current', true)
-                ->update(['is_current' => false, 'updated_at' => now()]);
+        $markdown = implode("\n\n", array_map(
+            static fn (array $block): string => (string) ($block['markdown'] ?? ''),
+            $blocks,
+        ));
 
-            $markdown = implode("\n\n", array_map(
-                static fn (array $block): string => (string) ($block['markdown'] ?? ''),
-                $blocks,
-            ));
+        $newVersion = $this->versionWriter->writeNewCurrentVersion($pageId, [
+            'content_markdown' => $markdown,
+            'content_blocks_json' => $blocks,
+            'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/claim-content-repair',
+        ]);
 
-            $newVersion = EnterpriseWikiPageVersion::create([
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => (int) $previousVersion->version_number + 1,
-                'is_current' => true,
-                'content_markdown' => $markdown,
-                'content_blocks_json' => $blocks,
-                'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/claim-content-repair',
-            ]);
+        $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
 
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
-
-            return $newVersion;
-        });
+        return $newVersion;
     }
 
     /**

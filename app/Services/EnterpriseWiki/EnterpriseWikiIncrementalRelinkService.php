@@ -63,6 +63,7 @@ class EnterpriseWikiIncrementalRelinkService
         private readonly WikiLinkRevisionAiClient $aiClient,
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -422,19 +423,7 @@ class EnterpriseWikiIncrementalRelinkService
                 return null;
             }
 
-            $next = ((int) EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->max('version_number')) + 1;
-
-            EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $pageId)
-                ->where('is_current', true)
-                ->update(['is_current' => false]);
-
-            return EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $next,
-                'is_current' => true,
+            return $this->versionWriter->writeNewCurrentVersion($pageId, [
                 'content_markdown' => $markdown,
                 'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
             ]);

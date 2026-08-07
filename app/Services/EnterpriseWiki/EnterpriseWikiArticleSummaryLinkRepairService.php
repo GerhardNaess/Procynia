@@ -8,7 +8,6 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Safe repair for existing article/summary page pairs that are missing one or both mutual
@@ -46,6 +45,7 @@ class EnterpriseWikiArticleSummaryLinkRepairService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
+        private readonly EnterpriseWikiPageVersionWriter $versionWriter,
     ) {}
 
     /**
@@ -231,23 +231,13 @@ class EnterpriseWikiArticleSummaryLinkRepairService
             $blocks,
         )));
 
-        DB::transaction(function () use ($page, $version, $blocks, $markdown): void {
-            EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $page->id)
-                ->where('is_current', true)
-                ->update(['is_current' => false]);
+        $this->versionWriter->writeNewCurrentVersion($page, [
+            'content_markdown' => $markdown,
+            'content_blocks_json' => $blocks,
+            'generated_by_model' => 'deterministic/article-summary-link-repair',
+        ]);
 
-            EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $page->id,
-                'version_number' => (int) $version->version_number + 1,
-                'is_current' => true,
-                'content_markdown' => $markdown,
-                'content_blocks_json' => $blocks,
-                'generated_by_model' => 'deterministic/article-summary-link-repair',
-            ]);
-
-            $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
-        });
+        $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
 
         $this->buildPageLinksService->materializeWikilinksForPage($page->fresh());
     }

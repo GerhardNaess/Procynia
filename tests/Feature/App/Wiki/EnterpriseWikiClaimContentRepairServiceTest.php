@@ -507,10 +507,17 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
             ->shouldReceive('extractClaimsForManualMixedBlock')
             ->once()
             ->withArgs(function () use ($fixture): bool {
+                // The manual-edit flow's own staged version already occupies version_number 2 by
+                // this point (staged before claim extraction runs) — this concurrent write must
+                // take the next free number, not hardcode 2, or it collides with it.
+                $nextVersionNumber = ((int) EnterpriseWikiPageVersion::query()
+                    ->where('enterprise_wiki_page_id', $fixture['page']->id)
+                    ->max('version_number')) + 1;
+
                 $fixture['version']->update(['is_current' => false]);
                 EnterpriseWikiPageVersion::query()->create([
                     'enterprise_wiki_page_id' => $fixture['page']->id,
-                    'version_number' => 2,
+                    'version_number' => $nextVersionNumber,
                     'is_current' => true,
                     'is_staged' => false,
                     'content_markdown' => 'Concurrent current version.',
