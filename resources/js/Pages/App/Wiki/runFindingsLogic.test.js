@@ -9,6 +9,8 @@ import {
     isRunStalled,
     isActiveWikiRun,
     formatFindingUserId,
+    hasActiveWikiRunForTab,
+    activeWikiRunLikeObjectsForTab,
 } from './runFindingsLogic.js';
 
 describe('formatFindingUserId', () => {
@@ -358,6 +360,83 @@ describe('ACTIVE_WIKI_RUN_STATUSES / isActiveWikiRun — polling contract (Wiki 
         for (const status of backendAutomaticProgressStatuses) {
             assert.ok(ACTIVE_WIKI_RUN_STATUSES.includes(status), `expected ACTIVE_WIKI_RUN_STATUSES to include ${status}`);
         }
+    });
+});
+
+/**
+ * Wiki run-4: run 4 reached status=awaiting_document_owner_approval, qa_status=passed in the
+ * database, but the Kilder (sources) tab kept showing the earlier 'post_claim_verification' badge
+ * indefinitely. Root cause: Index.jsx computed its polling gate (hasActiveWikiRun) by reading
+ * `.status` directly off whatever list the active tab shows — correct for the Kjøringer tab
+ * (`runs` items ARE ingest runs) but wrong for the Kilder tab (`sources` items are documents; the
+ * ingest run status lives nested at `source.latest_ingest_run`, and `source.status` is always
+ * undefined). A permanently-false polling gate for that tab meant the 5s poll never fired at all —
+ * not a stale copy of data, but a gate that never let a fresh fetch happen in the first place.
+ * activeWikiRunLikeObjectsForTab()/hasActiveWikiRunForTab() replace that inline per-tab check.
+ */
+describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab polling gate (Wiki run-4)', () => {
+    test('Kilder tab: reads the nested latest_ingest_run, never the (non-existent) source.status', () => {
+        const sources = [
+            { id: 10, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'post_claim_verification' } },
+        ];
+
+        assert.deepEqual(activeWikiRunLikeObjectsForTab('sources', { sources }), [{ id: 4, status: 'post_claim_verification' }]);
+    });
+
+    test('Kilder tab: a source with no ingest run yet is skipped, never crashes on the missing nested object', () => {
+        const sources = [{ id: 11, document_status: 'pending', latest_ingest_run: null }];
+
+        assert.doesNotThrow(() => hasActiveWikiRunForTab('sources', { sources }));
+        assert.equal(hasActiveWikiRunForTab('sources', { sources }), false);
+    });
+
+    test('Kjøringer tab: run objects are used directly, not nested', () => {
+        const runs = [{ id: 4, status: 'post_claim_verification' }];
+
+        assert.deepEqual(activeWikiRunLikeObjectsForTab('runs', { runs }), runs);
+    });
+
+    test('an unrelated tab (e.g. pages/quality) never polls off either list', () => {
+        assert.deepEqual(activeWikiRunLikeObjectsForTab('pages', { sources: [{ status: 'queued' }], runs: [{ status: 'queued' }] }), []);
+        assert.equal(hasActiveWikiRunForTab('pages', { sources: [{ status: 'queued' }], runs: [{ status: 'queued' }] }), false);
+    });
+
+    // The exact run-4 transition: a poll response replacing 'post_claim_verification' with
+    // 'awaiting_document_owner_approval' must keep the Kilder tab's polling gate open (both are
+    // active per ACTIVE_WIKI_RUN_STATUSES) — proving the fix does not merely start polling, but
+    // keeps it running long enough for the real transition to land — and each call is derived
+    // fresh from whatever is passed in, so a new poll response is never shadowed by an old one.
+    test('run-4 transition: post_claim_verification -> awaiting_document_owner_approval stays active on the Kilder tab throughout', () => {
+        const sourcesBeforePoll = [
+            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'post_claim_verification', qa_status: null } },
+        ];
+        const sourcesAfterPoll = [
+            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'awaiting_document_owner_approval', qa_status: 'passed' } },
+        ];
+
+        assert.equal(hasActiveWikiRunForTab('sources', { sources: sourcesBeforePoll }), true, 'still active before the poll lands');
+        assert.equal(hasActiveWikiRunForTab('sources', { sources: sourcesAfterPoll }), true, 'still active once the poll response replaces the old status');
+
+        // The new props are used as-is — the old 'post_claim_verification' value is never retained
+        // once sourcesAfterPoll is what's passed in (no local caching/merging inside the helper).
+        const [afterRun] = activeWikiRunLikeObjectsForTab('sources', { sources: sourcesAfterPoll });
+        assert.equal(afterRun.status, 'awaiting_document_owner_approval');
+        assert.notEqual(afterRun.status, 'post_claim_verification');
+    });
+
+    // Demonstrates the actual bug being fixed: the previous inline check
+    // (`sources.some((s) => ACTIVE_WIKI_RUN_STATUSES.includes(s.status))`) reads `.status` directly
+    // off the source object rather than off `source.latest_ingest_run` — this reproduces that
+    // exact wrong check to prove it always evaluates to false, unlike the fixed helper above.
+    test('reproduces the pre-fix bug: checking source.status directly is always false, even while its run is active', () => {
+        const sources = [
+            { id: 4, document_status: 'extracted', latest_ingest_run: { id: 4, status: 'awaiting_document_owner_approval' } },
+        ];
+
+        const buggyHasActiveRun = sources.some(isActiveWikiRun) || sources.some((s) => s?.status === 'queued');
+        assert.equal(buggyHasActiveRun, false, 'the old bug: source.status is always undefined, so this never detects an active run');
+
+        assert.equal(hasActiveWikiRunForTab('sources', { sources }), true, 'the fix: reads the nested latest_ingest_run instead');
     });
 });
 

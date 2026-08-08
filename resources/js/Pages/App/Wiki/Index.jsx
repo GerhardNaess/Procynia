@@ -15,6 +15,7 @@ import {
     isRunStalled,
     formatFindingUserId,
     isActiveWikiRun,
+    hasActiveWikiRunForTab,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -3547,8 +3548,15 @@ export default function WikiIndex({
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
-    const visibleRuns = activeTab === 'sources' ? sources : activeTab === 'runs' ? runs : [];
-    const hasActiveWikiRun = visibleRuns.some(isActiveWikiRun) || visibleRuns.some((run) => run?.status === 'queued');
+    // Wiki run-4: hasActiveWikiRunForTab() (runFindingsLogic.js) picks the right run-like objects
+    // per tab — a source object has no top-level `status` of its own (it has `document_status`, a
+    // different lifecycle); the ingest run status lives nested at source.latest_ingest_run. The
+    // previous inline check read `source.status` directly (always undefined), so this was
+    // permanently false whenever the Kilder tab was open and the polling effect below never
+    // started — a run could keep progressing (post_claim_verification -> qa ->
+    // awaiting_document_owner_approval) in the database while its Kilder-tab badge kept showing
+    // whatever status was rendered on the last full page load, forever, until a manual refresh.
+    const hasActiveWikiRun = hasActiveWikiRunForTab(activeTab, { sources, runs });
     const wikiHelpContent = activeTab === 'pages'
         ? {
             title: tw.page_help_title ?? 'Slik fungerer Wiki-sider',

@@ -128,6 +128,36 @@ export function isActiveWikiRun(run) {
 }
 
 /**
+ * Wiki run-4: the run-like objects the Kjøringer/Kilder polling gate (Index.jsx) must inspect for
+ * "is anything still actively processing" — differ per tab. The Kjøringer tab's `runs` prop items
+ * ARE ingest runs (each has its own `.status` directly). The Kilder tab's `sources` prop items are
+ * NOT ingest runs — a source has its own `document_status` lifecycle field, and the actual ingest
+ * run status lives nested at `source.latest_ingest_run`. Checking `source.status` directly (the
+ * bug: it's always undefined) made the Kilder tab's polling gate permanently false, so a source's
+ * badge could sit on a stale status (e.g. 'post_claim_verification') forever after the underlying
+ * run had already moved on (e.g. to 'awaiting_document_owner_approval') — until a full manual page
+ * reload re-fetched the true status. Every call recomputes fresh from whatever `sources`/`runs` are
+ * passed in — there is no memoization here, so a new poll response is always reflected immediately.
+ */
+export function activeWikiRunLikeObjectsForTab(activeTab, { sources = [], runs = [] } = {}) {
+    if (activeTab === 'sources') {
+        return sources.map((source) => source?.latest_ingest_run).filter(Boolean);
+    }
+
+    if (activeTab === 'runs') {
+        return runs;
+    }
+
+    return [];
+}
+
+export function hasActiveWikiRunForTab(activeTab, { sources = [], runs = [] } = {}) {
+    const candidates = activeWikiRunLikeObjectsForTab(activeTab, { sources, runs });
+
+    return candidates.some(isActiveWikiRun) || candidates.some((run) => run?.status === 'queued');
+}
+
+/**
  * Wiki run-3: derives the Dokumenteiergodkjenning (last) timeline step's state from the run's
  * actual document-owner approval evidence (`run.document_owner_approval`, built by
  * WikiController::documentOwnerApprovalCountsForRun()) instead of ever inferring it from
