@@ -518,8 +518,67 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('step 3 — compare against mature practice', $developerPrompt);
         $this->assertStringContainsString('step 4 — contribute where it adds value', $developerPrompt);
         $this->assertStringContainsString('the established good practice for that subject specifically', $developerPrompt);
-        $this->assertStringContainsString('depth over breadth', $developerPrompt);
-        $this->assertStringContainsString('generic checklist items', $developerPrompt);
+        $this->assertStringContainsString('keep every recommendation concrete and anchored in what this page actually deals with', $developerPrompt);
+    }
+
+    /**
+     * Run 12 regression: the same source document that had previously produced real best_practice
+     * content generated none once the concrete gap checks were replaced by an abstract
+     * subject-comparison. The checks are back as professional triggers — explicitly not a quota —
+     * so process material with obvious governance gaps has something concrete to catch on.
+     */
+    public function test_developer_prompt_lists_the_concrete_gap_triggers(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        foreach ([
+            'ownership and responsibility',
+            'control points',
+            'targets, kpis and measurement frequency',
+            'deviation handling',
+            'decision criteria',
+            'risk and security',
+            'process boundaries',
+            'follow-up and improvement',
+        ] as $trigger) {
+            $this->assertStringContainsString($trigger, $developerPrompt, "missing gap trigger: {$trigger}");
+        }
+
+        $this->assertStringContainsString('professional triggers, not a quota', $developerPrompt);
+    }
+
+    /**
+     * The same run-12 regression from the other side: nothing may push the model into withholding
+     * a well-founded recommendation. The old "depth over breadth" framing and its demand that a
+     * recommendation never fit any other document are gone.
+     */
+    public function test_developer_prompt_does_not_discourage_well_founded_recommendations(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringNotContainsString('depth over breadth', $developerPrompt);
+        $this->assertStringNotContainsString('would read exactly the same for an unrelated document', $developerPrompt);
+        $this->assertStringContainsString('never a reason to withhold it', $developerPrompt);
+
+        // A mature source may still legitimately yield nothing.
+        $this->assertStringContainsString('zero best_practice blocks is the correct outcome', $developerPrompt);
+        $this->assertStringContainsString('no quota, no minimum, no padding', $developerPrompt);
+    }
+
+    /**
+     * Requiring best_practice to read exactly like the rest of the agreement removed the cue the
+     * model used to classify such a block at all, so gap-closing clauses could be filed as
+     * source_based or structural instead. Origin is now stated to decide classification, not tone.
+     */
+    public function test_developer_prompt_states_that_origin_not_tone_decides_classification(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('classification is decided by origin, not by tone', $developerPrompt);
+        $this->assertStringContainsString('that block is best_practice', $developerPrompt);
+        $this->assertStringContainsString('it is not source_based', $developerPrompt);
+        $this->assertStringContainsString('it is not structural either', $developerPrompt);
+        $this->assertStringContainsString('never turns it into source content', $developerPrompt);
     }
 
     /**
