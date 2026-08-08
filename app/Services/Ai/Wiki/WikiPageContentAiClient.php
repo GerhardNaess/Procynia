@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -131,7 +132,7 @@ class WikiPageContentAiClient
             $context,
         );
 
-        return $this->parseBlocksResponse($decoded);
+        return $this->parseBlocksResponse($decoded, 'generation', $pageType);
     }
 
     private function planCapacity(string $pageType, int $inputSizeChars, int $retryAttempt): AiCapacityPlan
@@ -205,7 +206,7 @@ class WikiPageContentAiClient
             $context,
         );
 
-        return $this->parseSectionRepairResponse($decoded, $issues);
+        return $this->parseSectionRepairResponse($decoded, $issues, $pageType);
     }
 
     private function planSectionRepairCapacity(int $inputSizeChars, int $sectionsToRepair, int $retryAttempt): AiCapacityPlan
@@ -273,13 +274,13 @@ class WikiPageContentAiClient
             $context,
         );
 
-        return $this->parseBlocksResponse($decoded);
+        return $this->parseBlocksResponse($decoded, 'figure_repair', $pageType);
     }
 
     /**
      * @return array{markdown: string, blocks: list<array<string, mixed>>}
      */
-    private function parseBlocksResponse(array $decoded): array
+    private function parseBlocksResponse(array $decoded, string $operation, string $pageType): array
     {
         $blocks = data_get($decoded, 'page.blocks', []);
 
@@ -330,6 +331,8 @@ class WikiPageContentAiClient
 
         $this->validateMarkdown($markdown);
 
+        $this->logParsedBlockOrigins($operation, $pageType, $blocks);
+
         return [
             'markdown' => $markdown,
             'blocks' => array_values($blocks),
@@ -349,7 +352,7 @@ class WikiPageContentAiClient
      * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
      * @return list<array{planned_topic: string, blocks: list<array<string, mixed>>}>
      */
-    private function parseSectionRepairResponse(array $decoded, array $issues): array
+    private function parseSectionRepairResponse(array $decoded, array $issues, string $pageType): array
     {
         $sections = data_get($decoded, 'sections', []);
 
@@ -432,7 +435,54 @@ class WikiPageContentAiClient
             ];
         }
 
+        $this->logParsedBlockOrigins(
+            'section_repair',
+            $pageType,
+            array_merge(...array_map(static fn (array $section): array => $section['blocks'], $result)),
+            count($result),
+        );
+
         return $result;
+    }
+
+    /**
+     * TEMPORARY (Wiki run-12/13): counts the content_origin the AI itself returned, logged at the
+     * only point where that is known — after schema validation, before
+     * EnterpriseWikiGenerateAppliedPagesService touches a single block. Run 12 and 13 both
+     * persisted zero best_practice blocks, and nothing in the chain records the AI response
+     * ('store' => false, and the decoder logs only on rejection), so it is currently impossible to
+     * tell whether the model returned none or the pipeline dropped them. This distinguishes the
+     * two; remove it once that is settled.
+     *
+     * Counts only — never markdown, source text, the raw response, or any document content.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     */
+    private function logParsedBlockOrigins(string $operation, string $pageType, array $blocks, ?int $sectionCount = null): void
+    {
+        $counts = [
+            EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED => 0,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE => 0,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL => 0,
+        ];
+
+        foreach ($blocks as $block) {
+            $origin = (string) ($block['content_origin'] ?? '');
+
+            if (array_key_exists($origin, $counts)) {
+                $counts[$origin]++;
+            }
+        }
+
+        Log::info('[WIKI_PAGE_CONTENT_ORIGINS] Parsed AI block origins.', array_filter([
+            'operation' => $operation,
+            'page_type' => $pageType,
+            'sections' => $sectionCount,
+            'total' => count($blocks),
+            'source_based' => $counts[EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED],
+            'best_practice' => $counts[EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE],
+            'structural' => $counts[EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL],
+        ], static fn (mixed $value): bool => $value !== null));
     }
 
     private function validateMarkdown(string $markdown): void
