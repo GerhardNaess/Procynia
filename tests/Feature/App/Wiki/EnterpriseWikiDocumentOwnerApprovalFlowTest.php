@@ -15,8 +15,9 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -161,6 +162,266 @@ class EnterpriseWikiDocumentOwnerApprovalFlowTest extends TestCase
         $this->assertTrue($approval->is_override);
         $this->assertSame($systemOwner->id, $approval->decided_by_user_id);
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+    }
+
+    /**
+     * v0.10 architecture fix: ordinary source-attributed content (content_origin = source_based
+     * on a page version's own content_blocks_json) must generate a document owner approval
+     * requirement even when zero claims exist for the page — claims are Procynia's own
+     * assertions (best practice, recommendation, interpretation, ...), never the entry ticket for
+     * document owner approval. Covers scenario A + B from the fix ticket: requirement exists, and
+     * the run cannot reach completed without an explicit human decision.
+     */
+    public function test_source_based_content_blocks_create_requirement_and_await_approval_with_zero_claims(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'zero-claim-source.docx');
+        $page = $this->createPendingPage($customer, 'zero-claim-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+        $run = $this->createPassedQaRun($customer, $page, $version, $document->id);
+
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+
+        $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->firstOrFail();
+        $this->assertSame($owner->id, $approval->document_owner_user_id);
+        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING, $approval->approval_status);
+        $this->assertContains($document->id, $approval->source_document_ids);
+    }
+
+    /**
+     * Scenario C: once the real document owner records an actual approve decision (traceable to
+     * user, decision and timestamp via the existing approval model), the run can complete — with
+     * no claims involved anywhere in the flow.
+     */
+    public function test_real_owner_approval_completes_zero_claim_source_based_run(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'zero-claim-source.docx');
+        $page = $this->createPendingPage($customer, 'zero-claim-approve-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+        $run = $this->createPassedQaRun($customer, $page, $version, $document->id);
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+
+        $approval = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->firstOrFail();
+
+        $this->actingAs($owner)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approval->id}/approve", [
+            'comment' => 'Godkjent uten claims.',
+        ])->assertRedirect(route('app.wiki.show', $page->slug));
+
+        $approval->refresh();
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, $approval->approval_status);
+        $this->assertSame($owner->id, $approval->decided_by_user_id);
+        $this->assertNotNull($approval->decided_at);
+        $this->assertFalse($approval->is_override);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+    }
+
+    /**
+     * Scenario D: a page whose content_blocks_json cites two different source documents owned by
+     * two different users — no claims involved — must require both owners' approval before the
+     * run can complete, and neither owner can satisfy the other's requirement.
+     */
+    public function test_two_source_documents_with_two_owners_both_required_via_block_provenance(): void
+    {
+        $customer = $this->createCustomer();
+        $ownerX = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $ownerY = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $documentA = $this->createDocument($customer, $ownerX, 'doc-a.docx');
+        $documentB = $this->createDocument($customer, $ownerY, 'doc-b.docx');
+        $page = $this->createPendingPage($customer, 'two-doc-block-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [
+            $this->sourceBasedBlock($documentA, 'block-0001'),
+            $this->sourceBasedBlock($documentB, 'block-0002'),
+        ]);
+        $run = $this->createPassedQaRun($customer, $page, $version, $documentA->id);
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+
+        $approvalX = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->where('document_owner_user_id', $ownerX->id)
+            ->firstOrFail();
+        $approvalY = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->where('document_owner_user_id', $ownerY->id)
+            ->firstOrFail();
+
+        // X cannot satisfy Y's requirement.
+        $this->actingAs($ownerX)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalY->id}/approve")
+            ->assertForbidden();
+
+        $this->actingAs($ownerX)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalX->id}/approve")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+
+        $this->actingAs($ownerY)->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$approvalY->id}/approve")
+            ->assertRedirect(route('app.wiki.show', $page->slug));
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+    }
+
+    /**
+     * Scenario E: block-level provenance and a claim's own source reference both point at the same
+     * document — requirement identity must stay deterministic, so no duplicate approval row is
+     * created just because two provenance paths agree on the same document.
+     */
+    public function test_provenance_and_claim_to_same_document_does_not_duplicate_requirement(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'shared-doc.docx');
+        $page = $this->createPendingPage($customer, 'shared-doc-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+        $claim = $this->createClaim($page, $version, 'Krav fra delt dokument.');
+        $this->createSourceReference($claim, $document);
+
+        $approvals = app(EnterpriseWikiDocumentOwnerApprovalService::class)->syncForPageVersion($version);
+
+        $this->assertCount(1, $approvals);
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+    }
+
+    /**
+     * Scenario F: running the requirement builder twice must be idempotent — no duplicate rows,
+     * and an already-recorded decision must not be overwritten by the second pass.
+     */
+    public function test_requirement_builder_is_idempotent_across_repeated_runs(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'idempotent-doc.docx');
+        $page = $this->createPendingPage($customer, 'idempotent-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+
+        $service = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+        $first = $service->syncForPageVersion($version);
+        $this->assertCount(1, $first);
+
+        $second = $service->syncForPageVersion($version);
+        $this->assertCount(1, $second);
+        $this->assertSame($first->first()->id, $second->first()->id);
+
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+    }
+
+    /**
+     * Scenario H, combined with F: an existing decision on a requirement survives a repeated
+     * requirement-building pass — approving, then re-syncing, must not reset the decision back to
+     * pending.
+     */
+    public function test_existing_approval_decision_is_preserved_across_re_evaluation(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'preserved-decision-doc.docx');
+        $page = $this->createPendingPage($customer, 'preserved-decision-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+
+        $service = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+        $approval = $service->syncForPageVersion($version)->first();
+        $service->decide($approval, $owner, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, 'Godkjent.');
+
+        $resynced = $service->syncForPageVersion($version)->first();
+
+        $resynced->refresh();
+        $this->assertSame(EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED, $resynced->approval_status);
+        $this->assertSame($owner->id, $resynced->decided_by_user_id);
+        $this->assertNotNull($resynced->decided_at);
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+    }
+
+    /**
+     * Scenario G: a terminal run must not gain new approval requirements from a stale/late
+     * re-evaluation call — the pre-existing terminal guard in
+     * EnterpriseWikiDocumentFlowService::reconcileRunDocumentOwnerApprovalState() must still hold
+     * for the new block-based provenance path, exactly as it already did for claims.
+     */
+    public function test_terminal_run_gets_no_new_requirements_from_block_provenance(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $document = $this->createDocument($customer, $owner, 'terminal-doc.docx');
+        $page = $this->createPendingPage($customer, 'terminal-run-page');
+        $version = $this->createCurrentVersionWithBlocks($page, [$this->sourceBasedBlock($document)]);
+        $run = $this->createPassedQaRun($customer, $page, $version, $document->id);
+        $run->update(['status' => EnterpriseWikiIngestRun::STATUS_COMPLETED, 'finished_at' => now()]);
+
+        $this->assertSame(
+            0,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(
+            0,
+            EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+                ->where('enterprise_wiki_page_version_id', $version->id)
+                ->count(),
+        );
+    }
+
+    private function createCurrentVersionWithBlocks(EnterpriseWikiPage $page, array $blocks): EnterpriseWikiPageVersion
+    {
+        return EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.e($page->title),
+            'content_blocks_json' => $blocks,
+            'generated_by_model' => 'gpt-5',
+        ]);
+    }
+
+    private function sourceBasedBlock(EnterpriseWikiDocument $document, string $blockKey = 'block-0001'): array
+    {
+        return [
+            'block_key' => $blockKey,
+            'position' => 0,
+            'markdown' => 'Kildebasert innhold for '.$document->original_filename,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_label' => $document->original_filename,
+            'source_elements' => [],
+        ];
     }
 
     private function createCustomer(string $name = 'Document Owner Test AS'): Customer

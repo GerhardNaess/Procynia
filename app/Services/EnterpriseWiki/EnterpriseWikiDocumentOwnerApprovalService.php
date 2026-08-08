@@ -81,7 +81,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 ])
                 ->get();
 
-        return $this->buildRequirementGroupsFromClaims($claims, $page);
+        return $this->buildRequirementGroups($version, $claims, $page);
     }
 
     /**
@@ -99,9 +99,17 @@ class EnterpriseWikiDocumentOwnerApprovalService
                     EnterpriseWikiPage::STATUS_ARCHIVED,
                     EnterpriseWikiPage::STATUS_SUPERSEDED,
                 ]))
-            ->whereHas('claims.sourceReferences', fn ($query) => $query
-                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-                ->where('source_id', $document->id))
+            ->where(function ($query) use ($document): void {
+                $query->whereHas('claims.sourceReferences', fn ($q) => $q
+                    ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                    ->where('source_id', $document->id))
+                    ->orWhere(function ($blockQuery) use ($document): void {
+                        $blockQuery->whereNotNull('content_blocks_json')->whereRaw(
+                            "EXISTS (SELECT 1 FROM json_array_elements(content_blocks_json) AS elem WHERE elem->>'source_type' = ? AND (elem->>'source_id')::bigint = ?)",
+                            [EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT, $document->id],
+                        );
+                    });
+            })
             ->with(['page'])
             ->get();
 
@@ -308,7 +316,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
                 ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)])
             ->get();
 
-        return $this->buildRequirementGroupsFromClaims($claims, $page)
+        return $this->buildRequirementGroups($version, $claims, $page)
             ->map(function (array $group) use ($version, $page): EnterpriseWikiPageVersionDocumentOwnerApproval {
                 $sourceDocumentIds = collect($group['source_document_ids'] ?? [])
                     ->map(static fn (mixed $value): int => (int) $value)
@@ -330,21 +338,25 @@ class EnterpriseWikiDocumentOwnerApprovalService
      *     source_document_labels: list<string>
      * }>
      */
-    private function buildRequirementGroupsFromClaims(Collection $claims, EnterpriseWikiPage $page): Collection
+    private function buildRequirementGroups(EnterpriseWikiPageVersion $version, Collection $claims, EnterpriseWikiPage $page): Collection
     {
         // v0.10 (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat — v0.10"): Document Owner
         // approval attributes real, source-linked content to its owning document — it is
         // orthogonal to claim QA review and must never be suppressed by open claim QA signals
         // (unsupported_generated_content/internal_error/missing provenance). Approval
-        // requirements are always built from claims' actual source references below, regardless
-        // of hasOpenClaimQaSignals() — that method remains available purely as informational data
-        // for the voluntary QA screen (see hasOpenClaimQaSignalsForVersion()).
-        $documentIds = $claims->flatMap(function (EnterpriseWikiClaim $claim): Collection {
-            return $claim->sourceReferences
-                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-                ->pluck('source_id');
-        })->map(static fn (mixed $value): int => (int) $value)
-            ->filter(static fn (int $value): bool => $value > 0)
+        // requirements are always built from the page version's actual provenance below,
+        // regardless of hasOpenClaimQaSignals() — that method remains available purely as
+        // informational data for the voluntary QA screen (see hasOpenClaimQaSignalsForVersion()).
+        //
+        // Authoritative provenance is EnterpriseWikiPageVersion::content_blocks_json — every
+        // block written by EnterpriseWikiPageContentBlockService carries its own source_type/
+        // source_id independently of whether a claim was ever extracted for it, so ordinary
+        // source-attributed content (content_origin = source_based) is discovered here even with
+        // zero claims. Claims' own source references are unioned in on top of that (not replaced)
+        // so a claim that cites a document beyond what the version's blocks record still triggers
+        // its owner's requirement, and existing claim-based provenance keeps working unchanged.
+        $documentIds = $this->sourceBasedDocumentIdsForVersion($version)
+            ->merge($this->claimSourceDocumentIdsFromCollection($claims))
             ->unique()
             ->values();
 
@@ -402,10 +414,68 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
+     * Document IDs a page version's own content blocks are directly attributed to. Only
+     * content_origin = source_based blocks count — best_practice/unsupported_generated_content/
+     * internal_error/unclassified blocks are Procynia-side content, not source document content,
+     * and must never generate a document owner approval requirement on their own.
+     *
+     * @return Collection<int, int>
+     */
+    private function sourceBasedDocumentIdsForVersion(EnterpriseWikiPageVersion $version): Collection
+    {
+        $blocks = is_array($version->content_blocks_json) ? $version->content_blocks_json : [];
+        $ids = collect();
+
+        foreach ($blocks as $block) {
+            if (! is_array($block) || ($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                continue;
+            }
+
+            $ids->push($this->documentIdFromProvenancePayload($block));
+
+            foreach ((array) ($block['source_elements'] ?? []) as $element) {
+                if (is_array($element)) {
+                    $ids->push($this->documentIdFromProvenancePayload($element));
+                }
+            }
+        }
+
+        return $ids->filter(static fn (?int $value): bool => $value !== null && $value > 0)
+            ->unique()
+            ->values();
+    }
+
+    private function documentIdFromProvenancePayload(array $payload): ?int
+    {
+        if (($payload['source_type'] ?? null) !== EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+            return null;
+        }
+
+        $sourceId = (int) ($payload['source_id'] ?? 0);
+
+        return $sourceId > 0 ? $sourceId : null;
+    }
+
+    /**
+     * @return Collection<int, int>
+     */
+    private function claimSourceDocumentIdsFromCollection(Collection $claims): Collection
+    {
+        return $claims->flatMap(function (EnterpriseWikiClaim $claim): Collection {
+            return $claim->sourceReferences
+                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->pluck('source_id');
+        })->map(static fn (mixed $value): int => (int) $value)
+            ->filter(static fn (int $value): bool => $value > 0)
+            ->unique()
+            ->values();
+    }
+
+    /**
      * Whether a page version's claims currently carry an open claim QA signal — informational
      * only (v0.10). Public counterpart of hasOpenClaimQaSignals() for callers (WikiController)
      * that only need the boolean, not a full requirements/approvals computation. Does not affect
-     * whether a Document Owner approval requirement is created — see buildRequirementGroupsFromClaims().
+     * whether a Document Owner approval requirement is created — see buildRequirementGroups().
      */
     public function hasOpenClaimQaSignalsForVersion(EnterpriseWikiPageVersion $version): bool
     {
@@ -430,7 +500,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
      * EnterpriseWikiPostIngestQaService::findOpenClaimQaSignals() reports, so the two can never
      * disagree). Purely informational since v0.10 (docs/enterprise-llm-wiki-plan.md,
      * "Arkitekturnotat — v0.10") — it no longer suppresses or gates the Document Owner approval
-     * requirement (see buildRequirementGroupsFromClaims()). Best-practice suggestions are
+     * requirement (see buildRequirementGroups()). Best-practice suggestions are
      * excluded — those are a distinct, already-supported review flow (WikiClaimController::approve()).
      */
     private function hasOpenClaimQaSignals(Collection $claims): bool
