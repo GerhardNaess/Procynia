@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
+use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimCanonicalizationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
@@ -46,6 +47,7 @@ class WikiClaimController extends Controller
         private readonly EnterpriseWikiPageContentBlockService $contentBlockService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiClaimCanonicalizationService $canonicalizationService,
+        private readonly EnterpriseWikiBestPracticeSectionService $bestPracticeSectionService,
     ) {}
 
     public function approve(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -204,7 +206,7 @@ class WikiClaimController extends Controller
 
         $siblings = EnterpriseWikiClaim::query()
             ->where('enterprise_wiki_page_version_id', $claim->enterprise_wiki_page_version_id)
-            ->where('content_block_key', $blockKey)
+            ->whereIn('content_block_key', $this->sectionBlockKeysFor($claim))
             ->where('content_origin', EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)
             ->where('id', '!=', $claim->id)
             ->where('approval_status', EnterpriseWikiClaim::APPROVAL_STATUS_PENDING)
@@ -213,6 +215,56 @@ class WikiClaimController extends Controller
         foreach ($siblings as $sibling) {
             $this->storeDecision($sibling, $userId, $status, $comment);
         }
+    }
+
+    /**
+     * Every content_block_key belonging to the SAME visible "Beste praksis" section as this claim,
+     * in block order — the review/decision unit the user actually sees and acts on.
+     *
+     * Reuses EnterpriseWikiBestPracticeSectionService::mapBlocksToSections(), the single source of
+     * truth the Wiki page itself renders from (via WikiController::renderedContentBlocks()), so the
+     * decision unit and the visible section can never disagree. That map derives its boundaries
+     * from data that always exists — block order, each block's own leading heading, and
+     * content_origin — and anchors a stable key on the first block of every best-practice run, so
+     * it never depends on a stored section_key being present.
+     *
+     * Falls back to the claim's own block alone whenever the block is not part of a mapped section
+     * (no stable anchor, missing version, or a block the map deliberately excludes), which is
+     * exactly the previous per-block behaviour.
+     *
+     * @return list<string>
+     */
+    private function sectionBlockKeysFor(EnterpriseWikiClaim $claim): array
+    {
+        $blockKey = trim((string) $claim->content_block_key);
+
+        if ($blockKey === '') {
+            return [];
+        }
+
+        $claim->loadMissing('version');
+        $version = $claim->version;
+
+        if ($version === null || (int) $version->id !== (int) $claim->enterprise_wiki_page_version_id) {
+            return [$blockKey];
+        }
+
+        $map = $this->bestPracticeSectionService->mapBlocksToSections($version);
+        $sectionKey = $map[$blockKey]['section_key'] ?? null;
+
+        if ($sectionKey === null) {
+            return [$blockKey];
+        }
+
+        $keys = [];
+
+        foreach ($map as $key => $section) {
+            if (($section['section_key'] ?? null) === $sectionKey) {
+                $keys[] = (string) $key;
+            }
+        }
+
+        return $keys === [] ? [$blockKey] : $keys;
     }
 
     /**
@@ -238,7 +290,12 @@ class WikiClaimController extends Controller
             return;
         }
 
-        $this->contentBlockService->replaceBlockMarkdown($version, $blockKey, '');
+        // "Fjern teksten" applies to the whole visible section, matching the decision that was
+        // just cascaded across it — otherwise rejecting a section would leave its other paragraphs
+        // standing on the page with no claim backing them.
+        foreach ($this->sectionBlockKeysFor($claim) as $sectionBlockKey) {
+            $this->contentBlockService->replaceBlockMarkdown($version, $sectionBlockKey, '');
+        }
     }
 
     public function storeSourceReference(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -497,8 +554,25 @@ class WikiClaimController extends Controller
             abort(422, 'Best-practice text can only be edited when the claim has a stable Wiki text block.');
         }
 
+        // The reviewer edits the whole visible section (Show.jsx seeds the field with the section's
+        // combined markdown), so the edited text replaces the SECTION: it is written to the
+        // section's first block and the remaining blocks are blanked. Writing it to one block while
+        // leaving the others standing would duplicate the section's other paragraphs on the page.
+        $sectionBlockKeys = $this->sectionBlockKeysFor($claim);
+        $primaryBlockKey = $sectionBlockKeys[0] ?? $blockKey;
+
+        // Blank the section's other blocks BEFORE writing the new text. replaceBlockMarkdown()
+        // locates a block by its current markdown inside content_markdown, and the edited section
+        // text legitimately keeps some of those paragraphs verbatim — writing it first would make
+        // their lookup ambiguous and silently leave them duplicated on the page.
+        foreach ($sectionBlockKeys as $sectionBlockKey) {
+            if ($sectionBlockKey !== $primaryBlockKey) {
+                $this->contentBlockService->replaceBlockMarkdown($version, $sectionBlockKey, '');
+            }
+        }
+
         abort_unless(
-            $this->contentBlockService->replaceBlockMarkdown($version, $blockKey, $approvedText),
+            $this->contentBlockService->replaceBlockMarkdown($version, $primaryBlockKey, $approvedText),
             422,
             'Best-practice text can only be edited when the original block is still present in the current Wiki page version.',
         );
