@@ -3526,6 +3526,7 @@ return [
         'verification_basis_claim_handler_notice' => 'Review open suggestions and deviations. Source-based content should already have traceability from the system; manual source linking is only a repair fallback.',
         'verification_basis_read_only_notice' => 'You can see the verification basis, but you do not have access to process claims.',
         'verification_basis_best_practice_badge' => 'Addition – not from the source document',
+        'verification_basis_block_claim_count' => 'Combined review · :count claims',
         'verification_basis_best_practice_reason_fallback' => 'This content is a best-practice suggestion and must be reviewed before it can be used as approved material.',
         'verification_basis_best_practice_no_source_search' => 'This is not presented as documented customer knowledge. Review the wording or reject it. You should not search for a missing source.',
         'verification_basis_best_practice_edit_label' => 'Edit and approve',

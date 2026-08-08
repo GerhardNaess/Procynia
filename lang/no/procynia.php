@@ -3526,6 +3526,7 @@ return [
         'verification_basis_claim_handler_notice' => 'Vurder åpne forslag og avvik. Kildebasert innhold skal ha sporbarhet fra systemet; manuell kildekobling brukes bare som reparasjon.',
         'verification_basis_read_only_notice' => 'Du kan se verifikasjonsgrunnlaget, men har ikke tilgang til å behandle påstander.',
         'verification_basis_best_practice_badge' => 'Tillegg – ikke hentet fra kildedokumentet',
+        'verification_basis_block_claim_count' => 'Samlet vurdering · :count påstander',
         'verification_basis_best_practice_reason_fallback' => 'Innholdet er et forslag basert på beste praksis og må vurderes før det kan brukes som godkjent materiale.',
         'verification_basis_best_practice_no_source_search' => 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.',
         'verification_basis_best_practice_edit_label' => 'Rediger og godkjenn',

@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     groupContentBlocksBySection,
+    groupBestPracticeClaimsForReview,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic.js';
@@ -128,5 +129,82 @@ describe('groupContentBlocksBySection', () => {
             content_origin: 'structural',
             best_practice_reason: null,
         }), false);
+    });
+});
+
+/**
+ * One best_practice block legitimately yields several atomic claims (extraction is unchanged),
+ * but every review action already applies to the whole block on the backend — cascadeBlockDecision()
+ * propagates approve/reject to all pending siblings on the same (page version, block key), and
+ * both the text edit and the removal rewrite the block's markdown. Showing one card per claim
+ * therefore asked the reviewer to decide the same thing repeatedly.
+ */
+describe('groupBestPracticeClaimsForReview — one review card per best-practice block', () => {
+    const bp = (id, blockKey, extra = {}) => ({
+        id,
+        content_origin: 'best_practice',
+        content_block_key: blockKey,
+        enterprise_wiki_page_version_id: 18,
+        approval_status: 'pending',
+        ...extra,
+    });
+
+    test('3 claims from the same block collapse into 1 review unit that counts them', () => {
+        const units = groupBestPracticeClaimsForReview([
+            bp(1, 'block-0002'),
+            bp(2, 'block-0002'),
+            bp(3, 'block-0002'),
+        ]);
+
+        assert.equal(units.length, 1);
+        assert.equal(units[0].claimCount, 3);
+        assert.deepEqual(units[0].claimIds, [1, 2, 3]);
+        assert.equal(units[0].claim.id, 1, 'the first claim represents the block');
+    });
+
+    test('2 distinct best-practice blocks stay 2 review units', () => {
+        const units = groupBestPracticeClaimsForReview([
+            bp(1, 'block-0002'),
+            bp(2, 'block-0005'),
+            bp(3, 'block-0002'),
+        ]);
+
+        assert.equal(units.length, 2);
+        assert.deepEqual(units.map((u) => u.claimCount), [2, 1]);
+        assert.deepEqual(units.map((u) => u.claim.id), [1, 2], 'input order is preserved');
+    });
+
+    test('the same block key on a different page version is never merged', () => {
+        const units = groupBestPracticeClaimsForReview([
+            bp(1, 'block-0002', { enterprise_wiki_page_version_id: 18 }),
+            bp(2, 'block-0002', { enterprise_wiki_page_version_id: 19 }),
+        ]);
+
+        assert.equal(units.length, 2);
+    });
+
+    test('non-best-practice claims are never grouped — each keeps its own card', () => {
+        const units = groupBestPracticeClaimsForReview([
+            { id: 1, content_origin: 'internal_error', content_block_key: 'block-0002', enterprise_wiki_page_version_id: 18 },
+            { id: 2, content_origin: 'unsupported_generated_content', content_block_key: 'block-0002', enterprise_wiki_page_version_id: 18 },
+        ]);
+
+        assert.equal(units.length, 2);
+        assert.deepEqual(units.map((u) => u.claimCount), [1, 1]);
+    });
+
+    test('a best-practice claim without a stable block anchor stays its own card', () => {
+        const units = groupBestPracticeClaimsForReview([
+            bp(1, null),
+            bp(2, '   '),
+            bp(3, 'block-0002'),
+        ]);
+
+        assert.equal(units.length, 3);
+    });
+
+    test('empty and missing input are handled without throwing', () => {
+        assert.deepEqual(groupBestPracticeClaimsForReview([]), []);
+        assert.deepEqual(groupBestPracticeClaimsForReview(undefined), []);
     });
 });

@@ -10,6 +10,7 @@ import {
 } from './wikiQualityChecks';
 import { formatFindingUserId } from './runFindingsLogic';
 import {
+    groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
@@ -1247,7 +1248,21 @@ export default function WikiShow({
         const isPendingDecision = claim.approval_status === 'pending';
         const showDecisionBadge = claim.approval_status !== 'pending';
         const sourceDraft = claimSourceDrafts[claim.id] ?? {};
-        const claimTextEdit = claimTextEdits[claim.id] ?? claim.claim_text ?? '';
+        // The reviewer edits (and approves) the whole block: WikiClaimController::
+        // applyBestPracticeTextEdit() replaces the BLOCK's markdown with whatever is submitted
+        // here. Seeding this from claim_text was therefore lossy for any block that produced more
+        // than one claim — approving would have replaced the entire block with the single
+        // fragment this card happened to represent. Seed from the block's own markdown instead,
+        // falling back to claim_text when the block is no longer present in the current version.
+        const claimBlockKey = typeof claim.content_block_key === 'string' ? claim.content_block_key.trim() : '';
+        const claimBlockMarkdown = claimBlockKey !== ''
+            ? getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === claimBlockKey) ?? {})
+            : '';
+        const claimEditBaseline = claim.content_origin === 'best_practice' && claimBlockMarkdown.trim() !== ''
+            ? claimBlockMarkdown
+            : (claim.claim_text ?? '');
+        const claimTextEdit = claimTextEdits[claim.id] ?? claimEditBaseline;
+        const groupedClaimCount = options.claimCount ?? 1;
         const sourceReferences = claim.source_references ?? [];
         const hasSourceReferences = sourceReferences.length > 0;
         const canHandleClaim = claim.can_handle ?? false;
@@ -1503,6 +1518,13 @@ export default function WikiShow({
                                 <Badge
                                     label={tw.verification_basis_best_practice_badge ?? 'Beste praksis'}
                                     cls="bg-amber-100 text-amber-700"
+                                />
+                            )}
+                            {groupedClaimCount > 1 && (
+                                <Badge
+                                    label={(tw.verification_basis_block_claim_count ?? 'Samlet vurdering · :count påstander')
+                                        .replace(':count', groupedClaimCount)}
+                                    cls="bg-slate-100 text-slate-600"
                                 />
                             )}
                             {claim.finding_category_label && (
@@ -2352,10 +2374,10 @@ export default function WikiShow({
                                                             </p>
                                                         </div>
                                                         <div className="mt-4 space-y-3">
-                                                            {focusedReviewClaims.map((claim) => renderClaimCard(
-                                                                claim,
-                                                                claim.approval_status === 'pending' ? 'open' : 'verified',
-                                                                { showClaimText: false, inlineReview: true },
+                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims).map((unit) => renderClaimCard(
+                                                                unit.claim,
+                                                                unit.claim.approval_status === 'pending' ? 'open' : 'verified',
+                                                                { showClaimText: false, inlineReview: true, claimCount: unit.claimCount },
                                                             ))}
                                                         </div>
                                                     </div>
@@ -2656,7 +2678,7 @@ export default function WikiShow({
                                     </p>
                                 ) : (
                                     <div className="space-y-4">
-                                        {openClaims.map((claim) => renderClaimCard(claim, 'open'))}
+                                        {groupBestPracticeClaimsForReview(openClaims).map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
                                     </div>
                                 )}
                             </section>
@@ -2682,7 +2704,7 @@ export default function WikiShow({
                                             </p>
                                         ) : (
                                             <div className="space-y-4">
-                                                {verifiedClaims.map((claim) => renderClaimCard(claim, 'verified'))}
+                                                {groupBestPracticeClaimsForReview(verifiedClaims).map((unit) => renderClaimCard(unit.claim, 'verified', { claimCount: unit.claimCount }))}
                                             </div>
                                         )}
                                     </div>

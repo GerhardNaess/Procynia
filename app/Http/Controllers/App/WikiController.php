@@ -1564,6 +1564,10 @@ class WikiController extends Controller
                         'claim_text' => $claim->claim_text,
                         'content_origin' => $claim->content_origin,
                         'page_excerpt' => $claim->page_excerpt,
+                        // (page version, block key) is the identity a best_practice BLOCK is
+                        // decided by — WikiClaimController::cascadeBlockDecision() cascades on
+                        // exactly this pair — so the review UI groups its cards by it too.
+                        'enterprise_wiki_page_version_id' => $claim->enterprise_wiki_page_version_id,
                         'content_block_key' => $claim->content_block_key,
                         'review_reason' => $claim->review_reason,
                         'review_metadata' => $claim->review_metadata,
