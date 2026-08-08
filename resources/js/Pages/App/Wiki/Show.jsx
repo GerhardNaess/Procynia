@@ -12,6 +12,7 @@ import { formatFindingUserId } from './runFindingsLogic';
 import {
     groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
+    resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
@@ -1255,9 +1256,12 @@ export default function WikiShow({
         // fragment this card happened to represent. Seed from the block's own markdown instead,
         // falling back to claim_text when the block is no longer present in the current version.
         const claimBlockKey = typeof claim.content_block_key === 'string' ? claim.content_block_key.trim() : '';
-        const claimBlockMarkdown = claimBlockKey !== ''
-            ? getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === claimBlockKey) ?? {})
-            : '';
+        const claimSection = claimBlockKey !== '' ? resolveBestPracticeSectionForBlock(contentBlocks, claimBlockKey) : null;
+        const claimBlockMarkdown = claimSection !== null
+            ? claimSection.markdown
+            : (claimBlockKey !== ''
+                ? getWikiBlockRawMarkdown(contentBlocks.find((block) => block.block_key === claimBlockKey) ?? {})
+                : '');
         const claimEditBaseline = claim.content_origin === 'best_practice' && claimBlockMarkdown.trim() !== ''
             ? claimBlockMarkdown
             : (claim.claim_text ?? '');
@@ -2048,6 +2052,12 @@ export default function WikiShow({
             .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         : [];
 
+    // The visual "Beste praksis" section that owns the focused review target, if any. When the
+    // target block is part of a multi-block section, the review panel must render AFTER the whole
+    // section (below) rather than from inside renderBlock() — placing it inside split the section's
+    // own paragraphs apart and left everything after the first one outside the review.
+    const targetReviewSection = resolveBestPracticeSectionForBlock(contentBlocks, targetBlockKey);
+
     // Derive semantic traversal groups from outgoing links
     const summaryLinks = outgoingLinks.filter((p) => p.page_type === 'summary');
     const articleLinks = outgoingLinks.filter((p) => p.page_type === 'article');
@@ -2363,7 +2373,7 @@ export default function WikiShow({
                                                         <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
                                                     </>
                                                 )}
-                                                {isTargetBlock && focusedReviewClaims.length > 0 && (
+                                                {isTargetBlock && targetReviewSection === null && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                                         <div className="space-y-1">
                                                             <p className="text-base font-semibold text-violet-700">
@@ -2374,7 +2384,7 @@ export default function WikiShow({
                                                             </p>
                                                         </div>
                                                         <div className="mt-4 space-y-3">
-                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims).map((unit) => renderClaimCard(
+                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims, contentBlocks).map((unit) => renderClaimCard(
                                                                 unit.claim,
                                                                 unit.claim.approval_status === 'pending' ? 'open' : 'verified',
                                                                 { showClaimText: false, inlineReview: true, claimCount: unit.claimCount },
@@ -2408,6 +2418,25 @@ export default function WikiShow({
                                                     {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
                                                 </p>
                                                 {group.blocks.map((block) => renderBlock(block, { suppressBestPracticeFrame: true }))}
+                                                {targetReviewSection?.sectionKey === group.sectionKey && focusedReviewClaims.length > 0 && (
+                                                    <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                                                        <div className="space-y-1">
+                                                            <p className="text-base font-semibold text-violet-700">
+                                                                {tw.review_reference_section_heading ?? 'Vurdering for denne seksjonen'}
+                                                            </p>
+                                                            <p className="text-base text-slate-600">
+                                                                {tw.review_reference_section_subtitle ?? 'Handlingene under gjelder hele teksten over.'}
+                                                            </p>
+                                                        </div>
+                                                        <div className="mt-4 space-y-3">
+                                                            {groupBestPracticeClaimsForReview(focusedReviewClaims, contentBlocks).map((unit) => renderClaimCard(
+                                                                unit.claim,
+                                                                unit.claim.approval_status === 'pending' ? 'open' : 'verified',
+                                                                { showClaimText: false, inlineReview: true, claimCount: unit.claimCount },
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     });
@@ -2678,7 +2707,7 @@ export default function WikiShow({
                                     </p>
                                 ) : (
                                     <div className="space-y-4">
-                                        {groupBestPracticeClaimsForReview(openClaims).map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
+                                        {groupBestPracticeClaimsForReview(openClaims, contentBlocks).map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
                                     </div>
                                 )}
                             </section>
@@ -2704,7 +2733,7 @@ export default function WikiShow({
                                             </p>
                                         ) : (
                                             <div className="space-y-4">
-                                                {groupBestPracticeClaimsForReview(verifiedClaims).map((unit) => renderClaimCard(unit.claim, 'verified', { claimCount: unit.claimCount }))}
+                                                {groupBestPracticeClaimsForReview(verifiedClaims, contentBlocks).map((unit) => renderClaimCard(unit.claim, 'verified', { claimCount: unit.claimCount }))}
                                             </div>
                                         )}
                                     </div>

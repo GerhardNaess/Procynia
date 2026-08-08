@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     groupContentBlocksBySection,
     groupBestPracticeClaimsForReview,
+    resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic.js';
@@ -206,5 +207,94 @@ describe('groupBestPracticeClaimsForReview — one review card per best-practice
     test('empty and missing input are handled without throwing', () => {
         assert.deepEqual(groupBestPracticeClaimsForReview([]), []);
         assert.deepEqual(groupBestPracticeClaimsForReview(undefined), []);
+    });
+});
+
+/**
+ * A visual "Beste praksis" section spans SEVERAL content blocks (a heading block plus its
+ * paragraphs). Grouping review by block key alone still produced one card per block, and — because
+ * the panel was rendered from inside the matching block — physically split the section's own
+ * paragraphs apart, leaving everything after the first outside the review and out of the edit
+ * field. The review unit is now the section, using the same boundaries the article view draws.
+ */
+describe('resolveBestPracticeSectionForBlock / section-level review units', () => {
+    // One visual section: 3 best_practice blocks sharing a server-stamped section_key.
+    const sectionBlocks = [
+        { block_key: 'block-0002', section_key: 'bp-1', section_heading: 'Styring', content_origin: 'best_practice', markdown: '## Styring' },
+        { block_key: 'block-0003', section_key: 'bp-1', content_origin: 'best_practice', markdown: 'Leverandøren skal etablere rutiner.' },
+        { block_key: 'block-0004', section_key: 'bp-1', content_origin: 'best_practice', markdown: 'Leverandøren skal dokumentere avvik.' },
+        { block_key: 'block-0009', content_origin: 'source_based', markdown: 'Kildeinnhold.' },
+    ];
+
+    const bpClaim = (id, blockKey) => ({
+        id,
+        content_origin: 'best_practice',
+        content_block_key: blockKey,
+        enterprise_wiki_page_version_id: 18,
+        approval_status: 'pending',
+    });
+
+    test('the section is resolved from any of its blocks, in order, with the full combined text', () => {
+        for (const key of ['block-0002', 'block-0003', 'block-0004']) {
+            const section = resolveBestPracticeSectionForBlock(sectionBlocks, key);
+
+            assert.equal(section.sectionKey, 'bp-1');
+            assert.deepEqual(section.blockKeys, ['block-0002', 'block-0003', 'block-0004']);
+            assert.equal(
+                section.markdown,
+                '## Styring\n\nLeverandøren skal etablere rutiner.\n\nLeverandøren skal dokumentere avvik.',
+            );
+        }
+    });
+
+    test('a block outside any section resolves to null', () => {
+        assert.equal(resolveBestPracticeSectionForBlock(sectionBlocks, 'block-0009'), null);
+        assert.equal(resolveBestPracticeSectionForBlock(sectionBlocks, 'missing'), null);
+        assert.equal(resolveBestPracticeSectionForBlock(sectionBlocks, null), null);
+    });
+
+    // Required scenario: 3 best_practice paragraphs in one visual section -> 1 review panel.
+    test('claims spread across a section\'s 3 blocks collapse into one review unit', () => {
+        const units = groupBestPracticeClaimsForReview(
+            [bpClaim(1, 'block-0002'), bpClaim(2, 'block-0003'), bpClaim(3, 'block-0004')],
+            sectionBlocks,
+        );
+
+        assert.equal(units.length, 1);
+        assert.equal(units[0].sectionKey, 'bp-1');
+        assert.equal(units[0].claimCount, 3);
+        // Required scenario: approve/reject must cover every claim of the section.
+        assert.deepEqual(units[0].claimIds, [1, 2, 3]);
+    });
+
+    test('two separate sections stay two review units', () => {
+        const blocks = [
+            ...sectionBlocks,
+            { block_key: 'block-0011', section_key: 'bp-2', content_origin: 'best_practice', markdown: 'Annen anbefaling.' },
+        ];
+
+        const units = groupBestPracticeClaimsForReview(
+            [bpClaim(1, 'block-0002'), bpClaim(2, 'block-0004'), bpClaim(3, 'block-0011')],
+            blocks,
+        );
+
+        assert.equal(units.length, 2);
+        assert.deepEqual(units.map((u) => u.sectionKey), ['bp-1', 'bp-2']);
+        assert.deepEqual(units.map((u) => u.claimCount), [2, 1]);
+    });
+
+    test('a standalone best_practice block (no section) still gets its own unit', () => {
+        const blocks = [{ block_key: 'block-0020', content_origin: 'best_practice', markdown: 'Enkeltstående anbefaling.' }];
+        const units = groupBestPracticeClaimsForReview([bpClaim(1, 'block-0020'), bpClaim(2, 'block-0020')], blocks);
+
+        assert.equal(units.length, 1);
+        assert.equal(units[0].sectionKey, null);
+        assert.equal(units[0].claimCount, 2);
+    });
+
+    test('without content blocks it degrades to block-level grouping rather than throwing', () => {
+        const units = groupBestPracticeClaimsForReview([bpClaim(1, 'block-0002'), bpClaim(2, 'block-0003')]);
+
+        assert.equal(units.length, 2, 'no section data available -> each block is its own unit');
     });
 });

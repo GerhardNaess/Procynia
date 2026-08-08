@@ -58,46 +58,89 @@ export function hasInvalidBestPracticeMetadata(block) {
 }
 
 /**
- * Collapses the review list into one card per best-practice BLOCK instead of one per claim.
+ * Resolves the BEST-PRACTICE SECTION a block belongs to, reusing the exact section boundaries the
+ * Wiki view itself renders (groupContentBlocksBySection above, over the server-computed
+ * section_key from EnterpriseWikiBestPracticeSectionService). Returns null for a block that is not
+ * part of a multi-block section — a standalone best_practice block is its own unit and needs no
+ * section handling.
  *
- * Claim extraction deliberately produces atomic claims, so a single best_practice block can yield
- * several of them — and the reviewer was shown each fragment as its own separate "finding" to
- * approve or reject, even though every action already applies to the whole block on the backend:
- * WikiClaimController::cascadeBlockDecision() propagates the decision to every other pending
- * best_practice claim on the same (page version, block key), and both
- * applyBestPracticeTextEdit() and removeBestPracticeText() rewrite the block's own markdown, not a
- * fragment. Deciding one card therefore already decided the rest, which is exactly why showing
- * them separately was misleading.
+ * @returns {{sectionKey: string, blocks: Array<object>, blockKeys: Array<string>, markdown: string}|null}
+ */
+export function resolveBestPracticeSectionForBlock(contentBlocks, blockKey) {
+    const key = typeof blockKey === 'string' ? blockKey.trim() : '';
+
+    if (key === '') {
+        return null;
+    }
+
+    const group = groupContentBlocksBySection(contentBlocks ?? [])
+        .find((entry) => entry.type === 'section' && entry.blocks.some((block) => block?.block_key === key));
+
+    if (!group) {
+        return null;
+    }
+
+    return {
+        sectionKey: group.sectionKey,
+        blocks: group.blocks,
+        blockKeys: group.blocks.map((block) => block?.block_key).filter(Boolean),
+        markdown: group.blocks
+            .map((block) => String(block?.markdown ?? '').trim())
+            .filter((markdown) => markdown !== '')
+            .join('\n\n'),
+    };
+}
+
+/**
+ * Collapses the review list into one card per best-practice REVIEW UNIT — a whole visual "Beste
+ * praksis" section when the claim's block belongs to one, otherwise the single block.
  *
- * Grouping key is the pair the block is actually identified by — (page version, block key) —
- * matching cascadeBlockDecision()'s own query. Only best_practice claims with a stable block key
- * group; every other claim (internal_error, unsupported_generated_content, a best_practice claim
- * that never got a block anchor) stays its own unit, since none of them share a block-wide
- * decision. Input order is preserved and the first claim of a block becomes its representative,
- * so the card keeps the position the reviewer already expects.
+ * Claim extraction deliberately produces atomic claims, and one visual section spans several
+ * content blocks (a heading block plus its paragraphs), each of which can carry its own claims.
+ * Grouping by block key alone therefore still split one section into several review cards, and —
+ * because the panel was rendered from inside the matching block — physically injected the review
+ * box between the section's own paragraphs, leaving the rest of the same section outside the
+ * review and only the first paragraph in the edit field.
+ *
+ * The section boundary is never re-derived here: it comes from groupContentBlocksBySection(), the
+ * same helper the article view uses to draw the amber section frame, so the review unit and the
+ * visible section can never disagree. Only best_practice claims with a stable block anchor group;
+ * internal_error, unsupported_generated_content, and unanchored best_practice claims each keep
+ * their own card, since none of them share a section-wide decision.
  *
  * @param {Array<object>} claims
- * @returns {Array<{key: string, claim: object, claimIds: Array<number>, claimCount: number}>}
+ * @param {Array<object>} contentBlocks used only to look up section membership
+ * @returns {Array<{key: string, claim: object, claimIds: Array<number>, claimCount: number, sectionKey: ?string}>}
  */
-export function groupBestPracticeClaimsForReview(claims) {
+export function groupBestPracticeClaimsForReview(claims, contentBlocks = []) {
     const units = [];
-    const unitIndexByBlock = new Map();
+    const unitIndexByIdentity = new Map();
 
     for (const claim of claims ?? []) {
         const blockKey = typeof claim?.content_block_key === 'string' ? claim.content_block_key.trim() : '';
         const groupable = claim?.content_origin === 'best_practice' && blockKey !== '';
 
         if (!groupable) {
-            units.push({ key: `claim-${claim?.id}`, claim, claimIds: [claim?.id], claimCount: 1 });
+            units.push({ key: `claim-${claim?.id}`, claim, claimIds: [claim?.id], claimCount: 1, sectionKey: null });
             continue;
         }
 
-        const blockIdentity = `${claim?.enterprise_wiki_page_version_id ?? ''}::${blockKey}`;
-        const existingIndex = unitIndexByBlock.get(blockIdentity);
+        const section = resolveBestPracticeSectionForBlock(contentBlocks, blockKey);
+        const versionId = claim?.enterprise_wiki_page_version_id ?? '';
+        const identity = section !== null
+            ? `${versionId}::section::${section.sectionKey}`
+            : `${versionId}::block::${blockKey}`;
+        const existingIndex = unitIndexByIdentity.get(identity);
 
         if (existingIndex === undefined) {
-            unitIndexByBlock.set(blockIdentity, units.length);
-            units.push({ key: `block-${blockIdentity}`, claim, claimIds: [claim.id], claimCount: 1 });
+            unitIndexByIdentity.set(identity, units.length);
+            units.push({
+                key: identity,
+                claim,
+                claimIds: [claim.id],
+                claimCount: 1,
+                sectionKey: section?.sectionKey ?? null,
+            });
             continue;
         }
 
