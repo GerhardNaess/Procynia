@@ -14,7 +14,6 @@ import {
     groupContentBlocksBySection,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
-    hasRenderableBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
 
 function getWikiShowHelpSections(tw) {
@@ -2276,16 +2275,15 @@ export default function WikiShow({
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                             <div className="wiki-article">
                                 {(() => {
-                                    // A single content block's own markup — table/image/editing/plain markdown —
-                                    // WITHOUT its own "Beste praksis" frame; suppressBestPracticeFrame is true when
-                                    // this block is rendered inside a shared section frame (see below) so the label
-                                    // and amber background are shown once per faglig seksjon, not once per block.
-                                    const renderBlock = (block, { suppressBestPracticeFrame = false } = {}) => {
+                                    // A single content block's own markup — table/image/editing/plain markdown.
+                                    // A block never carries its own "Beste praksis" frame: the amber label and
+                                    // background belong to the whole faglig seksjon and are drawn once, around the
+                                    // section (see below), so no individual paragraph is highlighted on its own.
+                                    const renderBlock = (block) => {
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
                                         const isEditingTargetBlock = wikiBlockEditingKey === block.block_key;
-                                        const isBestPracticeBlock = hasRenderableBestPracticeMetadata(block);
                                         const hasBestPracticeMetadataIssue = hasInvalidBestPracticeMetadata(block);
                                         const currentDraft = wikiBlockEditDrafts[block.block_key] ?? currentBlockRawMarkdown;
                                         const canSaveBlockEdit = Boolean(
@@ -2356,13 +2354,6 @@ export default function WikiShow({
                                                             </p>
                                                         )}
                                                     </div>
-                                                ) : isBestPracticeBlock && !suppressBestPracticeFrame ? (
-                                                    <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
-                                                        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                                            {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
-                                                        </p>
-                                                        <ReactMarkdown components={{ a: WikiArticleLink }}>{currentBlockMarkdown}</ReactMarkdown>
-                                                    </div>
                                                 ) : (
                                                     <>
                                                         {hasBestPracticeMetadataIssue && (
@@ -2417,7 +2408,7 @@ export default function WikiShow({
                                                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                                                     {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
                                                 </p>
-                                                {group.blocks.map((block) => renderBlock(block, { suppressBestPracticeFrame: true }))}
+                                                {group.blocks.map((block) => renderBlock(block))}
                                                 {targetReviewSection?.sectionKey === group.sectionKey && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                                         <div className="space-y-1">
