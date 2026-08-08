@@ -227,12 +227,22 @@ class WikiPageContentAiClientTest extends TestCase
         }
     }
 
-    public function test_best_practice_rule_requires_necessity_not_just_accuracy(): void
+    /**
+     * The relevance guard that keeps best_practice content on THIS page's owned topics (never a
+     * broad sweep of the wider subject area) is unchanged. What changed: a thin source document
+     * now only justifies thin SOURCE_BASED content — it must never be read as licence to skip the
+     * best-practice synthesis, and doubt is resolved on relevance rather than by suppressing a
+     * well-founded recommendation outright.
+     */
+    public function test_best_practice_rule_keeps_the_relevance_guard_without_suppressing_recommendations(): void
     {
         $payload = $this->capturePayload(pageType: 'concept');
         $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($payload));
 
-        $this->assertStringContainsString('a thin source document justifies a thin page', $developerPrompt);
+        $this->assertStringContainsString('never add general professional/industry elaboration of the wider subject area', $developerPrompt);
+        $this->assertStringContainsString('a thin source document justifies thin source_based content', $developerPrompt);
+        $this->assertStringContainsString('it never justifies skipping the best-practice synthesis', $developerPrompt);
+        $this->assertStringContainsString('resolve doubt on relevance, not on whether to propose at all', $developerPrompt);
     }
 
     public function test_developer_prompt_forbids_repeating_the_same_sentence(): void
@@ -384,13 +394,52 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('never write a vague, generic sentence', $developerPrompt);
     }
 
-    public function test_developer_prompt_instructs_active_gap_analysis_and_allows_zero_best_practice_blocks(): void
+    /**
+     * The synthesis is a four-step reasoning procedure — understand the source, identify which
+     * professional subject the page actually deals with, compare the source against mature
+     * practice for THAT subject, then contribute where it adds value — deliberately replacing the
+     * previous generic gap checklist, which invited recommendations that would read the same for
+     * any unrelated document.
+     */
+    public function test_developer_prompt_instructs_subject_specific_best_practice_synthesis(): void
     {
         $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
 
-        $this->assertStringContainsString('active gap analysis', $developerPrompt);
+        $this->assertStringContainsString('professional best-practice synthesis', $developerPrompt);
+        $this->assertStringContainsString('step 1 — understand the source', $developerPrompt);
+        $this->assertStringContainsString('step 2 — identify the subject', $developerPrompt);
+        $this->assertStringContainsString('step 3 — compare against mature practice', $developerPrompt);
+        $this->assertStringContainsString('step 4 — contribute where it adds value', $developerPrompt);
+        $this->assertStringContainsString('the established good practice for that subject specifically', $developerPrompt);
+        $this->assertStringContainsString('depth over breadth', $developerPrompt);
+        $this->assertStringContainsString('generic checklist items', $developerPrompt);
+    }
+
+    /**
+     * The assertiveness contract: a recommendation being absent from the source is the REASON to
+     * propose it (that absence is what makes it a Procynia contribution), never grounds to
+     * suppress it — with human review named as the safety mechanism that makes proposing safe.
+     */
+    public function test_developer_prompt_does_not_suppress_recommendations_absent_from_the_source(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('being absent from the source is never a reason to withhold a relevant recommendation', $developerPrompt);
+        $this->assertStringContainsString('procynia is expected to add professional value here', $developerPrompt);
+        $this->assertStringContainsString('routed to a human reviewer', $developerPrompt);
+    }
+
+    /**
+     * Assertiveness must not become padding: zero best_practice blocks stays valid when the
+     * source already treats its subject well, and no quota may ever be manufactured.
+     */
+    public function test_developer_prompt_allows_zero_best_practice_blocks_and_forbids_padding(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('no quota, no minimum, no padding', $developerPrompt);
         $this->assertStringContainsString('zero best_practice blocks is the correct outcome', $developerPrompt);
-        $this->assertStringContainsString('never invent a recommendation just to produce one', $developerPrompt);
+        $this->assertStringContainsString('never manufacture a recommendation to fill space', $developerPrompt);
     }
 
     public function test_generate_page_from_source_accepts_a_structural_block(): void
