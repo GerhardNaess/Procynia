@@ -151,3 +151,46 @@ export function groupBestPracticeClaimsForReview(claims, contentBlocks = []) {
 
     return units;
 }
+
+/**
+ * Decision state of a whole best-practice SECTION, derived only from the claims that already carry
+ * the review outcome — no new state, no new audit concept. The full audit trail behind each of
+ * these claims stays untouched and reconstructable: page/version, content_block_key,
+ * content_origin, best_practice_reason (block + claim.review_reason), approval_status,
+ * approved_by_user_id, approved_at, approval_comment, the final/edited claim_text and block
+ * markdown, its source references, plus the append-only enterprise_wiki_claim_decisions log
+ * (who, when, previous -> new state, comment) that is never updated or deleted.
+ *
+ *  - 'approved'   every best_practice claim anchored in this section was approved
+ *  - 'rejected'   every one was rejected
+ *  - 'pending'    anything else while claims exist (still pending, or a partial mix)
+ *  - 'unreviewed' the section carries no best_practice claim at all
+ *
+ * Only 'approved' may drop the "Beste praksis" label: a partially decided section is not an
+ * accepted one, and must stay visibly marked.
+ *
+ * @param {Array<string>} blockKeys the section's own block keys
+ * @param {Array<object>} claims
+ * @returns {'approved'|'rejected'|'pending'|'unreviewed'}
+ */
+export function bestPracticeSectionApprovalState(blockKeys, claims) {
+    const keys = new Set((blockKeys ?? []).filter((key) => typeof key === 'string' && key.trim() !== '').map((key) => key.trim()));
+
+    const relevant = (claims ?? []).filter((claim) => claim?.content_origin === 'best_practice'
+        && typeof claim?.content_block_key === 'string'
+        && keys.has(claim.content_block_key.trim()));
+
+    if (relevant.length === 0) {
+        return 'unreviewed';
+    }
+
+    if (relevant.every((claim) => claim.approval_status === 'approved')) {
+        return 'approved';
+    }
+
+    if (relevant.every((claim) => claim.approval_status === 'rejected')) {
+        return 'rejected';
+    }
+
+    return 'pending';
+}

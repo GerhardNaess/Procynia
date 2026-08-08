@@ -10,6 +10,7 @@ import {
 } from './wikiQualityChecks';
 import { formatFindingUserId } from './runFindingsLogic';
 import {
+    bestPracticeSectionApprovalState,
     groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
     resolveBestPracticeSectionForBlock,
@@ -2406,14 +2407,29 @@ export default function WikiShow({
                                             return renderBlock(group.block);
                                         }
 
+                                        // Once every best_practice claim in the section has been approved, the
+                                        // addition has been accepted into the agreement — it is ordinary contract
+                                        // text from then on and no longer needs the "Beste praksis" marking. A
+                                        // pending, partially decided, or rejected section keeps the marking, and the
+                                        // decision itself stays fully reconstructable from the claims and the
+                                        // append-only enterprise_wiki_claim_decisions log.
+                                        const sectionIsApproved = bestPracticeSectionApprovalState(
+                                            group.blocks.map((block) => block.block_key),
+                                            claims,
+                                        ) === 'approved';
+
                                         return (
                                             <div
                                                 key={`section-${group.sectionKey}`}
-                                                className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3"
+                                                className={sectionIsApproved
+                                                    ? 'space-y-3'
+                                                    : 'space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3'}
                                             >
-                                                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                                    {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
-                                                </p>
+                                                {!sectionIsApproved && (
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                        {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                    </p>
+                                                )}
                                                 {group.blocks.map((block) => renderBlock(block))}
                                                 {targetReviewSection?.sectionKey === group.sectionKey && focusedReviewClaims.length > 0 && (
                                                     <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/60 px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
