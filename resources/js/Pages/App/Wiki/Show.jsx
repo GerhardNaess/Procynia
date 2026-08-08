@@ -2300,7 +2300,13 @@ export default function WikiShow({
                                                 id={`wiki-block-${block.block_key}`}
                                                 data-block-key={block.block_key}
                                                 tabIndex={-1}
-                                                className={isTargetBlock
+                                                // The focused-review target highlight marks the ONE thing the user
+                                                // navigated to. When that block sits inside a best-practice section
+                                                // the review unit is the whole section, so ringing a single paragraph
+                                                // inside it contradicts the panel below ("gjelder hele teksten over")
+                                                // and made the first sentence look separated from the rest. The
+                                                // section's own frame plus that panel already locate the review.
+                                                className={isTargetBlock && targetReviewSection === null
                                                     ? 'rounded-lg border border-amber-300 bg-amber-50/70 px-3 py-2 ring-2 ring-amber-200 transition-colors'
                                                     : undefined}
                                             >
