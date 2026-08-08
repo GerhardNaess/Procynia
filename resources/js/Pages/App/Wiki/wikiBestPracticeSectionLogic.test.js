@@ -2,8 +2,8 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     groupContentBlocksBySection,
-    bestPracticeSectionApprovalState,
     groupBestPracticeClaimsForReview,
+    isPageVersionFinallyApproved,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
@@ -301,108 +301,59 @@ describe('resolveBestPracticeSectionForBlock / section-level review units', () =
 });
 
 /**
- * An approved best-practice addition has been accepted into the agreement, so it should read as
- * ordinary contract text rather than staying flagged forever. The label is dropped ONLY on a fully
- * approved section — the decision itself remains reconstructable from the claim fields
- * (page/version, block key, origin, reason, approval_status, approved_by, approved_at, comment,
- * final text, source references) plus the append-only enterprise_wiki_claim_decisions log.
+ * Product rule: best-practice content stops being flagged once the PAGE VERSION is finally
+ * approved through the existing document owner approval — not when its individual claims happen
+ * to be approved. Claim review is a separate, voluntary quality loop and never settles the page.
  */
-describe('bestPracticeSectionApprovalState — only a fully approved section drops its label', () => {
-    const keys = ['block-0002', 'block-0003', 'block-0004'];
-    const claim = (id, blockKey, approval_status) => ({
-        id,
-        content_origin: 'best_practice',
-        content_block_key: blockKey,
-        approval_status,
+describe('isPageVersionFinallyApproved — the document owner decision drives the label', () => {
+    test('a page that is not document-owner approved keeps the label', () => {
+        for (const state of ['pending', 'mixed', 'rejected', 'missing_owner', 'awaiting_sync', 'qa_review_open', 'superseded', 'processing', 'processing_failed']) {
+            assert.equal(isPageVersionFinallyApproved({ state }), false, `state ${state} must keep the marking`);
+        }
     });
 
-    test('pending best practice keeps the label', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'pending'),
-            claim(2, 'block-0003', 'pending'),
-        ]);
-
-        assert.equal(state, 'pending');
-        assert.notEqual(state, 'approved');
+    test('a document-owner approved page version hides the label', () => {
+        assert.equal(isPageVersionFinallyApproved({ state: 'approved' }), true);
     });
 
-    test('a fully approved section hides the label', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'approved'),
-            claim(2, 'block-0003', 'approved'),
-            claim(3, 'block-0004', 'approved'),
-        ]);
-
-        assert.equal(state, 'approved');
+    test('a missing or empty summary never counts as approved', () => {
+        assert.equal(isPageVersionFinallyApproved(null), false);
+        assert.equal(isPageVersionFinallyApproved(undefined), false);
+        assert.equal(isPageVersionFinallyApproved({}), false);
     });
 
-    test('a partially approved section still shows the label', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'approved'),
-            claim(2, 'block-0003', 'approved'),
-            claim(3, 'block-0004', 'pending'),
-        ]);
-
-        assert.equal(state, 'pending', 'not every claim is approved -> still marked');
-    });
-
-    test('approved mixed with rejected is not treated as ordinary approved content', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'approved'),
-            claim(2, 'block-0003', 'rejected'),
-        ]);
-
-        assert.notEqual(state, 'approved');
-        assert.equal(state, 'pending');
-    });
-
-    test('a fully rejected section is reported as rejected, never as approved', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'rejected'),
-            claim(2, 'block-0003', 'rejected'),
-        ]);
-
-        assert.equal(state, 'rejected');
-        assert.notEqual(state, 'approved');
-    });
-
-    test('a section with no best_practice claims is unreviewed — never silently unlabelled', () => {
-        assert.equal(bestPracticeSectionApprovalState(keys, []), 'unreviewed');
-        assert.equal(bestPracticeSectionApprovalState(keys, undefined), 'unreviewed');
-    });
-
-    test('claims from other blocks or other origins never affect the section state', () => {
-        const state = bestPracticeSectionApprovalState(keys, [
-            claim(1, 'block-0002', 'approved'),
-            claim(2, 'block-0099', 'pending'),
-            { id: 3, content_origin: 'internal_error', content_block_key: 'block-0003', approval_status: 'pending' },
-        ]);
-
-        assert.equal(state, 'approved', 'only best_practice claims inside this section count');
-    });
-
-    // The audit trail behind the decision must survive the label being hidden.
-    test('the approving claim keeps its full audit data after approval', () => {
-        const approved = {
+    // Hiding the marking must never imply the underlying data changed: content_origin, the
+    // best-practice reason and every claim decision field stay exactly as they were.
+    test('best-practice and audit data survive untouched once the page is approved', () => {
+        const block = {
+            block_key: 'block-0002',
+            content_origin: 'best_practice',
+            best_practice_reason: 'Identifisert svakhet: uklart prosesseierskap.',
+            markdown: 'Kunden skal utpeke navngitte prosesseiere for hver etablert ITIL-prosess.',
+        };
+        const claim = {
             id: 1,
             enterprise_wiki_page_version_id: 18,
             content_block_key: 'block-0002',
             content_origin: 'best_practice',
             review_reason: 'Identifisert svakhet: uklart prosesseierskap.',
-            approval_status: 'approved',
-            approved_by_name: 'Kari Nordmann',
-            approved_at: '2026-08-08T15:00:00+00:00',
-            approval_comment: 'Beholdt som avtaletekst.',
-            claim_text: 'Leverandøren skal dokumentere prosesseierskap.',
+            approval_status: 'pending',
+            approved_by_name: null,
+            approved_at: null,
+            claim_text: 'Kunden skal utpeke navngitte prosesseiere for hver etablert ITIL-prosess.',
         };
 
-        assert.equal(bestPracticeSectionApprovalState(['block-0002'], [approved]), 'approved');
+        assert.equal(isPageVersionFinallyApproved({ state: 'approved' }), true);
 
-        for (const field of [
-            'enterprise_wiki_page_version_id', 'content_block_key', 'content_origin', 'review_reason',
-            'approval_status', 'approved_by_name', 'approved_at', 'approval_comment', 'claim_text',
-        ]) {
-            assert.ok(approved[field] !== undefined && approved[field] !== null, `audit field kept: ${field}`);
+        // The label is gone, but the block is still recorded as best_practice with its reason,
+        // and the claim keeps every field the audit trail is reconstructed from — including a
+        // still-pending claim review, which the page approval deliberately does not decide.
+        assert.equal(block.content_origin, 'best_practice');
+        assert.equal(hasRenderableBestPracticeMetadata(block), true);
+        assert.equal(claim.content_origin, 'best_practice');
+        assert.equal(claim.approval_status, 'pending');
+        for (const field of ['enterprise_wiki_page_version_id', 'content_block_key', 'review_reason', 'claim_text']) {
+            assert.ok(claim[field] !== undefined, `audit field kept: ${field}`);
         }
     });
 });
