@@ -842,6 +842,11 @@ class WikiController extends Controller
                     'findings_open_qa_review_count' => $summary['open_qa_review'],
                     'findings_open_non_blocking_count' => $summary['open_non_blocking'] + $summary['best_practice_pending'],
                     'findings_explanation' => $summary['explanation'] ?? null,
+                    // Wiki run-3: run.status alone can never say whether a human actually approved
+                    // anything (see documentOwnerApprovalCountsForRun() docblock) — the Kjøringer
+                    // timeline's Dokumenteiergodkjenning step uses these counts instead of
+                    // blanket-trusting a 'completed' status.
+                    'document_owner_approval' => $this->documentOwnerApprovalCountsForRun($run),
                     'created_at' => $run->created_at,
                     'started_at' => $run->started_at,
                     'finished_at' => $run->finished_at,
@@ -1008,6 +1013,74 @@ class WikiController extends Controller
 
         return $this->redirectToWikiTab($request)
             ->with('success', __('procynia.wiki.run_retry_maintainer_decision_success'));
+    }
+
+    /**
+     * Document Owner approval evidence for the Kjøringer timeline (Del 1-9): a run's own `status`
+     * is never sufficient to know whether a human actually approved anything, since an
+     * approve/reject decision (WikiClaimController/EnterpriseWikiDocumentOwnerApprovalService)
+     * never transitions run.status itself — `completed` only ever means the technical pipeline
+     * (and any automated QA) finished, and 'awaiting_document_owner_approval' just means at least
+     * one page is still unresolved. This reuses the exact same per-page-version approval summary
+     * runPages() already computes (documentOwnerSummaryForRunPageVersion()) rather than
+     * re-deriving approval semantics, and folds it down to the minimum the frontend timeline needs
+     * to render the Dokumenteiergodkjenning step correctly for ANY run status, not just while the
+     * run is actively awaiting approval:
+     *
+     *   - required_count === 0: no page produced by this run currently carries a Document Owner
+     *     requirement — either because it only ever held an open, non-blocking claim QA signal
+     *     (documentOwnerSummaryQaReviewOpen()), or because the version this run produced was later
+     *     superseded by a newer run (documentOwnerSummarySuperseded() — approval no longer applies
+     *     to a superseded version, so it must not be counted as if this run's own approval had been
+     *     decided). The frontend must show this as neutral/not-required, never as if a human
+     *     approved something.
+     *   - rejected_count > 0: at least one page's approval was rejected — the frontend must show
+     *     this as the step's error state regardless of what run.status says.
+     *   - pending_count > 0: at least one required approval has not yet been decided (including an
+     *     owner still unassigned, or an approval row not yet synced) — still waiting on a human.
+     *   - otherwise every required approval was actually approved — this is the only case that may
+     *     render as done/green.
+     *
+     * A page whose generated version doesn't exist yet is skipped (nothing to approve until the
+     * page exists) rather than counted as pending, since that only happens while the run is still
+     * actively generating — a state the earlier timeline steps already represent.
+     *
+     * @return array{required_count: int, approved_count: int, rejected_count: int, pending_count: int}
+     */
+    private function documentOwnerApprovalCountsForRun(EnterpriseWikiIngestRun $run): array
+    {
+        $runPages = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->with('generatedPageVersion.documentOwnerApprovals')
+            ->get();
+
+        $approved = 0;
+        $rejected = 0;
+        $pending = 0;
+
+        foreach ($runPages as $runPage) {
+            $version = $runPage->generatedPageVersion;
+
+            if (! $version instanceof EnterpriseWikiPageVersion) {
+                continue;
+            }
+
+            $state = $this->documentOwnerSummaryForRunPageVersion($version, (bool) $version->is_current)['state'];
+
+            match ($state) {
+                'approved' => $approved++,
+                'rejected' => $rejected++,
+                'pending', 'mixed', 'missing_owner', 'awaiting_sync' => $pending++,
+                default => null, // qa_review_open, processing, processing_failed, superseded: no live approval requirement
+            };
+        }
+
+        return [
+            'required_count' => $approved + $rejected + $pending,
+            'approved_count' => $approved,
+            'rejected_count' => $rejected,
+            'pending_count' => $pending,
+        ];
     }
 
     /**

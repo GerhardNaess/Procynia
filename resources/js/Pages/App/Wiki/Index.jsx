@@ -1245,6 +1245,18 @@ function getWikiQualityHelpSections(tw) {
     ];
 }
 
+/**
+ * Wiki run-3: "Fullført / bestått" means, and only ever has meant, that the technical pipeline
+ * finished (run.status === 'completed') and automated QA passed (qa_status === 'passed') — it is
+ * NOT evidence that a human Document Owner reviewed or approved anything. A run can and does reach
+ * this exact status/qa_status pair with pending, rejected, or not-yet-required Document Owner
+ * approvals; that distinct human-approval evidence is surfaced separately by the Kjøringer
+ * timeline's Dokumenteiergodkjenning step (see documentOwnerApprovalStepState() in
+ * runFindingsLogic.js), which reads run.document_owner_approval rather than this badge. Keep this
+ * label as-is (not renamed) — in context (next to the Dokumenteiergodkjenning step and the
+ * "Sider" panel's own per-page Document Owner status) it already reads as a pipeline/QA badge, not
+ * a claim of human sign-off.
+ */
 function ingestStatusLabel(status, qaStatus = null, tw = {}) {
     if (status === 'completed' && qaStatus === 'passed') {
         return tw.ingest_status_completed_passed ?? 'Fullført / bestått';

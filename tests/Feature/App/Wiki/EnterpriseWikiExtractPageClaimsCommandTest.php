@@ -513,6 +513,48 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->value('claims_extracted_at'));
     }
 
+    /**
+     * Wiki run-3, page 7: an article page whose blocks are entirely source_based plus one
+     * structural cross-reference block ("Se også: [[...]]") that never carries a content_origin
+     * at all — reproduces the exact shape investigated for the run-3 "page 8 got 3 claims, page 9
+     * logged an AI attempt, page 7 logged nothing" asymmetry. Confirmed not a bug: extraction runs
+     * uniformly across every page regardless of page_type (no page-type gate exists —
+     * claimCandidateBlocks() gates purely on each block's own content_origin), and a page with zero
+     * best_practice/unsupported_generated_content blocks correctly skips the AI call entirely
+     * (EnterpriseWikiExtractPageClaimsService::extract(), the `$allClaimCandidateBlocks->isEmpty()`
+     * branch) — so no '[WIKI_CLAIM_EXTRACTION] AI extraction attempt.' log line is ever written for
+     * such a page, by design, even though extraction still completes correctly. This test is the
+     * logging-contract requested for that investigation: it proves correct execution (zero claims,
+     * zero AI calls, claims_extracted_at still recorded) without adding any new logging.
+     */
+    public function test_article_page_with_only_source_based_and_untagged_structural_blocks_extracts_zero_claims_without_an_ai_call(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $blocks = $version->content_blocks_json;
+        foreach ($blocks as $index => $block) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED;
+            $blocks[$index]['best_practice_reason'] = null;
+        }
+        $blocks[] = [
+            'block_key' => 'article-summary-link',
+            'position' => count($blocks),
+            'markdown' => '**Se også:** [[test-page|Test Page]]',
+        ];
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
+
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+        $this->assertNotNull(EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $version->enterprise_wiki_page_id)
+            ->value('claims_extracted_at'));
+    }
+
     public function test_source_based_blocks_for_roles_requirements_dates_and_procedures_do_not_become_claims(): void
     {
         $customer = $this->createCustomer();

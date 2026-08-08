@@ -110,18 +110,70 @@ describe('getRunTimelineState — escalated run points at QA, never at Dokumente
         }
     });
 
-    test('a completed run marks every step done, including Dokumenteier', () => {
-        const run = { status: 'completed' };
+    // Wiki run-3 (A): completed + a real approved requirement -> Dokumenteier renders green.
+    test('a completed run with an actually-approved requirement marks Dokumenteier done', () => {
+        const run = {
+            status: 'completed',
+            document_owner_approval: { required_count: 1, approved_count: 1, rejected_count: 0, pending_count: 0 },
+        };
 
-        for (let i = 0; i < RUN_TIMELINE_STEPS.length; i++) {
-            assert.equal(getRunTimelineState(run, i), 'done');
+        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'done');
+    });
+
+    // Wiki run-3 (E): completed still marks every earlier step done — only the last step is
+    // decided by real approval evidence instead of the blanket rule.
+    test('a completed run still marks every step before Dokumenteier done, regardless of approval evidence', () => {
+        const run = {
+            status: 'completed',
+            document_owner_approval: { required_count: 0, approved_count: 0, rejected_count: 0, pending_count: 0 },
+        };
+
+        for (let i = 0; i < dokumenteierIndex; i++) {
+            assert.equal(getRunTimelineState(run, i), 'done', `step ${i} should be done`);
         }
     });
 
-    test('a run awaiting document owner approval marks that last step as waiting, not error', () => {
-        const run = { status: 'awaiting_document_owner_approval' };
+    // Wiki run-3 (D): completed but no page ever required a Document Owner decision -> neutral,
+    // never green, since a 'completed' run.status alone never proves a human approved anything.
+    test('a completed run with no live approval requirement marks Dokumenteier not_required, never done', () => {
+        const run = {
+            status: 'completed',
+            document_owner_approval: { required_count: 0, approved_count: 0, rejected_count: 0, pending_count: 0 },
+        };
+
+        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'not_required');
+    });
+
+    // Wiki run-3: a completed run with no document_owner_approval prop at all (e.g. an older
+    // cached response) must default to the same safe not_required rendering, never to done.
+    test('a completed run missing the document_owner_approval prop entirely defaults to not_required', () => {
+        const run = { status: 'completed' };
+
+        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'not_required');
+    });
+
+    // Wiki run-3 (B): awaiting_document_owner_approval + a genuinely pending requirement ->
+    // Dokumenteier renders as still waiting on a human.
+    test('a run awaiting document owner approval with a pending requirement marks that last step as waiting, not error', () => {
+        const run = {
+            status: 'awaiting_document_owner_approval',
+            document_owner_approval: { required_count: 1, approved_count: 0, rejected_count: 0, pending_count: 1 },
+        };
 
         assert.equal(getRunTimelineState(run, dokumenteierIndex), 'waiting');
+    });
+
+    // Wiki run-3 (C): a rejected requirement must render as the step's error state. The run
+    // completion gate never lets 'completed' happen while a rejection is outstanding
+    // (EnterpriseWikiDocumentOwnerApprovalService::evaluateRunCompletionGate()), so this is only
+    // ever observed while run.status is still 'awaiting_document_owner_approval'.
+    test('a rejected requirement marks Dokumenteier as the error step', () => {
+        const run = {
+            status: 'awaiting_document_owner_approval',
+            document_owner_approval: { required_count: 1, approved_count: 0, rejected_count: 1, pending_count: 0 },
+        };
+
+        assert.equal(getRunTimelineState(run, dokumenteierIndex), 'error');
     });
 
     test('an active run in generating_pages marks that step active and later steps empty', () => {
