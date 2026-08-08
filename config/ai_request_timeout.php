@@ -97,6 +97,25 @@ return [
             ],
         ],
 
+        // Mirrors ai_capacity.operations.enterprise_wiki_page_content — see
+        // WikiPageContentAiClient (generation, figure repair, planned-section repair).
+        'enterprise_wiki_page_content' => [
+            'base_seconds' => (int) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_BASE_SECONDS', 30),
+            'seconds_per_input_chars_unit' => (float) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_INPUT_SECONDS', 1.0),
+            'input_chars_per_unit' => (int) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_INPUT_CHARS_PER_UNIT', 2000),
+            'seconds_per_output_token' => (float) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_OUTPUT_SECONDS_PER_TOKEN', 0.02),
+
+            // Planned-section repair — adds a per-section term, mirroring the
+            // maintainer-decision batch profile's per-candidate term.
+            'batch' => [
+                'base_seconds' => (int) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_REPAIR_BASE_SECONDS', 30),
+                'seconds_per_input_chars_unit' => (float) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_REPAIR_INPUT_SECONDS', 1.0),
+                'input_chars_per_unit' => (int) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_REPAIR_INPUT_CHARS_PER_UNIT', 2000),
+                'seconds_per_output_token' => (float) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_REPAIR_OUTPUT_SECONDS_PER_TOKEN', 0.02),
+                'seconds_per_candidate' => (float) env('AI_REQUEST_TIMEOUT_WIKI_PAGE_REPAIR_SECONDS_PER_CANDIDATE', 1.5),
+            ],
+        ],
+
     ],
 
 ];

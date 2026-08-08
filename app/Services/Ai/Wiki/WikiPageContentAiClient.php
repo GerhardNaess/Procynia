@@ -2,24 +2,60 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Data\Ai\AiCallContext;
+use App\Data\Ai\Capacity\AiCapacityPlan;
+use App\Data\Ai\Capacity\AiCapacityRequest;
+use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Models\EnterpriseWikiClaim;
-use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
-use App\Services\OpenAi\OpenAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
 use RuntimeException;
 
+/**
+ * Wiki run-6: max_output_tokens for every call this class makes (full-page generation, figure
+ * repair, and planned-section repair) previously shared one hardcoded 6000-token ceiling,
+ * regardless of page type, source size, or — for repair — how many sections actually needed
+ * fixing. Run 6's article page had 2 planned sections missing after the first generation pass;
+ * the repair call for both of them together hit status=incomplete/reason=max_output_tokens
+ * (input_tokens=15594, output_tokens capped at exactly 6000, 768 of it spent on reasoning).
+ *
+ * Now sized via EnterpriseWikiAiCapacityPlanner/EnterpriseWikiAiCapacityRetryExecutor — the same
+ * generic, config-driven capacity-planning-plus-bounded-retry mechanism
+ * EnterpriseWikiMaintainerDecisionAiClient already uses, adopted here instead of inventing a
+ * second, bespoke retry mechanism (see config('ai_capacity.operations.enterprise_wiki_page_content')
+ * for the tunable profile, including its 'batch' sub-profile for section repair).
+ */
 class WikiPageContentAiClient
 {
     public const MODEL = 'gpt-5';
-
-    private const MAX_OUTPUT_TOKENS = 6000;
 
     private const REASONING_EFFORT = 'low';
 
     private const PROMPT_NAME = 'wiki_page_content_generation';
 
+    private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_page_content';
+
+    /**
+     * Rough expected content-block count per page type, standing in for
+     * AiCapacityRequest::$expectedResultObjects — an article page's own structure (title +
+     * intro + several `## ` sections, each usually more than one block) is materially larger
+     * than a summary/concept/entity page's, so treating every page type as the same size (the
+     * run-6 bug) undersizes the budget for exactly the page type most likely to need it.
+     */
+    private const EXPECTED_BLOCK_COUNTS = [
+        'article' => 8,
+        'summary' => 4,
+        'concept' => 5,
+        'entity' => 5,
+    ];
+
+    private const DEFAULT_EXPECTED_BLOCK_COUNT = 5;
+
     public function __construct(
-        private readonly OpenAiClient $openAiClient,
-        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
+        private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
+        private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
+        private readonly EnterpriseWikiAiRequestTimeoutPolicy $timeoutPolicy,
     ) {}
 
     public static function isAvailable(): bool
@@ -71,16 +107,42 @@ class WikiPageContentAiClient
         string $additionalContext = '',
         array $linkCatalog = [],
         array $sourceElements = [],
+        ?AiCallContext $context = null,
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $this->languageName($languageCode), $linkCatalog, $sourceElements);
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
-        $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient');
+        $context ??= AiCallContext::none();
+        $languageName = $this->languageName($languageCode);
+        $inputSizeChars = mb_strlen($sourceText);
+
+        $decoded = $this->capacityRetryExecutor->execute(
+            'WikiPageContentAiClient',
+            $inputSizeChars,
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
+            fn (int $maxOutputTokens): array => $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $languageName, $linkCatalog, $sourceElements, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            )),
+            $context,
+        );
 
         return $this->parseBlocksResponse($decoded);
+    }
+
+    private function planCapacity(string $pageType, int $inputSizeChars, int $retryAttempt): AiCapacityPlan
+    {
+        return $this->capacityPlanner->plan(new AiCapacityRequest(
+            operationType: self::CAPACITY_OPERATION_TYPE,
+            model: self::MODEL,
+            inputSizeChars: $inputSizeChars,
+            expectedResultObjects: self::EXPECTED_BLOCK_COUNTS[$pageType] ?? self::DEFAULT_EXPECTED_BLOCK_COUNT,
+            retryAttempt: $retryAttempt,
+        ));
     }
 
     /**
@@ -114,26 +176,47 @@ class WikiPageContentAiClient
         string $additionalContext = '',
         array $linkCatalog = [],
         array $sourceElements = [],
+        ?AiCallContext $context = null,
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $payload = $this->buildRepairPayload(
-            $pageTitle,
-            $pageType,
-            $existingMarkdown,
-            $issues,
-            $sourceText,
-            $additionalContext,
-            $this->languageName($languageCode),
-            $linkCatalog,
-            $sourceElements,
+        $context ??= AiCallContext::none();
+        $languageName = $this->languageName($languageCode);
+        $repairPromptText = $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements);
+        $inputSizeChars = mb_strlen($repairPromptText);
+        // Wiki run-6: each missing/empty/link-only planned section is sized as one "candidate" —
+        // repairing 2 sections at once (run 6's article page) must get a materially larger budget
+        // than repairing 1, instead of sharing the exact same flat ceiling.
+        $sectionsToRepair = max(1, count($issues));
+
+        $decoded = $this->capacityRetryExecutor->execute(
+            'WikiPageContentAiClient(repair)',
+            $inputSizeChars,
+            fn (int $retryAttempt): AiCapacityPlan => $this->planSectionRepairCapacity($inputSizeChars, $sectionsToRepair, $retryAttempt),
+            fn (int $maxOutputTokens): array => $this->buildRepairPayload($pageType, $languageName, $repairPromptText, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForBatch(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            ), $sectionsToRepair),
+            $context,
         );
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
-        $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient(repair)');
 
         return $this->parseSectionRepairResponse($decoded, $issues);
+    }
+
+    private function planSectionRepairCapacity(int $inputSizeChars, int $sectionsToRepair, int $retryAttempt): AiCapacityPlan
+    {
+        return $this->capacityPlanner->planBatchCall(
+            operationType: self::CAPACITY_OPERATION_TYPE,
+            model: self::MODEL,
+            candidatesInBatch: $sectionsToRepair,
+            inputSizeChars: $inputSizeChars,
+            retryAttempt: $retryAttempt,
+        );
     }
 
     /**
@@ -162,24 +245,33 @@ class WikiPageContentAiClient
         string $additionalContext = '',
         array $linkCatalog = [],
         array $sourceElements = [],
+        ?AiCallContext $context = null,
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $payload = $this->buildFigureRepairPayload(
-            $pageTitle,
-            $pageType,
-            $existingMarkdown,
-            $issues,
-            $sourceText,
-            $additionalContext,
-            $this->languageName($languageCode),
-            $linkCatalog,
-            $sourceElements,
+        $context ??= AiCallContext::none();
+        $languageName = $this->languageName($languageCode);
+        // Returns the FULL corrected page (unlike repairPlannedSections()), so it shares the
+        // main page-content capacity profile — sized here off the actual built prompt (which
+        // echoes the whole existing page back), not just the raw source text.
+        $figureRepairPromptText = $this->figureRepairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements);
+        $inputSizeChars = mb_strlen($figureRepairPromptText);
+
+        $decoded = $this->capacityRetryExecutor->execute(
+            'WikiPageContentAiClient(figure_repair)',
+            $inputSizeChars,
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
+            fn (int $maxOutputTokens): array => $this->buildFigureRepairPayload($pageType, $languageName, $figureRepairPromptText, $maxOutputTokens),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            )),
+            $context,
         );
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
-        $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient(figure_repair)');
 
         return $this->parseBlocksResponse($decoded);
     }
@@ -363,17 +455,8 @@ class WikiPageContentAiClient
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    private function buildRepairPayload(
-        string $pageTitle,
-        string $pageType,
-        string $existingMarkdown,
-        array $issues,
-        string $sourceText,
-        string $additionalContext,
-        string $languageName,
-        array $linkCatalog = [],
-        array $sourceElements = [],
-    ): array {
+    private function buildRepairPayload(string $pageType, string $languageName, string $repairPromptText, int $maxOutputTokens): array
+    {
         return [
             'model' => self::MODEL,
             'input' => [
@@ -391,7 +474,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
+                            'text' => $repairPromptText,
                         ],
                     ],
                 ],
@@ -408,7 +491,7 @@ class WikiPageContentAiClient
                 'effort' => self::REASONING_EFFORT,
             ],
             'store' => false,
-            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+            'max_output_tokens' => $maxOutputTokens,
         ];
     }
 
@@ -472,9 +555,20 @@ class WikiPageContentAiClient
         $parts[] = '';
         $parts[] = '---';
         $parts[] = '';
-        $parts[] = 'Source document:';
-        $parts[] = '';
-        $parts[] = $sourceText;
+
+        // Wiki run-6: the flat source text and SOURCE ELEMENTS below are the exact same
+        // underlying content when structured elements exist — one as continuous prose, the
+        // other broken into citable segments. Sending both roughly doubles this already-large
+        // repair prompt's input for no benefit (the model only ever cites source_element_key
+        // values) — run 6's article repair sent both at once, reaching input_tokens=15594 for a
+        // 2-section repair that then hit max_output_tokens.
+        if ($sourceElements !== []) {
+            $parts[] = 'Source document: see SOURCE ELEMENTS below — the full source content is provided there, broken into citable segments, and is not repeated here as flat text.';
+        } else {
+            $parts[] = 'Source document:';
+            $parts[] = '';
+            $parts[] = $sourceText;
+        }
 
         if (trim($additionalContext) !== '') {
             $parts[] = '';
@@ -517,17 +611,8 @@ class WikiPageContentAiClient
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    private function buildFigureRepairPayload(
-        string $pageTitle,
-        string $pageType,
-        string $existingMarkdown,
-        array $issues,
-        string $sourceText,
-        string $additionalContext,
-        string $languageName,
-        array $linkCatalog = [],
-        array $sourceElements = [],
-    ): array {
+    private function buildFigureRepairPayload(string $pageType, string $languageName, string $figureRepairPromptText, int $maxOutputTokens): array
+    {
         return [
             'model' => self::MODEL,
             'input' => [
@@ -545,7 +630,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->figureRepairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
+                            'text' => $figureRepairPromptText,
                         ],
                     ],
                 ],
@@ -562,7 +647,7 @@ class WikiPageContentAiClient
                 'effort' => self::REASONING_EFFORT,
             ],
             'store' => false,
-            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+            'max_output_tokens' => $maxOutputTokens,
         ];
     }
 
@@ -633,9 +718,14 @@ class WikiPageContentAiClient
         $parts[] = '';
         $parts[] = '---';
         $parts[] = '';
-        $parts[] = 'Source document:';
-        $parts[] = '';
-        $parts[] = $sourceText;
+
+        if ($sourceElements !== []) {
+            $parts[] = 'Source document: see SOURCE ELEMENTS below — the full source content is provided there, broken into citable segments, and is not repeated here as flat text.';
+        } else {
+            $parts[] = 'Source document:';
+            $parts[] = '';
+            $parts[] = $sourceText;
+        }
 
         if (trim($additionalContext) !== '') {
             $parts[] = '';
@@ -673,7 +763,7 @@ class WikiPageContentAiClient
         return implode("\n", $parts);
     }
 
-    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog = [], array $sourceElements = []): array
+    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog, array $sourceElements, int $maxOutputTokens): array
     {
         return [
             'model' => self::MODEL,
@@ -709,7 +799,7 @@ class WikiPageContentAiClient
                 'effort' => self::REASONING_EFFORT,
             ],
             'store' => false,
-            'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+            'max_output_tokens' => $maxOutputTokens,
         ];
     }
 

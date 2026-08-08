@@ -2,7 +2,12 @@
 
 namespace Tests\Unit\Services\Ai;
 
+use App\Data\Ai\Capacity\AiCapacityRequest;
+use App\Data\Ai\Capacity\AiTimeoutRequest;
+use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
+use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
 use Mockery\MockInterface;
@@ -33,15 +38,56 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertSame('wiki_page_content_generation', $format['name']);
         $this->assertTrue($format['strict']);
         $this->assertIsArray($format['schema']);
-        $this->assertSame(6000, $payload['max_output_tokens']);
+        $this->assertIsInt($payload['max_output_tokens']);
+        $this->assertGreaterThan(0, $payload['max_output_tokens']);
         $this->assertSame('low', data_get($payload, 'reasoning.effort'));
         $this->assertFalse($payload['store']);
         $this->assertArrayNotHasKey('temperature', $payload);
     }
 
-    public function test_generate_from_source_uses_a_300_second_http_timeout(): void
+    // Wiki run-6: max_output_tokens (and, by extension, the request timeout — see
+    // EnterpriseWikiAiRequestTimeoutPolicy) is no longer a flat constant — it is derived from
+    // EnterpriseWikiAiCapacityPlanner's 'enterprise_wiki_page_content' profile, the same
+    // mechanism EnterpriseWikiMaintainerDecisionAiClient already uses. Computing the SAME plan
+    // independently here (rather than hardcoding an expected number) is the same pattern
+    // EnterpriseWikiMaintainerDecisionAiClientTest uses.
+    public function test_payload_uses_capacity_planner_derived_max_output_tokens(): void
+    {
+        $sourceText = 'Noe kildetekst.';
+        $payload = $this->capturePayload(pageType: 'article', sourceText: $sourceText);
+
+        $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_page_content',
+            model: 'gpt-5',
+            inputSizeChars: mb_strlen($sourceText),
+            expectedResultObjects: 8, // WikiPageContentAiClient::EXPECTED_BLOCK_COUNTS['article']
+        ));
+
+        $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
+        $this->assertGreaterThan(0, $payload['max_output_tokens']);
+    }
+
+    public function test_article_pages_get_a_larger_budget_than_summary_pages_for_the_same_source(): void
+    {
+        $sourceText = 'Noe kildetekst.';
+        $articlePayload = $this->capturePayload(pageType: 'article', sourceText: $sourceText);
+        $summaryPayload = $this->capturePayload(pageType: 'summary', sourceText: $sourceText);
+
+        $this->assertGreaterThan($summaryPayload['max_output_tokens'], $articlePayload['max_output_tokens']);
+    }
+
+    public function test_larger_source_text_produces_a_larger_max_output_tokens_than_a_small_document(): void
+    {
+        $smallPayload = $this->capturePayload(sourceText: 'Kort tekst.');
+        $largePayload = $this->capturePayload(sourceText: str_repeat('ITIL Incident Management prosessbeskrivelse. ', 400));
+
+        $this->assertGreaterThan($smallPayload['max_output_tokens'], $largePayload['max_output_tokens']);
+    }
+
+    public function test_generate_from_source_uses_a_capacity_derived_http_timeout(): void
     {
         $capturedTimeout = null;
+        $sourceText = 'Noe kildetekst.';
 
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
@@ -58,9 +104,23 @@ class WikiPageContentAiClientTest extends TestCase
                 ];
             });
 
-        app(WikiPageContentAiClient::class)->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+        app(WikiPageContentAiClient::class)->generateFromSource('Test Page', 'article', $sourceText, 'no');
 
-        $this->assertSame(300, $capturedTimeout);
+        $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_page_content',
+            model: 'gpt-5',
+            inputSizeChars: mb_strlen($sourceText),
+            expectedResultObjects: 8,
+        ));
+        $expectedTimeout = app(EnterpriseWikiAiRequestTimeoutPolicy::class)->resolve(new AiTimeoutRequest(
+            operationType: 'enterprise_wiki_page_content',
+            inputSizeChars: mb_strlen($sourceText),
+            chosenMaxOutputTokens: $expectedPlan->chosenMaxOutputTokens,
+        ))->timeoutSeconds;
+
+        $this->assertSame($expectedTimeout, $capturedTimeout);
+        $this->assertGreaterThanOrEqual(30, $capturedTimeout);
+        $this->assertLessThanOrEqual(180, $capturedTimeout);
     }
 
     // =========================================================================
@@ -245,12 +305,15 @@ class WikiPageContentAiClientTest extends TestCase
     {
         $catalog = [['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];
 
-        $payload = $this->capturePayload(linkCatalog: $catalog);
+        $payloadWithoutCatalog = $this->capturePayload();
+        $payloadWithCatalog = $this->capturePayload(linkCatalog: $catalog);
 
-        $this->assertSame('gpt-5', $payload['model']);
-        $this->assertSame(6000, $payload['max_output_tokens']);
-        $this->assertSame('low', data_get($payload, 'reasoning.effort'));
-        $this->assertFalse($payload['store']);
+        $this->assertSame('gpt-5', $payloadWithCatalog['model']);
+        // The link catalog is never part of the capacity estimate (page-type/source-size driven
+        // only), so it must not change the chosen output-token budget either.
+        $this->assertSame($payloadWithoutCatalog['max_output_tokens'], $payloadWithCatalog['max_output_tokens']);
+        $this->assertSame('low', data_get($payloadWithCatalog, 'reasoning.effort'));
+        $this->assertFalse($payloadWithCatalog['store']);
     }
 
     public function test_developer_prompt_documents_slug_and_slug_anchor_syntax(): void
@@ -463,36 +526,58 @@ class WikiPageContentAiClientTest extends TestCase
         });
     }
 
-    public function test_generate_from_source_throws_on_incomplete_response_and_logs_safe_diagnostics(): void
+    /**
+     * Wiki run-6: a single incomplete/max_output_tokens response is no longer an immediate,
+     * permanent failure — EnterpriseWikiAiCapacityRetryExecutor (adopted from
+     * EnterpriseWikiMaintainerDecisionAiClient) makes exactly one bounded capacity retry at a
+     * higher budget first. Only when BOTH attempts still come back incomplete/max_output_tokens
+     * does this now surface as EnterpriseWikiAiOutputCapacityExceededException — never an
+     * unbounded/automatic retry loop (mirrors
+     * EnterpriseWikiMaintainerDecisionAiClientTest::test_decide_throws_capacity_exceeded_when_both_attempts_hit_max_output_tokens()).
+     */
+    public function test_generate_from_source_throws_capacity_exceeded_after_bounded_retry_on_incomplete_max_output_tokens(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->twice()->andReturn([
+            'id' => 'resp_incomplete',
+            'status' => 'incomplete',
+            'incomplete_details' => ['reason' => 'max_output_tokens'],
+            'output_text' => '{"page":{"markdown":"# Test Page',
+            'output' => [],
+            'usage' => ['output_tokens' => 20],
+        ]);
+
+        $this->expectException(EnterpriseWikiAiOutputCapacityExceededException::class);
+        $this->expectExceptionMessageMatches('/WikiPageContentAiClient: exhausted capacity retry/');
+        $this->expectExceptionMessageMatches('/retry level 1/');
+        $this->expectExceptionMessageMatches('/max_output_tokens/');
+
+        app(WikiPageContentAiClient::class)->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+    }
+
+    /**
+     * A non-token incomplete reason (e.g. a content filter) is never treated as a capacity
+     * problem — it must propagate on the very first attempt, with no retry at all.
+     */
+    public function test_generate_from_source_does_not_retry_a_non_token_incomplete_reason(): void
     {
         Log::spy();
 
         $client = $this->clientWithRawResponse([
-            'id' => 'resp_incomplete',
+            'id' => 'resp_incomplete_other',
             'status' => 'incomplete',
             'incomplete_details' => [
-                'reason' => 'max_output_tokens',
+                'reason' => 'content_filter',
             ],
-            'output_text' => '{"page":{"markdown":"# Test Page',
+            'output_text' => '',
             'output' => [],
         ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*max_output_tokens/s');
+        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*content_filter/s');
 
         $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
-
-        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
-            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
-                && ($context['response_id'] ?? null) === 'resp_incomplete'
-                && ($context['http_status'] ?? null) === 200
-                && ($context['response_status'] ?? null) === 'incomplete'
-                && ($context['incomplete_details']['reason'] ?? null) === 'max_output_tokens'
-                && ($context['output_text_length'] ?? null) > 0
-                && ($context['output_item_types'] ?? null) === []
-                && ($context['content_item_types'] ?? null) === []
-                && ($context['has_refusal'] ?? null) === false;
-        });
     }
 
     public function test_generate_from_source_throws_on_refusal_and_logs_safe_diagnostics(): void
@@ -740,6 +825,171 @@ class WikiPageContentAiClientTest extends TestCase
             sourceText: 'Kildetekst.',
             languageCode: 'no',
         );
+    }
+
+    // =========================================================================
+    // Capacity policy (Wiki run-6)
+    // =========================================================================
+
+    /**
+     * Test B: a large-but-valid full-page response (well beyond the old flat 6000-token
+     * ceiling) is accepted end-to-end once max_output_tokens is sized by the capacity planner
+     * instead of a fixed constant.
+     */
+    public function test_generate_page_from_source_accepts_a_large_valid_response_beyond_the_old_flat_ceiling(): void
+    {
+        $manyBlocks = [];
+        for ($i = 0; $i < 12; $i++) {
+            $manyBlocks[] = $this->sourceBasedBlock("Avsnitt {$i} med reelt innhold i en stor artikkel.");
+        }
+
+        $client = $this->clientReturning(['page' => ['blocks' => $manyBlocks]]);
+
+        $result = $client->generatePageFromSource(
+            'Stor artikkel',
+            'article',
+            str_repeat('ITIL Incident Management prosessbeskrivelse. ', 400),
+            'no',
+        );
+
+        $this->assertCount(12, $result['blocks']);
+    }
+
+    /**
+     * Test C/D (run-6 regression): repairing 2 planned sections at once — the exact run-6 shape
+     * (article page, 2 missing sections) — must be sized with a materially larger budget than
+     * repairing just 1, via EnterpriseWikiAiCapacityPlanner::planBatchCall(). Before this fix,
+     * both shared the identical flat 6000-token ceiling regardless of section count.
+     */
+    public function test_repairing_two_sections_computes_a_larger_budget_than_repairing_one(): void
+    {
+        $capturedPayloads = [];
+        $capture = function (array $payload) use (&$capturedPayloads): array {
+            $capturedPayloads[] = $payload;
+
+            return [
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'sections' => [$this->sourceBasedSection('X', 'Repaired body text.')],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ];
+        };
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->twice()->andReturnUsing($capture);
+
+        $client = app(WikiPageContentAiClient::class);
+
+        $client->repairPlannedSections(
+            pageTitle: 'Masterdata ITIL',
+            pageType: 'article',
+            existingMarkdown: '# Masterdata ITIL',
+            issues: [['type' => 'planned_section_missing', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+
+        $client->repairPlannedSections(
+            pageTitle: 'Masterdata ITIL',
+            pageType: 'article',
+            existingMarkdown: '# Masterdata ITIL',
+            issues: [
+                ['type' => 'planned_section_missing', 'planned_topic' => 'X', 'heading' => 'X'],
+                ['type' => 'planned_section_missing', 'planned_topic' => 'Y', 'heading' => 'Y'],
+            ],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+
+        $this->assertGreaterThan(
+            $capturedPayloads[0]['max_output_tokens'],
+            $capturedPayloads[1]['max_output_tokens'],
+        );
+    }
+
+    /**
+     * Test D/E (run-6 regression, exact shape): a 2-section repair that still comes back
+     * incomplete/max_output_tokens after one bounded capacity retry throws
+     * EnterpriseWikiAiOutputCapacityExceededException — clearly naming the operation (repair),
+     * the configured/chosen budget, and the response id — never an unbounded retry loop (exactly
+     * 2 attempts: the mock would fail verification if a 3rd were attempted).
+     */
+    public function test_repair_planned_sections_throws_capacity_exceeded_after_bounded_retry(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->twice()->andReturn([
+            'id' => 'resp_00b83d3e7a626e95016a771e74f498819e9268234c502287c2',
+            'status' => 'incomplete',
+            'incomplete_details' => ['reason' => 'max_output_tokens'],
+            'output_text' => '{"sections":[',
+            'output' => [],
+            'usage' => ['output_tokens' => 6000],
+        ]);
+
+        $this->expectException(EnterpriseWikiAiOutputCapacityExceededException::class);
+        $this->expectExceptionMessageMatches('/WikiPageContentAiClient\(repair\): exhausted capacity retry/');
+        $this->expectExceptionMessageMatches('/max_output_tokens/');
+        $this->expectExceptionMessageMatches('/resp_00b83d3e7a626e95016a771e74f498819e9268234c502287c2/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Masterdata ITIL',
+            pageType: 'article',
+            existingMarkdown: '# Masterdata ITIL',
+            issues: [
+                ['type' => 'planned_section_missing', 'planned_topic' => 'Hvordan ITIL brukes operativt i leveransen', 'heading' => 'Hvordan ITIL brukes operativt i leveransen'],
+                ['type' => 'planned_section_missing', 'planned_topic' => 'Metodikk for etablering, innføring og oppfølging av ITIL-prosesser', 'heading' => 'Metodikk for etablering, innføring og oppfølging av ITIL-prosesser'],
+            ],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+    }
+
+    /**
+     * Wiki run-6: repairUserPrompt() previously sent the full flat source text AND the full
+     * SOURCE ELEMENTS list (the same content, doubled) whenever source elements were available —
+     * a direct contributor to run 6's oversized repair input (15594 input tokens). When source
+     * elements exist, the flat copy must be omitted.
+     */
+    public function test_repair_prompt_omits_duplicate_flat_source_text_when_source_elements_are_present(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [$this->sourceBasedSection('X', 'Repaired body text.')],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'article',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_missing', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Dette er den fulle kildeteksten som ikke skal gjentas.',
+            languageCode: 'no',
+            sourceElements: [[
+                'source_element_key' => 'paragraph-1',
+                'source_element_type' => 'paragraph',
+                'reference_text' => 'Dokumentert kildeelement.',
+            ]],
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($capturedPayload);
+
+        $this->assertStringNotContainsString('Dette er den fulle kildeteksten som ikke skal gjentas.', $userPrompt);
+        $this->assertStringContainsString('see SOURCE ELEMENTS below', $userPrompt);
+        $this->assertStringContainsString('paragraph-1', $userPrompt);
     }
 
     // =========================================================================

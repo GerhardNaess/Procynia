@@ -132,6 +132,87 @@ return [
             ],
         ],
 
+        /*
+        |----------------------------------------------------------------
+        | Wiki page content (generation, figure repair, section repair)
+        |----------------------------------------------------------------
+        |
+        | Wiki run-6: WikiPageContentAiClient previously used one hardcoded
+        | max_output_tokens=6000 for every call — full-page generation, figure repair
+        | (also returns a full page), AND planned-section repair (returns only the
+        | missing/empty section(s), but was still charged the same flat ceiling
+        | regardless of how many sections needed repair). Run 6's article page had 2
+        | planned sections missing after the first generation pass, and the repair
+        | call for both of them together hit status=incomplete/max_output_tokens
+        | (input_tokens=15594, output_tokens capped at exactly 6000 — 768 of it spent
+        | on reasoning, leaving too little for two full sections' worth of structured
+        | blocks). Adopts EnterpriseWikiAiCapacityPlanner/EnterpriseWikiAiCapacityRetryExecutor
+        | (built generically for EnterpriseWikiMaintainerDecisionAiClient, "another Wiki
+        | AI client can adopt it later ... with no change to this class") instead of a
+        | second, bespoke retry mechanism.
+        |
+        */
+        'enterprise_wiki_page_content' => [
+            // Fixed cost of the page.blocks wrapper JSON, independent of block count.
+            'base_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_PAGE_BASE_TOKENS', 400),
+
+            // Tokens per expected content block (markdown prose + content_origin +
+            // source_element_keys/types + best_practice_reason + link_intents) — used
+            // for full-page generation/figure-repair, scaled per page type (see
+            // WikiPageContentAiClient::EXPECTED_BLOCK_COUNTS) since an article page
+            // has materially more blocks than a summary or concept page.
+            'tokens_per_result_object' => (int) env('AI_CAPACITY_WIKI_PAGE_PER_BLOCK_TOKENS', 260),
+
+            // Input-driven contribution standing in for how much body content a
+            // longer source document justifies — unknown before the model responds.
+            'tokens_per_input_chars_unit' => (int) env('AI_CAPACITY_WIKI_PAGE_INPUT_TOKENS', 60),
+            'input_chars_per_unit' => (int) env('AI_CAPACITY_WIKI_PAGE_INPUT_CHARS_PER_UNIT', 800),
+
+            // gpt-5 reasoning tokens count against max_output_tokens even at 'low'
+            // effort — same empirically-derived figure as enterprise_wiki_maintainer_
+            // decision above (run 583 spent 1344 of 3000 on reasoning alone); run 6's
+            // article repair independently observed 768 of 6000.
+            'reasoning_token_buffer' => (int) env('AI_CAPACITY_WIKI_PAGE_REASONING_BUFFER', 1500),
+
+            'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_PAGE_MIN_TOKENS', 2500),
+            'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_PAGE_SAFETY_MARGIN', 0.35),
+
+            // Applied once per capacity retry level (at most one — see
+            // EnterpriseWikiAiCapacityRetryExecutor), still clamped to max_output_tokens below.
+            'retry_multiplier' => (float) env('AI_CAPACITY_WIKI_PAGE_RETRY_MULTIPLIER', 1.6),
+
+            'max_output_tokens' => (int) env('AI_CAPACITY_WIKI_PAGE_MAX_TOKENS', 9000),
+
+            /*
+            |----------------------------------------------------------------
+            | Planned-section repair profile
+            |----------------------------------------------------------------
+            |
+            | Sizes WikiPageContentAiClient::repairPlannedSections() — reuses
+            | EnterpriseWikiAiCapacityPlanner::planBatchCall()'s existing "N candidates"
+            | shape, treating each missing/empty/link-only planned section as one
+            | candidate, so a 2-section repair (run 6) gets a materially larger budget
+            | than a 1-section repair instead of sharing the exact same flat ceiling.
+            | Inherits reasoning_token_buffer/retry_multiplier/max_output_tokens/the
+            | input-size term from the profile above (unset here).
+            |
+            */
+            'batch' => [
+                // Fixed cost of the sections.blocks wrapper JSON, independent of how
+                // many sections are being repaired.
+                'batch_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_PAGE_REPAIR_OVERHEAD_TOKENS', 500),
+
+                // Estimated tokens per repaired section — a full substantial paragraph
+                // (or more) of prose plus its block-schema fields; larger than a single
+                // generation block's own per-object estimate above since a whole
+                // planned section can span more than one block.
+                'tokens_per_candidate' => (int) env('AI_CAPACITY_WIKI_PAGE_REPAIR_TOKENS_PER_SECTION', 1800),
+
+                'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_PAGE_REPAIR_SAFETY_MARGIN', 0.35),
+                'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_PAGE_REPAIR_MIN_TOKENS', 3000),
+            ],
+        ],
+
     ],
 
 ];
