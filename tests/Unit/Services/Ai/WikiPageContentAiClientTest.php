@@ -395,6 +395,113 @@ class WikiPageContentAiClientTest extends TestCase
     }
 
     /**
+     * Generated Wiki content must be directly usable as agreement text. A best_practice block
+     * therefore states its clause normatively ("skal ..."), never as advice from Procynia — the
+     * previous prompt actively instructed the banned form ("Procynia anbefaler at ... fordi ...").
+     */
+    public function test_developer_prompt_requires_best_practice_written_as_normative_contract_text(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload(pageType: $pageType)));
+
+            $this->assertStringContainsString('finished, normative agreement text', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('"skal", "skal sikre", "skal etablere", "skal dokumentere", "skal følge opp"', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('keep it normative, never descriptive', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_bans_advisory_framing_in_best_practice_text(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('never frame it as advice, opinion, or a suggestion from anyone', $developerPrompt);
+
+        foreach (['procynia anbefaler', 'vi anbefaler', 'det anbefales', 'beste praksis tilsier', 'fordi dette vil'] as $bannedPhrase) {
+            $this->assertStringContainsString($bannedPhrase, $developerPrompt, "banned phrase must be named: {$bannedPhrase}");
+        }
+    }
+
+    /**
+     * The justification is review metadata, not page content — it must be carried by
+     * best_practice_reason (which the existing best_practice -> claim -> review flow already
+     * persists and surfaces to the reviewer), never mixed into the visible clause.
+     */
+    public function test_developer_prompt_keeps_justification_in_best_practice_reason_not_in_the_text(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('the block\'s markdown carries only the clause', $developerPrompt);
+        $this->assertStringContainsString('belongs exclusively in best_practice_reason, never in the visible text', $developerPrompt);
+        $this->assertStringContainsString('best_practice_reason is where the justification lives', $developerPrompt);
+        $this->assertStringContainsString('never rendered as page text', $developerPrompt);
+    }
+
+    /**
+     * The house style applies to source_based content too: it is rewritten into finished
+     * agreement prose, but its meaning, obligations and parties stay exactly as the source has
+     * them, and nothing ever comments on the source or on Procynia.
+     */
+    public function test_developer_prompt_requires_source_based_written_as_agreement_text_without_meta_commentary(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('the whole page must read as usable agreement text', $developerPrompt);
+        $this->assertStringContainsString('preserve the meaning, the obligations, and the parties/roles exactly as the source states them', $developerPrompt);
+        $this->assertStringContainsString('never write about the source, about this system, or about your own work', $developerPrompt);
+        $this->assertStringContainsString('kilden beskriver', $developerPrompt);
+    }
+
+    public function test_developer_prompt_forbids_inventing_parties_or_defaulting_every_obligation_to_the_customer(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('use the party and role names that actually follow from the source and its context', $developerPrompt);
+        $this->assertStringContainsString('never invent a party the material does not support', $developerPrompt);
+        $this->assertStringContainsString('never default every obligation to "kunden skal"', $developerPrompt);
+    }
+
+    /**
+     * Section repair writes onto the same page as ordinary generation, so it must produce the
+     * same finished-agreement-text style — otherwise a repaired section reintroduces exactly the
+     * advisory phrasing this change removes.
+     */
+    public function test_repair_prompt_requires_the_same_contract_text_style(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [$this->sourceBasedSection('X', 'Repaired body text.')],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'article',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_missing', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($capturedPayload));
+
+        $this->assertStringContainsString('write every block as finished agreement text', $developerPrompt);
+        $this->assertStringContainsString('never as advice', $developerPrompt);
+        $this->assertStringContainsString('procynia anbefaler', $developerPrompt);
+        $this->assertStringContainsString('the justification belongs in best_practice_reason', $developerPrompt);
+    }
+
+    /**
      * The synthesis is a four-step reasoning procedure — understand the source, identify which
      * professional subject the page actually deals with, compare the source against mature
      * practice for THAT subject, then contribute where it adds value — deliberately replacing the
