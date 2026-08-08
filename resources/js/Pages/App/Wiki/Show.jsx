@@ -13,6 +13,7 @@ import {
     groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
     isPageVersionFinallyApproved,
+    partitionBestPracticeReviewUnits,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
@@ -930,7 +931,8 @@ export default function WikiShow({
 
     const { claimFindings: claimLintFindings, structuralFindings } = splitWikiVerificationFindings(lintFindings);
     const structuralFindingGroups = groupWikiFindingsByCode(structuralFindings);
-    const openClaims = verificationClaims.filter((claim) => (
+    // A claim still needs a human decision. Unchanged predicate — only how it is applied changed.
+    const claimRequiresAction = (claim) => (
         claim.approval_status === 'pending'
         && (
             claim.content_origin === 'best_practice'
@@ -940,7 +942,8 @@ export default function WikiShow({
             || claim.source_status === 'missing_source'
             || claim.source_status === 'missing_excerpt'
         )
-    ));
+    );
+    const openClaims = verificationClaims.filter(claimRequiresAction);
     const verifiedClaims = verificationClaims.filter((claim) => !openClaims.includes(claim));
 
     const sendAction = (action) => {
@@ -2064,6 +2067,11 @@ export default function WikiShow({
     // the individual claim reviews say.
     const pageIsFinallyApproved = isPageVersionFinallyApproved(documentOwnerSummary);
 
+    // Review units are partitioned ONCE, so a unit whose claims are partly approved and partly
+    // pending is listed only under "krever behandling" — never simultaneously under "Verifiserte
+    // påstander", which previously made settled text look like it still needed approving.
+    const reviewUnits = partitionBestPracticeReviewUnits(verificationClaims, contentBlocks, claimRequiresAction);
+
     // Derive semantic traversal groups from outgoing links
     const summaryLinks = outgoingLinks.filter((p) => p.page_type === 'summary');
     const articleLinks = outgoingLinks.filter((p) => p.page_type === 'article');
@@ -2715,7 +2723,7 @@ export default function WikiShow({
                                     </p>
                                 ) : (
                                     <div className="space-y-4">
-                                        {groupBestPracticeClaimsForReview(openClaims, contentBlocks).map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
+                                        {reviewUnits.open.map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
                                     </div>
                                 )}
                             </section>
@@ -2741,7 +2749,7 @@ export default function WikiShow({
                                             </p>
                                         ) : (
                                             <div className="space-y-4">
-                                                {groupBestPracticeClaimsForReview(verifiedClaims, contentBlocks).map((unit) => renderClaimCard(unit.claim, 'verified', { claimCount: unit.claimCount }))}
+                                                {reviewUnits.verified.map((unit) => renderClaimCard(unit.claim, 'verified', { claimCount: unit.claimCount }))}
                                             </div>
                                         )}
                                     </div>

@@ -172,3 +172,43 @@ export function groupBestPracticeClaimsForReview(claims, contentBlocks = []) {
 export function isPageVersionFinallyApproved(documentOwnerSummary) {
     return documentOwnerSummary?.state === 'approved';
 }
+
+/**
+ * Splits review units into "still needs a decision" and "already decided", so a unit can never
+ * appear in both lists at once.
+ *
+ * The open and verified lists used to be grouped independently — open from the pending claims,
+ * verified from the rest — so a unit holding both an approved and a still-pending claim was
+ * rendered twice: once under "Påstander som krever behandling" and once under "Verifiserte
+ * påstander". That reads as being asked to approve something already approved.
+ *
+ * A unit is open when at least one of its own claims still requires action, and its representative
+ * becomes that claim, so the card shows the state the reviewer actually has to act on rather than
+ * whichever claim happened to come first. Everything else — fully approved, fully rejected, or any
+ * other settled combination — is verified, and rejected claims therefore never return as open
+ * suggestions. No claim is dropped from either list, so the audit data stays reachable.
+ *
+ * @param {Array<object>} claims
+ * @param {Array<object>} contentBlocks
+ * @param {(claim: object) => boolean} requiresAction
+ */
+export function partitionBestPracticeReviewUnits(claims, contentBlocks, requiresAction) {
+    const claimsById = new Map((claims ?? []).filter(Boolean).map((claim) => [claim.id, claim]));
+    const open = [];
+    const verified = [];
+
+    for (const unit of groupBestPracticeClaimsForReview(claims, contentBlocks)) {
+        const actionable = unit.claimIds
+            .map((id) => claimsById.get(id))
+            .filter((claim) => claim !== undefined && requiresAction(claim));
+
+        if (actionable.length > 0) {
+            open.push({ ...unit, claim: actionable[0] });
+            continue;
+        }
+
+        verified.push(unit);
+    }
+
+    return { open, verified };
+}

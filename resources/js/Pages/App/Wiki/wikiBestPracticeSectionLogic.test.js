@@ -4,6 +4,7 @@ import {
     groupContentBlocksBySection,
     groupBestPracticeClaimsForReview,
     isPageVersionFinallyApproved,
+    partitionBestPracticeReviewUnits,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
@@ -355,5 +356,89 @@ describe('isPageVersionFinallyApproved — the document owner decision drives th
         for (const field of ['enterprise_wiki_page_version_id', 'content_block_key', 'review_reason', 'claim_text']) {
             assert.ok(claim[field] !== undefined, `audit field kept: ${field}`);
         }
+    });
+});
+
+/**
+ * "Påstander som krever behandling" must list only best-practice content that genuinely still
+ * needs a decision. The open and verified lists were previously grouped independently, so a unit
+ * holding both an approved and a still-pending claim appeared in BOTH — which reads as being asked
+ * to approve something already approved.
+ */
+describe('partitionBestPracticeReviewUnits — open review shows only what still needs a decision', () => {
+    const requiresAction = (claim) => claim.approval_status === 'pending';
+    const blocks = [
+        { block_key: 'block-0013', content_origin: 'best_practice', markdown: 'A' },
+        { block_key: 'block-0014', content_origin: 'best_practice', markdown: 'B' },
+    ];
+    const claim = (id, blockKey, approval_status) => ({
+        id,
+        content_origin: 'best_practice',
+        content_block_key: blockKey,
+        enterprise_wiki_page_version_id: 31,
+        approval_status,
+    });
+
+    test('a fully approved unit produces 0 open cards and stays visible under verified', () => {
+        const { open, verified } = partitionBestPracticeReviewUnits(
+            [claim(1, 'block-0013', 'approved'), claim(2, 'block-0013', 'approved')],
+            blocks,
+            requiresAction,
+        );
+
+        assert.equal(open.length, 0);
+        assert.equal(verified.length, 1);
+        assert.deepEqual(verified[0].claimIds, [1, 2], 'approved claims stay reachable');
+    });
+
+    test('a pending unit produces exactly 1 open card', () => {
+        const { open, verified } = partitionBestPracticeReviewUnits(
+            [claim(1, 'block-0013', 'pending'), claim(2, 'block-0013', 'pending')],
+            blocks,
+            requiresAction,
+        );
+
+        assert.equal(open.length, 1);
+        assert.equal(verified.length, 0);
+        assert.equal(open[0].claimCount, 2);
+    });
+
+    test('a partly approved unit stays open and is NOT also listed as verified', () => {
+        const { open, verified } = partitionBestPracticeReviewUnits(
+            [claim(1, 'block-0013', 'approved'), claim(2, 'block-0013', 'pending')],
+            blocks,
+            requiresAction,
+        );
+
+        assert.equal(open.length, 1, 'still needs a decision');
+        assert.equal(verified.length, 0, 'and must not be double-listed as verified');
+        assert.equal(open[0].claim.id, 2, 'the card represents the claim that needs action');
+    });
+
+    test('a rejected unit never returns as an open suggestion', () => {
+        const { open, verified } = partitionBestPracticeReviewUnits(
+            [claim(1, 'block-0013', 'rejected'), claim(2, 'block-0013', 'rejected')],
+            blocks,
+            requiresAction,
+        );
+
+        assert.equal(open.length, 0);
+        assert.equal(verified.length, 1);
+    });
+
+    test('an approved unit and a pending unit are separated, never merged or duplicated', () => {
+        const { open, verified } = partitionBestPracticeReviewUnits(
+            [claim(1, 'block-0013', 'approved'), claim(2, 'block-0014', 'pending')],
+            blocks,
+            requiresAction,
+        );
+
+        assert.equal(open.length, 1);
+        assert.equal(verified.length, 1);
+        assert.deepEqual(open[0].claimIds, [2]);
+        assert.deepEqual(verified[0].claimIds, [1]);
+
+        const allIds = [...open, ...verified].flatMap((unit) => unit.claimIds);
+        assert.equal(new Set(allIds).size, allIds.length, 'no claim appears in both buckets');
     });
 });
