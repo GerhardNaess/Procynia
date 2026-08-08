@@ -151,10 +151,34 @@ export function activeWikiRunLikeObjectsForTab(activeTab, { sources = [], runs =
     return [];
 }
 
+/**
+ * Statuses that are not themselves "actively processing" (so they stay out of
+ * ACTIVE_WIKI_RUN_STATUSES, which also drives timeline/activity/aria-live semantics) but must
+ * still keep the polling gate open, because the run can leave them without this browser tab doing
+ * anything:
+ *
+ *  - 'queued': the worker picks it up on its own moments later.
+ *  - 'decision_only' (Wiki run-11): waits for the maintainer decision to be APPLIED — which
+ *    routinely happens somewhere this tab never sees (the Kilder tab, another session, or the
+ *    API), after which the run runs the entire pipeline to completion automatically. This is the
+ *    exact same argument ACTIVE_WIKI_RUN_STATUSES already documents for
+ *    'awaiting_document_owner_approval' ("an approval completed elsewhere ... is picked up
+ *    automatically"); excluding decision_only was inconsistent with it.
+ *
+ * Leaving decision_only out created a deadlock rather than a delay: the poll that would fetch the
+ * run's new state is gated on run data that only that poll can refresh, so a Kjøringer tab opened
+ * while a run sat in decision_only kept rendering that first snapshot — "Vedlikeholdersbeslutning
+ * behandles", 0 pages, 0 findings — indefinitely, even after the run had reached
+ * awaiting_document_owner_approval with its pages generated. Only a manual browser refresh
+ * recovered it.
+ */
+const POLL_UNTIL_RESOLVED_STATUSES = ['queued', 'decision_only'];
+
 export function hasActiveWikiRunForTab(activeTab, { sources = [], runs = [] } = {}) {
     const candidates = activeWikiRunLikeObjectsForTab(activeTab, { sources, runs });
 
-    return candidates.some(isActiveWikiRun) || candidates.some((run) => run?.status === 'queued');
+    return candidates.some(isActiveWikiRun)
+        || candidates.some((run) => POLL_UNTIL_RESOLVED_STATUSES.includes(run?.status));
 }
 
 /**

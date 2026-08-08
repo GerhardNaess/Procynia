@@ -440,6 +440,72 @@ describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab po
     });
 });
 
+/**
+ * Wiki run-11: the Kjøringer tab kept rendering a run's first snapshot ("Vedlikeholdersbeslutning
+ * behandles", 0 pages, 0 findings) long after the backend had taken it all the way to
+ * awaiting_document_owner_approval with 3 generated pages. The backend and the built bundle were
+ * both verified correct — the poll request returns the fresh `runs` prop — so the defect was the
+ * gate deciding whether that poll ever runs.
+ */
+describe('hasActiveWikiRunForTab — the polling gate must never deadlock the Kjøringer tab (Wiki run-11)', () => {
+    // The required end-to-end behaviour: a run observed at maintainer_decision must keep the gate
+    // open across every intermediate status, all the way to awaiting_document_owner_approval, so
+    // each poll replaces the run prop with the newer one and the row stops showing the decision.
+    test('the gate stays open for every status between maintainer_decision and awaiting_document_owner_approval', () => {
+        const pipeline = [
+            'maintainer_decision',
+            'applying',
+            'generating_pages',
+            'generating_concept_entity_pages',
+            'verification_linking',
+            'verifying_claims',
+            'post_claim_verification',
+            'qa',
+            'awaiting_document_owner_approval',
+        ];
+
+        for (const status of pipeline) {
+            assert.equal(
+                hasActiveWikiRunForTab('runs', { runs: [{ id: 11, status }] }),
+                true,
+                `polling must stay on while run 11 is ${status}`,
+            );
+        }
+    });
+
+    // The actual root cause. decision_only leaves that state when the maintainer decision is
+    // APPLIED — routinely somewhere this tab never sees (the Kilder tab, another session, the
+    // API) — after which the run completes the whole pipeline on its own. Gating polling on it
+    // was a deadlock, not a delay: only the poll can refresh the run data the gate reads.
+    test('a run sitting in decision_only keeps polling, so an apply elsewhere is picked up', () => {
+        assert.equal(hasActiveWikiRunForTab('runs', { runs: [{ id: 11, status: 'decision_only' }] }), true);
+    });
+
+    test('the same holds on the Kilder tab, where the run status is nested', () => {
+        const sources = [{ id: 11, document_status: 'extracted', latest_ingest_run: { id: 11, status: 'decision_only' } }];
+
+        assert.equal(hasActiveWikiRunForTab('sources', { sources }), true);
+    });
+
+    // decision_only must stay OUT of ACTIVE_WIKI_RUN_STATUSES: that list also drives timeline
+    // state, the activity block's aria-live, and stalled detection, none of which this fix
+    // touches. Only the polling gate treats it as unresolved.
+    test('decision_only is a polling-gate concern only — it is never an "actively processing" status', () => {
+        assert.equal(ACTIVE_WIKI_RUN_STATUSES.includes('decision_only'), false);
+        assert.equal(isActiveWikiRun({ status: 'decision_only' }), false);
+    });
+
+    test('genuinely terminal runs still stop the polling gate', () => {
+        for (const status of ['completed', 'failed', 'escalated', 'cancelled']) {
+            assert.equal(
+                hasActiveWikiRunForTab('runs', { runs: [{ id: 11, status }] }),
+                false,
+                `${status} must not keep polling`,
+            );
+        }
+    });
+});
+
 describe('isRunStalled — requires BOTH an actively-processing status AND a long gap since progress', () => {
     const NOW = new Date('2026-07-31T12:00:00Z').getTime();
     const twentyMinutesAgo = new Date(NOW - 20 * 60_000).toISOString();
