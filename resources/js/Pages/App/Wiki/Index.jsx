@@ -3385,7 +3385,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                 >
                     <option value="">{tw.quality_filter_code_all ?? 'Alle sjekker'}</option>
                     {usedCodes.map((c) => (
-                        <option key={c} value={c}>{getQualityCheckCopy(c, tw).label}</option>
+                        <option key={c} value={c}>{getWikiQualityCheckCopy(c, tw).label}</option>
                     ))}
                 </select>
 
@@ -3438,7 +3438,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale
                             <tbody className="divide-y divide-slate-100">
                                 {findings.map((f) => {
                                     const sevCls = SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600';
-                                    const checkCopy = getQualityCheckCopy(f.code, tw);
+                                    const checkCopy = getWikiQualityCheckCopy(f.code, tw);
                                     const description = checkCopy.unknown && f.message ? f.message : (checkCopy.description || f.message || '');
                                     const rowTitle = f.page_title ?? f.page_slug ?? checkCopy.label;
                                     return (
