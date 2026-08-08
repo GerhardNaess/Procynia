@@ -286,6 +286,81 @@ class WikiPageContentAiClientTest extends TestCase
     }
 
     // =========================================================================
+    // structural content_origin (Wiki run-5)
+    // =========================================================================
+
+    public function test_schema_allows_structural_content_origin(): void
+    {
+        $payload = $this->capturePayload();
+        $schema = $payload['text']['format']['schema'];
+        $blockSchema = $schema['properties']['page']['properties']['blocks']['items'];
+
+        $this->assertSame(
+            ['source_based', 'best_practice', 'structural'],
+            $blockSchema['properties']['content_origin']['enum'],
+        );
+    }
+
+    public function test_developer_prompt_instructs_headings_and_cross_references_to_be_structural(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload(pageType: $pageType)));
+
+            $this->assertStringContainsString('structural', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('the page title, a section heading', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('cross-reference', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
+    public function test_developer_prompt_requires_concrete_procynia_assertion_for_best_practice(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('at least one concrete procynia assertion', $developerPrompt);
+        $this->assertStringContainsString('a heading, title, or cross-reference is never best_practice by itself', $developerPrompt);
+        $this->assertStringContainsString('never write a vague, generic sentence', $developerPrompt);
+    }
+
+    public function test_developer_prompt_instructs_active_gap_analysis_and_allows_zero_best_practice_blocks(): void
+    {
+        $developerPrompt = mb_strtolower($this->developerPromptTextFromPayload($this->capturePayload()));
+
+        $this->assertStringContainsString('active gap analysis', $developerPrompt);
+        $this->assertStringContainsString('zero best_practice blocks is the correct outcome', $developerPrompt);
+        $this->assertStringContainsString('never invent a recommendation just to produce one', $developerPrompt);
+    }
+
+    public function test_generate_page_from_source_accepts_a_structural_block(): void
+    {
+        $client = $this->clientReturning([
+            'page' => [
+                'blocks' => [
+                    $this->structuralBlock('# Test Page'),
+                    $this->sourceBasedBlock('Kildeinnhold.'),
+                ],
+            ],
+        ]);
+
+        $result = $client->generatePageFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        $this->assertSame('structural', $result['blocks'][0]['content_origin']);
+        $this->assertNull($result['blocks'][0]['best_practice_reason'] ?? null);
+    }
+
+    public function test_generate_page_from_source_still_rejects_an_unsupported_content_origin(): void
+    {
+        $block = $this->sourceBasedBlock('# Test Page');
+        $block['content_origin'] = 'mixed';
+
+        $client = $this->clientReturning(['page' => ['blocks' => [$block]]]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('has invalid content_origin');
+
+        $client->generatePageFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+    }
+
+    // =========================================================================
     // Happy path
     // =========================================================================
 
@@ -767,6 +842,21 @@ class WikiPageContentAiClientTest extends TestCase
             'content_origin' => 'source_based',
             'source_element_keys' => ['document-1-full-text'],
             'source_element_types' => ['manual'],
+            'best_practice_reason' => null,
+            'link_intents' => [],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function structuralBlock(string $markdown): array
+    {
+        return [
+            'markdown' => $markdown,
+            'content_origin' => 'structural',
+            'source_element_keys' => [],
+            'source_element_types' => [],
             'best_practice_reason' => null,
             'link_intents' => [],
         ];

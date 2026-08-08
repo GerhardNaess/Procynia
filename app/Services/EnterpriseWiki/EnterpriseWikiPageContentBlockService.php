@@ -130,6 +130,7 @@ class EnterpriseWikiPageContentBlockService
             if (! in_array($origin, [
                 EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL,
             ], true)) {
                 throw new \RuntimeException("WikiPageContentAiClient: generated block had unsupported content_origin [{$origin}].");
             }

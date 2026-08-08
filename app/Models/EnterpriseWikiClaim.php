@@ -14,6 +14,21 @@ class EnterpriseWikiClaim extends Model
 
     public const CONTENT_ORIGIN_BEST_PRACTICE = 'best_practice';
 
+    /**
+     * Wiki run-5: a page-generation block origin for content that carries no factual or
+     * professional assertion of its own — the page title, a section heading with no accompanying
+     * claim, a "Se også"/"See also" cross-reference sentence, or other purely navigational/
+     * editorial text. Introduced because `best_practice` was previously used as a catch-all for
+     * "not literally from the source" (the generation schema offered only two choices), so headings
+     * and cross-references were force-classified as best_practice even though
+     * EnterpriseWikiExtractPageClaimsService legitimately extracts zero claims from them — leaving
+     * the "BESTE PRAKSIS" badge shown with nothing reviewable behind it. `structural` is a
+     * block-level-only origin: it is never assigned to an EnterpriseWikiClaim (claim extraction
+     * excludes it from claim candidates exactly like source_based) and requires no claim, no
+     * source_element_keys, and no best_practice_reason.
+     */
+    public const CONTENT_ORIGIN_STRUCTURAL = 'structural';
+
     public const CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT = 'unsupported_generated_content';
 
     public const CONTENT_ORIGIN_INTERNAL_ERROR = 'internal_error';
@@ -22,6 +37,7 @@ class EnterpriseWikiClaim extends Model
         self::CONTENT_ORIGIN_UNCLASSIFIED,
         self::CONTENT_ORIGIN_SOURCE_BASED,
         self::CONTENT_ORIGIN_BEST_PRACTICE,
+        self::CONTENT_ORIGIN_STRUCTURAL,
         self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         self::CONTENT_ORIGIN_INTERNAL_ERROR,
     ];

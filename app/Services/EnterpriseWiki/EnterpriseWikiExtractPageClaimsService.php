@@ -200,7 +200,7 @@ class EnterpriseWikiExtractPageClaimsService
                 $claimCandidateBlocks = $this->claimCandidateBlocksWithoutExistingClaims($version, $allClaimCandidateBlocks);
 
                 if ($allClaimCandidateBlocks->isNotEmpty() && $claimCandidateBlocks->isEmpty()) {
-                    $completed = $this->persist($run->id, $row->id, $page, $version, $token, ['claims' => []], []);
+                    $completed = $this->persist($run->id, $row->id, $page, $version, $token, ['claims' => []], collect());
 
                     if ($completed === null) {
                         $busy++;
@@ -237,7 +237,7 @@ class EnterpriseWikiExtractPageClaimsService
                 $version,
                 $token,
                 $result,
-                $claimCandidateBlocks->pluck('block_key')->all(),
+                $claimCandidateBlocks,
             );
 
             if ($pageClaimsCreated === null) {
@@ -529,9 +529,9 @@ class EnterpriseWikiExtractPageClaimsService
      *
      * @return int|null the number of claims created, or null if the reservation was lost
      */
-    private function persist(int $runId, int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, array $candidateBlockKeys): ?int
+    private function persist(int $runId, int $rowId, EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, string $token, array $result, Collection $claimCandidateBlocks): ?int
     {
-        return DB::transaction(function () use ($runId, $rowId, $page, $version, $token, $result, $candidateBlockKeys): ?int {
+        return DB::transaction(function () use ($runId, $rowId, $page, $version, $token, $result, $claimCandidateBlocks): ?int {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
@@ -549,7 +549,8 @@ class EnterpriseWikiExtractPageClaimsService
             }
 
             $created = 0;
-            $candidateBlockKeySet = array_flip(array_map(static fn (mixed $key): string => (string) $key, $candidateBlockKeys));
+            $createdBlockKeys = [];
+            $candidateBlockKeySet = array_flip($claimCandidateBlocks->pluck('block_key')->map(static fn (mixed $key): string => (string) $key)->all());
 
             foreach ($this->dedupeClaims($result['claims']) as $i => $claim) {
                 $pageExcerpt = trim((string) ($claim['excerpt'] ?? ''));
@@ -627,6 +628,61 @@ class EnterpriseWikiExtractPageClaimsService
                     'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
                 ]);
 
+                if ($blockKey !== '') {
+                    $createdBlockKeys[$blockKey] = true;
+                }
+
+                $created++;
+            }
+
+            // Wiki run-5: best_practice → claim is a contract, not a suggestion the AI can
+            // silently decline. A best_practice block persisted a genuine Procynia assertion at
+            // generation time (EnterpriseWikiPageContentBlockService already rejects a best_practice
+            // block with no best_practice_reason) — if extraction's own AI call still returned no
+            // claim anchored to that block (either because it found nothing, or because its
+            // returned excerpt anchored to a different block instead), the block would otherwise
+            // reach the final Wiki version with a "BESTE PRAKSIS" badge and nothing reviewable
+            // behind it (exactly the run-5 defect). Rather than accept that silently, a deterministic
+            // fallback claim is built directly from the block's own already-reviewed markdown and
+            // best_practice_reason — no further AI call, so it can never itself return zero.
+            foreach ($claimCandidateBlocks as $block) {
+                $blockKey = trim((string) ($block['block_key'] ?? ''));
+
+                if ($blockKey === ''
+                    || (string) ($block['content_origin'] ?? '') !== EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                    || isset($createdBlockKeys[$blockKey])
+                ) {
+                    continue;
+                }
+
+                $blockMarkdown = trim((string) ($block['markdown'] ?? ''));
+
+                EnterpriseWikiClaim::query()->create([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'enterprise_wiki_page_version_id' => $version->id,
+                    'claim_text' => $blockMarkdown,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'page_excerpt' => $blockMarkdown !== '' ? $blockMarkdown : null,
+                    'content_block_key' => $blockKey,
+                    'review_reason' => trim((string) ($block['best_practice_reason'] ?? '')) !== ''
+                        ? (string) $block['best_practice_reason']
+                        : 'Vurder om anbefalingen skal beholdes som beste praksis.',
+                    'review_metadata' => [
+                        'statement_kind' => 'recommendation',
+                        'classification_basis' => 'deterministic_fallback_from_block',
+                        'decision_source' => EnterpriseWikiClaimClassificationService::SOURCE_EXTRACTION,
+                        'suggested_placement' => $blockKey,
+                        'visible_wiki_link_recommendation' => ($block['link_intents'] ?? []) !== [] ? 'recommended' : 'not_needed',
+                        'link_intents' => $block['link_intents'] ?? [],
+                    ],
+                    'generation_issue' => 'best_practice_block_extraction_returned_no_claim',
+                    'position_order' => $created,
+                    'confidence' => EnterpriseWikiClaim::CONFIDENCE_UNCERTAIN,
+                    'conflict_flag' => false,
+                    'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                ]);
+
+                $createdBlockKeys[$blockKey] = true;
                 $created++;
             }
 

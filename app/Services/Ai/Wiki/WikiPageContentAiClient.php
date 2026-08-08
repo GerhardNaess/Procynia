@@ -212,6 +212,7 @@ class WikiPageContentAiClient
             if (! in_array($origin, [
                 EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL,
             ], true)) {
                 throw new RuntimeException("WikiPageContentAiClient: generated page block [{$index}] has invalid content_origin.");
             }
@@ -307,6 +308,7 @@ class WikiPageContentAiClient
                 if (! in_array($origin, [
                     EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                     EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL,
                 ], true)) {
                     throw new RuntimeException("WikiPageContentAiClient: repaired section [{$sectionIndex}] block [{$blockIndex}] has invalid content_origin.");
                 }
@@ -430,7 +432,7 @@ class WikiPageContentAiClient
             '- No filenames, document IDs, run IDs, or internal technical identifiers',
             '- No mention of AI generation, confidence levels, or approval status',
             '',
-            'Every content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
+            'Every content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. structural is for a pure "Se også"/cross-reference one-liner with no assertion of its own; best_practice requires a concrete Procynia recommendation or identified gap, never a bare heading or reference.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -583,7 +585,7 @@ class WikiPageContentAiClient
             '- No filenames, document IDs, run IDs, or internal technical identifiers',
             '- No mention of AI generation, confidence levels, or approval status',
             '',
-            'Every ordinary content block must explicitly choose content_origin: source_based or best_practice — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS.',
+            'Every ordinary content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. Keep every existing block\'s own content_origin unchanged unless you are correcting it.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -728,24 +730,39 @@ class WikiPageContentAiClient
             'STRUCTURED BLOCK OUTPUT:',
             '- Return page.blocks as the only content-bearing output. Do not return a single free-form markdown field.',
             '- Each block must be one independently traceable heading, paragraph, or heading+paragraph group.',
-            '- Every ordinary content block must explicitly choose content_origin: source_based or best_practice. There is no third option and no default — choose deliberately for each block.',
-            '- For source_based blocks, copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
+            '- Every content block must explicitly choose content_origin: source_based, best_practice, or structural. There is no other option and no default — choose deliberately for each block.',
+            '',
+            'SOURCE_BASED — direct content from the source document:',
+            '- Copy one or more exact source_element_keys from SOURCE ELEMENTS and include the corresponding source_element_types.',
             '- A source_based block without source_element_keys is invalid. Never mark a block source_based just because it sounds plausible or reads like something the source document would say — only when you can cite the specific source_element_keys it is drawn from.',
-            '- A block is best_practice when it deliberately goes beyond the source document with general professional/industry knowledge or an established practice — and does NOT claim the named customer or supplier already has, does, or follows the thing described, and does NOT state a fact specific to this particular customer\'s/supplier\'s actual agreement, system, or process.',
-            '- Write best_practice sentences in the SAME formal, neutral, declarative register as ordinary Wiki text — a plain statement of professional fact, not a suggestion. Do NOT open or mark a best_practice sentence with an advisory/recommendation phrase — never "bør", "kan", "anbefales", "det anbefales", "som beste praksis", "en vanlig tilnærming er", "faglig anbefaling", "it is recommended", "as a best practice", "a common approach is", "could", "should consider", or any similar hedging/advisory wording. For example, write "Tydelig rolle- og ansvarsfordeling gir klare eskaleringslinjer og konsistent prosessutførelse." — never "Det anbefales å ha tydelig rolle- og ansvarsfordeling...". The reader must be able to tell best_practice content apart from source_based content ONLY through the page\'s own content_origin/UI labeling, never through a difference in wording, tone, or confidence.',
-            '- Do not soften a best_practice sentence into advice or add a hedging opener just because it goes beyond the source document — state the professional fact directly and confidently, exactly as you would phrase a source_based sentence.',
-            '- General industry/framework knowledge that elaborates on a concept beyond what the source document literally states (e.g. explaining what a standard practice typically involves) is best_practice, not source_based — even if it uses similar terminology to the source. Only mark it source_based if you can cite the exact source_element_keys that state those specific facts.',
-            '- For best_practice blocks, explain the positive basis in best_practice_reason and leave source_element_keys/source_element_types empty.',
+            '',
+            'STRUCTURAL — content with no factual or professional assertion of its own:',
+            '- Use structural for the page title, a section heading that introduces a topic without itself stating a claim, a "Se også"/"See also" cross-reference sentence, a plain wikilink-only reference, or other purely navigational/editorial text.',
+            '- Never use best_practice as a fallback for content that has no source_element_keys to cite — if a block carries no assertion at all, it is structural, not best_practice.',
+            '- Leave best_practice_reason null and source_element_keys/source_element_types empty for structural blocks.',
+            '',
+            'BEST_PRACTICE — a genuine Procynia assertion, never a fallback category:',
+            '- A best_practice block must contain at least one concrete Procynia assertion: a recommendation, an identified gap or weakness in what the source document describes, a control or safeguard that should be introduced, a clarification of ownership/responsibility, a measurable target or KPI, a decision criterion, a risk control, a follow-up/monitoring mechanism, or a process improvement. A heading, title, or cross-reference is NEVER best_practice by itself — classify it as structural instead.',
+            '- Write best_practice content as an explicit, self-contained Procynia recommendation: state both what should be improved, introduced, or done, and why that matters in this page\'s context — e.g. "Procynia anbefaler at ... fordi ...". Never write a vague, generic sentence like "Det anbefales å følge beste praksis." — every best_practice block must name the concrete gap or improvement, not just gesture at "best practice" in the abstract.',
+            '- The reader must be able to recognize best_practice content as Procynia\'s own assessment from the sentence itself, not only from how the page later displays it.',
+            '- Do NOT claim the named customer or supplier already has, does, or follows the thing recommended, and do NOT state it as a fact specific to this particular customer\'s/supplier\'s actual agreement, system, or process — that would misrepresent your own recommendation as a documented fact.',
+            '- For best_practice blocks, explain the basis for the assessment in best_practice_reason.',
+            '- When a specific part of the source document is what exposed the gap or weakness your recommendation addresses, cite it: include the relevant source_element_key(s)/source_element_types alongside content_origin=best_practice. This does not make the block source_based — it only records what motivated your own assessment. Leave source_element_keys empty when no single source element specifically triggered the recommendation.',
             '- Do not classify factual statements, uncertain source facts, rewritten source facts, statements about the customer\'s or supplier\'s current/actual state, or likely hallucinations as best_practice — those must be source_based (if genuinely grounded, with real source_element_keys) or omitted.',
             '- A best_practice block must be necessary to understand or use this page\'s own owned topics (see PAGE RESPONSIBILITY below) for what the source material actually describes — never add general professional/industry elaboration of the wider subject area just because it is true and related. A thin source document justifies a thin page: when in doubt whether a piece of best_practice content is actually necessary here, leave it out rather than include it because it is technically accurate.',
-            '- link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
+            '',
+            'ACTIVE GAP ANALYSIS (perform this deliberately before writing any best_practice content):',
+            '- After you have understood what the source document actually describes for this page\'s own owned topics, actively assess whether it leaves a genuine, professionally relevant gap — for example: unclear ownership/responsibility, missing decision criteria, missing control points, missing measurable requirements, missing deviation/incident handling, missing follow-up or measurement, unclear process boundaries, missing risk/security controls, or a missing connection between processes.',
+            '- Add a best_practice block only when this assessment finds a real, specific gap or improvement that is professionally grounded and relevant to this page. Zero best_practice blocks is the correct outcome when the source material already gives no meaningful basis for a useful addition — never invent a recommendation just to produce one.',
+            '',
+            'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
         ]);
 
         $responsibilityRules = implode("\n", [
             'PAGE RESPONSIBILITY:',
             '- "Additional context" (if present) states this page\'s own content responsibility in three tiers: what to explain in depth ("own content responsibility"), what to mention only briefly ("Reference only"), and what to never mention ("EXCLUDED").',
             '- Treat every EXCLUDED topic as a hard, binding boundary: do not mention it, allude to it, or give it a section, list, or even one sentence — not even to note that it exists or that it is covered elsewhere.',
-            '- For a "Reference only" topic, write AT MOST one short sentence plus an inline [[wikilink]] to the page that owns it — never its own heading, paragraph, or list of sub-points.',
+            '- For a "Reference only" topic, write AT MOST one short sentence plus an inline [[wikilink]] to the page that owns it — never its own heading, paragraph, or list of sub-points. This one-liner is structural (a cross-reference), not best_practice — unless it also happens to state a genuine Procynia recommendation of its own, which the "Reference only" tier does not call for.',
             '- Stay strictly inside this page\'s own content responsibility for everything else. The number of sections this page contains should track directly with the number of items in its own content responsibility — do not add or expand a section to cover something that is not one of those items, even if it is topically related.',
             '- When no such guidance is given at all, fall back to writing only what the source material actually supports for this specific page — a short, thin source document justifies a short, thin page; do not expand into a comprehensive treatment of the wider subject just because more could technically be said about it.',
             '- Never restate the same sentence, fact, or near-identical wording more than once on this page, and never copy wording verbatim from another page\'s content given as context — express a shared idea once, in your own words, in the place it actually belongs.',
@@ -950,6 +967,7 @@ class WikiPageContentAiClient
                     'enum' => [
                         EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                         EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                        EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL,
                     ],
                 ],
                 'source_element_keys' => [

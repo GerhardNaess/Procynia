@@ -3883,6 +3883,10 @@ return [
                 'label' => 'Article is missing a summary link',
                 'description' => 'The article does not link to the summary page.',
             ],
+            'best_practice_block_without_claim' => [
+                'label' => 'Best practice is missing a claim',
+                'description' => 'The page has best-practice content with no corresponding reviewable claim.',
+            ],
             'broken_wikilink' => [
                 'label' => 'Invalid wiki link',
                 'description' => 'The content contains a wiki link that does not point to a valid page.',

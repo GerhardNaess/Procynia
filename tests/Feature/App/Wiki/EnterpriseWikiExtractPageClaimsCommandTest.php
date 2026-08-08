@@ -614,10 +614,24 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
             ->where('enterprise_wiki_page_version_id', $version->id)
             ->get();
 
-        $this->assertCount(1, $claims);
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claims->first()->content_origin);
-        $this->assertTrue($claims->first()->conflict_flag);
+        // Wiki run-5: the fixture's third block (block-0003, untouched by this test — still the
+        // base fixture's own best_practice block) is a genuine best_practice candidate the AI
+        // mock above never returned a claim for, so the best_practice -> claim contract now
+        // deterministically backfills it — hence 2 claims total, not 1. The point of this test —
+        // that source_based text is never persisted as a claim, and that a real AI-extracted
+        // best_practice claim keeps its conflict flag — is unaffected and still asserted below.
+        $this->assertCount(2, $claims);
         $this->assertFalse($claims->contains('claim_text', 'Dokumenteier godkjenner endringer før publisering.'));
+
+        $extractedClaim = $claims->firstWhere('claim_text', 'Uavhengig kontroll før publisering reduserer operasjonell risiko.');
+        $this->assertNotNull($extractedClaim);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $extractedClaim->content_origin);
+        $this->assertTrue($extractedClaim->conflict_flag);
+
+        $fallbackClaim = $claims->firstWhere('content_block_key', 'block-0003');
+        $this->assertNotNull($fallbackClaim);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $fallbackClaim->content_origin);
+        $this->assertSame('best_practice_block_extraction_returned_no_claim', $fallbackClaim->generation_issue);
     }
 
     public function test_best_practice_block_is_sent_as_claim_candidate_even_when_page_already_has_source_based_claim(): void
@@ -763,6 +777,98 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
         $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
 
         $this->assertSame(0, $result['pages']);
+        $this->assertSame(0, $result['claims']);
+        $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+    }
+
+    /**
+     * Wiki run-5 (test G/I): the best_practice → claim contract. Extraction's own AI call is
+     * allowed to legitimately find nothing (mirrors what actually happened for run 5's headings/
+     * cross-references before those became `structural`) — but a genuine best_practice block
+     * (non-empty best_practice_reason, real assertion markdown) must never silently end up with
+     * zero reviewable claims. A deterministic fallback claim, built directly from the block's own
+     * already-validated markdown/reason, is created instead — no further AI call involved.
+     */
+    public function test_best_practice_block_gets_a_deterministic_fallback_claim_when_ai_returns_zero_claims(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => []]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $this->assertSame(2, $result['claims'], 'one fallback claim per best_practice block (block-0002, block-0003)');
+
+        $fallbackClaims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->get();
+
+        $this->assertCount(2, $fallbackClaims);
+
+        foreach ($fallbackClaims as $claim) {
+            $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claim->content_origin);
+            $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $claim->approval_status);
+            $this->assertSame('best_practice_block_extraction_returned_no_claim', $claim->generation_issue);
+            $this->assertNotNull($claim->content_block_key);
+        }
+    }
+
+    /**
+     * Wiki run-5 (test H): the fallback claim is anchored to the exact block it was built from —
+     * both its content_block_key and claim_text/review_reason trace back to that specific block,
+     * not a different one on the same page.
+     */
+    public function test_fallback_claim_is_linked_to_the_correct_block_and_page_version(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, $page, $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => []]);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $blocks = collect($version->content_blocks_json)->keyBy('block_key');
+        $claims = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->get();
+
+        $this->assertCount(2, $claims);
+
+        foreach ($claims as $claim) {
+            $this->assertSame($page->id, $claim->enterprise_wiki_page_id);
+            $this->assertSame($version->id, $claim->enterprise_wiki_page_version_id);
+            $block = $blocks->get($claim->content_block_key);
+            $this->assertNotNull($block, 'claim must anchor to a real block on this version');
+            $this->assertSame($block['markdown'], $claim->claim_text);
+            $this->assertSame($block['best_practice_reason'], $claim->review_reason);
+        }
+    }
+
+    /**
+     * Wiki run-5 (test K): a structural block (heading/cross-reference) is excluded from claim
+     * candidates exactly like source_based, and never triggers the best_practice fallback either.
+     */
+    public function test_structural_block_never_creates_a_claim_or_a_fallback(): void
+    {
+        $customer = $this->createCustomer();
+        [$run, , $version] = $this->createAppliedRunWithVersionedPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $blocks = $version->content_blocks_json;
+        foreach ($blocks as $index => $block) {
+            $blocks[$index]['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL;
+            $blocks[$index]['best_practice_reason'] = null;
+        }
+        $version->update(['content_blocks_json' => $blocks]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)->shouldNotReceive('extractClaims');
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
         $this->assertSame(0, $result['claims']);
         $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
     }

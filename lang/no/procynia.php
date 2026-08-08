@@ -3883,6 +3883,10 @@ return [
                 'label' => 'Artikkel mangler lenke til sammendrag',
                 'description' => 'Artikkelen mangler en lenke til sammendragssiden.',
             ],
+            'best_practice_block_without_claim' => [
+                'label' => 'Beste praksis mangler påstand',
+                'description' => 'Siden har et beste praksis-innhold som ikke har en tilhørende, reviewbar påstand.',
+            ],
             'broken_wikilink' => [
                 'label' => 'Ugyldig wikilenke',
                 'description' => 'Innholdet inneholder en wikilenke som ikke peker til en gyldig side.',

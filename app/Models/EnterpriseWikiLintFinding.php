@@ -23,6 +23,17 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_PAGE_WITHOUT_CLAIMS = 'page_without_claims';
 
+    /**
+     * Wiki run-5: a stronger, block-precise integrity signal than CODE_PAGE_WITHOUT_CLAIMS above —
+     * a specific best_practice content block (a persisted Procynia assertion) has no reviewable
+     * claim anchored to it at all. Never fired for a page whose blocks are only source_based/
+     * structural, since those never produce a claim by design.
+     * EnterpriseWikiExtractPageClaimsService::persist() now guarantees a best_practice block
+     * always gets a deterministic fallback claim if extraction itself returned none, so this
+     * should only ever fire for a legacy page version generated before that fix.
+     */
+    public const CODE_BEST_PRACTICE_BLOCK_WITHOUT_CLAIM = 'best_practice_block_without_claim';
+
     // Source reference
     public const CODE_SOURCE_REFERENCE_WITHOUT_DOCUMENT = 'source_reference_without_document';
 
@@ -100,6 +111,7 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_MISSING_CURRENT_VERSION,
         self::CODE_EMPTY_PAGE_CONTENT,
         self::CODE_PAGE_WITHOUT_CLAIMS,
+        self::CODE_BEST_PRACTICE_BLOCK_WITHOUT_CLAIM,
         self::CODE_SOURCE_REFERENCE_WITHOUT_DOCUMENT,
         self::CODE_SOURCE_REFERENCE_CUSTOMER_MISMATCH,
         self::CODE_PAGE_WITHOUT_OUTGOING_LINKS,

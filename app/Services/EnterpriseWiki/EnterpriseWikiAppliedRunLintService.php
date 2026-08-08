@@ -725,14 +725,41 @@ class EnterpriseWikiAppliedRunLintService
             ->with('sourceReferences')
             ->get();
 
-        if ($claims->isEmpty()) {
+        // Wiki run-5: source_based and structural blocks never produce a claim, by design — only
+        // a best_practice block (a persisted Procynia assertion) is ever expected to. A page built
+        // purely from source_based + structural content correctly has zero claims; that must never
+        // be reported as a defect (see CODE_PAGE_WITHOUT_CLAIMS below).
+        $bestPracticeBlockKeys = $this->bestPracticeBlockKeysForVersion($version);
+        $claimedBlockKeys = $claims->pluck('content_block_key')
+            ->filter()
+            ->map(static fn (mixed $key): string => trim((string) $key))
+            ->unique();
+
+        // A stronger, block-precise integrity signal than CODE_PAGE_WITHOUT_CLAIMS: a specific
+        // best_practice block has no reviewable claim anchored to it at all.
+        // EnterpriseWikiExtractPageClaimsService::persist() now guarantees this cannot happen for
+        // a page generated after this fix (a deterministic fallback claim is always created); this
+        // remains a real error for a legacy page version generated before that fix.
+        if ($bestPracticeBlockKeys->diff($claimedBlockKeys)->isNotEmpty()) {
             $this->upsertFinding(
-                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_CLAIMS),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Page has no claims extracted from its current version.',
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_BEST_PRACTICE_BLOCK_WITHOUT_CLAIM),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Page has a best_practice content block with no reviewable claim.',
                 $touchedIds,
                 $counts,
             );
+        }
+
+        if ($claims->isEmpty()) {
+            if ($bestPracticeBlockKeys->isNotEmpty()) {
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_CLAIMS),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    'Page has no claims extracted from its current version.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
 
             return;
         }
@@ -791,6 +818,21 @@ class EnterpriseWikiAppliedRunLintService
                 }
             }
         }
+    }
+
+    /**
+     * @return Collection<int, string> unique, non-empty block_key values for every best_practice
+     *                                 block in the version's current content_blocks_json
+     */
+    private function bestPracticeBlockKeysForVersion(EnterpriseWikiPageVersion $version): Collection
+    {
+        return collect((array) ($version->content_blocks_json ?? []))
+            ->filter(static fn (mixed $block): bool => is_array($block)
+                && ($block['content_origin'] ?? null) === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE)
+            ->map(static fn (array $block): string => trim((string) ($block['block_key'] ?? '')))
+            ->filter(static fn (string $key): bool => $key !== '')
+            ->unique()
+            ->values();
     }
 
     private function checkPageLinks(

@@ -108,4 +108,25 @@ describe('groupContentBlocksBySection', () => {
             best_practice_reason: '',
         }), false);
     });
+
+    // Wiki run-5: a structural block (page title, section heading, "Se også" cross-reference)
+    // must never render with the "Beste praksis" badge/frame — even if it happens to carry a
+    // best_practice_reason-shaped string (e.g. leftover data), only the literal content_origin
+    // value 'best_practice' can ever trigger it.
+    test('a structural block never renders the best-practice badge, even with a reason-like string present', () => {
+        assert.equal(hasRenderableBestPracticeMetadata({
+            content_origin: 'structural',
+            best_practice_reason: null,
+        }), false);
+
+        assert.equal(hasRenderableBestPracticeMetadata({
+            content_origin: 'structural',
+            best_practice_reason: 'Not actually a best-practice reason.',
+        }), false);
+
+        assert.equal(hasInvalidBestPracticeMetadata({
+            content_origin: 'structural',
+            best_practice_reason: null,
+        }), false);
+    });
 });

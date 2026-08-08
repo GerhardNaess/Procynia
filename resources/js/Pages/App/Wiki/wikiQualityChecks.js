@@ -4,6 +4,7 @@ export const WIKI_QUALITY_CHECKS = {
     applied_run_without_summary: 'applied_run_without_summary',
     article_without_concept_or_entity_links: 'article_without_concept_or_entity_links',
     article_without_summary_link: 'article_without_summary_link',
+    best_practice_block_without_claim: 'best_practice_block_without_claim',
     broken_wikilink: 'broken_wikilink',
     claim_missing_source: 'claim_missing_source',
     concept_without_incoming_wikilink: 'concept_without_incoming_wikilink',

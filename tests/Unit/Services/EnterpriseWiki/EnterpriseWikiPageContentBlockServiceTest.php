@@ -97,4 +97,36 @@ class EnterpriseWikiPageContentBlockServiceTest extends TestCase
 
         $this->assertCount(1, $blocks);
     }
+
+    /**
+     * Wiki run-5: a structural block (page title, section heading, "Se også" cross-reference) —
+     * unlike source_based and best_practice — requires neither a best_practice_reason nor any
+     * source_element_keys.
+     */
+    public function test_structural_block_is_accepted_without_reason_or_source_elements(): void
+    {
+        $blocks = $this->service()->buildBlocksFromStructuredResult($this->document(), [[
+            'markdown' => '# Masterdata ITIL',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL,
+            'best_practice_reason' => null,
+            'source_element_keys' => [],
+        ]], []);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_STRUCTURAL, $blocks[0]['content_origin']);
+        $this->assertNull($blocks[0]['best_practice_reason']);
+    }
+
+    public function test_unsupported_content_origin_is_still_rejected(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/unsupported content_origin/');
+
+        $this->service()->buildBlocksFromStructuredResult($this->document(), [[
+            'markdown' => 'Some text.',
+            'content_origin' => 'mixed',
+            'best_practice_reason' => null,
+            'source_element_keys' => [],
+        ]], []);
+    }
 }
