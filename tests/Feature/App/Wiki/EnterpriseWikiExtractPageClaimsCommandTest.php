@@ -7,12 +7,14 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageClaimExtractionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -871,6 +873,146 @@ class EnterpriseWikiExtractPageClaimsCommandTest extends TestCase
 
         $this->assertSame(0, $result['claims']);
         $this->assertSame(0, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
+    }
+
+    /**
+     * Wiki run-7 diagnostic (test A): byte-for-byte reproduction of finding #17
+     * (best_practice_block_without_claim, page_id=19, page_version_id=18, block_key=block-0001,
+     * markdown="# Masterdata ITIL", reason "Title provided by the assignment; page heading is a
+     * structural element, not sourced content."). Proves the b60fcfd contract is correctly
+     * implemented in the current code: run via `php artisan test` (a fresh PHP process reading
+     * today's files, unlike a long-lived `queue:work` daemon that keeps already-declared classes
+     * in memory for its entire lifetime), the fallback claim is created, anchored to the exact
+     * same page_version_id and content_block_key as the block itself. Run 7's actual failure was
+     * traced to the `enterprise-wiki` queue worker container having been running continuously
+     * since before commit b60fcfd was made — it was still executing the pre-fix persist() with no
+     * fallback when it processed run 7 — not a defect in this code.
+     */
+    public function test_run7_exact_block_gets_a_fallback_claim(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $page = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata ITIL');
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Masterdata ITIL\n\nInnhold.",
+            'content_blocks_json' => [
+                [
+                    'block_key' => 'block-0001',
+                    'position' => 0,
+                    'markdown' => '# Masterdata ITIL',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'source_elements' => [],
+                    'best_practice_reason' => 'Title provided by the assignment; page heading is a structural element, not sourced content.',
+                ],
+                [
+                    'block_key' => 'block-0002',
+                    'position' => 1,
+                    'markdown' => 'Denne siden beskriver hvordan leverandøren anvender ITIL.',
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_elements' => [[
+                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                        'source_id' => 123,
+                        'source_label' => 'source.docx',
+                        'source_hash' => str_pad('a', 64, '0'),
+                        'document_version_hash' => str_pad('a', 64, '0'),
+                        'source_element_key' => 'source-para',
+                        'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                        'source_row_key' => null,
+                        'source_excerpt' => 'Denne siden beskriver hvordan leverandøren anvender ITIL.',
+                        'page_reference' => null,
+                    ]],
+                    'best_practice_reason' => null,
+                ],
+            ],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => []]);
+
+        $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $claims = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->get();
+
+        $this->assertSame(1, $result['claims']);
+        $this->assertCount(1, $claims);
+        $this->assertSame('block-0001', $claims->first()->content_block_key);
+        $this->assertSame($version->id, $claims->first()->enterprise_wiki_page_version_id);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, $claims->first()->content_origin);
+        $this->assertSame('best_practice_block_extraction_returned_no_claim', $claims->first()->generation_issue);
+    }
+
+    /**
+     * Wiki run-7 (test B): extraction always re-fetches the page's CURRENT version at the moment
+     * it actually runs — so whichever blocks/keys a prior repair pass left behind (never the
+     * blocks/keys from before that repair) are what claim candidates and fallback claims anchor
+     * to. Simulates "repair renamed/replaced a block" by giving the version a block_key a
+     * hypothetical earlier generation pass would not have used, and confirms both the fallback
+     * claim and a subsequent lint check agree on that exact, final key.
+     */
+    public function test_extraction_uses_final_post_repair_block_keys(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createRunApplied($customer);
+        $page = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Repaired Page');
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+
+        // The version persisted here already represents the FINAL, post-repair state (the real
+        // pipeline only ever creates/updates the version once repair has finished — see
+        // EnterpriseWikiGenerateAppliedPagesService::generatePageForRun()) — block-0099 stands in
+        // for a key a repair pass produced that never existed in an earlier draft.
+        $version = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Repaired Page\n\nInnhold.",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0099',
+                'position' => 0,
+                'markdown' => 'Procynia anbefaler dokumentert eierskap for hver prosess.',
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                'source_elements' => [],
+                'best_practice_reason' => 'Identifisert svakhet: uklart prosesseierskap.',
+            ]],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $this->mock(WikiPageClaimExtractionAiClient::class)
+            ->shouldReceive('extractClaims')
+            ->once()
+            ->andReturn(['claims' => []]);
+
+        app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
+
+        $claim = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->first();
+        $this->assertNotNull($claim);
+        $this->assertSame('block-0099', $claim->content_block_key);
+
+        // The lint check must find this exact claim for this exact version/block, matching what
+        // extraction just wrote — no version/key mismatch between the two.
+        app(EnterpriseWikiAppliedRunLintService::class)->lint($run->fresh());
+
+        $this->assertSame(0, EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->where('code', EnterpriseWikiLintFinding::CODE_BEST_PRACTICE_BLOCK_WITHOUT_CLAIM)
+            ->count());
     }
 
     public function test_claim_from_best_practice_block_gets_review_metadata_without_source_reference(): void

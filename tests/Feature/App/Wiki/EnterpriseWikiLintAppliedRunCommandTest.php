@@ -260,6 +260,66 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
+    /**
+     * Wiki run-7 (test C): a claim tied to an OLDER page version must never satisfy the
+     * best_practice_block_without_claim check for a NEWER current version — checkPageClaims()
+     * scopes its claims query to the CURRENT version's own id, so a claim left behind on a
+     * superseded version is correctly invisible to it. This is the scenario item 5 asked to rule
+     * out for run 7 (a repair/re-versioning leaving a claim "stuck" on the wrong version) — proven
+     * here as already-correct existing behavior, not a gap this task introduces a fix for.
+     */
+    public function test_claim_on_old_page_version_does_not_satisfy_the_check_for_a_new_current_version(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $page = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Re-versioned Page');
+        $this->addPageToRun($run, $page);
+
+        $oldVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => false,
+            'content_markdown' => "# Re-versioned Page\n\nContent.",
+            'content_blocks_json' => [
+                $this->bestPracticeBlock('block-0001', 'Procynia anbefaler dokumentert risikoklassifisering av endringer.', 'Identifisert svakhet: manglende risikoklassifisering.'),
+            ],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $oldVersion->id,
+            'claim_text' => 'Procynia anbefaler dokumentert risikoklassifisering av endringer.',
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            'content_block_key' => 'block-0001',
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ]);
+
+        // A repair/re-generation supersedes the old version with a new current one — same
+        // block_key reused, but this new version has no claim of its own.
+        $newVersion = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Re-versioned Page\n\nRepaired content.",
+            'content_blocks_json' => [
+                $this->bestPracticeBlock('block-0001', 'Procynia anbefaler dokumentert risikoklassifisering av endringer.', 'Identifisert svakhet: manglende risikoklassifisering.'),
+            ],
+            'generated_by_model' => 'gpt-5',
+        ]);
+        $oldVersion->update(['is_current' => false]);
+
+        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $newVersion->id,
+            'code' => EnterpriseWikiLintFinding::CODE_BEST_PRACTICE_BLOCK_WITHOUT_CLAIM,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
+        ]);
+    }
+
     public function test_creates_finding_when_claim_has_no_source_reference(): void
     {
         $customer = $this->createCustomer();
