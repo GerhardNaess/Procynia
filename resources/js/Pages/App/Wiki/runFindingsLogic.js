@@ -36,6 +36,51 @@ export function formatFindingUserId(id) {
     return raw;
 }
 
+/**
+ * Resolves the finding a "Tilbake til funn" deep link points at, within one run's already-fetched
+ * findings.
+ *
+ * The link carries the backend's internal id ('best-practice-5390' — see
+ * EnterpriseWikiRunFindingsService::returnUrlForFinding()), but a user reading the UI only ever
+ * sees the stripped number, so a hand-typed or hand-edited '?focus_finding=5390' resolves too.
+ * The internal id is matched first: it is unambiguous, whereas the bare number can in principle
+ * collide across categories (lint 41 and claim 41 are different findings). Returns null for a
+ * missing, unknown or ambiguous id, which is what makes the deep link degrade into an ordinary
+ * "open the run's findings" navigation rather than focusing the wrong row.
+ */
+export function resolveFocusedFinding(findings, focusFindingId) {
+    const target = String(focusFindingId ?? '').trim();
+
+    if (target === '' || !Array.isArray(findings)) {
+        return null;
+    }
+
+    const exact = findings.find((finding) => String(finding?.id ?? '') === target);
+
+    if (exact) {
+        return exact;
+    }
+
+    const byUserId = findings.filter((finding) => formatFindingUserId(finding?.id) === target);
+
+    return byUserId.length === 1 ? byUserId[0] : null;
+}
+
+/**
+ * The local filter chip the panel must be on for the focused finding to be visible at all. The
+ * panel defaults to 'open', so a deep link to an already-approved or resolved finding would
+ * otherwise land on a row that is filtered away — the user would be returned to an empty-looking
+ * list. Keeps the current filter whenever the finding already passes it, so arriving at an open
+ * finding never silently widens the view.
+ */
+export function focusedFindingLocalFilter(finding, currentFilter) {
+    if (!finding) {
+        return currentFilter;
+    }
+
+    return matchesFindingsLocalFilter(finding, currentFilter) ? currentFilter : 'all';
+}
+
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
     { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },

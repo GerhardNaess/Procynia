@@ -11,6 +11,8 @@ import {
     formatFindingUserId,
     hasActiveWikiRunForTab,
     activeWikiRunLikeObjectsForTab,
+    resolveFocusedFinding,
+    focusedFindingLocalFilter,
 } from './runFindingsLogic.js';
 
 describe('formatFindingUserId', () => {
@@ -649,5 +651,93 @@ describe('getEscalationCopy — explains an escalated run instead of repeating t
         const copy = getEscalationCopy(run, { ingest_activity_escalated_blocking: ':count of :total blocks completion' });
 
         assert.equal(copy.blockingSummary, '2 of 9 blocks completion');
+    });
+});
+
+/**
+ * "Tilbake til funn" on an article draft used to return the user to the Wiki runs list filtered to
+ * the right document — but only to the document ROW, so continuing work on the finding meant
+ * reopening the Funn panel and hunting for it by eye. The link now carries the finding itself
+ * (EnterpriseWikiRunFindingsService::returnUrlForFinding() → ?focus_run=…&focus_finding=…), and
+ * these two helpers are what turn that URL back into a focused row.
+ */
+describe('resolveFocusedFinding — a deep link resolves to exactly one finding', () => {
+    const findings = [
+        { id: 'best-practice-5390', status: 'approved', category: 'best_practice_suggestion' },
+        { id: 'claim-defect-5378', status: 'open', category: 'undocumented_or_incorrect_claim' },
+        { id: 'lint-41', status: 'open', category: 'orphan_entity_page' },
+    ];
+
+    test('the internal finding id from the deep link matches its row', () => {
+        assert.equal(resolveFocusedFinding(findings, 'best-practice-5390')?.id, 'best-practice-5390');
+        assert.equal(resolveFocusedFinding(findings, 'lint-41')?.id, 'lint-41');
+    });
+
+    test('the user-facing number a reviewer actually sees also resolves', () => {
+        // The UI shows "Funn #41" for lint-41, so a hand-typed ?focus_finding=41 must work.
+        assert.equal(resolveFocusedFinding(findings, '41')?.id, 'lint-41');
+        assert.equal(resolveFocusedFinding(findings, '5390')?.id, 'best-practice-5390');
+    });
+
+    test('surrounding whitespace and a numeric argument are both tolerated', () => {
+        assert.equal(resolveFocusedFinding(findings, ' lint-41 ')?.id, 'lint-41');
+        assert.equal(resolveFocusedFinding(findings, 41)?.id, 'lint-41');
+    });
+
+    test('an ambiguous bare number focuses nothing rather than the wrong row', () => {
+        const ambiguous = [
+            { id: 'lint-41', status: 'open' },
+            { id: 'claim-defect-41', status: 'open' },
+        ];
+
+        assert.equal(resolveFocusedFinding(ambiguous, '41'), null);
+        // The unambiguous internal id still works on the same data.
+        assert.equal(resolveFocusedFinding(ambiguous, 'claim-defect-41')?.id, 'claim-defect-41');
+    });
+
+    test('an id that belongs to no finding in this run resolves to null', () => {
+        assert.equal(resolveFocusedFinding(findings, 'lint-99999'), null);
+        assert.equal(resolveFocusedFinding(findings, '99999'), null);
+    });
+
+    test('a missing id, or missing findings, resolves to null instead of throwing', () => {
+        for (const missing of [null, undefined, '', '   ']) {
+            assert.equal(resolveFocusedFinding(findings, missing), null);
+        }
+
+        assert.equal(resolveFocusedFinding(null, 'lint-41'), null);
+        assert.equal(resolveFocusedFinding(undefined, 'lint-41'), null);
+        assert.equal(resolveFocusedFinding([], 'lint-41'), null);
+    });
+});
+
+describe('focusedFindingLocalFilter — the focused finding is never filtered away', () => {
+    test('an open finding keeps the default filter — arriving never widens the view', () => {
+        const open = { status: 'open', blocks_run: false };
+
+        assert.equal(focusedFindingLocalFilter(open, 'open'), 'open');
+        assert.ok(matchesFindingsLocalFilter(open, 'open'), 'guards the premise of this test');
+    });
+
+    test('an already-approved finding widens the filter to all', () => {
+        // The regression this prevents: returning from an approved best-practice draft to a list
+        // whose default "Åpne" chip hides the very finding the user came back to.
+        const approved = { status: 'approved', blocks_run: false };
+
+        assert.equal(matchesFindingsLocalFilter(approved, 'open'), false);
+        assert.equal(focusedFindingLocalFilter(approved, 'open'), 'all');
+    });
+
+    test('a resolved finding widens too, but not when the user is already on Løst', () => {
+        const resolved = { status: 'resolved', blocks_run: false };
+
+        assert.equal(focusedFindingLocalFilter(resolved, 'open'), 'all');
+        assert.equal(focusedFindingLocalFilter(resolved, 'resolved'), 'resolved');
+        assert.equal(focusedFindingLocalFilter(resolved, 'all'), 'all');
+    });
+
+    test('no finding leaves the current filter untouched', () => {
+        assert.equal(focusedFindingLocalFilter(null, 'open'), 'open');
+        assert.equal(focusedFindingLocalFilter(undefined, 'blocking'), 'blocking');
     });
 });

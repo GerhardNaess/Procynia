@@ -63,10 +63,6 @@ class EnterpriseWikiRunFindingsService
      */
     public function buildForRun(EnterpriseWikiIngestRun $run, ?User $user, bool $includeTechnical): array
     {
-        $returnUrl = route('app.wiki.index', [
-            'tab' => 'runs',
-            'run_src' => $run->source_id,
-        ]);
 
         $pageIds = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
@@ -110,7 +106,7 @@ class EnterpriseWikiRunFindingsService
         $items = [];
 
         foreach ($lintFindings as $finding) {
-            $items[] = $this->normalizeLintFinding($finding, $pagesById, $currentVersionIdByPageId, $user, $includeTechnical, $returnUrl);
+            $items[] = $this->normalizeLintFinding($finding, $pagesById, $currentVersionIdByPageId, $user, $includeTechnical, $run);
         }
 
         // v0.7 binding quality-strategy rule (docs/enterprise-llm-wiki-plan.md, "Arkitekturnotat —
@@ -135,7 +131,7 @@ class EnterpriseWikiRunFindingsService
         );
 
         foreach ($claimDefectGroups as $groupClaims) {
-            $items[] = $this->normalizeClaimDefect($groupClaims, $pagesById, $user, $includeTechnical, $returnUrl);
+            $items[] = $this->normalizeClaimDefect($groupClaims, $pagesById, $user, $includeTechnical, $run);
         }
 
         // Grouped by faglig seksjon (heading block + its immediately-following best-practice
@@ -157,7 +153,7 @@ class EnterpriseWikiRunFindingsService
         );
 
         foreach ($bestPracticeGroups as $groupClaims) {
-            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $sectionMapsByVersionId, $user, $includeTechnical, $returnUrl);
+            $items[] = $this->normalizeBestPracticeSuggestion($groupClaims, $pagesById, $sectionMapsByVersionId, $user, $includeTechnical, $run);
         }
 
         usort($items, $this->sortComparator());
@@ -178,7 +174,7 @@ class EnterpriseWikiRunFindingsService
         Collection $currentVersionIdByPageId,
         ?User $user,
         bool $includeTechnical,
-        ?string $returnUrl,
+        EnterpriseWikiIngestRun $run,
     ): array {
         $page = $finding->enterprise_wiki_page_id !== null ? $pagesById->get($finding->enterprise_wiki_page_id) : null;
         $currentVersionId = $page !== null ? $currentVersionIdByPageId->get($page->id) : null;
@@ -201,7 +197,8 @@ class EnterpriseWikiRunFindingsService
         $canHandleClaim = $claim !== null && $user instanceof User && ! $isSuperseded && $finding->isOpen()
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
 
-        $url = $this->pageUrl($page, $claim?->id, $returnUrl, $claim === null ? $finding->id : null);
+        $findingId = 'lint-'.$finding->id;
+        $url = $this->pageUrl($page, $claim?->id, $this->returnUrlForFinding($run, $findingId), $claim === null ? $finding->id : null);
         $actionLabel = match (true) {
             $url === null => null,
             $claim !== null && $finding->isOpen() && ! $isSuperseded => $canHandleClaim ? 'open_and_handle' : 'view_source',
@@ -209,7 +206,7 @@ class EnterpriseWikiRunFindingsService
         };
 
         $item = [
-            'id' => 'lint-'.$finding->id,
+            'id' => $findingId,
             'title' => $copy['label'],
             'explanation' => $copy['description'],
             'category' => $finding->code,
@@ -283,7 +280,7 @@ class EnterpriseWikiRunFindingsService
         Collection $pagesById,
         ?User $user,
         bool $includeTechnical,
-        ?string $returnUrl,
+        EnterpriseWikiIngestRun $run,
     ): array {
         $claim = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->enterprise_wiki_page_id, $a->id] <=> [$b->enterprise_wiki_page_id, $b->id]
         )->first();
@@ -305,6 +302,8 @@ class EnterpriseWikiRunFindingsService
         $canHandleClaim = $user instanceof User
             && $this->documentOwnerApprovalService->canHandleClaim($claim, $user, $claim->version);
 
+        $findingId = 'claim-defect-'.$claim->id;
+        $returnUrl = $this->returnUrlForFinding($run, $findingId);
         $url = $this->pageUrl($page, $claim->id, $returnUrl);
         $actionKey = match (true) {
             $url === null => null,
@@ -339,7 +338,7 @@ class EnterpriseWikiRunFindingsService
             ->all();
 
         $item = [
-            'id' => 'claim-defect-'.$claim->id,
+            'id' => $findingId,
             'title' => $explanation['title'],
             'explanation' => $explanation['explanation'],
             'recommended_action' => $explanation['recommended_action'],
@@ -463,7 +462,7 @@ class EnterpriseWikiRunFindingsService
         Collection $sectionMapsByVersionId,
         ?User $user,
         bool $includeTechnical,
-        ?string $returnUrl,
+        EnterpriseWikiIngestRun $run,
     ): array {
         $orderedClaims = $claims->sort(fn (EnterpriseWikiClaim $a, EnterpriseWikiClaim $b): int => [$a->position_order, $a->id] <=> [$b->position_order, $b->id]
         )->values();
@@ -484,7 +483,8 @@ class EnterpriseWikiRunFindingsService
         $canHandle = $isPending && $user instanceof User
             && $this->documentOwnerApprovalService->canHandleClaim($primary, $user, $primary->version);
 
-        $url = $this->pageUrl($page, $primary->id, $returnUrl);
+        $findingId = 'best-practice-'.$primary->id;
+        $url = $this->pageUrl($page, $primary->id, $this->returnUrlForFinding($run, $findingId));
         $action = match (true) {
             $url === null => null,
             $isPending => $canHandle ? 'open_and_review' : 'view_page',
@@ -502,7 +502,7 @@ class EnterpriseWikiRunFindingsService
             ->all();
 
         $item = [
-            'id' => 'best-practice-'.$primary->id,
+            'id' => $findingId,
             'title' => $headingText ?? $primary->claim_text,
             'section_text' => $sectionText,
             'explanation' => (string) ($primary->review_reason ?? __('procynia.wiki.runs_findings_best_practice_default_reason')),
@@ -567,6 +567,26 @@ class EnterpriseWikiRunFindingsService
         $sectionKey = $sectionMap[$blockKey]['section_key'] ?? null;
 
         return $sectionKey ?? $claim->enterprise_wiki_page_version_id.'|'.$blockKey;
+    }
+
+    /**
+     * The "Tilbake til funn" target for ONE finding: the Kjøringer tab, filtered to the document
+     * this run belongs to (run_src — the pre-existing convention), plus the run and the finding
+     * itself. The extra two parameters are what turns "back to the list that contains the finding"
+     * into "back to the finding": Wiki Index reads them to reopen the run's Funn panel and focus
+     * the row (see WikiController::loadRunsTab() → runs_filters.focus_*, and RunsTab in Index.jsx).
+     *
+     * Deliberately a real URL rather than history state, so the context survives a page refresh
+     * and a link shared with a colleague.
+     */
+    private function returnUrlForFinding(EnterpriseWikiIngestRun $run, string $findingId): string
+    {
+        return route('app.wiki.index', [
+            'tab' => 'runs',
+            'run_src' => $run->source_id,
+            'focus_run' => $run->id,
+            'focus_finding' => $findingId,
+        ]);
     }
 
     private function pageUrl(

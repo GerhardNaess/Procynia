@@ -744,6 +744,19 @@ class WikiController extends Controller
         $runSrc = is_numeric($request->query('run_src'))
             ? (int) $request->query('run_src') : null;
 
+        // Deep link back to ONE finding (EnterpriseWikiRunFindingsService::returnUrlForFinding()).
+        // Read from the URL rather than kept in history/React state so a refresh — or a link pasted
+        // to a colleague — still lands on the same finding. Both are pure view hints: they never
+        // touch the query below, so they can never widen what this customer is allowed to see, and
+        // an id belonging to another customer's run simply matches no row in the rendered list.
+        $rawFocusFinding = $request->query('focus_finding');
+        $focusFinding = is_string($rawFocusFinding) && preg_match('/^[A-Za-z0-9_-]{1,64}$/', $rawFocusFinding) === 1
+            ? $rawFocusFinding
+            : null;
+        $focusRun = is_numeric($request->query('focus_run'))
+            ? (int) $request->query('focus_run')
+            : null;
+
         $query = EnterpriseWikiIngestRun::query()
             ->select('enterprise_wiki_ingest_runs.*')
             ->withCount(['sections', 'pages'])
@@ -859,6 +872,8 @@ class WikiController extends Controller
                 'status' => $runStatus,
                 'decision' => $runDecision,
                 'src_id' => $runSrc,
+                'focus_run' => $focusRun,
+                'focus_finding' => $focusFinding,
             ],
         ];
     }

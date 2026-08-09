@@ -17,6 +17,8 @@ import {
     formatFindingUserId,
     isActiveWikiRun,
     hasActiveWikiRunForTab,
+    resolveFocusedFinding,
+    focusedFindingLocalFilter,
 } from './runFindingsLogic';
 
 function formatDate(value, locale) {
@@ -322,6 +324,7 @@ function RunListItem({
     onRetryMaintainerDecision,
     onFetchRunPages,
     onFetchRunFindings,
+    focusFindingId,
 }) {
     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const statusBadgeClass = run.status === 'awaiting_document_owner_approval'
@@ -590,6 +593,7 @@ function RunListItem({
                             onRetry={() => onFetchRunFindings(run.id)}
                             tw={tw}
                             locale={locale}
+                            focusFindingId={focusFindingId}
                         />
                     )}
                 </div>
@@ -2662,6 +2666,43 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
         }
     };
 
+    // "Tilbake til funn" deep link (EnterpriseWikiRunFindingsService::returnUrlForFinding()):
+    // ?tab=runs&run_src=…&focus_run=…&focus_finding=… reopens the run's Funn panel by itself, so
+    // returning from an article draft lands on the finding rather than on the document row. Read
+    // from the URL via props, never from history state, so a refresh reproduces it.
+    //
+    // The ref makes it fire ONCE per deep link: without it, closing the panel again would be undone
+    // on the next runs poll. A focus_run matching no row in this customer's list is simply ignored.
+    const appliedFocusRef = useRef(null);
+    const focusRunId = filters.focus_run ?? null;
+    const focusFindingId = filters.focus_finding ?? null;
+
+    useEffect(() => {
+        if (focusRunId === null || focusFindingId === null) {
+            return;
+        }
+
+        const focusKey = `${focusRunId}:${focusFindingId}`;
+
+        if (appliedFocusRef.current === focusKey) {
+            return;
+        }
+
+        const run = runs.find((candidate) => String(candidate.id) === String(focusRunId));
+
+        if (!run) {
+            return;
+        }
+
+        appliedFocusRef.current = focusKey;
+        setExpandedRuns((current) => ({ ...current, [run.id]: 'findings' }));
+
+        if (runFindingsState[run.id]?.fetchedForLintCount !== run.lint_count) {
+            fetchRunFindings(run.id, run.lint_count);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusRunId, focusFindingId, runs]);
+
     // Keeps an OPEN findings panel live: the runs poll refreshes run.lint_count every 5s while a
     // run is active, but that alone never triggers fetchRunFindings (a separate fetch(), not an
     // Inertia prop) — without this effect, a panel left open across a poll tick would keep
@@ -2783,6 +2824,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                     onRetryMaintainerDecision={handleRetryClick}
                                     onFetchRunPages={fetchRunPages}
                                     onFetchRunFindings={fetchRunFindings}
+                                    focusFindingId={String(focusRunId ?? '') === String(run.id) ? focusFindingId : null}
                                 />
                             );
                         })}
@@ -3066,12 +3108,56 @@ function findingsLocalFilterLabel(filterKey, tw) {
  * it rather than stacking a second independent panel. Local status/blocking filters apply only
  * within this open panel and never touch the Kjøringer tab's own filter bar.
  */
-function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
+function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId = null }) {
     // Defaults to 'open' so a run with many historically-resolved findings doesn't bury the
     // ones that still need attention — 'resolved' (Løst) remains one click away via the filter
     // chips below, unchanged.
     const [localFilter, setLocalFilter] = useState('open');
     const [expandedFindingIds, setExpandedFindingIds] = useState(() => new Set());
+    // The row a "Tilbake til funn" deep link points at: expanded, scrolled to, and briefly ringed.
+    const [focusedRowId, setFocusedRowId] = useState(null);
+    const focusRowRef = useRef(null);
+    const appliedFocusRef = useRef(null);
+
+    const findingsData = state?.status === 'ready' ? (state.data?.findings ?? []) : null;
+
+    // Runs once the findings have actually arrived — the panel fetches them lazily, so at deep-link
+    // time there is usually nothing to focus yet. Widening the filter is conditional
+    // (focusedFindingLocalFilter): an already-approved best-practice finding is invisible under the
+    // default 'open' chip, and returning to a list that looks empty is the bug this whole flow
+    // exists to avoid.
+    useEffect(() => {
+        if (findingsData === null || !focusFindingId || appliedFocusRef.current === focusFindingId) {
+            return;
+        }
+
+        const finding = resolveFocusedFinding(findingsData, focusFindingId);
+
+        if (!finding) {
+            return;
+        }
+
+        appliedFocusRef.current = focusFindingId;
+        setLocalFilter((current) => focusedFindingLocalFilter(finding, current));
+        setExpandedFindingIds((current) => new Set(current).add(finding.id));
+        setFocusedRowId(finding.id);
+    }, [findingsData, focusFindingId]);
+
+    // Scroll only after the row exists in the DOM — the filter change and the expansion above both
+    // have to render first, otherwise the target is still filtered away and there is nothing to
+    // scroll to. The ring is temporary: it marks where the user landed without becoming permanent
+    // UI state that later has to be cleared by hand.
+    useEffect(() => {
+        if (focusedRowId === null || !focusRowRef.current) {
+            return undefined;
+        }
+
+        focusRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        const timer = setTimeout(() => setFocusedRowId(null), 2600);
+
+        return () => clearTimeout(timer);
+    }, [focusedRowId]);
 
     const toggleFindingExpanded = (findingId) => {
         setExpandedFindingIds((prev) => {
@@ -3168,10 +3254,16 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                         {visibleFindings.map((finding) => {
                             const isClaimFinding = CLAIM_FINDING_CATEGORIES.has(finding.category);
                             const isExpanded = isClaimFinding && expandedFindingIds.has(finding.id);
+                            const isFocused = focusedRowId === finding.id;
 
                             return (
                                 <Fragment key={finding.id}>
-                                    <tr className="align-top text-slate-700">
+                                    <tr
+                                        ref={isFocused ? focusRowRef : null}
+                                        className={`align-top text-slate-700 transition-colors duration-500 ${
+                                            isFocused ? 'bg-violet-50 ring-2 ring-inset ring-violet-300' : ''
+                                        }`}
+                                    >
                                         <td className="max-w-[360px] px-4 py-3">
                                             <div className="flex items-start gap-2">
                                                 {isClaimFinding && (
