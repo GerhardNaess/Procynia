@@ -22,6 +22,103 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     }
 
     // =========================================================================
+    // Fase 8K-1 — EXISTING PAGE CANDIDATES context alongside the source catalog
+    // =========================================================================
+
+    public function test_existing_page_candidates_reach_the_maintainer_prompt(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES', $prompt);
+        $this->assertStringContainsString('[page 41]', $prompt);
+        $this->assertStringContainsString('OLD-THRESHOLD-MARKER', $prompt, 'the superseded value must be visible');
+        $this->assertStringContainsString('current version: 77', $prompt);
+    }
+
+    public function test_candidate_context_does_not_replace_the_source_catalog(): void
+    {
+        // The two blocks answer different questions: SOURCE ELEMENTS is the NEW document,
+        // EXISTING PAGE CANDIDATES is what the Wiki already says. Both must survive together.
+        $prompt = $this->userMessageText($this->capturePayload(
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->candidateFixture(),
+        ));
+
+        $this->assertStringContainsString('SOURCE ELEMENTS', $prompt);
+        $this->assertStringContainsString('[paragraph-0] (paragraph) First body paragraph.', $prompt);
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES', $prompt);
+        $this->assertStringContainsString('OLD-THRESHOLD-MARKER', $prompt);
+    }
+
+    public function test_prompt_is_unchanged_when_there_are_no_candidates(): void
+    {
+        $withCandidates = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertStringNotContainsString('EXISTING PAGE CANDIDATES', $withCandidates);
+    }
+
+    public function test_only_the_supplied_candidates_are_sent_never_a_whole_wiki(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        // Exactly the two supplied candidates — the block never reaches back for more pages.
+        $this->assertSame(2, substr_count($prompt, '[page '));
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES (2 pages)', $prompt);
+    }
+
+    public function test_candidate_block_is_byte_identical_for_identical_input(): void
+    {
+        $first = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+        $second = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertSame($first, $second);
+    }
+
+    public function test_candidate_context_does_not_alter_the_decision_schema(): void
+    {
+        $schema = $this->capturePayload(existingPageCandidates: $this->candidateFixture())['text']['format']['schema'];
+
+        // 8K-1 is context only — no patch contract, no owned_topics change (that would be 8K-2).
+        $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
+        $this->assertSame('array', $ownedTopics['type']);
+        $this->assertSame(['type' => 'string'], $ownedTopics['items']);
+        $this->assertSame(['create', 'update'], $schema['properties']['source_article']['properties']['action']['enum']);
+    }
+
+    /**
+     * Domain-free candidates in the shape EnterpriseWikiPatchCandidateService returns them.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function candidateFixture(): array
+    {
+        return [
+            [
+                'page_id' => 41,
+                'title' => 'Existing Platform Page',
+                'slug' => 'existing-platform-page',
+                'page_type' => 'entity',
+                'page_version_id' => 77,
+                'version_number' => 2,
+                'content' => "# Existing Platform Page\n\nTarget availability is OLD-THRESHOLD-MARKER per month.",
+                'truncated' => false,
+                'mention_count' => 2,
+            ],
+            [
+                'page_id' => 42,
+                'title' => 'Governing Procedure',
+                'slug' => 'governing-procedure',
+                'page_type' => 'article',
+                'page_version_id' => 78,
+                'version_number' => 1,
+                'content' => "# Governing Procedure\n\nIncidents are confirmed within OLD-DEADLINE-MARKER.",
+                'truncated' => true,
+                'mention_count' => 0,
+            ],
+        ];
+    }
+
+    // =========================================================================
     // Fase 8J-1B — addressable SOURCE ELEMENTS catalog for the maintainer decision
     // =========================================================================
 
@@ -925,6 +1022,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         array $indexContext = [],
         string $languageCode = 'no',
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): array {
         $capturedPayload = null;
 
@@ -939,7 +1037,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             });
 
         app(EnterpriseWikiMaintainerDecisionAiClient::class)->decide(
-            $sourceMeta, $sourceText, $indexContext, $languageCode, [], null, $sourceElements,
+            $sourceMeta, $sourceText, $indexContext, $languageCode, [], null, $sourceElements, $existingPageCandidates,
         );
 
         return (array) $capturedPayload;

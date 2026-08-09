@@ -79,11 +79,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $figureCandidates = [],
         ?AiCallContext $context = null,
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): array {
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context, $sourceElements);
+        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
 
         $mentions = $globalPlan['concept_candidate_mentions'];
@@ -198,8 +199,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $figureCandidates = [],
         ?AiCallContext $context = null,
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): array {
-        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements);
+        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements, $existingPageCandidates);
         $inputSizeChars = mb_strlen($userPromptText);
 
         return $this->capacityRetryExecutor->execute(
@@ -493,7 +495,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ];
     }
 
-    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = []): string
+    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = [], array $existingPageCandidates = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
@@ -509,6 +511,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $this->indexContextJson($indexContext),
             '',
             EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
+            ...($existingPageCandidates !== []
+                ? ['', EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($existingPageCandidates)]
+                : []),
         ]);
     }
 

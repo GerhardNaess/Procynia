@@ -85,6 +85,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $figureCandidates = [],
         ?AiCallContext $context = null,
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -109,9 +110,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
         if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
-            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements);
+            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
         } else {
-            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements);
+            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements, $existingPageCandidates);
 
             $decoded = $this->capacityRetryExecutor->execute(
                 'EnterpriseWikiMaintainerDecisionAiClient',
@@ -666,7 +667,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         ]);
     }
 
-    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = []): string
+    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = [], array $existingPageCandidates = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
@@ -686,6 +687,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
             $indexJson,
             '',
             self::figureCandidatesBlock($figureCandidates),
+            ...($existingPageCandidates !== []
+                ? ['', self::existingPageCandidatesBlock($existingPageCandidates)]
+                : []),
         ]);
     }
 
@@ -826,6 +830,65 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'SOURCE TEXT:',
             $text !== '' ? $text : '(empty)',
         ]);
+    }
+
+    /**
+     * Renders the "EXISTING PAGE CANDIDATES" prompt block (Fase 8K-1): the real current content of
+     * the few existing Wiki pages this source document plausibly touches
+     * (EnterpriseWikiPatchCandidateService).
+     *
+     * The Wiki index this prompt already carries gives one 200-character excerpt per page — enough
+     * to know a page exists, never enough to see a concrete threshold, deadline or rule sitting in
+     * the middle of it. Run 25 showed the consequence: a document that explicitly revised existing
+     * requirements produced only new pages, because the values it superseded were invisible to the
+     * decision.
+     *
+     * Deliberately a separate block from SOURCE ELEMENTS: that one is the NEW document, this one is
+     * what the Wiki already says. Conflating them would make it impossible for the maintainer — or
+     * a later reader of this prompt — to tell new source material from existing knowledge.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     */
+    public static function existingPageCandidatesBlock(array $candidates): string
+    {
+        if ($candidates === []) {
+            return '';
+        }
+
+        $parts = [
+            'EXISTING PAGE CANDIDATES ('.count($candidates).' pages):',
+            'These Wiki pages already exist for this customer and are named in the source document',
+            'above. What follows is their CURRENT content — the authoritative Wiki knowledge as it',
+            'stands today, not part of the new source document.',
+            '',
+            'Use this to judge whether the new document changes something these pages already state:',
+            '- A page here is a candidate, not a verdict — being listed does NOT mean it must change.',
+            '- Only treat existing content as superseded when the new source document actually says so.',
+            '- Never copy an existing page\'s content into the new source article or summary; refer to',
+            '  the page instead, exactly as the page-responsibility rules require.',
+            '- These pages are context for your create/update/reuse/reference_only decisions.',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $parts[] = '';
+            $parts[] = sprintf(
+                '[page %d] %s',
+                (int) ($candidate['page_id'] ?? 0),
+                (string) ($candidate['title'] ?? ''),
+            );
+            $parts[] = sprintf(
+                'type: %s | slug: %s | current version: %d (v%d)%s',
+                (string) ($candidate['page_type'] ?? ''),
+                (string) ($candidate['slug'] ?? ''),
+                (int) ($candidate['page_version_id'] ?? 0),
+                (int) ($candidate['version_number'] ?? 0),
+                ($candidate['truncated'] ?? false) ? ' | content truncated' : '',
+            );
+            $parts[] = 'content:';
+            $parts[] = (string) ($candidate['content'] ?? '');
+        }
+
+        return implode("\n", $parts);
     }
 
     /**

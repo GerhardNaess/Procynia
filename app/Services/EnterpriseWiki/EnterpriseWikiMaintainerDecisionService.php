@@ -29,6 +29,7 @@ class EnterpriseWikiMaintainerDecisionService
 {
     public function __construct(
         private readonly EnterpriseWikiIndexContextService $indexContextService,
+        private readonly EnterpriseWikiPatchCandidateService $patchCandidateService,
         private readonly EnterpriseWikiMaintainerDecisionAiClient $aiClient,
         private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
         private readonly EnterpriseWikiMaintainerDecisionHierarchyValidator $hierarchyValidator,
@@ -83,7 +84,13 @@ class EnterpriseWikiMaintainerDecisionService
         $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
 
-        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements);
+        // Fase 8K-1: the few existing pages this document plausibly revises, with their real
+        // current content. The Wiki index above only carries a 200-character excerpt per page, so
+        // a concrete threshold or deadline already recorded in the Wiki is invisible to the
+        // decision without this. Read-only — nothing here patches anything (that is 8K-3).
+        $existingPageCandidates = $this->patchCandidateService->findForDocument($document);
+
+        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
 
         return $this->validateAndRepairForDocument($customerId, $document, $languageCode, $decision, $context);
     }
