@@ -229,6 +229,24 @@ const WIKI_INLINE_LINK_CLASS =
     'rounded-sm text-violet-700 underline decoration-violet-300 decoration-2 underline-offset-2 transition hover:text-violet-800 hover:decoration-violet-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500';
 
 /**
+ * "Tilbake til funn" is a real navigation action — returning to the finding being reviewed — not
+ * incidental breadcrumb text, so it carries the same weight as the page's other primary actions.
+ *
+ * Composed from styles this module already owns rather than a new variant: the violet button
+ * classes are exactly those of the "Send til gjennomgang" / "Lagre endring" buttons further down
+ * this same page, and the focus ring is the Wiki module's established violet focus-visible
+ * treatment (see Index.jsx's primary buttons). No new colour or shade is introduced.
+ *
+ * "Tilbake til Wiki" deliberately keeps WIKI_SECONDARY_BACK_LINK_CLASS — it is ordinary navigation
+ * and must stay visually subordinate to the finding return.
+ */
+const WIKI_FINDING_BACK_BUTTON_CLASS =
+    'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700';
+
+const WIKI_SECONDARY_BACK_LINK_CLASS =
+    'inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950';
+
+/**
  * ReactMarkdown's `a` component override for the article body: EnterpriseWikiWikilinkRenderer
  * rewrites canonical [[slug|anchor]] wikilinks into standard `/app/wiki/{slug}` markdown links
  * server-side, so this only needs to route those internally via Inertia instead of a full page
@@ -2109,9 +2127,11 @@ export default function WikiShow({
                     otherwise the plain Wiki page list. */}
                 <Link
                     href={topBackLink.href}
-                    className="inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950"
+                    className={topBackLink.isFindingReturn
+                        ? WIKI_FINDING_BACK_BUTTON_CLASS
+                        : WIKI_SECONDARY_BACK_LINK_CLASS}
                 >
-                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
                     </svg>
                     {topBackLink.isFindingReturn
@@ -2232,9 +2252,9 @@ export default function WikiShow({
                     <div>
                         <Link
                             href={backHref}
-                            className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900 hover:underline"
+                            className={WIKI_FINDING_BACK_BUTTON_CLASS}
                         >
-                            <BackArrowIcon className="h-4 w-4" aria-hidden="true" />
+                            <BackArrowIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
                             {tw.review_reference_back_to_findings ?? 'Tilbake til funn'}
                         </Link>
                     </div>
