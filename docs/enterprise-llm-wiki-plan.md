@@ -2,7 +2,7 @@
 
 Versjon: 0.26
 Dato: 2026-08-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Arkitekturbeslutning oppdatert 2026-08-06: claims gjelder Procynias egne påstander og innvendinger; direkte kildeinnhold skal spores via provenance, kildekobling og blokk-/elementreferanser, ikke via claims** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet** · **Første reelle kompletterende dokumentimport (run 20, 2026-08-09) avdekket et generelt ownership-gap. Korrigert 2026-08-09 etter kontroll av faktisk produksjonskall: Wiki HAR allerede structured prose provenance i sidegenereringen (paragraph/list_item/table_row/image med `source_element_key`); gapet er at maintainer decision — som fordeler `owned_topics` — ikke får den samme katalogen. Neste implementeringssteg er Fase 8J-1A (persister parser-output) og Fase 8J-1B (gi maintaineren source catalog), hvor 8J-1B er den funksjonelle forutsetningen for ownership. Se Fase 8J og Arkitekturnotat v0.12**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Arkitekturbeslutning oppdatert 2026-08-06: claims gjelder Procynias egne påstander og innvendinger; direkte kildeinnhold skal spores via provenance, kildekobling og blokk-/elementreferanser, ikke via claims** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet** · **Første reelle kompletterende dokumentimport (run 20, 2026-08-09) avdekket et generelt ownership-gap. Korrigert 2026-08-09 etter kontroll av faktisk produksjonskall: Wiki HAR allerede structured prose provenance i sidegenereringen (paragraph/list_item/table_row/image med `source_element_key`); gapet er at maintainer decision — som fordeler `owned_topics` — ikke får den samme katalogen. **Fase 8J-1B levert, commit `e0dba82`** — maintaineren får nå samme adresserbare source catalog som sidegenerering, bevist aktiv i run 23. Fler-element-proveniens per blokk viste seg å være eksisterende arkitektur, ikke et gap. Neste steg er observasjon på flere gyldige testtilfeller før 8J-2 designes; 8J-1A gjenstår som selvstendig robusthetsarbeid. Se Fase 8J og Arkitekturnotat v0.12**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -16,7 +16,7 @@ Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 
 >
 > **Arkitekturbeslutning (v0.11, 2026-08-06):** Claims skal ikke brukes til å modellere direkte kildeutsagn. Når kildedokumentet selv sier noe eksplisitt, skal det gå direkte inn i Wikien med kildekobling, provenance, dokumentreferanse, blokk-/elementreferanse og revisjonsspor. Claims er reservert for Procynias egne påstander, vurderinger, anbefalinger og innvendinger. «Beste praksis» er en systemgenerert klassifisering av Procynias tilføyelser, ikke en etikett på kildedokumentets egne fakta. Denne beslutningen erstatter alle tidligere formuleringer i dokumentet som antyder at direkte kildefakta skal claim-verifiseres.
 >
-> **Proveniens-/eierskapskorrigering (v0.12, 2026-08-09):** Eierskap i Enterprise Wiki gjelder **semantisk substans**, ikke fysiske dokumentelementer og ikke temanavn. Målbildet «én substansiell kunnskapsenhet skal ha én canonical owner» står ved lag, men kan i dag **ikke håndheves server-side**: sidegenereringen har adresserbar kildeproveniens, men **maintainer decision — laget som fordeler `owned_topics` — får den ikke**, og har derfor ingen strukturert proveniens å knytte temaene til. (Korrigert 2026-08-09: en tidligere formulering hevdet at Wiki kun hadde flat `extracted_text` som grunnlag. Det var feil — se Fase 8J.) Inntil proveniensgrunnlaget finnes skal ownership **ikke** håndheves med tekstheuristikk (title-substring, fuzzy matching, ordlister, domenebegreper). Riktig rekkefølge er: (1) strukturerte source elements inn i Wiki, (2) observer og mål faktisk proveniens, (3) design semantisk fact/span-eierskap, (4) håndhev deretter en generisk ownership-invariant før sidegenerering. Se Fase 8J og det dedikerte arkitekturnotatet ved slutten av dokumentet.
+> **Proveniens-/eierskapskorrigering (v0.12, 2026-08-09):** Eierskap i Enterprise Wiki gjelder **semantisk substans**, ikke fysiske dokumentelementer og ikke temanavn. Målbildet «én substansiell kunnskapsenhet skal ha én canonical owner» står ved lag, men kan i dag **ikke håndheves server-side**: både sidegenereringen og — etter 8J-1B (commit `e0dba82`) — maintainer decision har nå adresserbar kildeproveniens. Det som fortsatt mangler er ikke infrastruktur, men **semantisk granularitet**: hvilket faktum eller tekstspan innenfor et element som bærer den eide substansen. (To tidligere formuleringer er korrigert 2026-08-09: at Wiki kun hadde flat `extracted_text` som grunnlag, og at fler-element-proveniens per blokk manglet. Begge var feil — se Fase 8J.) Inntil den semantiske modellen er designet skal ownership **ikke** håndheves med tekstheuristikk (title-substring, fuzzy matching, ordlister, domenebegreper). Riktig rekkefølge er: (1) strukturerte source elements inn i Wiki ✔, (2) observer og mål faktisk bruk, (3) design semantisk fact/span-eierskap, (4) håndhev deretter en generisk ownership-invariant før sidegenerering. Se Fase 8J og det dedikerte arkitekturnotatet ved slutten av dokumentet.
 >
 > **Presisering (v0.10, 2026-08-01):** claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger. QA-portvakten er rettet slik at interne signaler aldri alene setter en kjøring til `repair_required`; bare en reell brukersak eller en eksplisitt menneskelig blokkeringsbeslutning gjør det. Se det dedikerte arkitekturnotatet ved slutten av dokumentet.
 
@@ -127,7 +127,7 @@ Konsekvens av v0.6-korrigeringen (se arkitekturnotatet foran §1):
 - Sidegenerering (article/summary/concept/entity) beholdes uendret som teknisk grunnlag — runtimeflyten fungerer.
 - `EnterpriseWikiPageLink`, graph-endepunktet (8E-19) og graph-UI (8E-20) beholdes som modell/infrastruktur, men lenkebyggingen (`EnterpriseWikiBuildPageLinksService`) må korrigeres fra mekanisk kombinatorikk til deterministisk parsing av inline `[[wikilinks]]`.
 - Neste hovedspor er **ikke** graph-visualisering, generell resume-arkitektur eller andre utvidelser. Neste hovedspor er Fase 8I: inline wiki-lenker, deterministisk parsing, materialiserte relasjoner, backlinks og inkrementelt vedlikehold av eksisterende sider.
-- **Oppdatert (v0.12, 2026-08-09):** Fase 8I er fullført. Neste hovedspor er nå **Fase 8J-1A + 8J-1B**. Structured prose provenance finnes allerede i sidegenereringen; det som mangler er persistens av parser-output (8J-1A) og at maintainer decision får den samme adresserbare katalogen (8J-1B — forutsetningen for generisk ownership).
+- **Oppdatert (v0.12, 2026-08-09):** Fase 8I er fullført. **Fase 8J-1B er levert** (commit `e0dba82`) — maintainer decision får nå samme adresserbare source catalog som sidegenerering. Structured prose provenance og fler-element-proveniens per blokk var allerede på plass. Neste hovedspor er observasjon av 8J-1B på flere gyldige testtilfeller, deretter design av 8J-2; 8J-1A gjenstår som selvstendig robusthetsarbeid.
 
 ## 2. Ikke-rør-grenser
 
@@ -338,7 +338,7 @@ Kildebevis på claim- og kildeutsagnsnivå. Når en claim finnes, skal den ha mi
 
 Constraint: Minst én rad per `enterprise_wiki_claim_id`. Håndheves i applikasjonslaget ved ingest. Direkte kildeinnhold uten claim får i stedet provenance-/referansesporing på sideversjonen.
 
-> **Merk (v0.12, korrigert 2026-08-09):** element-kolonnene over finnes allerede i databasen, og `EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPES` støtter allerede `paragraph`/`list_item`/`table_row`/`image`/`manual`. **Både produsent- og konsumentsiden er i drift for DOCX:** `EnterpriseWikiDocumentSourceElementService::inspect()` produserer reelle elementer, og genererte blokker bærer faktiske `source_element_key`-verdier (`paragraph-*`, `listitem-*`, `tbl*-row*`). En tidligere formulering her hevdet at produsentsiden manglet og at nøklene var tomme eller syntetiske — **det var feil**, se korreksjonsboksen i Fase 8J. Gapet ligger i beslutningslaget: maintainer decision får ikke denne katalogen (Fase 8J-1B). Ingen ny parallell proveniensmodell skal innføres for Wiki.
+> **Merk (v0.12, korrigert 2026-08-09):** element-kolonnene over finnes allerede i databasen, og `EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPES` støtter allerede `paragraph`/`list_item`/`table_row`/`image`/`manual`. **Både produsent- og konsumentsiden er i drift for DOCX:** `EnterpriseWikiDocumentSourceElementService::inspect()` produserer reelle elementer, og genererte blokker bærer faktiske `source_element_key`-verdier (`paragraph-*`, `listitem-*`, `tbl*-row*`). En tidligere formulering her hevdet at produsentsiden manglet og at nøklene var tomme eller syntetiske — **det var feil**, se korreksjonsboksen i Fase 8J. Gapet i beslutningslaget er lukket av Fase 8J-1B (commit `e0dba82`). Merk også at **fler-element-proveniens per blokk allerede finnes** i `content_blocks_json.source_elements` — de flate feltene er kun primary-alias til første element. Ingen ny parallell proveniensmodell skal innføres for Wiki.
 
 ---
 
@@ -846,7 +846,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 
 21. **RequirementWiki*-tjenestenes claim-opphavsfiltrering (identifisert v0.8, 2026-07-21)** — `RequirementWikiResearchService`, `RequirementWikiAnswerService` og `RequirementWikiPageRanker` leser i dag `EnterpriseWikiClaim` uten å filtrere på `content_origin`, slik at `best_practice`/`unsupported_generated_content`-claims brukes identisk med `source_based`-claims som grunnlag for genererte Wiki-svar. Fantes før v0.7/v0.8 og er ikke rettet — se v0.8-notatet over. Bør avklares: skal disse tjenestene skille grunnlagstype eksplisitt i svaret (f.eks. markere hvilke deler som er beste praksis vs. dokumentert), og hvordan uten en større ombygging av de 3 AI-vendte tjenestene?
 
-22. **Eierskapsenhet for kildesubstans (identifisert v0.12, 2026-08-09)** — Hvilken proveniensenhet skal `owned_topics` forankres i? `source_element_key` alene er avvist (ett avsnitt/list item bærer legitimt flere uavhengige fakta). Kandidat er `source_element_key` + verifisert excerpt/span. Åpne underspørsmål: er `excerpt` alene tilstrekkelig, bør `char_start`/`char_end` brukes, kan claim-/fact-identitet gjenbrukes, eller trengs en egen source-fact-modell? Skal avgjøres **etter** Fase 8J trinn 1, med erfaringsdata fra ekte dokumenter — ikke før.
+22. **Eierskapsenhet for kildesubstans (identifisert v0.12, 2026-08-09)** — Hvilken proveniensenhet skal `owned_topics` forankres i? `source_element_key` alene er avvist (ett avsnitt/list item bærer legitimt flere uavhengige fakta). Kandidat er `source_element_key` + verifisert excerpt/span. **Merk at fler-element-proveniens per blokk allerede finnes** — det åpne spørsmålet gjelder granulariteten *innenfor* et element, ikke om elementene registreres. Åpne underspørsmål: er `excerpt` alene tilstrekkelig, bør `char_start`/`char_end` brukes, kan claim-/fact-identitet gjenbrukes, eller trengs en egen source-fact-modell? Skal avgjøres **etter** at 8J-1B er observert på flere gyldige testtilfeller — ikke før.
 
 23. **Persistensform for strukturerte source elements (identifisert v0.12, 2026-08-09)** — Skal `text_elements` og `tables` persisteres i separate kolonner på `enterprise_wiki_documents` (som `saved_notice_ai_documents` allerede gjør), eller kan `DocumentTextExtractor`-kontrakten lagres samlet uten å miste semantikk? Avgjøres i implementeringsfasen for **8J-1A** — planen låser bevisst ikke antall kolonner på forhånd. Merk at dette er persistens/caching av eksisterende parser-output, ikke innføring av ny proveniens.
 
@@ -879,7 +879,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 + 2 fullført** (kildemonitoring, intelligent retry, dyp reparasjon av claims/refs/lenker) · **8H-utvidelse fullført** (snapshot-basert terskelreparasjon og regresjonsdeteksjon) |
 | Runtimeflyt (queue-splitting) | Staged page-generation queues (article+summary → concept+entity → verifisering) | **Fullført** (commit `b6ccd87`) — teknisk grunnmur for at sidegenerering faktisk fullfører |
 | **Fase 8I** | **Karpathy Wiki linking and incremental maintenance** | **Fullført (8I-1–8I-6), commits `d0a608d`, `ab35d52`, `716477e`, `014861f`.** Se egen seksjon under. |
-| **Fase 8J** | **Structured prose provenance and semantic ownership** | **Neste implementeringssteg: 8J-1A + 8J-1B.** Structured prose provenance finnes **allerede** i sidegenereringen (korrigert 2026-08-09). 8J-1A = persister/cache eksisterende parser-output (robusthet/ytelse). **8J-1B = gi maintainer decision samme adresserbare katalog — den reelle forutsetningen for ownership.** 8J-2 (semantic fact/span ownership) er bevisst utsatt til 8J-1B er målt på ekte dokumenter. Se egen seksjon under og Arkitekturnotat v0.12. |
+| **Fase 8J** | **Structured prose provenance and semantic ownership** | **8J-1B LEVERT** (commit `e0dba82`, bevist aktiv i run 23) — maintainer decision får adresserbar source catalog. Structured prose provenance og **full fler-element-proveniens per blokk** var allerede eksisterende arkitektur (korrigert 2026-08-09). **8J-1A** (persister/cache parser-output — robusthet/ytelse) gjenstår som selvstendig arbeid utenfor kritisk sti. **8J-2** (semantic fact/span ownership) utsatt til 8J-1B er observert på flere gyldige testtilfeller. Se egen seksjon under og Arkitekturnotat v0.12. |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G, 8H **og 8I** | Sist — ikke aktiv fase. 8J er **ikke** en ny gate for produksjonsaktivering (se 8J-seksjonen). |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -2487,7 +2487,7 @@ Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (criti
 
 > **Status (2026-07-11): Fase 8I (8I-1 til 8I-6) fullført.** Karpathy Wiki-konseptet — inline wikilinks, backlinks, canonical traversal/graph, Wiki-aware generering, incremental relinking, og deterministisk lint + semantisk repair av lenker — er nå levert i sin helhet. Ingen gjenstående blocker fra 8I.
 >
-> **Oppdatert (v0.12, 2026-08-09):** formuleringen «neste hovedspor er graph-visualisering eller generell resume-arkitektur» er erstattet. Run 20 (første reelle kompletterende dokumentimport) viste at beslutningslaget mangler adresserbar kildeproveniens, og **Fase 8J-1A/8J-1B er nå neste implementeringssteg**.
+> **Oppdatert (v0.12, 2026-08-09):** formuleringen «neste hovedspor er graph-visualisering eller generell resume-arkitektur» er erstattet. Run 20 (første reelle kompletterende dokumentimport) viste at beslutningslaget manglet adresserbar kildeproveniens. **Fase 8J-1B er nå levert** (commit `e0dba82`); neste hovedspor er observasjon av den før 8J-2 designes.
 >
 > - **8I-1 (canonical wikilink-syntax, parser, validering)** og **8I-2 (deterministisk materialisering til `EnterpriseWikiPageLink`)** — fullført, commit `d0a608d`.
 > - **8I-3 (rendering av inline wikilinks, backlinks, canonical traversal)** og **8I-4 (Wiki-aware LLM-generering av inline wikilinks)** — fullført, commit `ab35d52`.
@@ -2566,7 +2566,7 @@ Claims og source references forblir verifikasjonslaget — de er ikke hovedinnho
 
 ### Fase 8J — Structured prose provenance and semantic ownership
 
-> **Status (2026-08-09, korrigert samme dag): ikke implementert.** Neste implementeringssteg er **8J-1A** (persister eksisterende parser-output — robusthet/ytelse) og **8J-1B** (gi maintainer decision adresserbar source catalog — den funksjonelle forutsetningen for ownership). **8J-2** (semantic fact/span ownership) er bevisst utsatt.
+> **Status (oppdatert 2026-08-09 etter run 23):** **8J-1B er levert** (commit `e0dba82`) og bevist aktiv i en reell kjøring. **8J-1A** (persister eksisterende parser-output — robusthet/ytelse) gjenstår som selvstendig, uavhengig arbeid. **8J-2** (semantic fact/span ownership) er bevisst utsatt til 8J-1B er observert på flere gyldige testtilfeller.
 >
 > Utløst av run 20, den første reelle importen av et *kompletterende* dokument etter at grunnlagsdokumentet allerede var importert. **Fasen ble opprinnelig definert på et feil premiss** — at Wiki manglet structured prose provenance. Premisset er korrigert etter kontroll av det faktiske produksjonskallet; se korreksjonsboksen rett under. Se Arkitekturnotat v0.12 for beslutningen og den korrigerte run 20-læringen.
 
@@ -2587,16 +2587,34 @@ Fasen er delt i to trinn som **ikke** skal implementeres sammen.
 - Proveniensen lander nedstrøms. Målt på gjeldende sideversjoner: **48 av 89 blokker bærer en reell `source_element_key`** (`paragraph`: 31, `list_item`: 17). De 41 uten nøkkel er `structural`-blokker (overskrifter og krysshenvisninger), som korrekt ikke har kildegrunnlag.
 - `wholeDocumentElement()` er dermed **ikke** normaltilstanden for DOCX. Den er en reell fallback for formater uten strukturell parser og for dokumenter der filen ikke lar seg parse.
 
-**Det som faktisk mangler er noe annet enn opprinnelig antatt:**
+**Genererte blokker har allerede FULL fler-element-proveniens.** Verifisert i kode og mot persisterte data (2026-08-09):
 
-1. Katalogen **persisteres ikke** — den re-parses fra originalfilen på disk ved hvert behov (`resolveDocumentPath()` brukes flere steder i tjenesten, som igjen kalles fra flere flyter). Robusthet/ytelse, ikke et proveniensgap. → **8J-1A**
-2. **Maintainer decision får ikke katalogen.** Den mottar `sourceMeta`, flat `sourceText`, `indexContext`, `languageCode` og `figureCandidates` — men ingen adresserbar prose-elementkatalog. Sidegenerering får den; beslutningslaget som fordeler `owned_topics` gjør det ikke. → **8J-1B**
+- AI-kontrakten bruker **`source_element_keys[]`** og **`source_element_types[]`** — begge arrays, begge `required` i det strenge skjemaet. Ingen singularform finnes i AI-kontrakten.
+- Parsing (`parseBlocksResponse()`) validerer at listen er et array og ikke-tom for `source_based`, men **trunkerer eller dedupliserer aldri**.
+- `EnterpriseWikiPageContentBlockService::buildBlocksFromStructuredResult()` resolver **hver** nøkkel mot katalogen (hard feil ved ukjent nøkkel) og persisterer **alle** i `content_blocks_json.source_elements`.
+- Hvert element i `source_elements` bærer sin egen `source_element_key`, `source_element_type`, `source_row_key`, `source_excerpt`, `page_reference`, `source_type`, `source_id`, `source_label`, `source_hash` og `document_version_hash`.
+- De flate feltene `source_element_key`/`source_element_type`/`source_excerpt` er **kun en primary/convenience-alias til første element**, beholdt for bakoverkompatibilitet — ikke den komplette proveniensen.
+- Begge representasjoner er allerede i aktiv bruk: `EnterpriseWikiVerifyPageClaimsService`, `EnterpriseWikiDocumentOwnerApprovalService`, `EnterpriseWikiRepairRunClaimSourceLinksService`, `EnterpriseWikiImageBlockBuilder` og `EnterpriseWikiTableBlockBuilder` leser `source_elements`-listen.
 
-**Dette flytter hele fasens tyngdepunkt:** ownership-problemet oppstår **før** sidegenerering, i beslutningslaget. Sidegenerering har allerede den proveniensen den trenger.
+Målt på reelle blokker (run 23, brukt som regresjonseksempel — aldri som regel):
+
+```text
+block-0002  flat=paragraph-2   source_elements=4  [paragraph-2, tbl0-row0, tbl0-row1, tbl0-row2]
+block-0005  flat=paragraph-3   source_elements=4  [paragraph-3, listitem-0, listitem-1, listitem-2]
+block-0009  flat=listitem-3    source_elements=3  [listitem-3, listitem-4, listitem-5]
+block-0007  flat=paragraph-4   source_elements=2  [paragraph-4, paragraph-5]
+```
+
+> **Korreksjon (2026-08-09).** En tidligere analyse konkluderte at proveniens «kollapset» fra flere nøkler til én, fordi den kun leste det flate `source_element_key`-feltet. **Det var feil** — ingen reduksjon skjer noe sted i datapathen. **Fler-element-proveniens er eksisterende arkitektur, ikke fremtidig arbeid, og krever ingen databaseendring:** alt ligger allerede i `content_blocks_json`.
+
+**Det som faktisk gjenstår:**
+
+1. Katalogen **persisteres ikke** — den re-parses fra originalfilen på disk ved hvert behov (`resolveDocumentPath()` brukes flere steder i tjenesten, som igjen kalles fra flere flyter). Robusthet/ytelse, ikke et proveniensgap. → **8J-1A**, uavhengig arbeid
+2. ~~**Maintainer decision får ikke katalogen.**~~ → **8J-1B, LEVERT** (commit `e0dba82`). Beslutningslaget mottar nå samme adresserbare katalog som sidegenerering.
 
 ---
 
-#### Trinn 1 — todelt *(neste implementeringssteg)*
+#### Trinn 1 — todelt *(8J-1B levert; 8J-1A gjenstår som selvstendig arbeid)*
 
 **Felles, bindende rammer for begge delmål:**
 
@@ -2627,11 +2645,11 @@ Planen låser fortsatt ikke antall JSON-kolonner. Implementeringsfasen skal avgj
 
 ---
 
-##### 8J-1B — Expose structured source catalog to maintainer decision *(den funksjonelt viktige delen)*
+##### 8J-1B — Expose structured source catalog to maintainer decision — **LEVERT** (commit `e0dba82`)
 
-**Dette er den reelle forutsetningen for alt videre ownership-arbeid.**
+**Dette var den reelle forutsetningen for alt videre ownership-arbeid.**
 
-**Dagens gap:** `EnterpriseWikiMaintainerDecisionAiClient::decide()` mottar `sourceMeta`, flat `sourceText`, `indexContext`, `languageCode` og `figureCandidates`. Den får ikke den samme adresserbare prose-elementkatalogen som sidegenerering får. Beslutningen som fordeler `owned_topics` mellom sider har derfor ingen serverside-adresserbar proveniens å knytte temaene til — og kan ikke uttrykke, og validatoren kan ikke kontrollere, hvilken kildesubstans et tema faktisk bygger på.
+**Gapet som ble lukket:** `EnterpriseWikiMaintainerDecisionAiClient::decide()` mottar `sourceMeta`, flat `sourceText`, `indexContext`, `languageCode` og `figureCandidates`. Den får ikke den samme adresserbare prose-elementkatalogen som sidegenerering får. Beslutningen som fordeler `owned_topics` mellom sider har derfor ingen serverside-adresserbar proveniens å knytte temaene til — og kan ikke uttrykke, og validatoren kan ikke kontrollere, hvilken kildesubstans et tema faktisk bygger på.
 
 **Planlagt endring:** maintainer decision skal motta en kompakt, adresserbar source catalog med minst:
 
@@ -2657,7 +2675,17 @@ Eksakt serialisering låses **ikke** her — dersom eksisterende promptarkitektu
 - `figureCandidates` skal fortsatt håndteres korrekt.
 - Tabeller skal vurderes innenfor samme source-element-kontrakt, ikke som en sidevei.
 
-**Avgrensning:** målet i 8J-1B er **ikke** å endre `owned_topics`-schemaet og **ikke** å håndheve ownership. Målet er å gi maintaineren adresserbar kildeproveniens, slik at neste fase kan bygges på strukturert grunnlag i stedet for tekstheuristikk.
+**Avgrensning (overholdt):** 8J-1B endret **ikke** `owned_topics`-schemaet og håndhever **ikke** ownership. Den ga maintaineren adresserbar kildeproveniens, slik at neste fase kan bygges på strukturert grunnlag i stedet for tekstheuristikk.
+
+**Levert oppførsel.** Maintainer decision mottar nå `paragraph`, `list_item` og `table_row` med stabil `source_element_key`, seksjonskontekst og elementtekst. Bilder håndteres fortsatt separat gjennom `FIGURE CANDIDATES` — en egen, korrekt kontrakt med klassifisering og `required`-flagg som ikke skal presses inn i prosakatalogen. Når strukturert katalog finnes brukes `SOURCE ELEMENTS`, og flat `SOURCE TEXT` sendes **ikke** i tillegg. Uten strukturerte elementer (eldre dokumenter, PDF/XLSX, uparsbar fil) faller prompten tilbake på flat `SOURCE TEXT` byte-identisk med oppførselen før 8J-1B.
+
+**Observasjon fra run 23 (første reelle kjøring med 8J-1B bevist aktiv):**
+
+- Workerne ble restartet **etter** at koden lå på disk, og kjøringen startet 4 minutter senere — ingen prosess kunne ha gammel kode lastet.
+- Deterministisk reproduksjon av prompten uten AI-kall bekreftet `SOURCE ELEMENTS` til stede, `SOURCE TEXT:` fraværende, **16 av 16** elementer i katalogen.
+- 5 sider generert; alle kontrollerte sider `valid_first_pass`; ingen `planned_section_only_links`; `repairPlannedSections()` aldri kalt; ingen ownership-kollisjon av run 20-typen.
+
+> **Dette er ett datapunkt.** Det beviser at 8J-1B fungerer teknisk og at kjøringen gikk gjennom — det beviser **ikke** deterministisk ownership-stabilitet, og det viser **ikke** at forbedringen skyldes source catalog alene. Run 23 hadde flere endrede variabler samtidig (ny katalog, nytt dokument-ID, endret wiki-indeks), og maintainer decision har dokumentert AI-varians. Effekten av katalogen på ownership-stabilitet er fortsatt **UKJENT**.
 
 **Persistensform — bevisst ikke låst i planen.** Konseptuelt:
 
@@ -2682,9 +2710,9 @@ strukturerte elementer mangler → whole-document fallback                      
 **Hva trinn 1 faktisk tilfører — presisert.** Strukturerte source elements ligger allerede til grunn for claim provenance, source references, verification, claim/source reconciliation, lint, page generation grounding og repair grounding. Disse gevinstene er **allerede tatt ut** og skal ikke krediteres 8J. Det trinn 1 tilfører er:
 
 - **8J-1A:** færre gjentatte parseoperasjoner, stabil elementkatalog gjennom en hel kjøring, og proveniens som ikke lenger forutsetter at originalfilen fortsatt ligger uendret på disk.
-- **8J-1B:** adresserbar kildeproveniens i beslutningslaget — den ene komponenten i kjeden som i dag mangler den, og forutsetningen for at trinn 2 kan bygges strukturelt.
+- **8J-1B (levert):** adresserbar kildeproveniens i beslutningslaget — den ene komponenten i kjeden som manglet den, og forutsetningen for at trinn 2 kan bygges strukturelt.
 
-Begge er verdifulle uavhengig av trinn 2, men det er 8J-1B som er den funksjonelle forutsetningen for generisk ownership.
+Begge er verdifulle uavhengig av trinn 2. 8J-1B var den funksjonelle forutsetningen for generisk ownership, og er nå oppfylt.
 
 **Downstream-komponenter som skal gjennomgås i implementeringsfasen.** Ikke anta at alle trenger kodeendring — de skal gjennomgås fordi de forbruker eller påvirkes av source-element-strukturen:
 
@@ -2771,7 +2799,7 @@ Planen påstår **ikke** at disse er permanente cross-version-identiteter. Sterk
 13. format uten strukturell parser (PDF/XLSX) bruker `wholeDocumentElement()`
 14. ingen backfill kreves for at eksisterende dokumenter fungerer
 
-*8J-1B (maintainer catalog):*
+*8J-1B (maintainer catalog) — implementert, dekket av tester i `EnterpriseWikiMaintainerDecisionAiClientTest`:*
 
 15. maintainer decision mottar en adresserbar katalog med key/type/seksjon/tekst
 16. katalogen er språk- og domeneuavhengig (ingen ordlister, ingen hardkodede titler)
@@ -2783,7 +2811,15 @@ Planen påstår **ikke** at disse er permanente cross-version-identiteter. Sterk
 
 #### Trinn 2 (8J-2) — Semantic ownership / source facts *(senere fase — skal ikke implementeres sammen med trinn 1)*
 
-**Element-level provenance finnes allerede** (se «Faktisk arkitekturstatus» over). Trinn 2 handler derfor ikke om å skaffe elementer, men om at `source_element_key` **alene ikke er tilstrekkelig** som eierskapsenhet.
+**Fler-element-proveniens finnes allerede og skal IKKE bygges som del av 8J-2** (se «Faktisk arkitekturstatus» over): en blokk registrerer allerede alle source elements den bygger på, hver med egen nøkkel, type og utdrag, i `content_blocks_json.source_elements`. Ingen databaseendring kreves for det.
+
+Trinn 2 handler om et **annet** granularitetsproblem. Vi vet hvilke source elements en blokk bygger på, men vi vet ikke nødvendigvis:
+
+- hvilket konkret **faktum** i elementet som støtter hvilket `owned_topic`
+- hvilket **tekstspan/utdrag** innenfor elementet som representerer den eide substansen
+- hvordan **én kilde med flere fakta** fordeles mellom flere canonical owners
+
+Det er dette nivået 8J-2 skal undersøke — ikke om elementene er registrert.
 
 **Følgende framtidige invariant er eksplisitt avvist:**
 
@@ -2815,24 +2851,31 @@ Før en slik schemaendring godkjennes må vi vite:
 - om claim-/fact-identitet kan gjenbrukes
 - om en egen source-fact-modell er nødvendig
 
-Trinn 2 skal først designes **etter** at 8J-1B er implementert — altså etter at maintaineren faktisk mottar source catalog og vi har observert hvordan den brukes på ekte dokumenter, hvor presise excerpts/spans blir, og om beslutningslaget i det hele tatt klarer å knytte `owned_topics` til adresserbare kildeenheter.
+8J-1B er nå levert, så forutsetningen er oppfylt. Det som gjenstår før 8J-2 designes er **observasjonsgrunnlag**, ikke infrastruktur: flere gyldige testtilfeller som viser om katalogen faktisk stabiliserer ownership, og hvor godt beslutningslaget klarer å knytte `owned_topics` til adresserbare kildeenheter.
+
+**Om måling av varians:** produktet tillater ikke flere ordinære importer av samme dokument, og planen skal **ikke** foreskrive omgåelse av den dokument-unikheten. Varians på identisk input må derfor måles enten via en eksisterende ikke-persisterende maintainer-dry-run, eller via separate legitime dokumentversjoner/testfixtures.
 
 ---
 
 #### Avhengigheter og rekkefølge
 
 ```text
-[allerede på plass]  structured source elements i sidegenerering (paragraph/list_item/table_row/image)
+[allerede på plass]  structured source elements i sidegenerering
+[allerede på plass]  FULL fler-element-proveniens per blokk (content_blocks_json.source_elements)
+[LEVERT]  8J-1B   maintainer decision får samme adresserbare katalog   (commit e0dba82)
         │
-8J-1A   persister/cache eksisterende parser-output          ← robusthet og ytelse, ikke årsaken til run 20
-8J-1B   gi maintainer decision samme adresserbare katalog   ← FUNKSJONELL FORUTSETNING for ownership
-        ↓  observer og mål hvordan beslutningslaget faktisk bruker katalogen
-8J-2    semantic source fact/span ownership (design først, deretter schema)
+        ↓  observer 8J-1B på flere gyldige testtilfeller
+        ↓  vurder ownership-stabilitet vs. AI-varians
+8J-2    semantic fact/span ownership — design på faktisk observert behov, deretter eventuelt schema
         ↓
 Generisk ownership-invariant håndhevet før sidegenerering
+
+8J-1A   persister/cache parser-output — selvstendig robusthets-/ytelsesarbeid, når som helst
 ```
 
-8J-1A og 8J-1B er uavhengige av hverandre og kan gjøres i valgfri rekkefølge. Kun **8J-1B** er på kritisk sti mot 8J-2.
+**Ingen ny proveniens-subfase skal legges inn mellom 8J-1B og 8J-2.** En slik ble vurdert og forkastet: den bygget på den feilaktige antakelsen at fler-element-proveniens manglet.
+
+8J-1A står utenfor den kritiske stien mot 8J-2 og kan gjøres uavhengig.
 
 **Hva som eksplisitt IKKE skal gjøres som del av 8J:**
 
@@ -2845,6 +2888,32 @@ Generisk ownership-invariant håndhevet før sidegenerering
 **Forhold til maintainer decision.** Målbildet «one substantive knowledge unit should have one canonical owner» beholdes. Presiseringen er at dagens decision-schema ikke har tilstrekkelig proveniens til å håndheve det server-side uten skjøre tekstheuristikker. Validatoren skal først få en sterkere ownership-invariant når proveniensmodellen faktisk kan bære den.
 
 **Eget prompt-gap (senere forbedringspunkt, ikke del av trinn 1).** Dagens `PAGE RESPONSIBILITY`-logikk sier presist at `owned_topics` er det den aktuelle siden skal forklare i dybden, og at listen skal være kort. Men prompten uttrykker **ikke** tydelig nok en *global* invariant over alle planlagte sider om at samme kildesubstans ikke skal eies flere steder — eksklusiviteten er formulert per side, aldri som en betingelse over unionen. Registreres som forbedringspunkt. **Prompt-presisering alene er ikke tilstrekkelig som garanti** — validatoren må på sikt kunne håndheve regelen strukturelt.
+
+#### Observasjonsstatus etter run 23 (2026-08-09)
+
+**BEVIST**
+
+- 8J-1B var aktiv (worker-restart etter kodelevering + deterministisk prompt-reproduksjon uten AI-kall)
+- Structured source catalog nådde maintainer decision, 16 av 16 elementer
+- `SOURCE ELEMENTS` brukt, flat `SOURCE TEXT` ikke sendt i tillegg
+- 5 sider generert; alle kontrollerte sider `valid_first_pass`
+- Ingen `planned_section_only_links`, ingen repair, ingen ownership-kollisjon av run 20-typen
+- Full fler-element-proveniens allerede persistert per blokk
+
+**INFERERT**
+
+- Source catalog *kan* ha bidratt til en mer granulær maintainer-plan (flere kandidater, mer presis ansvarsfordeling) — men flere variabler endret seg samtidig
+
+**UKJENT**
+
+- Om source catalog faktisk stabiliserer ownership over flere kjøringer
+- Hvor stor del av planforskjellen som skyldes AI-varians framfor katalogen
+
+#### Separate observasjoner (ikke del av 8J-2)
+
+**Varians i best-practice-produksjon.** Én kjøring ga 5 beste-praksis-forslag; en senere kjøring på tilsvarende materiale ga **0 best_practice-blokker**. Verifisert ved parselaget (`[WIKI_PAGE_CONTENT_ORIGINS]`) at modellen returnerte null forslag på samtlige sider — ikke filtrert bort nedstrøms. Null best_practice-blokker gir null claims, som igjen gir null source references; det er korrekt kjedeoppførsel gitt inputen, ikke en feil. **Dette skal ikke leses som bedre kvalitet** — den faglige merverdien uteble. Registrert som en åpen stabilitets-/kvalitetsobservasjon, uavhengig av eierskapsarbeidet.
+
+**Lint: mulig falskt positivt på artikkellenker.** `EnterpriseWikiAppliedRunLintService::checkArticleLinks()` sjekker kun typede `article_to_concept`/`article_to_entity`-relasjoner og mangler wikilink-fallbacken som `checkConceptLinks()` har og som entity-sjekken fikk i commit `bec838d`. Resultatet er at `article_without_concept_or_entity_links` kan rapporteres selv når artikkelen faktisk har inline wikilenker til concept-/entity-sider. Separat fra 8J, og **ikke** en forutsetning for 8J-2.
 
 #### Generelle arkitekturkrav (bindende for hele 8J)
 
