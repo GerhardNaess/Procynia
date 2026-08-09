@@ -153,6 +153,72 @@ export function groupBestPracticeClaimsForReview(claims, contentBlocks = []) {
 }
 
 /**
+ * The user-facing Funn ID of the finding a visible "Beste praksis" section corresponds to, so a
+ * reviewer can trace the section on the page back to the row in Funn/Kvalitet without matching on
+ * text.
+ *
+ * A best-practice finding is keyed on its PRIMARY claim — EnterpriseWikiRunFindingsService::
+ * normalizeBestPracticeSuggestion() builds the id as "best-practice-<primary claim id>", and
+ * formatFindingUserId() strips that prefix — so the number shown here is the id of the section's
+ * first claim in (position_order, id) order, exactly the ordering the backend applies. A section
+ * whose claims were never extracted has no finding and returns null rather than an invented id.
+ *
+ * @param {Array<object>} sectionBlocks the blocks of one section group
+ * @param {Array<object>} claims every claim on the page version
+ * @returns {?number}
+ */
+export function resolveBestPracticeSectionFindingId(sectionBlocks, claims) {
+    const blockKeys = new Set(
+        (sectionBlocks ?? [])
+            .map((block) => (typeof block?.block_key === 'string' ? block.block_key.trim() : ''))
+            .filter((key) => key !== ''),
+    );
+
+    if (blockKeys.size === 0) {
+        return null;
+    }
+
+    const rank = (claim) => [
+        claim?.position_order ?? Number.NEGATIVE_INFINITY,
+        claim?.id ?? Number.NEGATIVE_INFINITY,
+    ];
+
+    const primary = (claims ?? [])
+        .filter((claim) => claim?.content_origin === 'best_practice'
+            && blockKeys.has(typeof claim?.content_block_key === 'string' ? claim.content_block_key.trim() : ''))
+        .reduce((best, claim) => {
+            if (best === null) {
+                return claim;
+            }
+
+            const [bestOrder, bestId] = rank(best);
+            const [order, id] = rank(claim);
+
+            return order < bestOrder || (order === bestOrder && id < bestId) ? claim : best;
+        }, null);
+
+    return primary?.id ?? null;
+}
+
+/**
+ * The section heading text, extended with the Funn ID in parentheses when there is one. Kept as a
+ * single string rather than a separate badge or line: it is the heading, and it inherits the
+ * heading's own styling (including its uppercase transform) unchanged. Falls back to the bare
+ * label when no finding id resolves, so an empty "()" can never render.
+ */
+export function bestPracticeSectionLabelText(label, findingId, template) {
+    const base = String(label ?? '').trim();
+
+    if (findingId === null || findingId === undefined || String(findingId).trim() === '') {
+        return base;
+    }
+
+    return String(template ?? ':label (Funn ID: :id)')
+        .replace(':label', base)
+        .replace(':id', String(findingId).trim());
+}
+
+/**
  * Whether the page version on display has been FINALLY approved through the existing document
  * owner approval — the product's own definition of "this page is settled".
  *

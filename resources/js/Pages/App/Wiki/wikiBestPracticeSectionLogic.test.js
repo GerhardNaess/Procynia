@@ -1,14 +1,17 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+    bestPracticeSectionLabelText,
     groupContentBlocksBySection,
     groupBestPracticeClaimsForReview,
     isPageVersionFinallyApproved,
     partitionBestPracticeReviewUnits,
+    resolveBestPracticeSectionFindingId,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
     hasRenderableBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic.js';
+import { formatFindingUserId } from './runFindingsLogic.js';
 
 describe('groupContentBlocksBySection', () => {
     test('consecutive blocks sharing the same section_key become one section group', () => {
@@ -440,5 +443,132 @@ describe('partitionBestPracticeReviewUnits — open review shows only what still
 
         const allIds = [...open, ...verified].flatMap((unit) => unit.claimIds);
         assert.equal(new Set(allIds).size, allIds.length, 'no claim appears in both buckets');
+    });
+});
+
+/**
+ * The section heading on the Wiki page now names the Funn ID of the finding it corresponds to, so a
+ * reviewer can trace a "Beste praksis" section back to its row in Funn/Kvalitet without matching on
+ * text. The id must be the SAME number that panel shows, which is the section's primary claim —
+ * EnterpriseWikiRunFindingsService::normalizeBestPracticeSuggestion() keys the finding on it.
+ */
+describe('resolveBestPracticeSectionFindingId — the section names its own finding', () => {
+    const blocks = [
+        { block_key: 'h1', section_key: '1|h1', content_origin: 'best_practice' },
+        { block_key: 'p1', section_key: '1|h1', content_origin: 'best_practice' },
+        { block_key: 'p2', section_key: '1|h1', content_origin: 'best_practice' },
+        { block_key: 'src', section_key: null, content_origin: 'source_based' },
+        { block_key: 'h2', section_key: '1|h2', content_origin: 'best_practice' },
+        { block_key: 'p3', section_key: '1|h2', content_origin: 'best_practice' },
+    ];
+
+    const claim = (id, blockKey, positionOrder) => ({
+        id,
+        content_origin: 'best_practice',
+        content_block_key: blockKey,
+        position_order: positionOrder,
+    });
+
+    test('the primary claim of the section supplies the id', () => {
+        const claims = [claim(5390, 'h1', 0), claim(5391, 'p1', 1), claim(5392, 'p2', 2)];
+        const [section] = groupContentBlocksBySection(blocks);
+
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, claims), 5390);
+    });
+
+    test('primary is lowest (position_order, id), not document order of the array', () => {
+        // Deliberately shuffled, and the lowest id is NOT the lowest position_order.
+        const claims = [claim(5392, 'p2', 2), claim(5100, 'p1', 1), claim(5390, 'h1', 0)];
+        const [section] = groupContentBlocksBySection(blocks);
+
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, claims), 5390);
+    });
+
+    test('id breaks a position_order tie', () => {
+        const claims = [claim(5392, 'p1', 0), claim(5390, 'h1', 0)];
+        const [section] = groupContentBlocksBySection(blocks);
+
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, claims), 5390);
+    });
+
+    test('two sections on the same page each resolve their own id', () => {
+        const claims = [
+            claim(5390, 'h1', 0), claim(5391, 'p1', 1),
+            claim(5395, 'h2', 4), claim(5396, 'p3', 5),
+        ];
+        const groups = groupContentBlocksBySection(blocks).filter((g) => g.type === 'section');
+
+        assert.equal(groups.length, 2);
+        assert.equal(resolveBestPracticeSectionFindingId(groups[0].blocks, claims), 5390);
+        assert.equal(resolveBestPracticeSectionFindingId(groups[1].blocks, claims), 5395);
+    });
+
+    test('a claim belonging to another section never leaks in', () => {
+        const claims = [claim(5395, 'h2', 4)];
+        const [first] = groupContentBlocksBySection(blocks).filter((g) => g.type === 'section');
+
+        assert.equal(resolveBestPracticeSectionFindingId(first.blocks, claims), null);
+    });
+
+    test('non-best_practice claims anchored in the section are ignored', () => {
+        const claims = [
+            { id: 1, content_origin: 'unsupported_generated_content', content_block_key: 'h1', position_order: 0 },
+            claim(5391, 'p1', 1),
+        ];
+        const [section] = groupContentBlocksBySection(blocks);
+
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, claims), 5391);
+    });
+
+    test('a section with no claims, and empty input, resolve to null', () => {
+        const [section] = groupContentBlocksBySection(blocks);
+
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, []), null);
+        assert.equal(resolveBestPracticeSectionFindingId(section.blocks, undefined), null);
+        assert.equal(resolveBestPracticeSectionFindingId([], [claim(5390, 'h1', 0)]), null);
+    });
+
+    test('the id matches what the findings panel displays for the same finding', () => {
+        const claims = [claim(5390, 'h1', 0), claim(5391, 'p1', 1)];
+        const [section] = groupContentBlocksBySection(blocks);
+        const id = resolveBestPracticeSectionFindingId(section.blocks, claims);
+
+        // The panel renders formatFindingUserId('best-practice-<primary claim id>').
+        assert.equal(String(id), formatFindingUserId(`best-practice-${id}`));
+    });
+});
+
+describe('bestPracticeSectionLabelText — the id is part of the heading, never an empty paren', () => {
+    const template = ':label (Funn ID: :id)';
+
+    test('the id is appended in parentheses on the same line', () => {
+        assert.equal(
+            bestPracticeSectionLabelText('Beste praksis', 5390, template),
+            'Beste praksis (Funn ID: 5390)',
+        );
+    });
+
+    test('a missing id falls back to the bare label with no empty parentheses', () => {
+        for (const missing of [null, undefined, '', '   ']) {
+            assert.equal(bestPracticeSectionLabelText('Beste praksis', missing, template), 'Beste praksis');
+        }
+    });
+
+    test('id 0 is still a real id and is rendered', () => {
+        assert.equal(bestPracticeSectionLabelText('Beste praksis', 0, template), 'Beste praksis (Funn ID: 0)');
+    });
+
+    test('the label is translatable — the English template renders the English label', () => {
+        assert.equal(
+            bestPracticeSectionLabelText('Best practice', 5390, ':label (Finding ID: :id)'),
+            'Best practice (Finding ID: 5390)',
+        );
+    });
+
+    test('a missing template still produces a usable Norwegian label', () => {
+        assert.equal(
+            bestPracticeSectionLabelText('Beste praksis', 5390, undefined),
+            'Beste praksis (Funn ID: 5390)',
+        );
     });
 });

@@ -10,10 +10,12 @@ import {
 } from './wikiQualityChecks';
 import { formatFindingUserId } from './runFindingsLogic';
 import {
+    bestPracticeSectionLabelText,
     groupBestPracticeClaimsForReview,
     groupContentBlocksBySection,
     isPageVersionFinallyApproved,
     partitionBestPracticeReviewUnits,
+    resolveBestPracticeSectionFindingId,
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
@@ -2430,7 +2432,11 @@ export default function WikiShow({
                                             >
                                                 {!pageIsFinallyApproved && (
                                                     <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                                        {tw.wiki_best_practice_section_label ?? 'Beste praksis'}
+                                                        {bestPracticeSectionLabelText(
+                                                            tw.wiki_best_practice_section_label ?? 'Beste praksis',
+                                                            resolveBestPracticeSectionFindingId(group.blocks, claims),
+                                                            tw.wiki_best_practice_section_label_with_finding,
+                                                        )}
                                                     </p>
                                                 )}
                                                 {group.blocks.map((block) => renderBlock(block))}
