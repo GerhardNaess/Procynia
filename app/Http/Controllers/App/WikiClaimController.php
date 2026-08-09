@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiClaimDecision;
@@ -39,6 +40,8 @@ use Illuminate\Http\Request;
  */
 class WikiClaimController extends Controller
 {
+    use PreservesWikiReviewReturnUrl;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
@@ -60,6 +63,7 @@ class WikiClaimController extends Controller
         $validated = $request->validate([
             'comment' => ['nullable', 'string', 'max:1000'],
             'approved_text' => ['nullable', 'string', 'max:4000'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $this->applyBestPracticeTextEdit($claim, $validated['approved_text'] ?? null);
@@ -86,7 +90,9 @@ class WikiClaimController extends Controller
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
         $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED, $validated['comment'] ?? null);
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er godkjent.');
+        return redirect()
+            ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
+            ->with('success', 'Påstanden er godkjent.');
     }
 
     public function reject(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
@@ -98,6 +104,7 @@ class WikiClaimController extends Controller
 
         $validated = $request->validate([
             'comment' => ['nullable', 'string', 'max:1000'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $this->storeDecision(
@@ -119,7 +126,9 @@ class WikiClaimController extends Controller
         $this->cascadeBestPracticeDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
         $this->cascadeBlockDecision($claim->fresh(), $user->id, EnterpriseWikiClaim::APPROVAL_STATUS_REJECTED, $validated['comment'] ?? null);
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Påstanden er avvist.');
+        return redirect()
+            ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
+            ->with('success', 'Påstanden er avvist.');
     }
 
     /**
@@ -312,6 +321,7 @@ class WikiClaimController extends Controller
             'source_row_key' => ['nullable', 'string', 'max:255'],
             'excerpt' => ['nullable', 'string', 'max:4000'],
             'page_reference' => ['nullable', 'string', 'max:255'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $document = EnterpriseWikiDocument::query()
@@ -388,11 +398,15 @@ class WikiClaimController extends Controller
         $this->lintService->resolveClaimMissingSourceFinding($claim);
 
         return redirect()
-            ->route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id])
+            ->route('app.wiki.show', $this->wikiShowRouteParamsWithReviewContext(
+                $page->slug,
+                $claim->id,
+                $this->reviewBackUrlFromRequest($request),
+            ))
             ->with('success', 'Kilden er koblet til påstanden.');
     }
 
-    public function unapprove(string $slug, EnterpriseWikiClaim $claim): RedirectResponse
+    public function unapprove(Request $request, string $slug, EnterpriseWikiClaim $claim): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
@@ -424,7 +438,9 @@ class WikiClaimController extends Controller
 
         $this->lintService->reopenClaimMissingSourceFindingIfStillMissing($claim);
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Beslutningen er angret.');
+        return redirect()
+            ->route('app.wiki.show', $this->wikiShowRouteParamsForReviewReturn($request, $page->slug, $claim->id))
+            ->with('success', 'Beslutningen er angret.');
     }
 
     /**
@@ -453,6 +469,7 @@ class WikiClaimController extends Controller
         $validated = $request->validate([
             'blocking' => ['required', 'boolean'],
             'comment' => ['nullable', 'string', 'max:1000'],
+            'back_url' => ['nullable', 'string', 'max:2048'],
         ]);
 
         $newBlocking = (bool) $validated['blocking'];
@@ -473,7 +490,11 @@ class WikiClaimController extends Controller
         ]);
 
         return redirect()
-            ->route('app.wiki.show', ['slug' => $page->slug, 'claim_id' => $claim->id])
+            ->route('app.wiki.show', $this->wikiShowRouteParamsWithReviewContext(
+                $page->slug,
+                $claim->id,
+                $this->reviewBackUrlFromRequest($request),
+            ))
             ->with('success', $newBlocking ? 'Blokkeringen er beholdt.' : 'Blokkeringen er fjernet.');
     }
 

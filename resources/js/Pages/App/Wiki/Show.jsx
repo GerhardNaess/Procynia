@@ -8,7 +8,7 @@ import {
     groupWikiFindingsByCode,
     splitWikiVerificationFindings,
 } from './wikiQualityChecks';
-import { formatFindingUserId } from './runFindingsLogic';
+import { formatFindingUserId, resolveWikiBackLink } from './runFindingsLogic';
 import {
     bestPracticeSectionLabelText,
     groupBestPracticeClaimsForReview,
@@ -722,6 +722,10 @@ export default function WikiShow({
     const targetBlockKey = reviewReference?.status === 'ready' ? reviewReference.block_key : null;
     const hasStructureFinding = Boolean(structureFinding?.id);
     const backHref = reviewReference?.back_url ?? structureFinding?.back_url ?? '/app/wiki?tab=runs';
+    // Top-of-page back link: label and destination both follow the actual return context, so
+    // "Tilbake til funn" survives every action taken on the page rather than degrading to the
+    // generic Wiki link the moment a claim is approved.
+    const topBackLink = resolveWikiBackLink(reviewReference, structureFinding);
     const hasFocusedReview = targetBlockKey !== null;
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
@@ -967,6 +971,10 @@ export default function WikiShow({
             {
                 comment: approvalComments[claim.id] || undefined,
                 approved_text: approvedText || undefined,
+                // Carries the finding this page was opened from through the redirect, so the
+                // reviewer keeps "Tilbake til funn" instead of dropping to "Tilbake til Wiki"
+                // mid-workflow. Sent on every claim action for the same reason.
+                back_url: reviewReference?.back_url ?? undefined,
             },
             { onFinish: () => setClaimProcessing(null) },
         );
@@ -989,6 +997,7 @@ export default function WikiShow({
 
         const payload = {
             source_document_id: sourceDocumentId,
+            back_url: reviewReference?.back_url ?? undefined,
         };
 
         if (sourceElementKey && sourceElementType) {
@@ -1106,7 +1115,10 @@ export default function WikiShow({
         setClaimProcessing(claim.id);
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/reject`,
-            { comment: approvalComments[claim.id] || undefined },
+            {
+                comment: approvalComments[claim.id] || undefined,
+                back_url: reviewReference?.back_url ?? undefined,
+            },
             { onFinish: () => setClaimProcessing(null) },
         );
     };
@@ -1116,7 +1128,7 @@ export default function WikiShow({
         setClaimProcessing(claim.id);
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/unapprove`,
-            {},
+            { back_url: reviewReference?.back_url ?? undefined },
             { onFinish: () => setClaimProcessing(null) },
         );
     };
@@ -1126,7 +1138,11 @@ export default function WikiShow({
         setClaimProcessing(claim.id);
         router.patch(
             `/app/wiki/${page.slug}/claims/${claim.id}/blocking`,
-            { blocking, comment: approvalComments[claim.id] || undefined },
+            {
+                blocking,
+                comment: approvalComments[claim.id] || undefined,
+                back_url: reviewReference?.back_url ?? undefined,
+            },
             { onFinish: () => setClaimProcessing(null) },
         );
     };
@@ -2089,15 +2105,18 @@ export default function WikiShow({
         <CustomerAppLayout title={page.title} showPageTitle={false}>
             <div className="space-y-8">
 
-                {/* Back link */}
+                {/* Back link — the finding this page was opened from when there is one,
+                    otherwise the plain Wiki page list. */}
                 <Link
-                    href="/app/wiki"
+                    href={topBackLink.href}
                     className="inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950"
                 >
                     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
                     </svg>
-                    {tw.back ?? 'Tilbake til Wiki'}
+                    {topBackLink.isFindingReturn
+                        ? (tw.review_reference_back_to_findings ?? 'Tilbake til funn')
+                        : (tw.back ?? 'Tilbake til Wiki')}
                 </Link>
 
                 {/* Page header */}

@@ -13,6 +13,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -33,6 +34,12 @@ use Tests\TestCase;
 class WikiFindingDeepLinkTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+    }
 
     // =========================================================================
     // The outbound half: every finding's back_url names that finding
@@ -213,8 +220,188 @@ class WikiFindingDeepLinkTest extends TestCase
     }
 
     // =========================================================================
+    // Surviving the work: the context must outlive every action on the page
+    // =========================================================================
+
+    /**
+     * Scenario A step 5-6: approving the suggestion used to redirect to a bare slug, dropping both
+     * claim_id and back_url, so the finding link vanished mid-workflow.
+     */
+    public function test_approving_a_claim_redirects_back_with_the_finding_context_intact(): void
+    {
+        [$user, $page, $claim, $backUrl, $findingId] = $this->reviewScenario();
+
+        $response = $this->actingAs($user)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            ['back_url' => $backUrl],
+        );
+
+        $response->assertRedirect();
+
+        $target = $this->queryOf($response->headers->get('Location'));
+
+        $this->assertSame((string) $claim->id, (string) ($target['claim_id'] ?? null), 'claim_id is required for the link to render at all');
+        $this->assertSame($backUrl, $target['back_url'] ?? null);
+        $this->assertSame($findingId, $this->queryOf($target['back_url'])['focus_finding'] ?? null);
+    }
+
+    public function test_reject_unapprove_and_blocking_all_preserve_the_finding_context(): void
+    {
+        foreach (['reject', 'unapprove'] as $action) {
+            [$user, $page, $claim, $backUrl, $findingId] = $this->reviewScenario();
+
+            if ($action === 'unapprove') {
+                // Undo only applies to an already-decided claim.
+                $this->actingAs($user)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve");
+            }
+
+            $response = $this->actingAs($user)->patch(
+                "/app/wiki/{$page->slug}/claims/{$claim->id}/{$action}",
+                ['back_url' => $backUrl],
+            );
+
+            $response->assertRedirect();
+            $target = $this->queryOf($response->headers->get('Location'));
+
+            $this->assertSame((string) $claim->id, (string) ($target['claim_id'] ?? null), "{$action} must keep claim_id");
+            $this->assertSame($backUrl, $target['back_url'] ?? null, "{$action} must keep back_url");
+            $this->assertSame($findingId, $this->queryOf($target['back_url'])['focus_finding'] ?? null);
+        }
+    }
+
+    /**
+     * Scenario A step 6-8, end to end: after the approval redirect, FOLLOWING that redirect must
+     * still serve a review_reference whose back_url names the same finding — that prop is what
+     * Show.jsx renders "Tilbake til funn" from.
+     */
+    public function test_the_page_still_serves_the_finding_back_url_after_the_approval_redirect(): void
+    {
+        [$user, $page, $claim, $backUrl, $findingId] = $this->reviewScenario();
+
+        $redirect = $this->actingAs($user)->patch(
+            "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+            ['back_url' => $backUrl],
+        );
+
+        $response = $this->actingAs($user)->get($redirect->headers->get('Location'));
+
+        $response->assertOk();
+
+        $served = data_get($response->viewData('page'), 'props.review_reference.back_url');
+
+        $this->assertNotNull($served, 'the finding link must still render after the action');
+        $this->assertSame($findingId, $this->queryOf($served)['focus_finding'] ?? null);
+    }
+
+    /**
+     * Scenario B: several actions in a row on the same page. The context must not erode after the
+     * first one — each redirect has to reproduce it for the next action to send back.
+     */
+    public function test_the_context_survives_several_actions_in_a_row(): void
+    {
+        [$user, $page, $claim, $backUrl, $findingId] = $this->reviewScenario();
+
+        foreach (['approve', 'unapprove', 'approve'] as $step => $action) {
+            $redirect = $this->actingAs($user)->patch(
+                "/app/wiki/{$page->slug}/claims/{$claim->id}/{$action}",
+                ['back_url' => $backUrl],
+            );
+
+            $redirect->assertRedirect();
+
+            $served = data_get(
+                $this->actingAs($user)->get($redirect->headers->get('Location'))->viewData('page'),
+                'props.review_reference.back_url',
+            );
+
+            $this->assertSame(
+                $findingId,
+                $this->queryOf($served)['focus_finding'] ?? null,
+                "context lost at step {$step} ({$action})",
+            );
+        }
+    }
+
+    /**
+     * Scenario C: a page opened straight from the Wiki page list has no finding context, and an
+     * action on it must not invent one.
+     */
+    public function test_an_action_without_finding_context_redirects_without_a_back_url(): void
+    {
+        [$user, $page, $claim] = $this->reviewScenario();
+
+        $response = $this->actingAs($user)->patch("/app/wiki/{$page->slug}/claims/{$claim->id}/approve");
+
+        $response->assertRedirect();
+
+        $target = $this->queryOf($response->headers->get('Location'));
+
+        $this->assertArrayNotHasKey('back_url', $target);
+        // The redirect keeps its original bare-slug shape — the review context is all-or-nothing,
+        // so ordinary Wiki navigation is byte-for-byte what it was before this change.
+        $this->assertArrayNotHasKey('claim_id', $target);
+    }
+
+    /**
+     * The forwarding path must apply the SAME whitelist as the incoming one — a caller-supplied
+     * back_url can never become an open redirect to another host, or to an unrelated route.
+     */
+    public function test_a_hostile_or_malformed_back_url_is_rejected_on_the_action_too(): void
+    {
+        $hostile = [
+            'https://evil.example.com/app/wiki?tab=runs',
+            '/app/wiki?tab=pages',
+            '/app/notices?tab=runs',
+            'javascript:alert(1)',
+            '   ',
+        ];
+
+        foreach ($hostile as $backUrl) {
+            [$user, $page, $claim] = $this->reviewScenario();
+
+            $response = $this->actingAs($user)->patch(
+                "/app/wiki/{$page->slug}/claims/{$claim->id}/approve",
+                ['back_url' => $backUrl],
+            );
+
+            $response->assertRedirect();
+
+            $location = $response->headers->get('Location');
+            $target = $this->queryOf($location);
+
+            $this->assertArrayNotHasKey('back_url', $target, "back_url [{$backUrl}] must be rejected");
+            $this->assertStringContainsString('/app/wiki/'.$page->slug, $location, 'the redirect stays on this app');
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
+
+    /**
+     * A page opened from one concrete best-practice finding, plus that finding's return URL.
+     *
+     * @return array{0: User, 1: EnterpriseWikiPage, 2: EnterpriseWikiClaim, 3: string, 4: string}
+     */
+    private function reviewScenario(): array
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $document = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $document);
+        $page = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $claim = $this->createClaim($page, $this->currentVersion($page), EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE, 'block-0001');
+
+        $findingId = 'best-practice-'.$claim->id;
+        $backUrl = route('app.wiki.index', [
+            'tab' => 'runs',
+            'run_src' => $document->id,
+            'focus_run' => $run->id,
+            'focus_finding' => $findingId,
+        ]);
+
+        return [$user, $page, $claim, $backUrl, $findingId];
+    }
 
     /**
      * @param  array<string, mixed>  $query

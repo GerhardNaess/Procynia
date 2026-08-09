@@ -81,6 +81,27 @@ export function focusedFindingLocalFilter(finding, currentFilter) {
     return matchesFindingsLocalFilter(finding, currentFilter) ? currentFilter : 'all';
 }
 
+/**
+ * The back link at the top of a Wiki page: where it goes and what it is called.
+ *
+ * Driven by the return context the page was actually opened with, never by the page's type. A page
+ * reached from one specific finding carries that finding's return URL on its review_reference /
+ * structure_finding (validated server-side by PreservesWikiReviewReturnUrl::normalizeReviewBackUrl(),
+ * so it is always this app's own Wiki index) — and that context now survives every approve/reject/
+ * edit action on the page, which is what this helper exists to reflect. With no such context the
+ * link stays exactly what it always was: the plain Wiki page list.
+ *
+ * @returns {{href: string, isFindingReturn: boolean}}
+ */
+export function resolveWikiBackLink(reviewReference, structureFinding) {
+    const findingUrl = reviewReference?.back_url ?? structureFinding?.back_url ?? null;
+    const href = typeof findingUrl === 'string' ? findingUrl.trim() : '';
+
+    return href !== ''
+        ? { href, isFindingReturn: true }
+        : { href: '/app/wiki', isFindingReturn: false };
+}
+
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
     { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },

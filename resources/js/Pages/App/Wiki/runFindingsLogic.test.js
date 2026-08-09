@@ -13,6 +13,7 @@ import {
     activeWikiRunLikeObjectsForTab,
     resolveFocusedFinding,
     focusedFindingLocalFilter,
+    resolveWikiBackLink,
 } from './runFindingsLogic.js';
 
 describe('formatFindingUserId', () => {
@@ -739,5 +740,69 @@ describe('focusedFindingLocalFilter — the focused finding is never filtered aw
     test('no finding leaves the current filter untouched', () => {
         assert.equal(focusedFindingLocalFilter(null, 'open'), 'open');
         assert.equal(focusedFindingLocalFilter(undefined, 'blocking'), 'blocking');
+    });
+});
+
+/**
+ * The finding return context has to survive the WORK done on the page, not just the arrival.
+ * Approving a best-practice suggestion redirected to a bare slug, which dropped claim_id and
+ * back_url, so the next render had no review_reference and the reviewer was left with the generic
+ * "Tilbake til Wiki" — mid-workflow, with no way back to the finding they were handling. The
+ * redirects now carry both (PreservesWikiReviewReturnUrl); this helper is what decides the label
+ * from that context rather than from the page's type.
+ */
+describe('resolveWikiBackLink — the label follows the return context, not the page type', () => {
+    const findingUrl = '/app/wiki?tab=runs&run_src=19&focus_run=24&focus_finding=best-practice-5390';
+
+    test('a review reference back_url makes the top link return to the finding', () => {
+        const link = resolveWikiBackLink({ status: 'ready', back_url: findingUrl }, null);
+
+        assert.equal(link.isFindingReturn, true);
+        assert.equal(link.href, findingUrl);
+    });
+
+    test('a structure finding back_url counts as finding context too', () => {
+        const link = resolveWikiBackLink(null, { back_url: findingUrl });
+
+        assert.equal(link.isFindingReturn, true);
+        assert.equal(link.href, findingUrl);
+    });
+
+    test('the deep-link parameters survive into the href unchanged', () => {
+        const { href } = resolveWikiBackLink({ back_url: findingUrl }, null);
+        const query = new URLSearchParams(href.split('?')[1]);
+
+        assert.equal(query.get('tab'), 'runs');
+        assert.equal(query.get('run_src'), '19');
+        assert.equal(query.get('focus_run'), '24');
+        assert.equal(query.get('focus_finding'), 'best-practice-5390');
+    });
+
+    test('a page opened straight from the Wiki list keeps the plain Wiki link', () => {
+        const link = resolveWikiBackLink(null, null);
+
+        assert.equal(link.isFindingReturn, false);
+        assert.equal(link.href, '/app/wiki');
+    });
+
+    test('a review reference with no back_url is not finding context', () => {
+        // Opened via ?claim_id= alone — a real review reference, but nothing to return to.
+        const link = resolveWikiBackLink({ status: 'ready', claim_id: 12 }, null);
+
+        assert.equal(link.isFindingReturn, false);
+        assert.equal(link.href, '/app/wiki');
+    });
+
+    test('an empty or blank back_url degrades to the plain Wiki link', () => {
+        for (const blank of ['', '   ', null, undefined]) {
+            assert.equal(resolveWikiBackLink({ back_url: blank }, null).isFindingReturn, false);
+        }
+    });
+
+    test('the review reference wins over the structure finding when both are present', () => {
+        const other = '/app/wiki?tab=runs&focus_finding=lint-7';
+        const link = resolveWikiBackLink({ back_url: findingUrl }, { back_url: other });
+
+        assert.equal(link.href, findingUrl);
     });
 });

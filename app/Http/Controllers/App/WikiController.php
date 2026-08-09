@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Exceptions\EnterpriseWikiOrphanConceptLinkException;
+use App\Http\Controllers\Concerns\PreservesWikiReviewReturnUrl;
 use App\Http\Controllers\Concerns\RedirectsToWikiIndexTab;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
@@ -41,6 +42,7 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
+    use PreservesWikiReviewReturnUrl;
     use RedirectsToWikiIndexTab;
 
     public function __construct(
@@ -2224,25 +2226,6 @@ class WikiController extends Controller
         }
 
         return $reference;
-    }
-
-    private function normalizeReviewBackUrl(string $backUrl): ?string
-    {
-        $backUrl = trim($backUrl);
-
-        if ($backUrl === '') {
-            return null;
-        }
-
-        $parsed = parse_url($backUrl);
-
-        if (! is_array($parsed) || ($parsed['path'] ?? null) !== '/app/wiki') {
-            return null;
-        }
-
-        parse_str($parsed['query'] ?? '', $query);
-
-        return (($query['tab'] ?? null) === 'runs') ? $backUrl : null;
     }
 
     /**
