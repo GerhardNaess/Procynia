@@ -7,6 +7,7 @@ use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
+use App\Models\EnterpriseWikiSourceReference;
 use RuntimeException;
 
 /**
@@ -83,6 +84,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         string $languageCode,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
+        array $sourceElements = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -107,9 +109,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
         if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
-            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
+            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements);
         } else {
-            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
+            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements);
 
             $decoded = $this->capacityRetryExecutor->execute(
                 'EnterpriseWikiMaintainerDecisionAiClient',
@@ -192,6 +194,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $issues,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
+        array $sourceElements = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -201,7 +204,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
-        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues, $figureCandidates);
+        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues, $figureCandidates, $sourceElements);
         $inputSizeChars = mb_strlen($repairPromptText);
 
         $decoded = $this->capacityRetryExecutor->execute(
@@ -355,13 +358,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
         array $decision,
         array $issues,
         array $figureCandidates = [],
+        array $sourceElements = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
-        $text = trim($sourceText);
-
-        if (mb_strlen($text) > self::MAX_SOURCE_TEXT_CHARS) {
-            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS)."\n[... text truncated ...]";
-        }
 
         $indexJson = $indexContext !== []
             ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
@@ -374,8 +373,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'SOURCE METADATA:',
             "Title: {$title}",
             '',
-            'SOURCE TEXT:',
-            $text !== '' ? $text : '(empty)',
+            self::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexJson,
@@ -668,15 +666,10 @@ class EnterpriseWikiMaintainerDecisionAiClient
         ]);
     }
 
-    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = []): string
+    private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
-        $text = trim($sourceText);
-
-        if (mb_strlen($text) > self::MAX_SOURCE_TEXT_CHARS) {
-            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS)."\n[... text truncated ...]";
-        }
 
         $indexJson = $indexContext !== []
             ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
@@ -687,13 +680,151 @@ class EnterpriseWikiMaintainerDecisionAiClient
             "Title: {$title}",
             "Original file: {$filename}",
             '',
-            'SOURCE TEXT:',
-            $text !== '' ? $text : '(empty)',
+            self::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexJson,
             '',
             self::figureCandidatesBlock($figureCandidates),
+        ]);
+    }
+
+    /**
+     * Element types carried by the SOURCE ELEMENTS catalog (Fase 8J-1B). Images are deliberately
+     * excluded: FIGURE CANDIDATES is already their own correct, separate contract, and forcing an
+     * image description into a prose catalog would send the same thing twice in two shapes.
+     */
+    private const SOURCE_CATALOG_ELEMENT_TYPES = [
+        EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+        EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_LIST_ITEM,
+        EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_TABLE_ROW,
+    ];
+
+    /**
+     * Narrows an EnterpriseWikiDocumentSourceElementService::inspect() element list to the ones
+     * the SOURCE ELEMENTS catalog carries, preserving the service's own deterministic order.
+     *
+     * @param  list<array<string, mixed>>  $elements
+     * @return list<array<string, mixed>>
+     */
+    public static function sourceCatalogElements(array $elements): array
+    {
+        return array_values(array_filter(
+            $elements,
+            static fn (array $element): bool => in_array(
+                $element['source_element_type'] ?? null,
+                self::SOURCE_CATALOG_ELEMENT_TYPES,
+                true,
+            ),
+        ));
+    }
+
+    /**
+     * Renders the "SOURCE ELEMENTS" prompt block (Fase 8J-1B) shared by the single-call, repair and
+     * split-flow prompts — the same addressable source elements page generation already receives
+     * (EnterpriseWikiDocumentSourceElementService::inspect()), so the maintainer can reason about,
+     * and later refer to, the concrete parts of the document a decision rests on instead of an
+     * undifferentiated wall of text.
+     *
+     * This block REPLACES the flat "SOURCE TEXT" block whenever it is non-empty: the catalog is the
+     * same document content, only addressable, so sending both would send the whole document twice.
+     * When no structured elements exist (non-DOCX, unparsable, or a document whose file is gone),
+     * the caller keeps rendering flat SOURCE TEXT exactly as before — see sourceContentBlock().
+     *
+     * Format is deliberately compact rather than JSON: one `[key] (type · section)` header line per
+     * element followed by its own text. Measured on a real document this costs ~11% more characters
+     * than the flat text it replaces, where pretty JSON would cost roughly 2.7x.
+     *
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    public static function sourceElementsBlock(array $sourceElements, int $maxChars): string
+    {
+        $lines = [];
+        $used = 0;
+        $rendered = 0;
+        $currentSection = null;
+
+        foreach ($sourceElements as $element) {
+            $key = trim((string) ($element['source_element_key'] ?? ''));
+            $type = trim((string) ($element['source_element_type'] ?? ''));
+            $text = trim((string) ($element['reference_text'] ?? ''));
+
+            if ($key === '' || $type === '' || $text === '') {
+                continue;
+            }
+
+            $section = trim(implode(' ', array_filter([
+                trim((string) ($element['section_number'] ?? '')),
+                trim((string) ($element['section_title'] ?? '')),
+            ], static fn (string $part): bool => $part !== '')));
+
+            // Elements arrive in document order, so the section is printed once per run of
+            // elements that share it rather than repeated on every line — measured on a real
+            // document, repeating it cost about a third of the flat text's own size.
+            $sectionLine = $section !== '' && $section !== $currentSection ? "\n# {$section}" : null;
+            $entry = "[{$key}] ({$type}) ".$text;
+            $cost = mb_strlen($entry) + 1 + ($sectionLine !== null ? mb_strlen($sectionLine) + 1 : 0);
+
+            // Truncate on whole-element boundaries only: a half-rendered element would give the
+            // model a key whose text it cannot actually see.
+            if ($used + $cost > $maxChars) {
+                $lines[] = '[... '.(count($sourceElements) - $rendered).' further element(s) truncated ...]';
+
+                break;
+            }
+
+            if ($sectionLine !== null) {
+                $lines[] = $sectionLine;
+                $currentSection = $section;
+            }
+
+            $lines[] = $entry;
+            $used += $cost;
+            $rendered++;
+        }
+
+        if ($rendered === 0) {
+            return '';
+        }
+
+        return implode("\n", array_merge(
+            [
+                'SOURCE ELEMENTS ('.$rendered.' of '.count($sourceElements).'):',
+                'The source document, split into its addressable elements: [key] (type) text, grouped',
+                'under the "# " section they belong to. Keys are stable identifiers for this document',
+                'version — refer to them when reasoning about which parts of the source a page rests on,',
+                'and never invent one.',
+            ],
+            $lines,
+        ));
+    }
+
+    /**
+     * The source-content block for a maintainer prompt: the addressable SOURCE ELEMENTS catalog
+     * when structured elements are available, otherwise the flat SOURCE TEXT exactly as before.
+     *
+     * One or the other — never both. Backward compatible by construction: every caller that passes
+     * no source elements gets byte-identical output to the pre-8J-1B prompt.
+     *
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    public static function sourceContentBlock(string $sourceText, array $sourceElements, int $maxChars): string
+    {
+        $catalog = self::sourceElementsBlock(self::sourceCatalogElements($sourceElements), $maxChars);
+
+        if ($catalog !== '') {
+            return $catalog;
+        }
+
+        $text = trim($sourceText);
+
+        if (mb_strlen($text) > $maxChars) {
+            $text = mb_substr($text, 0, $maxChars)."\n[... text truncated ...]";
+        }
+
+        return implode("\n", [
+            'SOURCE TEXT:',
+            $text !== '' ? $text : '(empty)',
         ]);
     }
 

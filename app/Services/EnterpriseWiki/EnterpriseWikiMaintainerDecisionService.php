@@ -72,10 +72,18 @@ class EnterpriseWikiMaintainerDecisionService
 
         $sourceText = (string) ($document->extracted_text ?? '');
         $indexContext = $this->indexContextService->buildForCustomer($customerId);
-        $figureCandidates = $this->figureCandidatesForDocument($document);
+
+        // ONE inspect() per decision — the document is parsed once and split into the two
+        // contracts the maintainer prompt needs (Fase 8J-1B): images stay their own
+        // FIGURE CANDIDATES block, prose/table elements become the addressable SOURCE ELEMENTS
+        // catalog. Previously this same call was made and everything except the images was
+        // discarded, which is exactly why the maintainer never saw addressable source provenance.
+        $elements = $this->sourceElementService->inspect($document)['elements'];
+        $figureCandidates = $this->figureCandidatesFromElements($elements);
+        $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
 
-        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
+        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements);
 
         return $this->validateAndRepairForDocument($customerId, $document, $languageCode, $decision, $context);
     }
@@ -101,7 +109,13 @@ class EnterpriseWikiMaintainerDecisionService
         ];
         $sourceText = (string) ($document->extracted_text ?? '');
         $indexContext = $this->indexContextService->buildForCustomer($customerId);
-        $figureCandidates = $this->figureCandidatesForDocument($document);
+
+        // Same one-parse split as runForDocument(): the repair pass must see the same addressable
+        // source elements the original decision was made against, or it would reason about the
+        // document less precisely than the call it is correcting.
+        $elements = $this->sourceElementService->inspect($document)['elements'];
+        $figureCandidates = $this->figureCandidatesFromElements($elements);
+        $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
         $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys);
 
@@ -146,7 +160,7 @@ class EnterpriseWikiMaintainerDecisionService
             'issues' => $issues,
         ]);
 
-        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context);
+        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context, $sourceElements);
         $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys);
 
         if ($remainingIssues !== []) {
@@ -330,8 +344,15 @@ class EnterpriseWikiMaintainerDecisionService
      */
     private function figureCandidatesForDocument(EnterpriseWikiDocument $document): array
     {
-        $elements = $this->sourceElementService->inspect($document)['elements'];
+        return $this->figureCandidatesFromElements($this->sourceElementService->inspect($document)['elements']);
+    }
 
+    /**
+     * @param  list<array<string, mixed>>  $elements
+     * @return list<array<string, mixed>>
+     */
+    private function figureCandidatesFromElements(array $elements): array
+    {
         return array_values(array_filter(
             $elements,
             fn (array $element): bool => ($element['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE,

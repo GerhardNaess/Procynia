@@ -2701,16 +2701,22 @@ Begge er verdifulle uavhengig av trinn 2, men det er 8J-1B som er den funksjonel
 - tester for gammel whole-document fallback
 - tester for structured source elements
 
-**Tokenøkonomi — gjelder maintainer input (8J-1B), ikke sidegenerering.** Sidegenerering mangler ikke kompakte source elements; den har dem allerede. Problemet er at maintainer decision i dag får flat `sourceText` **uten** adresserbare prose-nøkler. Implementeringen skal derfor vurdere om maintainer input skal (a) erstatte flat `sourceText` med en kompakt keyed katalog, eller (b) bruke en hybrid der fulltekst ikke dupliseres. Samme tekst skal ikke sendes to ganger uten eksplisitt grunn. Målt på testdokumentet:
+**Tokenøkonomi — gjelder maintainer input (8J-1B), ikke sidegenerering.** Sidegenerering mangler ikke kompakte source elements; den har dem allerede. Problemet var at maintainer decision fikk flat `sourceText` **uten** adresserbare prose-nøkler. Valget falt på (a): katalogen **erstatter** flat `SOURCE TEXT` når strukturerte elementer finnes — katalogen er det samme dokumentinnholdet, bare adresserbart, så å sende begge ville sendt hele dokumentet to ganger.
 
-| Form | Relativt til flat tekst |
-|---|---|
-| flat `extracted_text` | 1,00× (baseline) |
-| kompakt `[key] (section) text`-katalog | ca. 1,11× |
-| pretty JSON-katalog | betydelig større |
-| flat tekst + full JSON samtidig | ca. 3,7× |
+**Faktisk måling fra den implementerte, optimaliserte 8J-1B-katalogen** (erstatter et tidligere anslag på ca. 1,11× som stammet fra et enklere prøveformat — uten preamble, uten typefelt, med færre elementtyper og uten table rows):
 
-Arkitekturprinsipp: når structured source elements brukes som AI-kontekst, sendes dokumentinnholdet normalt **én gang** i kompakt nøkkelform, f.eks. `[element-key] (section) text`. Samme innhold skal ikke dupliseres både som flat tekst og full strukturert JSON. Kodebasen har allerede lært denne leksen én gang — `WikiPageContentAiClient::repairUserPrompt()` sender bevisst ikke begge, etter at run 6 traff `max_output_tokens`. Eksakt promptformat avgjøres i implementeringsfasen og måles med tester.
+| Dokument | Gammel kildeblokk | Ny kildeblokk | Endring | Send-begge (forkastet) |
+|---|---|---|---|---|
+| Testdokument A | 2 076 tegn | 2 823 tegn | **+36,0 %** | +136 % |
+| Testdokument B | 1 931 tegn | 2 725 tegn | **+41,1 %** | +141 % |
+
+**Kildeinnholdet sendes fortsatt kun én gang** — summen av elementtekstene er ca. 4 % *mindre* enn flatteksten den erstatter, altså full dekning uten duplisering.
+
+> **+36/+41 % er ikke en generell fast prosent.** Tallene er målt på **to små testdokumenter** (ca. 2 KB). Overheaden består av en **fast preamble på ca. 330 tegn** og ca. **22 tegn per element** for `[key] (type)`-prefikset. På et 2 KB-dokument utgjør den faste preamblen alene ~16 %; på et stort dokument er den under 1 %. Prosentandelen forventes derfor å falle betydelig med dokumentstørrelse, mot per-element-overheaden som eneste vesentlige bidrag. Faktisk payload skal fortsatt måles i implementerings- og regresjonstester — ikke antas fra disse to tallene.
+
+Seksjonskontekst grupperes under `# `-linjer i stedet for å gjentas per element; den optimaliseringen alene tok overheaden ned fra ca. +48/+57 % til +36/+41 %.
+
+Arkitekturprinsipp (uendret og bindende): når structured source elements brukes som AI-kontekst, sendes dokumentinnholdet normalt **én gang** i kompakt nøkkelform, f.eks. `[element-key] (type) text`. Samme innhold skal ikke dupliseres både som flat tekst og full strukturert katalog. Pretty JSON unngås — det målte ca. 2,7× flatteksten der den kompakte formen ligger nær den. Kodebasen har allerede lært denne leksen én gang — `WikiPageContentAiClient::repairUserPrompt()` sender bevisst ikke begge, etter at run 6 traff `max_output_tokens`.
 
 **Formatstøtte — ærlig avgrensning.** Dagens rike strukturerte parser er **DOCX-spesifikk**. PDF (via `pdftotext`) og XLSX har ingen tilsvarende strukturell segmentering og bruker fallback. Fallback gjelder altså **format-/parserstøtte og gamle data — ikke fordi Wiki generelt mangler structured provenance**. Dette er ikke en arkitekturfeil. Den generelle modellen er:
 

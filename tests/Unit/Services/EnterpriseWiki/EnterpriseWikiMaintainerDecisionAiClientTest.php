@@ -22,6 +22,147 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     }
 
     // =========================================================================
+    // Fase 8J-1B — addressable SOURCE ELEMENTS catalog for the maintainer decision
+    // =========================================================================
+
+    public function test_maintainer_prompt_carries_the_addressable_source_catalog_when_elements_exist(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertStringContainsString('SOURCE ELEMENTS', $prompt);
+        $this->assertStringContainsString('[paragraph-0] (paragraph) First body paragraph.', $prompt);
+        $this->assertStringContainsString('[listitem-0] (list_item) First requirement item.', $prompt);
+        $this->assertStringContainsString('[tbl0-row0] (table_row) Field: Value', $prompt);
+    }
+
+    public function test_section_context_is_carried_and_grouped_rather_than_repeated_per_element(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertStringContainsString('# 1. Alpha', $prompt);
+        $this->assertStringContainsString('# 2. Beta', $prompt);
+        // Grouped: the section is printed once per run of elements, not on every line.
+        $this->assertSame(1, substr_count($prompt, '# 1. Alpha'));
+        $this->assertSame(1, substr_count($prompt, '# 2. Beta'));
+    }
+
+    public function test_catalog_order_is_deterministic_and_follows_the_service_order(): void
+    {
+        $first = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+        $second = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertSame($first, $second, 'same input must produce a byte-identical catalog');
+
+        foreach ([['paragraph-0', 'listitem-0'], ['listitem-0', 'listitem-1'], ['listitem-1', 'paragraph-1'], ['paragraph-1', 'tbl0-row0']] as [$earlier, $later]) {
+            $this->assertLessThan(
+                strpos($first, "[{$later}]"),
+                strpos($first, "[{$earlier}]"),
+                "{$earlier} must precede {$later}",
+            );
+        }
+    }
+
+    public function test_each_key_carries_its_own_text(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        // The regression this guards: a key/text pairing that drifts would make every downstream
+        // provenance statement wrong while still looking structurally valid.
+        $this->assertMatchesRegularExpression('/\[listitem-1\] \(list_item\) Second requirement item\./', $prompt);
+        $this->assertMatchesRegularExpression('/\[paragraph-1\] \(paragraph\) Paragraph under the second section\./', $prompt);
+    }
+
+    public function test_images_stay_in_figure_candidates_and_never_enter_the_prose_catalog(): void
+    {
+        $catalog = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($this->sourceElementFixture());
+
+        $this->assertSame(
+            ['paragraph-0', 'listitem-0', 'listitem-1', 'paragraph-1', 'tbl0-row0'],
+            array_column($catalog, 'source_element_key'),
+            'image elements belong to FIGURE CANDIDATES, not the prose catalog',
+        );
+    }
+
+    public function test_figure_candidates_block_is_still_rendered_alongside_the_catalog(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertStringContainsString('FIGURE CANDIDATES', $prompt);
+    }
+
+    public function test_flat_source_text_is_not_sent_alongside_the_catalog(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(
+            sourceText: 'UNIQUE-FLAT-TEXT-MARKER',
+            sourceElements: $this->sourceElementFixture(),
+        ));
+
+        // The binding rule: the same document content is never sent twice.
+        $this->assertStringNotContainsString('SOURCE TEXT:', $prompt);
+        $this->assertStringNotContainsString('UNIQUE-FLAT-TEXT-MARKER', $prompt);
+    }
+
+    public function test_falls_back_to_flat_source_text_when_no_structured_elements_exist(): void
+    {
+        // Old document, non-DOCX format, or a file that cannot be parsed.
+        $prompt = $this->userMessageText($this->capturePayload(sourceText: 'Plain extracted text.'));
+
+        $this->assertStringContainsString('SOURCE TEXT:', $prompt);
+        $this->assertStringContainsString('Plain extracted text.', $prompt);
+        $this->assertStringNotContainsString('SOURCE ELEMENTS', $prompt);
+    }
+
+    public function test_an_image_only_document_still_falls_back_to_flat_source_text(): void
+    {
+        $imagesOnly = array_values(array_filter(
+            $this->sourceElementFixture(),
+            static fn (array $element): bool => $element['source_element_type'] === 'image',
+        ));
+
+        $prompt = $this->userMessageText($this->capturePayload(sourceText: 'Plain extracted text.', sourceElements: $imagesOnly));
+
+        $this->assertStringContainsString('SOURCE TEXT:', $prompt);
+        $this->assertStringNotContainsString('SOURCE ELEMENTS', $prompt);
+    }
+
+    public function test_catalog_truncates_on_whole_element_boundaries(): void
+    {
+        $block = EnterpriseWikiMaintainerDecisionAiClient::sourceElementsBlock(
+            EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($this->sourceElementFixture()),
+            120,
+        );
+
+        // A half-rendered element would hand the model a key whose text it cannot see.
+        $this->assertStringContainsString('further element(s) truncated', $block);
+        $this->assertStringNotContainsString('[tbl0-row0]', $block);
+    }
+
+    public function test_the_catalog_sends_the_document_content_once(): void
+    {
+        $elements = $this->sourceElementFixture();
+        $flat = implode("\n", array_column($elements, 'reference_text'));
+
+        $block = EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock($flat, $elements, 12000);
+
+        foreach (['First body paragraph.', 'First requirement item.', 'Field: Value'] as $text) {
+            $this->assertSame(1, substr_count($block, $text), "[{$text}] must appear exactly once");
+        }
+    }
+
+    public function test_decision_schema_and_owned_topics_contract_are_unchanged(): void
+    {
+        $schema = $this->capturePayload(sourceElements: $this->sourceElementFixture())['text']['format']['schema'];
+
+        $this->assertSame('object', $schema['type']);
+        $this->assertArrayHasKey('concept_candidates', $schema['properties']);
+
+        // owned_topics must still be a plain string[] — 8J-1B does not touch the ownership schema.
+        $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
+        $this->assertSame('array', $ownedTopics['type']);
+        $this->assertSame(['type' => 'string'], $ownedTopics['items']);
+    }
+
+    // =========================================================================
     // Payload structure
     // =========================================================================
 
@@ -783,6 +924,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         string $sourceText = 'Noe innhold her.',
         array $indexContext = [],
         string $languageCode = 'no',
+        array $sourceElements = [],
     ): array {
         $capturedPayload = null;
 
@@ -797,10 +939,28 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             });
 
         app(EnterpriseWikiMaintainerDecisionAiClient::class)->decide(
-            $sourceMeta, $sourceText, $indexContext, $languageCode,
+            $sourceMeta, $sourceText, $indexContext, $languageCode, [], null, $sourceElements,
         );
 
         return (array) $capturedPayload;
+    }
+
+    /**
+     * Domain-free source elements in the exact shape
+     * EnterpriseWikiDocumentSourceElementService::inspect() returns them.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function sourceElementFixture(): array
+    {
+        return [
+            ['source_element_key' => 'paragraph-0', 'source_element_type' => 'paragraph', 'section_number' => '1.', 'section_title' => 'Alpha', 'reference_text' => 'First body paragraph.'],
+            ['source_element_key' => 'listitem-0', 'source_element_type' => 'list_item', 'section_number' => '1.', 'section_title' => 'Alpha', 'reference_text' => 'First requirement item.'],
+            ['source_element_key' => 'listitem-1', 'source_element_type' => 'list_item', 'section_number' => '1.', 'section_title' => 'Alpha', 'reference_text' => 'Second requirement item.'],
+            ['source_element_key' => 'paragraph-1', 'source_element_type' => 'paragraph', 'section_number' => '2.', 'section_title' => 'Beta', 'reference_text' => 'Paragraph under the second section.'],
+            ['source_element_key' => 'tbl0-row0', 'source_element_type' => 'table_row', 'section_number' => '2.', 'section_title' => 'Beta', 'reference_text' => 'Field: Value'],
+            ['source_element_key' => 'img0', 'source_element_type' => 'image', 'section_number' => '2.', 'section_title' => 'Beta', 'reference_text' => 'A described figure.'],
+        ];
     }
 
     private function clientReturning(array $decision): EnterpriseWikiMaintainerDecisionAiClient

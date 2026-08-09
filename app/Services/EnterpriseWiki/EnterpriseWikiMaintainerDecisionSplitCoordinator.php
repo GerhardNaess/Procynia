@@ -78,11 +78,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $languageCode,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
+        array $sourceElements = [],
     ): array {
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context);
+        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context, $sourceElements);
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
 
         $mentions = $globalPlan['concept_candidate_mentions'];
@@ -196,8 +197,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         string $languageName,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
+        array $sourceElements = [],
     ): array {
-        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates);
+        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements);
         $inputSizeChars = mb_strlen($userPromptText);
 
         return $this->capacityRetryExecutor->execute(
@@ -236,8 +238,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         int $batchIndex,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
+        array $sourceElements = [],
     ): array {
-        $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions, $figureCandidates);
+        $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions, $figureCandidates, $sourceElements);
         $inputSizeChars = mb_strlen($userPromptText);
         $candidateCount = count($batchMentions);
 
@@ -263,9 +266,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /** @return array<string,mixed> */
-    public function decidePersistedCandidateBatch(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $globalPlan, array $mentions, int $batchNumber, array $figureCandidates = [], ?AiCallContext $context = null): array
+    public function decidePersistedCandidateBatch(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $globalPlan, array $mentions, int $batchNumber, array $figureCandidates = [], ?AiCallContext $context = null, array $sourceElements = []): array
     {
-        return $this->decideCandidateBatch($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $figureCandidates, $context);
+        return $this->decideCandidateBatch($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $figureCandidates, $context, $sourceElements);
     }
 
     private function buildGlobalPlanPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
@@ -490,7 +493,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ];
     }
 
-    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = []): string
+    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = []): string
     {
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
@@ -500,8 +503,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             "Title: {$title}",
             "Original file: {$filename}",
             '',
-            'SOURCE TEXT:',
-            $this->truncatedSourceText($sourceText),
+            EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
@@ -522,6 +524,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $globalPlan,
         array $batchMentions,
         array $figureCandidates = [],
+        array $sourceElements = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
 
@@ -538,8 +541,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'SOURCE METADATA:',
             "Title: {$title}",
             '',
-            'SOURCE TEXT:',
-            $this->truncatedSourceText($sourceText),
+            EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
@@ -552,17 +554,6 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
         ]);
-    }
-
-    private function truncatedSourceText(string $sourceText): string
-    {
-        $text = trim($sourceText);
-
-        if (mb_strlen($text) > self::MAX_SOURCE_TEXT_CHARS) {
-            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS)."\n[... text truncated ...]";
-        }
-
-        return $text !== '' ? $text : '(empty)';
     }
 
     private function indexContextJson(array $indexContext): string
