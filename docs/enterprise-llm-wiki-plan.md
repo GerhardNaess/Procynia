@@ -2853,6 +2853,15 @@ Før en slik schemaendring godkjennes må vi vite:
 
 8J-1B er nå levert, så forutsetningen er oppfylt. Det som gjenstår før 8J-2 designes er **observasjonsgrunnlag**, ikke infrastruktur: flere gyldige testtilfeller som viser om katalogen faktisk stabiliserer ownership, og hvor godt beslutningslaget klarer å knytte `owned_topics` til adresserbare kildeenheter.
 
+**Gjeldende anbefaling etter to observasjonspunkter: utsett 8J-2 og test bredere over tid.**
+
+- Det finnes foreløpig **ingen konkret observert ownership-feil** som krever fact/span-eierskap for å løses.
+- Begge de beviste 8J-1B-kjøringene ga CLEAN ownership, uten repair og uten run-20-feilklassen.
+- Fler-element-proveniens er presis på source-element-nivå i praksis (22 av 22 blokker i run 24).
+- Fact/span-granularitet er fortsatt en **mulig fremtidig forbedring**, men er ikke bevist nødvendig av dagens observasjoner.
+
+> **8J-2 er utsatt, ikke kansellert.** Behovet skal avgjøres av observert adferd over flere dokumenter, kunder og fagdomener — ikke av at fasen finnes i planen. Dukker det opp en konkret eierskapsfeil som elementnivå ikke kan uttrykke, er 8J-2 riktig svar.
+
 **Om måling av varians:** produktet tillater ikke flere ordinære importer av samme dokument, og planen skal **ikke** foreskrive omgåelse av den dokument-unikheten. Varians på identisk input må derfor måles enten via en eksisterende ikke-persisterende maintainer-dry-run, eller via separate legitime dokumentversjoner/testfixtures.
 
 ---
@@ -2889,31 +2898,108 @@ Generisk ownership-invariant håndhevet før sidegenerering
 
 **Eget prompt-gap (senere forbedringspunkt, ikke del av trinn 1).** Dagens `PAGE RESPONSIBILITY`-logikk sier presist at `owned_topics` er det den aktuelle siden skal forklare i dybden, og at listen skal være kort. Men prompten uttrykker **ikke** tydelig nok en *global* invariant over alle planlagte sider om at samme kildesubstans ikke skal eies flere steder — eksklusiviteten er formulert per side, aldri som en betingelse over unionen. Registreres som forbedringspunkt. **Prompt-presisering alene er ikke tilstrekkelig som garanti** — validatoren må på sikt kunne håndheve regelen strukturelt.
 
-#### Observasjonsstatus etter run 23 (2026-08-09)
+#### Observasjonsstatus — to reelle observasjonspunkter (2026-08-09)
+
+8J-1B er så langt observert på **to separate kompletterende dokumenter**. Begge dokumenteres under som selvstendige observasjonspunkter.
+
+##### Observasjonspunkt 1 — run 23
 
 **BEVIST**
 
 - 8J-1B var aktiv (worker-restart etter kodelevering + deterministisk prompt-reproduksjon uten AI-kall)
-- Structured source catalog nådde maintainer decision, 16 av 16 elementer
+- Structured source catalog nådde maintainer decision, **16 av 16** elementer
 - `SOURCE ELEMENTS` brukt, flat `SOURCE TEXT` ikke sendt i tillegg
 - 5 sider generert; alle kontrollerte sider `valid_first_pass`
 - Ingen `planned_section_only_links`, ingen repair, ingen ownership-kollisjon av run 20-typen
 - Full fler-element-proveniens allerede persistert per blokk
 
+##### Observasjonspunkt 2 — run 24
+
+Annet kildedokument, annet emneområde, samme kodeversjon.
+
+**BEVIST — 8J-1B aktiv**
+
+- Workerne var restartet **etter** commit `e0dba82`; kjøringen startet godt etter det. Ingen prosess kunne ha eldre kode lastet.
+- Maintainer-input brukte `SOURCE ELEMENTS`; flat `SOURCE TEXT` ble **ikke** sendt parallelt.
+- **35 av 35** source elements tilgjengelige, fordelt på **17 paragraph, 11 list_item, 7 table_row** — alle tre prosatypene representert.
+- Flat source text 5 667 tegn → rendret maintainer-input 7 105 tegn, dvs. **ca. +25,4 %**.
+
+> Dette støtter den eksisterende forventningen om at den **faste** katalog-overheaden (preamble) utgjør en mindre prosentandel jo større dokumentet er: ca. +36 % på et ~2 KB-dokument mot ca. +25 % på et ~5,7 KB-dokument. **+25 % er ikke en universell fast kostnad** — den avhenger av dokumentstørrelse og elementantall, og skal fortsatt måles per tilfelle.
+
+**BEVIST — ownership CLEAN**
+
+- Ingen konkurrerende canonical owners: hver substansiell kunnskapsenhet hadde nøyaktig én eier.
+- Artikkelen beholdt de dokument-/kundespesifikke rutinene og tersklene.
+- De nye concept-sidene eide den generiske/canonical substansen.
+- `reference_only` ble brukt konsekvent for relaterte konsepter, hver med navngitt owning page.
+- `excluded_topics` ble aktivt brukt til å holde lokale terskler og rutiner **ute** av canonical concept-sider.
+
+Dette er **samme arkitekturelle mønster som run 23**.
+
+**BEVIST — generering og coverage**
+
+- 6 sider totalt: article + summary + 4 nye concept-sider.
+- Alle fem kontrollerte innholdssider `valid_first_pass`.
+- `repairPlannedSections()` ikke kalt.
+- Ingen `planned_section_only_links`.
+- Ingen `EnterpriseWikiPageGenerationIncompleteException` tilhørende kjøringen.
+- **Run 20-feilklassen ble ikke observert.**
+
+**BEVIST — fler-element-proveniens i reell bruk**
+
+22 source_based-blokker undersøkt på tvers av alle sidene:
+
+- **22 av 22** hadde fler-element-proveniens
+- **0** manglet proveniens
+- **14** kombinerte flere source-element-typer i samme blokk
+- Bekreftet fungerende kombinasjoner: `paragraph + list_item`, `paragraph + table_row`, `paragraph + list_item + table_row`, og rene `table_row`-grupper
+
+Regresjonseksempler (**eksempler, ikke domeneregler**): en tabellblokk løste tre `table_row`-elementer; en sammendragsblokk løste 11 elementer på tvers av `paragraph`, `list_item` og `table_row`, alle med eget utdrag.
+
+##### Samlet status etter run 23 + run 24
+
+**BEVIST**
+
+- 8J-1B var aktiv i begge kjøringene
+- To separate kompletterende dokumenter
+- CLEAN ownership i begge
+- Ingen run-20-lignende kollisjon i noen av dem
+- Alle kontrollerte sider `valid_first_pass` i begge
+- Ingen AI-repair i noen av dem
+- Full fler-element-proveniens fungerer i praksis
+
 **INFERERT**
 
-- Source catalog *kan* ha bidratt til en mer granulær maintainer-plan (flere kandidater, mer presis ansvarsfordeling) — men flere variabler endret seg samtidig
+- Structured source catalog *kan* bidra til bedre og mer stabil canonical ownership
+- To like arkitekturelle resultater på ulike dokumenter styrker denne hypotesen
 
 **UKJENT**
 
-- Om source catalog faktisk stabiliserer ownership over flere kjøringer
-- Hvor stor del av planforskjellen som skyldes AI-varians framfor katalogen
+- Om dette holder over mange dokumenter
+- Om det holder på tvers av andre kunder og fagdomener
+- Hvor mye av forbedringen som skyldes katalogen kontra AI-varians — ingen kjøring har isolert katalogen som eneste variabel
+
+> **To vellykkede kjøringer på ulike dokumenter er vesentlig sterkere evidens enn én, men er ikke bevis for deterministisk stabilitet.**
 
 #### Separate observasjoner (ikke del av 8J-2)
 
-**Varians i best-practice-produksjon.** Én kjøring ga 5 beste-praksis-forslag; en senere kjøring på tilsvarende materiale ga **0 best_practice-blokker**. Verifisert ved parselaget (`[WIKI_PAGE_CONTENT_ORIGINS]`) at modellen returnerte null forslag på samtlige sider — ikke filtrert bort nedstrøms. Null best_practice-blokker gir null claims, som igjen gir null source references; det er korrekt kjedeoppførsel gitt inputen, ikke en feil. **Dette skal ikke leses som bedre kvalitet** — den faglige merverdien uteble. Registrert som en åpen stabilitets-/kvalitetsobservasjon, uavhengig av eierskapsarbeidet.
+**Varians i best-practice-produksjon.** Observert spenn over tre kjøringer:
 
-**Lint: mulig falskt positivt på artikkellenker.** `EnterpriseWikiAppliedRunLintService::checkArticleLinks()` sjekker kun typede `article_to_concept`/`article_to_entity`-relasjoner og mangler wikilink-fallbacken som `checkConceptLinks()` har og som entity-sjekken fikk i commit `bec838d`. Resultatet er at `article_without_concept_or_entity_links` kan rapporteres selv når artikkelen faktisk har inline wikilenker til concept-/entity-sider. Separat fra 8J, og **ikke** en forutsetning for 8J-2.
+| Kjøring | best_practice-blokker | Claims |
+|---|---|---|
+| tidligere kjøring | 5 forslag | — |
+| **run 23** | **0** | 0 |
+| **run 24** | **3** | **8** |
+
+Run 23s null ble verifisert ved parselaget (`[WIKI_PAGE_CONTENT_ORIGINS]`): modellen returnerte null forslag på samtlige sider — ikke filtrert bort nedstrøms. Null best_practice-blokker gir null claims, som igjen gir null source references; korrekt kjedeoppførsel gitt inputen, ikke en feil. **Null skal ikke leses som bedre kvalitet** — den faglige merverdien uteble.
+
+I run 24 ga de tre blokkene 8 claims, og de synlige forslagene var **legitime utvidelser av kilden**: hver begrunnelse pekte på et konkret hull i kildedokumentet, og hvert forslag la til en forpliktelse kilden ikke selv stiller — ikke omskriving av eksisterende kildekrav.
+
+**Konklusjon: best-practice-produksjonen varierer mellom dokumenter og kjøringer.** Registrert som en åpen stabilitets-/kvalitetsobservasjon. **Ikke koblet til eierskap eller 8J-2.**
+
+**Lint: falskt positivt på artikkellenker — bekreftet i to kjøringer.** `EnterpriseWikiAppliedRunLintService::checkArticleLinks()` sjekker kun typede `article_to_concept`/`article_to_entity`-relasjoner og mangler wikilink-fallbacken som `checkConceptLinks()` har og som entity-sjekken fikk i commit `bec838d`. Resultatet er at `article_without_concept_or_entity_links` rapporteres selv når artikkelen faktisk har inline wikilenker til concept-/entity-sider.
+
+Bekreftet i **både run 23 og run 24**: i run 24 hadde artikkelen 8 wikilenker til concept-sider og 1 til en entity-side, men null typede relasjoner — funnet ble likevel reist. Dette styrker den separate oppfølgingsoppgaven. Separat fra 8J, og **ikke** en forutsetning for 8J-2.
 
 #### Generelle arkitekturkrav (bindende for hele 8J)
 
