@@ -5,6 +5,7 @@ import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     getWikiQualityCheckCopy,
+    resolveWikiFindingSecondaryText,
 } from './wikiQualityChecks';
 import {
     RUN_TIMELINE_STEPS,
@@ -3196,9 +3197,10 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale }) {
                                                         </span>
                                                     )}
                                                     <span className="block text-base leading-6 font-semibold text-slate-900">{finding.title}</span>
-                                                    {finding.category === 'best_practice_suggestion' && finding.section_text && (
+                                                    {finding.category === 'best_practice_suggestion'
+                                                        && resolveWikiFindingSecondaryText(finding.title, finding.section_text) && (
                                                         <span className="block text-base leading-6 text-slate-600">
-                                                            {finding.section_text}
+                                                            {resolveWikiFindingSecondaryText(finding.title, finding.section_text)}
                                                         </span>
                                                     )}
                                                     <span className="block text-base leading-6 text-slate-600">

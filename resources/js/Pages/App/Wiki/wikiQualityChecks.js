@@ -68,6 +68,25 @@ export function isClaimRelatedWikiQualityCheck(code) {
     return CLAIM_QUALITY_CHECK_CODES.has(code);
 }
 
+function normalizeFindingText(value) {
+    return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+}
+
+/**
+ * A best-practice finding carries both a title and a section text. The title is the section's
+ * heading when one was detected, but falls back to the primary claim's own text when it was not —
+ * and the section text of a single-claim section is that very same sentence, so the reader saw the
+ * identical paragraph twice in a row. Returns the secondary text only when it genuinely adds
+ * something beyond the title; the reason line is unaffected either way.
+ */
+export function resolveWikiFindingSecondaryText(title, sectionText) {
+    if (normalizeFindingText(sectionText) === '') {
+        return null;
+    }
+
+    return normalizeFindingText(sectionText) === normalizeFindingText(title) ? null : sectionText;
+}
+
 export function splitWikiVerificationFindings(findings) {
     if (!Array.isArray(findings)) {
         return {

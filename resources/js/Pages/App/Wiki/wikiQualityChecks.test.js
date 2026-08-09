@@ -61,6 +61,38 @@ describe('wikiQualityChecks usage in the Wiki pages', () => {
         }
     });
 
+    test('the best-practice secondary text is dropped when it repeats the title', () => {
+        const text = 'Hver endringssak skal inneholde eksplisitt risikovurdering, testgrunnlag med '
+            + 'verifiserbare resultater og en tilbakeføringsplan.';
+
+        assert.equal(wikiQualityChecks.resolveWikiFindingSecondaryText(text, text), null);
+    });
+
+    test('identical text differing only in whitespace still counts as a repeat', () => {
+        const title = 'Hver endringssak skal inneholde eksplisitt risikovurdering.';
+        const sectionText = '  Hver endringssak skal   inneholde eksplisitt\nrisikovurdering.  ';
+
+        assert.equal(wikiQualityChecks.resolveWikiFindingSecondaryText(title, sectionText), null);
+    });
+
+    test('a section text that adds something beyond the title is kept verbatim', () => {
+        const title = 'Begrepsramme: ITIL og Incident management';
+        const sectionText = 'Hver endringssak skal inneholde eksplisitt risikovurdering. '
+            + 'Tilbakeføringsplanen skal være testet.';
+
+        assert.equal(
+            wikiQualityChecks.resolveWikiFindingSecondaryText(title, sectionText),
+            sectionText,
+            'the original string is returned untouched — normalization is only used for comparison',
+        );
+    });
+
+    test('an empty, blank or missing section text renders nothing', () => {
+        for (const value of ['', '   ', null, undefined]) {
+            assert.equal(wikiQualityChecks.resolveWikiFindingSecondaryText('Tittel', value), null);
+        }
+    });
+
     test('getWikiQualityCheckCopy resolves a known code and degrades safely for an unknown one', () => {
         const known = wikiQualityChecks.getWikiQualityCheckCopy('page_without_claims', {
             quality_checks: { page_without_claims: { label: 'Side mangler påstander', description: 'Beskrivelse.' } },
