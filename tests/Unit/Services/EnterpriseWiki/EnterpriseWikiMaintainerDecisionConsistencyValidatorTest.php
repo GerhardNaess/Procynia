@@ -454,6 +454,111 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidatorTest extends TestCase
     // Helpers
     // =========================================================================
 
+    // =========================================================================
+    // Run 18: "reference_only" is only valid when it actually points somewhere
+    // =========================================================================
+
+    public function test_reference_only_with_an_existing_owning_page_is_valid(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            $this->candidate('Hendelseshåndtering', 'reference_only', necessary: true, owningPageTitle: 'ITIL Incident Management'),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, [['title' => 'ITIL Incident Management']]);
+
+        $this->assertSame([], $issues);
+    }
+
+    public function test_reference_only_with_a_page_planned_in_the_same_decision_is_valid(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_pages'] = [['title' => 'Endringsstyring', 'action' => 'create', 'page_id' => null]];
+        $decision['concept_candidates'] = [
+            $this->candidate('Endringsmøte (CAB)', 'reference_only', necessary: true, owningPageTitle: 'Endringsstyring'),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+    }
+
+    /**
+     * The run-18 failure itself: the check only fired when necessary_for_article was true, so a
+     * targetless reference_only slipped through whenever that flag was false — leaving the article
+     * pointing onward to nothing.
+     */
+    public function test_reference_only_without_any_target_is_flagged_even_when_not_necessary_for_the_article(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            $this->candidate('Tjenesterapport (månedlig)', 'reference_only', necessary: false, owningPageTitle: null),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('Tjenesterapport (månedlig)', implode(' | ', $issues));
+        $this->assertStringContainsString('reference_only', implode(' | ', $issues));
+    }
+
+    public function test_reference_only_naming_a_page_that_does_not_exist_anywhere_is_flagged(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            $this->candidate('Tilgjengelighet 99,5 %', 'reference_only', necessary: true, owningPageTitle: 'Tjenestenivåstyring'),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('Tilgjengelighet 99,5 %', implode(' | ', $issues));
+    }
+
+    /**
+     * Aurora Serviceplattform is a named platform, so the valid resolution is the entity track —
+     * entity_pages counts as a real owning target (see plannedTitles()), and routing it there
+     * must satisfy the check without it ever becoming a concept page.
+     */
+    public function test_aurora_serviceplattform_is_satisfied_by_the_entity_track(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['entity_pages'] = [['title' => 'Aurora Serviceplattform', 'action' => 'create', 'page_id' => null]];
+        $decision['concept_candidates'] = [
+            $this->candidate('Aurora Serviceplattform', 'reference_only', necessary: true, owningPageTitle: 'Aurora Serviceplattform'),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+        $this->assertSame([], $decision['concept_pages'], 'the platform must never become a concept page');
+    }
+
+    /**
+     * A concrete threshold is a local fact: "exclude" is a legitimate resolution and must NOT be
+     * flagged into becoming its own concept page just because the article needs the number.
+     */
+    public function test_a_concrete_threshold_may_be_excluded_without_being_forced_onto_its_own_page(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            // Excluded and not claimed to be necessary — the number lives in the article's text.
+            $this->candidate('Tilgjengelighet 99,5 %', 'exclude', necessary: false, owningPageTitle: null),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision, []));
+        $this->assertSame([], $decision['concept_pages']);
+    }
+
+    public function test_exclude_still_needs_an_owning_page_when_the_article_is_said_to_need_it(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            $this->candidate('Tilgjengelighet 99,5 %', 'exclude', necessary: true, owningPageTitle: null),
+        ];
+
+        $issues = $this->validator()->findIssues($decision, []);
+
+        $this->assertNotEmpty($issues);
+        $this->assertStringContainsString('necessary for the article', implode(' | ', $issues));
+    }
+
     private function baseDecision(): array
     {
         return [

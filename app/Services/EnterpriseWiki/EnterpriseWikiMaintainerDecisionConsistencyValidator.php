@@ -195,20 +195,46 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
                     'concept_pages entry exists.';
             }
 
-            if (
-                in_array($candidateDecision, ['reference_only', 'exclude'], true)
-                && ($candidate['necessary_for_article'] ?? false) === true
-            ) {
-                $owningTitle = (string) ($candidate['owning_page_title'] ?? '');
+            // Run 18: "reference_only" means the article may mention the topic and link ONWARD to
+            // the page that owns it, so a reference_only candidate with nowhere to point is
+            // invalid on its own terms — regardless of necessary_for_article, which only says the
+            // article needs the topic, never that the topic needs its own page. This used to be
+            // checked only when necessary_for_article was true, leaving a targetless
+            // reference_only silently valid.
+            if ($candidateDecision === 'reference_only' && ! $this->hasResolvableOwningPage($candidate, $knownTitles)) {
+                $issues[] = "Concept candidate \"{$name}\" was decided \"reference_only\" without an ".
+                    'existing or planned owning page to point to — name one, create the page it belongs '.
+                    'on (concept_pages for a concept, entity_pages for an entity), or decide "exclude".';
+            }
 
-                if ($owningTitle === '' || ! $this->titleIsKnown($owningTitle, $knownTitles)) {
-                    $issues[] = "Concept candidate \"{$name}\" is marked necessary for the article but ".
-                        "decided \"{$candidateDecision}\" without an existing or planned owning page.";
-                }
+            // An excluded topic is not mentioned at all, so it needs no owning page — but the
+            // article claiming to need it while the decision drops it entirely is still a genuine
+            // contradiction.
+            if (
+                $candidateDecision === 'exclude'
+                && ($candidate['necessary_for_article'] ?? false) === true
+                && ! $this->hasResolvableOwningPage($candidate, $knownTitles)
+            ) {
+                $issues[] = "Concept candidate \"{$name}\" is marked necessary for the article but ".
+                    'decided "exclude" without an existing or planned owning page.';
             }
         }
 
         return $issues;
+    }
+
+    /**
+     * Whether the candidate names an owning page that actually exists in the index or is planned
+     * in this same decision (concept_pages or entity_pages — see plannedTitles()).
+     *
+     * @param  array<string, mixed>  $candidate
+     * @param  string[]  $knownTitles
+     */
+    private function hasResolvableOwningPage(array $candidate, array $knownTitles): bool
+    {
+        $owningTitle = (string) ($candidate['owning_page_title'] ?? '');
+
+        return $owningTitle !== '' && $this->titleIsKnown($owningTitle, $knownTitles);
     }
 
     /**
