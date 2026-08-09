@@ -272,6 +272,102 @@ class EnterpriseWikiMaintainerDecisionHierarchyValidatorTest extends TestCase
         ];
     }
 
+    // =========================================================================
+    // Run 16 (Aurora/ITSM): reusable subject-matter concepts must not be blocked
+    // =========================================================================
+
+    /**
+     * Run 16 planned 12 concept candidates from a ~1.9k-char ITSM document and created ZERO
+     * concept pages: Hendelseshåndtering, Endringsstyring and SLA were all reported with
+     * has_separate_source_evidence=false and has_reuse_value=false, and the gate rejected a
+     * "create" that was missing EITHER signal. A standard professional process that other pages
+     * will link to has reuse potential from its first source, so reuse value alone now carries it.
+     */
+    public function test_reusable_itsm_processes_are_not_blocked_on_thin_source_evidence(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            // Short sections in a small document — thin evidence, but genuinely reusable terms.
+            $this->candidate('Hendelseshåndtering', mentionedContext: 'section 3', hasEvidence: false, hasReuse: true),
+            $this->candidate('Endringsstyring', mentionedContext: 'section 4', hasEvidence: false, hasReuse: true),
+            $this->candidate('Tjenestenivå (SLA)', mentionedContext: 'section 5', hasEvidence: false, hasReuse: true),
+        ];
+
+        $this->assertSame([], $this->validator()->findIssues($decision));
+    }
+
+    /**
+     * The other half of the same scenario: concrete thresholds and purely local roles still must
+     * not become concept pages. Both signals absent is what the gate still stops.
+     */
+    public function test_concrete_figures_and_local_roles_are_still_blocked(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['concept_candidates'] = [
+            $this->candidate('Tilgjengelighet 99,5 %', mentionedContext: 'section 5', hasEvidence: false, hasReuse: false),
+            $this->candidate('Tjenesteeier (rolle)', mentionedContext: 'section 2', hasEvidence: false, hasReuse: false),
+        ];
+
+        $issues = implode(' | ', $this->validator()->findIssues($decision));
+
+        $this->assertStringContainsString('Tilgjengelighet 99,5 %', $issues);
+        $this->assertStringContainsString('Tjenesteeier (rolle)', $issues);
+    }
+
+    /**
+     * A named system stays an entity: routed through entity_pages, it is not a concept candidate
+     * decided "create" at all, so the concept gate never sees it and never objects.
+     */
+    public function test_a_named_platform_routed_as_an_entity_is_untouched_by_the_concept_gate(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['entity_pages'] = [['title' => 'Aurora Serviceplattform', 'action' => 'create', 'page_id' => null]];
+        $decision['concept_candidates'] = [
+            // Reported as a reuse of the entity page, exactly as run 16 did — never "create".
+            $this->candidate('Aurora Serviceplattform', mentionedContext: 'document title', hasEvidence: true, hasReuse: true, decision: 'reuse'),
+            $this->candidate('Hendelseshåndtering', mentionedContext: 'section 3', hasEvidence: false, hasReuse: true),
+        ];
+
+        $issues = $this->validator()->findIssues($decision);
+
+        $this->assertSame([], $issues);
+        $this->assertSame('Aurora Serviceplattform', $decision['entity_pages'][0]['title']);
+        $this->assertSame([], array_values(array_filter(
+            $decision['concept_candidates'],
+            static fn (array $c): bool => $c['name'] === 'Aurora Serviceplattform' && $c['decision'] === 'create',
+        )), 'the platform must never be decided as a concept page');
+    }
+
+    /**
+     * The whole Aurora mix in one pass: reusable processes survive, figures and local roles do
+     * not, and the platform stays an entity — proving central reusable terms are no longer
+     * systematically excluded while the overfragmentation guard still bites.
+     */
+    public function test_aurora_scenario_keeps_reusable_concepts_and_drops_local_facts(): void
+    {
+        $decision = $this->baseDecision();
+        $decision['entity_pages'] = [['title' => 'Aurora Serviceplattform', 'action' => 'update', 'page_id' => 45]];
+        $decision['concept_candidates'] = [
+            $this->candidate('Hendelseshåndtering', mentionedContext: 'section 3', hasEvidence: false, hasReuse: true),
+            $this->candidate('Endringsstyring', mentionedContext: 'section 4', hasEvidence: false, hasReuse: true),
+            $this->candidate('Tjenestenivå (SLA)', mentionedContext: 'section 5', hasEvidence: true, hasReuse: true),
+            $this->candidate('Tilgjengelighet 99,5 %', mentionedContext: 'section 5b', hasEvidence: false, hasReuse: false),
+            $this->candidate('Tjenesterapport (månedlig)', mentionedContext: 'section 6', hasEvidence: false, hasReuse: false),
+            $this->candidate('Driftsleder (rolle)', mentionedContext: 'section 2', hasEvidence: false, hasReuse: false),
+            $this->candidate('Aurora Serviceplattform', mentionedContext: 'document title', hasEvidence: true, hasReuse: true, decision: 'reuse'),
+        ];
+
+        $issues = implode(' | ', $this->validator()->findIssues($decision));
+
+        foreach (['Hendelseshåndtering', 'Endringsstyring', 'Tjenestenivå (SLA)'] as $keep) {
+            $this->assertStringNotContainsString($keep, $issues, "{$keep} must remain a viable concept page");
+        }
+
+        foreach (['Tilgjengelighet 99,5 %', 'Tjenesterapport (månedlig)', 'Driftsleder (rolle)'] as $drop) {
+            $this->assertStringContainsString($drop, $issues, "{$drop} must not become a concept page");
+        }
+    }
+
     private function candidate(
         string $name,
         string $mentionedContext,

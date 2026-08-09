@@ -22,10 +22,12 @@ namespace App\Services\EnterpriseWiki;
  * never an arbitrary "max N pages per document" (a document with several genuinely independent
  * concepts must still be allowed to produce several pages). Three complementary checks:
  *
- *  1. Insufficient evidence — a concept_candidates entry decided "create" but reporting
- *     has_separate_source_evidence=false and/or has_reuse_value=false (see
+ *  1. Insufficient evidence — a concept_candidates entry decided "create" while reporting
+ *     has_separate_source_evidence=false AND has_reuse_value=false (see
  *     EnterpriseWikiMaintainerDecisionPrompt) is, by the model's own admission, not a good
- *     standalone-page candidate.
+ *     standalone-page candidate. Requiring BOTH to be missing is deliberate: a term with reuse
+ *     potential earns its page on first sight even when this one document only devotes a short
+ *     passage to it, which is the normal shape of a reusable Enterprise Wiki concept.
  *  2. Shared-source cluster — three or more "create" candidates sharing the same (normalized)
  *     mentioned_context are very likely fragments of one short passage or bullet list, regardless
  *     of what their evidence flags say (a deterministic backstop against the model asserting
@@ -93,22 +95,19 @@ class EnterpriseWikiMaintainerDecisionHierarchyValidator
         $issues = [];
 
         foreach ($createCandidates as $candidate) {
-            $missing = [];
-
-            if ($candidate['has_separate_source_evidence'] !== true) {
-                $missing[] = 'separate substantial source evidence';
-            }
-
-            if ($candidate['has_reuse_value'] !== true) {
-                $missing[] = 'independent reuse value';
-            }
-
-            if ($missing === []) {
+            // Run 16: this used to reject a "create" candidate that was missing EITHER signal,
+            // which excluded every reusable subject-matter term a short source document mentions
+            // once — Hendelseshåndtering, Endringsstyring and SLA were all dropped that way. A
+            // thin passage is a weak signal, not a disqualification: an Enterprise Wiki concept
+            // page is worth creating on first sight of a term that other pages will plausibly link
+            // to later. Only a candidate with NEITHER its own source substance NOR reuse potential
+            // is genuinely just a local detail, and that is the one this still stops.
+            if ($candidate['has_separate_source_evidence'] === true || $candidate['has_reuse_value'] === true) {
                 continue;
             }
 
-            $issues[] = "Concept candidate \"{$candidate['name']}\" was decided \"create\" but lacks ".
-                implode(' and ', $missing).
+            $issues[] = "Concept candidate \"{$candidate['name']}\" was decided \"create\" but has ".
+                'neither separate substantial source evidence nor independent reuse value'.
                 ' — it should be a section under its natural owning page, or decided "reference_only"/'.
                 '"exclude" with an owning page named, not created as its own standalone page.';
         }
