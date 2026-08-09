@@ -85,6 +85,32 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame(['create', 'update'], $schema['properties']['source_article']['properties']['action']['enum']);
     }
 
+    public function test_the_block_does_not_claim_every_candidate_is_named_in_the_source_document(): void
+    {
+        // Candidates reached through the Wiki's own relations are NOT mentioned by name — the fixture's
+        // second page has mention_count 0 for exactly that reason. Telling the maintainer that every
+        // candidate is named would make it dismiss precisely the pages run 25 showed it must inspect.
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringNotContainsString('are named in the source document', $prompt);
+        $this->assertStringContainsString('without naming the page itself', $prompt);
+        $this->assertStringContainsString('on whether that document happens to mention the page by name', $prompt);
+
+        // The correction must not soften the guardrails in the other direction.
+        $this->assertStringContainsString('not a verdict', $prompt);
+        $this->assertStringContainsString('leave a candidate untouched when its substance is not affected', $prompt);
+    }
+
+    public function test_the_correction_leaves_candidate_rendering_and_data_untouched(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        // Only the framing sentences changed; every candidate row still renders identically.
+        $this->assertStringContainsString('[page 42] Governing Procedure', $prompt);
+        $this->assertStringContainsString('type: article | slug: governing-procedure | current version: 78 (v1) | content truncated', $prompt);
+        $this->assertStringContainsString('OLD-DEADLINE-MARKER', $prompt);
+    }
+
     /**
      * Domain-free candidates in the shape EnterpriseWikiPatchCandidateService returns them.
      *
