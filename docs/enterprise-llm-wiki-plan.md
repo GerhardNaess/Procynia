@@ -2,7 +2,7 @@
 
 Versjon: 0.26
 Dato: 2026-08-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Arkitekturbeslutning oppdatert 2026-08-06: claims gjelder Procynias egne påstander og innvendinger; direkte kildeinnhold skal spores via provenance, kildekobling og blokk-/elementreferanser, ikke via claims** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet** · **Første reelle kompletterende dokumentimport (run 20, 2026-08-09) avdekket et generelt ownership-gap. Korrigert 2026-08-09 etter kontroll av faktisk produksjonskall: Wiki HAR allerede structured prose provenance i sidegenereringen (paragraph/list_item/table_row/image med `source_element_key`); gapet er at maintainer decision — som fordeler `owned_topics` — ikke får den samme katalogen. **Fase 8J-1B levert, commit `e0dba82`** — maintaineren får nå samme adresserbare source catalog som sidegenerering, bevist aktiv i run 23. Fler-element-proveniens per blokk viste seg å være eksisterende arkitektur, ikke et gap. Neste steg er observasjon på flere gyldige testtilfeller før 8J-2 designes; 8J-1A gjenstår som selvstendig robusthetsarbeid. Se Fase 8J og Arkitekturnotat v0.12** · **Ny Fase 8K (2026-08-09): run 25 avdekket at et autoritativt endringsdokument ikke oppdaterer eksisterende current-innhold — gammel og ny substans står samtidig som gjeldende. Egen feilklasse fra 8J, scope MEDIUM, ikke avhengig av 8J-2. Se Fase 8K**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — backend produserte korrekt `rendered_markdown`, men inline wikilinks var ikke reelt runtime-verifisert som synlig klikkbare i UI før commit `2a3ad16` (se eget avsnitt) — og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · Fase 8I-6 (deterministisk lenke-lint og semantisk QA/repair av lenker) fullført, commit `014861f` · Inline wikilink-visning i UI reelt runtime-verifisert og rettet, commit `2a3ad16` — **Fase 8I er dermed komplett** · Post-ingest QA redegjort til deterministisk sluttkontroll, rettet 2026-07-13 · Manuell claim-godkjenning + automatisk kildegjenfinning mot nye dokumenter fullført, commits `a58bd40`/`7070d32` · QA-tilgang (tilleggsrolle) for claim-godkjenning fullført, commit `af1dcb6` · **Arkitekturbeslutning oppdatert 2026-08-06: claims gjelder Procynias egne påstander og innvendinger; direkte kildeinnhold skal spores via provenance, kildekobling og blokk-/elementreferanser, ikke via claims** · **Produktstrategi presisert (v0.10, 2026-08-01): claims/QA er en frivillig, ikke-blokkerende kvalitetssløyfe for Procynias egne påstander og innvendinger — bindende for alt videre arbeid** · **v0.10 realisert i kode (2026-08-01): QA-verdikt/Dokumenteier-godkjenning aldri lenger claim-gatet, Funn-panelet grupperer per canonical_fact_id, run-vid claim-takk (`max_new_claims_per_run`) lagt til, UI-språk rettet — se realiseringsnotatet ved slutten av dokumentet** · **Første reelle kompletterende dokumentimport (run 20, 2026-08-09) avdekket et generelt ownership-gap. Korrigert 2026-08-09 etter kontroll av faktisk produksjonskall: Wiki HAR allerede structured prose provenance i sidegenereringen (paragraph/list_item/table_row/image med `source_element_key`); gapet er at maintainer decision — som fordeler `owned_topics` — ikke får den samme katalogen. **Fase 8J-1B levert, commit `e0dba82`** — maintaineren får nå samme adresserbare source catalog som sidegenerering, bevist aktiv i run 23. Fler-element-proveniens per blokk viste seg å være eksisterende arkitektur, ikke et gap. Neste steg er observasjon på flere gyldige testtilfeller før 8J-2 designes; 8J-1A gjenstår som selvstendig robusthetsarbeid. Se Fase 8J og Arkitekturnotat v0.12** · **Ny Fase 8K (2026-08-09): run 25 avdekket at et autoritativt endringsdokument ikke oppdaterer eksisterende current-innhold — gammel og ny substans står samtidig som gjeldende. Egen feilklasse fra 8J, ikke avhengig av 8J-2. **8K-1 levert (commits `358daa1`/`f174320`) og observert 2026-08-10: PARTIAL SUCCESS — kontekst og modellbeslutning fungerte, men beslutningskontrakten og apply-stien er nedstrøms-blokkeringene.** Observasjonen korrigerte samtidig to antakelser i planen: produksjonsflyten stopper **ikke** ved `pageHasVersion()`, og dagens `action=update` er en **full-page regeneration** som faktisk fjernet urelatert substans og gammel proveniens. Scope revurdert til **MEDIUM–LARGE**. To nye bindende produktregler lagt til: `No duplicate canonical ownership on authoritative change` og `Canonical page granularity` (nytt tema er ikke nok for `create` — det må også være semantisk selvstendig). Se Fase 8K**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -881,7 +881,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Runtimeflyt (queue-splitting) | Staged page-generation queues (article+summary → concept+entity → verifisering) | **Fullført** (commit `b6ccd87`) — teknisk grunnmur for at sidegenerering faktisk fullfører |
 | **Fase 8I** | **Karpathy Wiki linking and incremental maintenance** | **Fullført (8I-1–8I-6), commits `d0a608d`, `ab35d52`, `716477e`, `014861f`.** Se egen seksjon under. |
 | **Fase 8J** | **Structured prose provenance and semantic ownership** | **8J-1B LEVERT** (commit `e0dba82`, bevist aktiv i run 23) — maintainer decision får adresserbar source catalog. Structured prose provenance og **full fler-element-proveniens per blokk** var allerede eksisterende arkitektur (korrigert 2026-08-09). **8J-1A** (persister/cache parser-output — robusthet/ytelse) gjenstår som selvstendig arbeid utenfor kritisk sti. **8J-2** (semantic fact/span ownership) utsatt til 8J-1B er observert på flere gyldige testtilfeller. Se egen seksjon under og Arkitekturnotat v0.12. |
-| **Fase 8K** | **Authoritative change documents and current-content patching** | **Nytt aktivt hovedspor (2026-08-09), ikke implementert.** Utløst av run 25: et autoritativt endringsdokument endret eksisterende krav, men ingen eksisterende side ble oppdatert — gammel og ny substans står nå samtidig som current (klassifisert **D — CONFLICTING**). Egen feilklasse fra 8J: 8J fordeler eierskap **mellom** sider, 8K håndterer **tidsutvikling** på en eksisterende eier. Scope **MEDIUM**. Subfaser 8K-1–8K-4. **Ikke avhengig av 8J-2.** Se egen seksjon under. |
+| **Fase 8K** | **Authoritative change documents and current-content patching** | **Aktivt hovedspor (2026-08-09). 8K-1 levert og observert; 8K-2 er neste aktive arbeid.** Utløst av run 25: et autoritativt endringsdokument endret eksisterende krav, men ingen eksisterende side ble oppdatert — gammel og ny substans stod samtidig som current (klassifisert **D — CONFLICTING**). Egen feilklasse fra 8J: 8J fordeler eierskap **mellom** sider, 8K håndterer **tidsutvikling** på en eksisterende eier. **Observasjonen etter 8K-1 (2026-08-10) viste at dagens `action=update` i produksjonsflyten er en full-page regeneration som fjerner urelatert substans og gammel proveniens — ikke et skip.** Scope **MEDIUM–LARGE**. Subfaser 8K-1–8K-4. **Ikke avhengig av 8J-2.** Se egen seksjon under. |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G, 8H **og 8I** | Sist — ikke aktiv fase. Verken 8J eller 8K er en ny gate for produksjonsaktivering (se de respektive seksjonene). |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -2888,12 +2888,15 @@ Generisk ownership-invariant håndhevet før sidegenerering
 
 8J-1A står utenfor den kritiske stien mot 8J-2 og kan gjøres uavhengig.
 
-**Sporene etter run 25 (2026-08-09):**
+**Sporene (oppdatert 2026-08-10 etter observasjonen av 8K-1):**
 
 ```text
 8J-1B   levert og observert på to reelle dokumenter
-8J-2    utsatt — observeres bredere over tid
-8K      nytt aktivt hovedspor (run 25), uavhengig av 8J-2
+8J-2    utsatt — observeres bredere over tid. IKKE prerequisite for noen 8K-subfase
+8K-1    levert og observert — PARTIAL SUCCESS, tilstrekkelig til å gå videre
+8K-2    neste aktive arbeid — decision contract + canonical owner/granularity rules
+8K-3    ekte patch application (ikke full rewrite)
+8K-4    validation/safety
 8J-1A   separat robusthets-/ytelsesspor, når som helst
 ```
 
@@ -3024,7 +3027,7 @@ Retningen skal være kundeuavhengig, språkuavhengig og domeneuavhengig, og skal
 
 ### Fase 8K — Authoritative change documents and current-content patching
 
-> **Status (2026-08-09): ikke implementert. Nytt aktivt hovedspor.** Utløst av run 25, den første importen av et *autoritativt endringsdokument* som eksplisitt endrer krav Wikien allerede har. Klassifisert **MEDIUM** (se scope-vurderingen nederst). Arbeidsbranch: `feat/wiki-authoritative-patch-flow`.
+> **Status (2026-08-10): 8K-1 levert og observert. 8K-2 er neste aktive arbeid.** Utløst av run 25, den første importen av et *autoritativt endringsdokument* som eksplisitt endrer krav Wikien allerede har. 8K-1 levert i commits `358daa1` (`EnterpriseWikiPatchCandidateService` + `EXISTING PAGE CANDIDATES`-blokken) og `f174320` (prompt-presisering), og observert på en ny import av samme endringsdokument 2026-08-10: **PARTIAL SUCCESS** — se «Observasjon etter 8K-1» under. Klassifisert **MEDIUM–LARGE** (se scope-vurderingen nederst). Arbeidsbranch: `feat/wiki-authoritative-patch-flow`.
 
 **8K er en annen feilklasse enn 8J og skal ikke slås sammen med den.**
 
@@ -3065,7 +3068,49 @@ Kjøringen ble klassifisert **D — CONFLICTING**: Wikien inneholder nå motstri
 
 ---
 
-#### Dagens `update` — DELVIS implementert
+#### Observasjon etter 8K-1 (2026-08-10)
+
+Samme endringsdokument ble importert på nytt etter at 8K-1 var levert. Observasjonen er dokumentert domeneuavhengig: den beskriver **hva mekanismene gjorde**, ikke fagbegrepene i dokumentet. To superseded krav omtales som **krav A** og **krav B**.
+
+**Hva 8K-1 leverte:**
+
+- Kandidatkonteksten gjorde **begge** de gamle current-verdiene synlige for maintaineren. Bevist ved at ingen av verdiene finnes i Wiki-indeksens excerpts (~200 tegn per side), mens beslutningen siterer dem verbatim.
+- **Minst ett avgjørende gammelt krav (B) var kun synlig via graph-hop** — det lå på en eksisterende side som kildedokumentet ikke navngir noe sted. Uten hopp langs den kanoniske wikilink-grafen ville kjøringen vært helt blind for krav B.
+- Maintaineren brukte kandidatinnholdet **aktivt**: den siterte de konkrete gamle verdiene, erklærte dem superseded, og lot en kandidat uten berørt substans korrekt være i fred (`candidate ≠ verdict`-guardrailen holdt).
+
+**Hva beslutningen faktisk gjorde:**
+
+- **Én** eksisterende page fikk `action=update` med korrekt, maskinlesbar `page_id` og en begrunnelse som navngir både gammel og ny verdi.
+- **En annen** eksisterende page ble eksplisitt identifisert som utdatert for *begge* krav — men kun i feltet `warnings`, som fritekst. Beslutningskontrakten hadde **ingen slot** som kunne adressere denne siden (`sourcePageSchema()` mangler `page_id`, og de typede shared-slots hører ikke til en article).
+- Den oppdaterte siden fikk faktisk **ny current version**.
+
+**Hva som gikk galt nedstrøms:**
+
+- Den nye versionen var en **full rewrite**, ikke en section patch. Kun én av fire blokker overlevde; siden krympet ~20 %; entitetens egen definisjon og en hel urelatert seksjon forsvant.
+- **Urelatert substans og gammel proveniens forsvant.** All blokk-proveniens til det opprinnelige kildedokumentet ble erstattet av proveniens til endringsdokumentet, for hele siden.
+- To urelaterte wikilenker forsvant, registrert som ordinær «stale link»-opprydding.
+- **Andre eksisterende pages beholdt de gamle current-verdiene** — krav A på to sider, krav B på tre sider. Ingen av dem fikk ny version.
+- QA passerte kjøringen. Ingen lint- eller QA-sjekk fanget noe av dette.
+
+**Resultat: kjøringen var fortsatt CONFLICTING.** Wiki-current gir fortsatt forskjellig svar avhengig av hvilken side leseren åpner — men på færre sider enn i run 25, og med den korrekte intensjonen eksplisitt dokumentert i beslutningen.
+
+**Klassifisering av 8K-1: `PARTIAL SUCCESS`** — tilstrekkelig til å gå videre. Nyansen er bindende for hvordan gapene fordeles:
+
+| Dimensjon | Vurdering |
+|---|---|
+| **Context availability** | **SUCCESS** — nødvendig gammel substans var synlig, graph-hop var avgjørende, ingen kandidat ble trunkert |
+| **Model decision quality** | **SUCCESS** — korrekt `action=update` med korrekt `page_id`, korrekt supersession-erkjennelse, ingen over-utløsning, ingen hallusinasjon |
+| **Downstream decision/apply capability** | **FAILURE — utenfor 8K-1.** Kontrakten kunne ikke bære det andre funnet (8K-2); apply-stien omskrev hele siden i stedet for å patche en seksjon (8K-3); ingen validering fanget resultatet (8K-4) |
+
+> **8K-1 skal ikke tilskrives de nedstrøms feilene.** Konteksten var korrekt og ble brukt korrekt. Det som feilet, feilet etter beslutningen.
+
+> **`warnings` som skyggekanal er et eget funn.** Maintaineren hadde det riktige svaret og leverte det som prosa ingen maskin leser. En kontrakt som tvinger dette ut som struktur er kjernen i 8K-2.
+
+---
+
+#### Dagens `update` — IMPLEMENTERT, men som full-page regeneration
+
+> **Korrigert 2026-08-10 etter observasjonen av faktisk produksjonskall.** En tidligere versjon av dette avsnittet beskrev datapathen som at `pageHasVersion()` = true fører til at siden hoppes over, slik at `update` «stopper før innholdet» og ingen ny version skrives. **Det er feil for den køede produksjonsflyten.** Observasjonen viste at en eksisterende page faktisk fikk ny current version. Beskrivelsen under er den verifiserte adferden.
 
 Maintainer-kontrakten har `ACTIONS = ['create', 'update']`, men utstyret er asymmetrisk:
 
@@ -3074,24 +3119,148 @@ Maintainer-kontrakten har `ACTIONS = ['create', 'update']`, men utstyret er asym
 | `sourcePageSchema()` | `source_article`, `source_summary` | ✅ | ❌ **mangler** |
 | `sharedPageSchema()` | `concept_pages`, `entity_pages` | ✅ | ✅ nullable, påkrevd non-null ved `update` |
 
-**Datapathen stopper før innholdet:**
+**Det finnes to forskjellige generasjons-stier, med forskjellig idempotensmodell. Planen må aldri blande dem:**
+
+| | **CLI/batch-sti** | **Queued production-sti** |
+|---|---|---|
+| Metode | `EnterpriseWikiGenerateAppliedPagesService::generate()` | `EnterpriseWikiGenerateAppliedPagesService::generatePageForRun()` |
+| Idempotens | `pageHasVersion($pageId)` — **enhver** version, **enhver** run | `enterprise_wiki_ingest_run_pages.generated_page_version_id` — **per run/page-pivot** |
+| Effekt på eksisterende page med version | **kan skippe** siden | **skipper ikke** — en ny run kan skrive ny version av en eksisterende page |
+| Brukes av | `wiki:generate-applied-pages` og QA sin `attemptRepair()` | `GenerateEnterpriseWikiAppliedPage`-jobben — **den ordinære dokumentflyten** |
+
+`generatePageForRun()` sin egen docblock sier det eksplisitt: pivot-idempotensen *«intentionally differs from generate()'s pageHasVersion() check … so that a new run can regenerate a page even though an older run already produced a version»*.
+
+**Verifisert datapath i produksjon:**
 
 ```text
 maintainer decision (action=update, page_id)
    ↓
 ApplyService::resolvePage()        ✅ finner eksisterende page (page_id-hint eller kanonisk slug)
    ↓
-ApplyService::syncReusedPage()     ⚠️  oppdaterer KUN page_type + last_source_hash
-                                       — tittel, slug, status og current version røres aldri
+ApplyService::syncReusedPage()     ⚠️  oppdaterer page_type + last_source_hash
+                                       — tittel, slug, status og current version røres ikke her
    ↓
-GenerateAppliedPagesService        ❌ pageHasVersion() = true  →  siden hoppes over
+pivot action = 'updated'
    ↓
-ingen ny page version              →  gammelt innhold forblir current
+GenerateEnterpriseWikiAppliedPage  →  generatePageForRun()
+   ↓
+generatePageFromSource(            ❗ INGEN eksisterende page-content som input
+    sourceText:        NYTT kildedokument,
+    additionalContext: reason + owned_topics fra beslutningen
+)
+   ↓
+writeVersion() → PageVersionWriter::writeNewCurrentVersion()
+   ↓
+NY current version                 ❗ hele siden skrevet på nytt fra det nye dokumentet alene
 ```
 
-`update` skal derfor beskrives som **delvis implementert**: sideoppløsningen fungerer, innholdsoppdateringen finnes ikke. I tillegg kan `action=update` i dag ikke uttrykke *hvilke* topics/seksjoner som endres, eller gammel vs. ny substans — den er en ren side-identitet.
+`update` skal derfor beskrives som **implementert, men usikret**: sideoppløsningen fungerer, en ny current version blir faktisk skrevet — men operasjonen er en **full-page regeneration uten preserve-/patch-semantikk**. Den eksisterende sidens innhold er aldri input til genereringen, verken via `generatePageFromSource()`-signaturen eller via `buildConceptEntityContext()`. Kombinert med instruksjonen «explain ONLY these in depth, nothing beyond them» er tap av urelatert substans det **deterministisk forventede** utfallet, ikke et uhell.
 
-**`page_id`-asymmetrien er et eget gap:** en artikkel- eller sammendragsside kan ikke identifiseres for oppdatering i det hele tatt.
+> **Dette gjør dagens update-path mer risikabel enn planen tidligere antok.** Tidligere lød risikoen «update gjør ingenting». Den reelle risikoen er «update kan tømme en eksisterende side for substans og proveniens som stammer fra andre kildedokumenter». Risikoen skalerer med hvor mange existing targets 8K-2 gjør adresserbare: én uttrykt update traff én side, flere uttrykte updates treffer flere sider. **8K-2 må derfor levere `preserve` samtidig som den utvider targeting — ikke etterpå.**
+
+I tillegg kan `action=update` i dag ikke uttrykke *hvilke* topics/seksjoner som endres, eller gammel vs. ny substans — den er en ren side-identitet.
+
+**`page_id`-asymmetrien er et eget gap:** en artikkel- eller sammendragsside kan ikke identifiseres for oppdatering i det hele tatt. Observasjonen viste konsekvensen konkret: maintaineren identifiserte riktig eksisterende article, men måtte levere funnet som `warnings`-prosa.
+
+**`syncReusedPage()` retyper stille:** den skriver `page_type` til slottets type. Dagens eneste «oppdater eksisterende side»-slot er altså **typet**, og feilbruk endrer sidens type uten advarsel. Se safety-kravet under 8K-2.
+
+---
+
+#### Invariant — `No duplicate canonical ownership on authoritative change`
+
+> **Bindende arkitekturregel, ikke prompt guidance.**
+
+Hvis ny autoritativ substans endrer noe som **allerede har en canonical owner**:
+
+- **`create` er ulovlig for den substansen.** Ny substans skal ikke etablere en ny side som konkurrerende eier av et tema som allerede har en eier.
+- **Den eksisterende eieren skal targetes for update/patch.**
+
+Maintaineren kan *foreslå* en handling. **Systemet skal ikke kunne apply en beslutning som etablerer konkurrerende canonical ownership for samme substans.** Regelen skal håndheves i apply/validering med strukturert beslutningsdata — ikke bare formuleres som en instruksjon modellen kan overse.
+
+```text
+substans har existing canonical owner
+   ├── beslutning sier create for samme substans   →  ULOVLIG, skal avvises/blokkeres
+   └── beslutning sier update/patch på eier        →  lovlig
+```
+
+Regelen er formulert på **substans**, ikke på sidetittel: to sider kan hete forskjellige ting og likevel eie samme krav. Deteksjonspresisjon er et 8K-4-tema; *regelen* er bindende fra nå.
+
+---
+
+#### Canonical page granularity
+
+> **Egen og strengere regel enn duplicate-ownership-invarianten.** Duplicate ownership handler om *endret* substans. Granularity handler om *all* ny substans, også substans som ikke endrer noe.
+
+**NY SIDE SKAL IKKE OPPRETTES BARE FORDI ET TEMA ER NYTT.**
+
+At et uttrykk eller tema ikke har egen side fra før er **ikke** grunnlag for `create`. Systemet skal først avgjøre om temaet naturlig tilhører en eksisterende canonical page. Hvis temaet:
+
+- er en **endring** av eksisterende tema
+- er en **utvidelse** av eksisterende tema
+- er en **spesialisering/variant** av eksisterende tema
+- er et naturlig **undertema** av et eksisterende canonical tema
+- eller på annen måte **semantisk hører hjemme** på en eksisterende canonical page
+
+skal temaet legges inn på den eksisterende siden.
+
+**Klassifisering av nye temaer — minst disse kategoriene:**
+
+| | Kategori | Beskrivelse | Handling |
+|---|---|---|---|
+| **A** | *Existing substance changed* | Temaet endrer eksisterende substans | **eksisterende page skal patches** |
+| **B** | *Existing topic extended* | Temaet tilfører ny substans innenfor samme canonical konseptområde | **eksisterende page skal utvides/amendes** |
+| **C** | *Existing topic specialized* | Temaet er en variant, spesialisering eller underkategori av eksisterende tema | **eksisterende page skal normalt utvides — ikke ny page** |
+| **D** | *Reference-only* | Temaet omtales, men tilfører ikke canonical substans | **reuse / reference_only** |
+| **E** | *New independent canonical topic* | Temaet er nytt **OG** semantisk selvstendig | **`create` kan være tillatt** |
+
+> **`new` er ikke tilstrekkelig for `create`. Det må også være `semantically independent`.**
+
+---
+
+#### Hard create-gate
+
+`create` av en ny canonical knowledge page skal bare være lov når **begge** er sanne:
+
+1. **ingen existing canonical page eier den aktuelle substansen**, og
+2. **temaet kan ikke naturlig innpasses som section/topic på en existing canonical page**
+
+Dette skal **ikke** være en modellpreferanse. Det skal være en **gate** som 8K-2 gjør uttrykkbar og som 8K-4 senere kan validere deterministisk eller semi-deterministisk med strukturert beslutningsdata. Beslutningen må derfor bære nok struktur til at gaten kan evalueres — se «Create eligibility» i 8K-2-scope.
+
+```text
+create-gate
+   ├── (1) ingen existing owner for substansen ?
+   │        nei  →  create ULOVLIG, target existing owner
+   └── (2) kan ikke innpasses som section/topic på existing page ?
+            nei  →  create ULOVLIG, utvid existing page
+        begge ja →  create tillatt
+```
+
+**Generisk illustrasjon fra observasjonen (ikke en domeneregel).** Kjøringen opprettet en ny concept-side for et begrep som var nytt i kildedokumentet, hadde egen terminologi og tilførte reell detalj — mens en eksisterende concept-side allerede omtalte samme begrep på klassifiseringsnivå, med en formulering som kan stå i spenning mot den nye siden. Læringen er **generell, ikke en konklusjon om at den konkrete siden er feil**:
+
+> Et nytt begrep kan ha ny terminologi, ny detalj og være nytt i kildedokumentet **uten** dermed å fortjene en egen canonical page. Systemet må først vurdere: *er dette egentlig en utvidelse av et eksisterende canonical topic?* Uten den vurderingen vokser Wikien i antall sider i stedet for i presisjon, og relatert kunnskap om samme tema spres over konkurrerende eiere.
+
+Merk at den eksisterende siden med det overlappende begrepet lå **utenfor** 8K-1s kandidat-cap. Granularity-vurderingen er derfor avhengig av kandidatdiscovery — se «8K-1 — gjenværende gap etter observasjonen».
+
+---
+
+#### Document page vs. canonical knowledge page
+
+**Dette er to forskjellige ting, og skal ikke blandes.**
+
+En **ny source article** og et **nytt document summary** kan være fullt legitime selv om dokumentet *bare* endrer eksisterende kunnskap:
+
+- endringsdokumentet kan få egen article — den representerer dokumentet, dets identitet, dato, beslutningseier og ordlyd
+- endringsdokumentet kan få eget summary
+
+**Men:** disse sidene skal **ikke automatisk bli canonical owner** av de underliggende fagtemaene som allerede har en existing owner.
+
+| | *Document representation* | *Canonical knowledge ownership* |
+|---|---|---|
+| Spørsmål | «Hvilket dokument sa dette, og når?» | «Hvor står gjeldende sannhet om dette temaet?» |
+| Legitim ny side ved endringsdokument | **JA** | **Bare hvis create-gaten passerer** |
+| Ved endret krav med existing owner | dokumentsiden beskriver *endringen* | existing owner skal patches |
+
+Dette var nøyaktig feilmodusen i run 25: de nye verdiene ble tildelt endringsnotat-artikkelen som eier, i stedet for å oppdatere den eksisterende canonical eieren. Observasjonen etter 8K-1 viste framgang — én existing owner ble faktisk oppdatert — men de nye dokumentsidene er fortsatt de eneste bærerne av det andre endrede kravet.
 
 ---
 
@@ -3121,9 +3290,11 @@ Run 25 viste konkret at **ingen av de gamle kravverdiene var synlige i indeks-pa
 
 Dette er et **faktisk kontekstgap**, ikke en beslutningsfeil: maintaineren hadde ikke grunnlag for å foreslå en oppdatering av et krav den ikke kunne se.
 
+> **Lukket av 8K-1 (2026-08-10).** Kontekstgapet er verifisert lukket for de nødvendige sidene: observasjonen bekreftet at ingen av de gamle verdiene finnes i indeks-excerptene, mens beslutningen siterer dem verbatim fra `EXISTING PAGE CANDIDATES`. Den kompakte indeksen er beholdt uendret — kandidatblokken er additiv.
+
 ---
 
-#### Anbefalt kontekstmodell — to trinn
+#### Anbefalt kontekstmodell — to trinn *(implementert i 8K-1)*
 
 ```text
 TRINN 1   maintaineren bruker dagens kompakte Wiki-index til å identifisere
@@ -3147,17 +3318,23 @@ Det eksisterende kandidat-/tekstsøk-mønsteret i `EnterpriseWikiIncrementalReli
 
 > Løsningen skal **ikke** låses til embeddings/RAG.
 
+**Realisert i 8K-1** som `EnterpriseWikiPatchCandidateService`, med to deterministiske strukturelle signaler i streng prioritetsrekkefølge: (1) sider navngitt i dokumentet, (2) **ett hopp** langs den kanoniske wikilink-grafen. Cap 3 kandidater, 6000 tegn per kandidat, trunkering på blokkgrenser, kundeskopet i spørringen, kun current versions, arkivert/superseded/rejected ekskludert. Ingen embeddings, ingen RAG. Speiler `EnterpriseWikiIncrementalRelinkService::findCandidates()` som forutsett.
+
+> **Graph-hop er empirisk validert og skal beholdes.** Observasjonen viste at kildedokumentet navngav **kun én** eksisterende side, og at det andre superseded kravet **utelukkende** var synlig på en side nådd via grafen. Uten signal 2 hadde 8K-1 vært halvblind.
+
 ---
 
 #### Patch-granularitet
 
 | Nivå | Beskrivelse | Vurdering |
 |---|---|---|
-| **A** | Page regeneration — hele eksisterende side regenereres | Risikerer å miste substans fra andre kildedokumenter |
+| **A** | Page regeneration — hele eksisterende side regenereres | **Dette er dagens faktiske adferd ved `action=update`.** Mister substans og proveniens fra andre kildedokumenter — observert, ikke hypotetisk |
 | **B** | **Section/topic patch** — kun berørte seksjoner/topics revideres | **Anbefalt første 8K-scope** |
 | **C** | Fact/span patch — konkret faktum/span erstattes | Mest presist, krever identitet som ikke finnes ennå |
 
 **Valgt: B.** Seksjonsgrenser og `owned_topics` finnes allerede, og eksisterende seksjonssplicing kan gjenbrukes. Hele side-regenerering (A) er utrygt når en side er bygget fra flere kilder.
+
+> **A er ikke et alternativ som «kan vurderes senere» — A er statusen som skal vekk.** Observasjonen målte A sin faktiske kostnad på en reell side: 1 av 4 blokker overlevde, ~20 % tekst borte, sidens egen definisjon borte, all proveniens til det opprinnelige kildedokumentet borte, to urelaterte wikilenker borte. 8K-3 skal erstatte A med B for existing-page-targets.
 
 > **Fact/span (C) er ikke en forutsetning for første 8K-leveranse.**
 
@@ -3184,33 +3361,93 @@ Begrepet «superseded» finnes i kodebasen, men gjelder **page versions** — ik
 
 ---
 
-#### `pageHasVersion()` skal ikke bare fjernes
+#### De tre utfallene — og hvor guarden faktisk finnes
 
-Dagens guard beskytter eksisterende sider mot utilsiktet overskriving. **8K skal ikke løses ved å fjerne den.**
+> **Korrigert 2026-08-10.** Dette avsnittet het tidligere «`pageHasVersion()` skal ikke bare fjernes» og forutsatte at guarden beskytter eksisterende sider i produksjon. **Den gjør den ikke.** `pageHasVersion()` finnes bare i CLI/batch-stien `generate()`; den køede produksjonsstien `generatePageForRun()` er pivot-idempotent og skriver ny version på en eksisterende page uten å konsultere den. Beskyttelsen som planen antok fantes, finnes altså **ikke** i den flyten dokumentimport faktisk bruker.
 
-I stedet må apply/generation skille eksplisitt mellom tre utfall:
+Apply/generation må derfor skille eksplisitt mellom tre utfall — og skillet må håndheves i **produksjonsstien**, ikke bare i CLI-stien:
 
 ```text
-CREATE         ny side, ny versjon
-REUSE / SKIP   eksisterende side, ingen endring          ← dagens oppførsel, beholdes
+CREATE         ny side, ny versjon                       ← krever at create-gaten passerer
+REUSE / SKIP   eksisterende side, ingen endring
 PATCH          eksisterende side, ny versjon             ← kun denne får skrive
 ```
 
-Bare **PATCH** skal kunne opprette en ny version på en eksisterende side.
+Bare **PATCH** skal kunne opprette en ny version på en eksisterende side. I dag finnes ikke skillet: `action=update` går rett i full regenerering, som er verken REUSE/SKIP eller PATCH.
+
+`pageHasVersion()` i CLI-stien skal ikke bare fjernes — den beskytter fortsatt batch- og QA-repair-kall mot utilsiktet overskriving. Men den skal heller ikke beskrives som produksjonsflytens vern.
 
 ---
 
-#### Patch decision contract
+#### Patch decision contract — 8K-2-scope
 
-Kontrakten skal **ikke** låses til et endelig JSON-schema ennå. Den må minst kunne uttrykke:
+Kontrakten skal **ikke** låses til et endelig JSON-schema eller databasefelter ennå, og **enum-navn er ikke låst**. Skillet mellom nødvendige, nyttige og senere felter er bindende; navngivningen er ikke.
 
-- eksisterende sides identitet
-- `action = patch/update`
-- hvilket `owned_topic`/seksjon som påvirkes
-- hva den nye substansen skal gjøre: **replace** / **amend** / **preserve**
-- hvilke source elements som begrunner endringen
+**Nødvendige — hvert punkt direkte begrunnet i observasjonen:**
 
-For `source_article`/`source_summary` må eksisterende sideidentitet kunne uttrykkes i det hele tatt — dagens manglende `page_id` er registrert som et gap.
+| Behov | Begrunnelse fra observasjonen |
+|---|---|
+| **`target_page_id` for en vilkårlig existing page, uavhengig av `page_type`** | Maintaineren identifiserte riktig existing article, men hadde ingen slot for den — funnet endte som `warnings`-prosa. Dette er hovedblokkeringen |
+| **`target` section/topic-identitet, maskinlesbar** | `owned_topics` er sideomfattende fritekst, ikke en adresse. Uten adresse blir enhver update en full rewrite |
+| **`operation`: replace / amend / preserve** | `update` er én udifferensiert verdi, tolket nedstrøms som «regenerer alt» |
+| **eksplisitt beskrivelse av superseded substance** | I dag bare implisitt i `reason`-prosa; ingenting en maskin kan validere mot |
+| **eksplisitt beskrivelse av replacement/amendment substance** | I dag bare implisitt i `owned_topics` |
+| **source element references som autoriserer endringen** | `source_element_key` finnes i dag bare på `planned_figures`, ikke på sideoppdrag |
+| **Existing owner match** — «denne nye substansen hører til eksisterende page X» | Nødvendig for at duplicate-ownership-invarianten kan håndheves i apply |
+| **Relationship to existing topic** — konseptuelt f.eks. *replaces / amends / extends / specializes / references / independent_new_topic* | Nødvendig for at granularity-klassifiseringen A–E kan uttrykkes i det hele tatt. **Enum-navn ikke låst** |
+| **Create eligibility** — nok struktur til at systemet kan validere om `create` faktisk er tillatt | Create-gaten må kunne evalueres, ikke bare instrueres |
+| **Multiple targets** — samme endring kan kreve update på flere existing pages | Observasjonen: samme superseded verdi lå current på flere sider samtidig. Én target er ikke nok |
+| **`preserve` av urelatert content** | Se eget avsnitt under — dette er 8K-2, ikke 8K-3 |
+
+**Nyttige:**
+
+- eksplisitt supersession-relasjon mellom ny og gammel eier
+- strukturert erstatning for `warnings`-skyggekanalen, slik at et erkjent-men-uadresserbart funn blir en maskinlesbar oppgave i stedet for prosa
+- begrunnelse per target, ikke bare per side
+
+**Senere (fact/span-nivå — ikke 8K-2):**
+
+- konkret gammel/ny verdi som strukturert fakta (`enterprise_wiki_canonical_facts` er tom i dag og ikke i bruk)
+- tekstspenn/offset-presisjon i target
+- kryss-side-faktidentitet for konfliktdeteksjon
+
+For `source_article`/`source_summary` må eksisterende sideidentitet kunne uttrykkes i det hele tatt — dagens manglende `page_id` er registrert som et gap, og observasjonen viste at det er nettopp dette gapet som blokkerte det ene funnet.
+
+---
+
+#### `preserve` er førsteklasses i 8K-2 — ikke en 8K-3-detalj
+
+Observasjonen viste at dagens update **faktisk**:
+
+- fjernet urelatert substans (1 av 4 blokker overlevde)
+- fjernet urelaterte wikilenker
+- fjernet gammel proveniens for hele siden
+
+Det er ikke en implementasjonssvakhet man kan rette i apply alene: **kontrakten kan i dag ikke uttrykke hva som skal beholdes.** En apply-mekanisme kan ikke bevare det beslutningen ikke har språk for.
+
+> **8K-2 skal definere `preserve`. 8K-3 skal implementere det.**
+
+Kontrakten må derfor kunne uttrykke **begge sider av operasjonen**:
+
+```text
+hva som skal endres     →  target section/topic + operation + replacement substance
+hva som skal beholdes   →  preserve, eksplisitt uttrykt
+```
+
+Rekkefølgen er ikke valgfri: så snart 8K-2 gjør flere existing pages adresserbare **uten** `preserve`, øker skadepotensialet proporsjonalt med antall targets. `preserve` og utvidet targeting må leveres i samme kontrakt.
+
+---
+
+#### Safety — existing page-identitet skal ikke endres som bieffekt
+
+Når en existing page targetes:
+
+- **page ID beholdes**
+- **`page_type` beholdes** — aldri endret som bieffekt av hvilken slot targetet ble uttrykt i
+- **`title` beholdes**, med mindre en særskilt, eksplisitt rename-mekanisme finnes
+- **`slug` beholdes**, med mindre en særskilt, eksplisitt rename-mekanisme finnes
+
+> **Bruk av en «feil» typed slot skal ikke stilltiende endre `page_type`.** Dagens `EnterpriseWikiMaintainerDecisionApplyService::syncReusedPage()` skriver `page_type` til slottets type. Med dagens ene shared-slot er konsekvensen begrenset; i det øyeblikket 8K-2 gjør flere sidetyper adresserbare blir den en reell datakorrupsjonsvei. **Dette er et 8K-2 safety-krav, ikke en 8K-3-detalj.**
 
 ---
 
@@ -3252,34 +3489,80 @@ Run 25 ga derfor ingen teknisk feil, selv om Wiki-current inneholder to motstrid
 
 Første 8K-scope trenger **ikke** nødvendigvis en generell semantisk conflict engine. Men acceptance criteria skal sikre at en vellykket patch ikke etterlater det gamle kravet current på canonical owner. **Cross-page conflict detection registreres som mulig senere hardening.**
 
+**Bekreftet av observasjonen etter 8K-1:** kjøringen fikk `qa_status=passed` mens flere eksisterende sider fortsatt bar de superseded verdiene, mens en oppdatert side hadde mistet urelatert substans, og mens all gammel blokk-proveniens på den siden var borte. `qa_result` inneholder kun eksistens-/innholdssjekker (`article_exists`, `summary_exists`, `*_has_content`) og lint-tellinger; ingen av dem angår innholdskonflikt, substanstap eller proveniens. **Ingen sjekk feilet fordi ingen relevant sjekk finnes.** `enterprise_wiki_canonical_facts` — det opplagte fundamentet for konfliktdeteksjon — er tom og ikke i bruk.
+
 ---
 
-#### Subfaser
+#### 8K-1 — gjenværende gap etter observasjonen
 
-**8K-1 — Patch candidate discovery and existing-content context**
-Identifisere relevante eksisterende sider, hente målrettet current content. **Ingen writes.**
+> **8K-1 trenger ingen blokkerende korreksjon før 8K-2.** Gapene under er reelle, men ingen av dem blokkerte observasjonen, og ingen av dem endrer utfallet så lenge kontrakten ikke kan adressere flere existing pages.
 
-**8K-2 — Patch decision contract**
-Uttrykke eksisterende side + berørt topic/seksjon + replace/amend/preserve. Løse sideidentitet for source- og shared pages.
+- **Ranking skiller grafnærhet fra faktisk superseded substans dårlig.** Rangeringen er *mentions*, deretter *wikilink-grad*, deretter page id. Den finner naboer, ikke eiere av berørt substans.
+- **Cap 3 traff ikke alle existing pages som hadde gamle current-verdier.** To av fire faktiske eiere var innenfor cap; to falt utenfor.
+- **Kandidat 3 var mindre relevant enn sider utenfor cap.** Kandidat 3 inneholdt ingen superseded substans, mens sider på plass 4 og 5 inneholdt begge/ett av de gamle kravene. Den eksisterende siden med overlappende begrep (se granularity-illustrasjonen) lå også utenfor cap.
+- **Konteksten er sidebasert, ikke verdibasert.** Ingenting peker maintaineren mot «hvilke current sider inneholder denne verdien».
+
+**Handlingsregler:**
+
+> **Cap skal ikke økes refleksivt.** Å heve cap ville hentet inn de to manglende eierne, men uten en kontrakt som kan adressere dem endrer det ingenting — og kostnaden i prompt-budsjett er reell.
+
+> **Etter 8K-2 skal kandidatdiscovery vurderes på nytt, med et sterkere substans-/value-signal** framfor en større cap. Når fullstendighet i eiersettet blir lastbærende (fordi flere targets kan uttrykkes), er «hvilke sider inneholder denne verdien» et mer presist og billigere signal enn «hvilke sider ligger nær i grafen».
+
+> **Graph-hop beholdes.** Empirisk validert og nødvendig — se «Anbefalt kontekstmodell».
+
+---
+
+#### Subfaser og rekkefølge
+
+**8K-1 — Patch candidate discovery and existing-content context** — **LEVERT og OBSERVERT (commits `358daa1`, `f174320`)**
+Identifiserer relevante eksisterende sider og henter målrettet current content. **Ingen writes.** Status: **PARTIAL SUCCESS — tilstrekkelig til å gå videre.** Context availability og model decision quality = SUCCESS; nedstrøms kapabilitet = FAILURE utenfor 8K-1.
+
+**8K-2 — Patch decision contract + canonical owner/granularity rules** — **NESTE AKTIVE ARBEID**
+Uttrykke existing page (vilkårlig `page_type`) + berørt topic/seksjon + replace/amend/preserve + **preserve av urelatert content** + existing owner match + relationship to existing topic + create eligibility + multiple targets. Løse sideidentitet for source- og shared pages. Håndheve at `page_type`/`title`/`slug` ikke endres som bieffekt.
 
 **8K-3 — Existing-page section patch application**
-Gjenbruke version writer, lage ny current version, bevare uendrede seksjoner, korrekt proveniens.
+Ekte patch-sti: existing current content som input, målrettet section/topic-operasjon, bevaring av uendrede blocks og deres proveniens, deterministisk validering, gjenbruk av version writer. **Skal ikke gjenbruke dagens `action=update` som full regeneration.**
 
 **8K-4 — Patch validation and conflict safety**
-Verifisere at gammel substans ikke lenger er current på canonical owner, at urelaterte seksjoner er bevart, forhindre utilsiktet rewrite, hardening rundt konflikter.
+Duplicate canonical ownership, page granularity, preserve safety og cross-page stale substance som målrettede validation gates.
+
+**Ikke i 8K-stien:**
+
+- **8J-2** — fortsatt separat spor, **fortsatt ikke prerequisite** for noen 8K-subfase
+- **8J-1A** — fortsatt separat robusthets-/ytelsesspor
 
 > Ingen 8K-5 eller flere subfaser uten konkret observert behov.
 
 ---
 
+#### 8K-4 — validation gates
+
+Fire målrettede gates. **Ingen generell ontologi eller semantic graph engine skal bygges nå** — dette er avgrensede sikkerhetssjekker rundt 8K-beslutninger, ikke en ny kunnskapsmotor.
+
+**1. Duplicate canonical ownership**
+Et apply-resultat skal ikke kunne ende med at gammel canonical owner fortsatt er current **samtidig** som en ny side er etablert som konkurrerende eier av samme substans.
+
+**2. Page granularity**
+Systemet skal kunne flagge at en ny canonical page er opprettet for et tema som naturlig burde vært section/topic på en existing page — altså at create-gaten ble passert på feil grunnlag.
+
+**3. Preserve safety**
+Et update-resultat skal kunne flagges hvis urelaterte blocks forsvinner, hvis proveniens for uendrede blocks forsvinner, eller hvis eksisterende wikilenker forsvinner uten eksplisitt begrunnelse. Alle tre ble observert i samme kjøring, uten et eneste funn.
+
+**4. Cross-page stale substance**
+Et endret krav skal ikke kunne stå som gammel/current på andre relevante pages uten at dette oppdages eller registreres.
+
+---
+
 #### Acceptance criteria (fixture-basert regresjonstest)
 
-Bygges som fixture med en «før»-Wiki og et endringsdokument — **ikke** som avhengighet av run 25s data.
+Bygges som fixture med en «før»-Wiki og et endringsdokument — **ikke** som avhengighet av run 25s eller observasjonskjøringens data. To superseded krav omtales som **krav A** og **krav B**.
 
-1. Gammel verdi for det første endrede kravet er ikke lenger current på canonical owner
-2. Ny verdi er current på canonical owner
-3. Gammel verdi for det andre endrede kravet er ikke lenger current
-4. Ny verdi er current
+**Overordnet sluttilstand (hele 8K):**
+
+1. Gammel verdi for krav A er ikke lenger current på canonical owner
+2. Ny verdi for krav A er current på canonical owner
+3. Gammel verdi for krav B er ikke lenger current
+4. Ny verdi for krav B er current
 5. Eksisterende canonical page-IDer beholdes
 6. Ny page version opprettes
 7. Gammel version beholdes historisk med `is_current = false`
@@ -3294,21 +3577,83 @@ Bygges som fixture med en «før»-Wiki og et endringsdokument — **ikke** som 
 
 > Generell cross-page semantisk konfliktdeteksjon er **ikke** en forutsetning for første 8K-leveranse, så lenge kriteriene over er oppfylt.
 
+**8K-2 (kontrakt) — patch-write kreves IKKE her:**
+
+1. En vilkårlig existing page kan targetes **uavhengig av `page_type`** — inkludert en article som ikke er dokumentets egen. *Regresjonskrav: det funnet som i observasjonen endte i `warnings` skal bli et strukturert target.*
+2. `target_page_id` er maskinlesbar
+3. Target section/topic er maskinlesbar
+4. Superseded substance er eksplisitt uttrykt i et dedikert felt, ikke i fritekst
+5. Replacement-/amendment-substance er eksplisitt uttrykt
+6. Source elements er eksplisitt knyttet til endringen
+7. `preserve` av urelatert content kan uttrykkes
+8. Flere existing targets kan uttrykkes for samme substansendring
+9. `page_type` kan ikke endres som bivirkning av hvilken slot targetet ble uttrykt i; `title` og `slug` likeså uten eksplisitt rename-mekanisme
+10. `create` kan ikke godkjennes for substans som har en existing canonical owner
+11. `create` kan ikke godkjennes for et nytt tema som naturlig tilhører en existing canonical page (kategori B/C)
+12. Et nytt, semantisk selvstendig tema (kategori E) kan fortsatt opprettes
+13. Ny document article/summary kan fortsatt opprettes **uten** å bli canonical owner av et eksisterende fagtema
+14. `warnings` skal ikke være den eneste kanalen for et identifisert patch-behov
+15. Fixture-basert, aldri avhengig av en konkret runs data
+
+**8K-3 (patch application):**
+
+1. Patch bruker **existing current content som input**
+2. Kun targeted section/topic endres
+3. Uendrede blocks bevares
+4. Uendrede blocks beholder sin eksisterende proveniens
+5. Urelaterte wikilenker bevares
+6. Existing page ID beholdes
+7. `page_type`, `title` og `slug` beholdes
+8. Gammel current version blir historisk (`is_current = false`)
+9. Ny current version opprettes via eksisterende `writeNewCurrentVersion()`
+10. En patch-generert version **kan skilles fra** en full page generation (f.eks. i `generated_by_model`, slik relink-stien alt gjør)
+11. Full regeneration skal **ikke** brukes som fallback uten en eksplisitt safety gate
+12. Blokkantall og lenkegraf før/etter logges for hver patch-write
+
+**8K-4 (validation/safety):**
+
+1. QA skal **ikke** passere dersom samme superseded substans fortsatt er current på en annen relevant canonical page
+2. QA skal **ikke** passere dersom en update har fjernet urelatert substans uten en eksplisitt beslutning om det
+3. QA skal **ikke** passere dersom proveniens for preserved content forsvinner
+4. QA skal kunne oppdage/flagge konkurrerende canonical ownership
+5. QA skal kunne oppdage/flagge feil page-granularity — ny side opprettet for et tema som burde vært en eksisterende section/topic
+6. Tapte urelaterte wikilenker ved update gir funn
+
+> Disse er **målrettede safety checks rundt 8K-beslutninger**. Det kreves ingen generell ontologi eller semantic graph engine for å oppfylle dem.
+
 ---
 
-#### Scope-klassifisering: MEDIUM
+#### Scope-klassifisering: MEDIUM–LARGE *(revurdert 2026-08-10)*
 
-**Ikke SMALL**, fordi maintaineren mangler nødvendig current-content-kontekst, update-pathen stopper før innholdet, og `source_article`/`source_summary` mangler sideidentitet.
+Opprinnelig klassifisering var **MEDIUM**, med begrunnelsen at «det som mangler er koordineringen av eksisterende mekanismer». Observasjonen etter 8K-1 endret to premisser, og klassifiseringen er derfor revurdert eksplisitt framfor å stå uendret.
 
-**Ikke LARGE**, fordi page versioning finnes, history/current-switching finnes, målrettet revisjonsmønster finnes, seksjonssplicing finnes og fler-element-proveniens finnes.
+**Det som fortsatt trekker mot MEDIUM — uendret og verifisert:**
 
-**Det som mangler er koordineringen av eksisterende mekanismer** — ikke fundamental ny infrastruktur.
+- `EnterpriseWikiPageVersionWriter::writeNewCurrentVersion()` finnes og er tilstrekkelig; history/current-switching finnes
+- målrettet revisjonsmønster finnes (`EnterpriseWikiIncrementalRelinkService`, `EnterpriseWikiLinkSemanticRepairService`)
+- fler-element-proveniens per blokk finnes og fungerte korrekt i observasjonen — ny substans fikk presis proveniens til de riktige source elements
+- seksjons-/blokkmodellen finnes (`content_blocks_json` med `block_key`, `position`, `content_origin`, `source_elements`)
+- 8K-1 er levert, virker, og krever ingen blokkerende korreksjon
+
+**Det som er større enn først antatt:**
+
+- **dagens produksjons-`update` er en full rewrite, ikke et skip.** Planen antok en manglende kapabilitet; virkeligheten er en aktiv, destruktiv kapabilitet. 8K-3 må erstatte adferd, ikke bare legge til adferd — og gjør det i en kodesti som allerede skriver til produksjonsdata
+- **canonical page granularity må håndheves**, ikke bare beskrives. Det er en ny beslutningsdimensjon (A–E-klassifisering) som ikke fantes i noen tidligere fase
+- **en hard create-gate må innføres**, med nok strukturert beslutningsdata til at den kan valideres — ikke bare instrueres
+- **flere existing targets må kunne uttrykkes**, fordi samme superseded substans i praksis ligger current på flere sider samtidig
+- **`preserve` må inn i kontrakten samtidig som targeting utvides**, ellers øker skadepotensialet med hver nye adresserbare side
+
+**Konklusjon: MEDIUM–LARGE.** Infrastrukturen er fortsatt på plass — det er derfor ikke LARGE. Men arbeidet er ikke lenger ren koordinering av eksisterende mekanismer: 8K-2 introduserer to nye bindende beslutningsregler (ownership-invariant, granularity/create-gate) med tilhørende håndhevingskrav, og 8K-3 må bygge en ny patch-sti som erstatter en eksisterende destruktiv sti. Det er mer enn MEDIUM og mindre enn LARGE.
+
+> **Konsekvens for rekkefølgen, ikke for ambisjonen.** Klassifiseringen endrer ingenting i hva 8K skal oppnå. Den er et signal om at 8K-2 og 8K-3 ikke bør slås sammen, og at `preserve` ikke kan utsettes.
 
 ---
 
 #### Generelle arkitekturkrav (bindende for hele 8K)
 
-Retningen skal være kundeuavhengig, språkuavhengig og domeneuavhengig. Ingen produksjonsregel skal bindes til et enkeltdokument, et fagdomene, konkrete tallverdier eller run 25. Dokumentet fra run 25 brukes utelukkende som regresjonscase.
+Retningen skal være kundeuavhengig, språkuavhengig og domeneuavhengig. Ingen produksjonsregel skal bindes til et enkeltdokument, et fagdomene, konkrete tallverdier, run 25 eller observasjonskjøringen etter 8K-1. Dokumentet fra run 25 brukes utelukkende som regresjonscase, og observasjonen etter 8K-1 utelukkende som empirisk begrunnelse for generelle regler.
+
+Dette gjelder også de to nye reglene: `No duplicate canonical ownership on authoritative change` og `Canonical page granularity` skal formuleres på substans- og relasjonsnivå, aldri på fagbegreper, sidetitler eller tallverdier fra et konkret dokument.
 
 8K er **ikke** avhengig av 8J-2, og er **ikke** en ny gate for produksjonsaktivering.
 
