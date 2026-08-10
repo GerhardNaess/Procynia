@@ -140,8 +140,9 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         $result = $this->service->apply($run);
 
         // Only source_article + source_summary from baseDecision() — the candidate itself
-        // never becomes a page.
-        $this->assertSame(['created' => 2, 'updated' => 0], $result);
+        // never becomes a page. patch_targets_deferred is Fase 8K-2's report of how many existing
+        // pages this decision patches instead of generating; zero here.
+        $this->assertSame(['created' => 2, 'updated' => 0, 'patch_targets_deferred' => 0], $result);
         $this->assertSame(0, EnterpriseWikiPage::query()->where('page_type', EnterpriseWikiPage::PAGE_TYPE_CONCEPT)->count());
     }
 
@@ -691,13 +692,18 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
     public function test_same_run_cannot_get_a_duplicate_pivot_row_for_the_same_page(): void
     {
         $customer = $this->createCustomer();
-        $existingPage = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Delt Side', 'delt-side-ab1c2d');
+        $existingPage = $this->createPageWithSlug($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Delt Side', 'delt-side-ab1c2d');
 
-        // Two different decision entries resolve to the exact same existing page within one run.
+        // Two different decision entries resolve to the exact same existing page within one run —
+        // one by explicit page_id, one by canonical slug. Both entries sit in the concept slot and
+        // the page is a concept page: since Fase 8K-2, addressing an existing page through a slot of
+        // a DIFFERENT type is refused rather than silently retyping the page (see
+        // test_update_by_page_id_through_a_mismatched_typed_slot_is_refused), so the duplicate-pivot
+        // guarantee is exercised without relying on that now-forbidden shape.
         $decision = $this->baseDecision([
-            'source_article' => ['action' => 'update', 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'x'],
             'concept_pages' => [
-                ['action' => 'update', 'page_id' => $existingPage->id, 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'Same page referenced twice.'],
+                ['action' => 'update', 'page_id' => $existingPage->id, 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'Same page referenced by id.'],
+                ['action' => 'create', 'page_id' => null, 'title' => 'Delt Side', 'proposed_slug' => 'delt-side-ab1c2d', 'reason' => 'Same page reached again by canonical slug.'],
             ],
         ]);
         $run = $this->createDecisionOnlyRun($customer, $decision);

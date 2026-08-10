@@ -78,6 +78,65 @@ class EnterpriseWikiMaintainerDecisionPrompt
 
     public const CONCEPT_CANDIDATE_DECISIONS = ['create', 'reuse', 'reference_only', 'exclude'];
 
+    /**
+     * Fase 8K-2 — what a patch target does to the existing substance it names.
+     *
+     *  - replace:  the existing substance is expressly superseded by the new source document and
+     *              must be replaced. Requires superseded_substance AND replacement_substance.
+     *  - amend:    the existing topic stands, but is extended or made more precise. Requires
+     *              replacement_substance (the addition); superseded_substance stays null.
+     *  - preserve: the page was considered against the new document and must be left UNTOUCHED.
+     *              Not decoration: it is the difference between "candidate examined and
+     *              deliberately not changed" and "candidate never examined", which is exactly the
+     *              information 8K-3 needs in order to know that leaving a page alone was a
+     *              decision rather than an omission. Carries no substance fields.
+     */
+    public const PATCH_OPERATIONS = ['replace', 'amend', 'preserve'];
+
+    /**
+     * Fase 8K-2 — how new substance relates to an existing canonical topic. These are the five
+     * categories of the plan's «Canonical page granularity» rule (A–E), as short machine-readable
+     * values:
+     *
+     *  A  substance_changed      existing substance is changed          -> patch the existing page
+     *  B  topic_extended         same canonical topic, new substance    -> amend the existing page
+     *  C  topic_specialized      variant/sub-topic of existing topic    -> amend the existing page
+     *  D  reference_only         mentioned, owns no new substance       -> reuse/reference, no page
+     *  E  independent_new_topic  genuinely new AND self-standing        -> create MAY be allowed
+     *
+     * The whole point of the enum is that `new` alone never justifies a new canonical page — only
+     * E does, and only E passes the create-gate (see EnterpriseWikiCanonicalOwnershipValidator).
+     */
+    public const TOPIC_RELATIONSHIPS = [
+        'substance_changed',
+        'topic_extended',
+        'topic_specialized',
+        'reference_only',
+        'independent_new_topic',
+    ];
+
+    /**
+     * Relationships that describe an EXISTING page being affected, and are therefore the only ones
+     * a patch target may carry. `independent_new_topic` is never valid on a patch target: it means
+     * "this belongs on a new page", which is a create decision, not a patch.
+     */
+    public const PATCH_TARGET_RELATIONSHIPS = [
+        'substance_changed',
+        'topic_extended',
+        'topic_specialized',
+        'reference_only',
+    ];
+
+    /**
+     * Relationships that mean an existing canonical page already owns this substance, so a new
+     * canonical page must NOT be created for it.
+     */
+    public const EXISTING_OWNER_RELATIONSHIPS = [
+        'substance_changed',
+        'topic_extended',
+        'topic_specialized',
+    ];
+
     private const FILE_EXTENSIONS = ['pdf', 'docx', 'xlsx', 'txt', 'doc', 'pptx', 'odt', 'csv'];
 
     /**
@@ -99,6 +158,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                         'concept_candidates' => ['type' => 'array', 'items' => self::conceptCandidateSchema()],
                         'concept_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
                         'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
                         'no_action_reason' => ['type' => ['string', 'null']],
                         'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
                     ],
@@ -108,6 +168,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                         'concept_candidates',
                         'concept_pages',
                         'entity_pages',
+                        'patch_targets',
                         'no_action_reason',
                         'warnings',
                     ],
@@ -150,6 +211,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                         'source_article' => self::sourcePageSchema(),
                         'source_summary' => self::sourcePageSchema(),
                         'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
                         'concept_candidate_mentions' => ['type' => 'array', 'items' => $mentionSchema],
                         'no_action_reason' => ['type' => ['string', 'null']],
                         'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -158,6 +220,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
                         'source_article',
                         'source_summary',
                         'entity_pages',
+                        'patch_targets',
                         'concept_candidate_mentions',
                         'no_action_reason',
                         'warnings',
@@ -185,8 +248,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'properties' => [
                         'concept_candidates' => ['type' => 'array', 'items' => self::conceptCandidateSchema()],
                         'concept_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        // A batch can discover that one of ITS candidates changes substance an
+                        // existing page owns. Phase A cannot know that (it never evaluates
+                        // candidate disposition), so a batch must be able to contribute its own
+                        // patch targets — otherwise the create-gate's "substance_changed must
+                        // produce a structured target" rule would be unsatisfiable in the split
+                        // flow, and the maintainer would be pushed back into free-text warnings.
+                        // EnterpriseWikiMaintainerDecisionMerger unions these with Phase A's.
+                        'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
                     ],
-                    'required' => ['concept_candidates', 'concept_pages'],
+                    'required' => ['concept_candidates', 'concept_pages', 'patch_targets'],
                     'additionalProperties' => false,
                 ],
             ],
@@ -281,6 +352,11 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'necessary_for_article' => ['type' => 'boolean'],
                 'has_separate_source_evidence' => ['type' => 'boolean'],
                 'has_reuse_value' => ['type' => 'boolean'],
+                // Fase 8K-2 — the granularity axis. `decision` says WHAT to do with the candidate;
+                // `relationship` says whether an existing canonical page already owns this
+                // substance, which is what makes the create-gate decidable rather than advisory.
+                'relationship' => ['type' => 'string', 'enum' => self::TOPIC_RELATIONSHIPS],
+                'existing_owner_page_id' => ['type' => ['integer', 'null']],
             ],
             'required' => [
                 'name',
@@ -294,9 +370,135 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'necessary_for_article',
                 'has_separate_source_evidence',
                 'has_reuse_value',
+                'relationship',
+                'existing_owner_page_id',
             ],
             'additionalProperties' => false,
         ];
+    }
+
+    /**
+     * Fase 8K-2 — one existing Wiki page this source document affects.
+     *
+     * Deliberately a SEPARATE top-level list rather than more fields on the page-creation slots.
+     * The page-creation slots are typed (`concept_pages`, `entity_pages`) and
+     * `source_article`/`source_summary` carry no page_id at all, so expressing "update this
+     * existing article" through them was impossible — and forcing it (putting an article into
+     * `entity_pages`) would have made EnterpriseWikiMaintainerDecisionApplyService::syncReusedPage()
+     * silently retype the page. A patch target names a page by id and never by slot, so it can
+     * address ANY existing page type without the type ever being implied by where it was written.
+     *
+     * `target_page_type` is present for the model to state what it believes it is targeting; it is
+     * verified against the database and never trusted (see EnterpriseWikiPatchTargetResolver). The
+     * database is the only authority on a page's type, and nothing here can change it.
+     *
+     * `preserve_topics` is TARGET-LOCAL, not page-wide. It names substance inside THIS target's own
+     * section/topic area that must survive the patch — the neighbouring statements a replace or amend
+     * sits next to and must not take with it. It is explicitly NOT a list of everything else on the
+     * page, and a maintainer is never expected to enumerate unrelated sections in it.
+     *
+     * The page-wide guarantee is a separate, stronger invariant that 8K-3 owes regardless of what
+     * this list says:
+     *
+     *     Everything outside the patch target's own bounded area is preserved BY DEFAULT.
+     *
+     * So the two mechanisms are: `preserve_topics` = explicit local protection inside the target
+     * area; everything beyond the target area = implicit preserve. Absence of a topic from
+     * `preserve_topics` is NEVER permission to delete it — it only means the maintainer saw no risk
+     * of that particular statement being swept up by this specific edit.
+     *
+     * Section/topic identity: the Wiki has no stable section identifier today — `block_key` is
+     * reallocated on every regenerated version, and `owned_topics` is free text. `target_topic` is
+     * therefore a required descriptor, and `target_heading` an OPTIONAL exact heading from the
+     * target page's current version, verified against it when present. That gives 8K-3 a real
+     * anchor when the substance sits under a heading, and an honest descriptor when it does not.
+     * Documented limitation, not an oversight: fact/span identity is explicitly out of 8K scope.
+     *
+     * @return array<string, mixed>
+     */
+    private static function patchTargetSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'target_page_id' => ['type' => 'integer'],
+                'target_page_title' => ['type' => 'string'],
+                'target_page_type' => ['type' => 'string'],
+                'target_topic' => ['type' => 'string'],
+                'target_heading' => ['type' => ['string', 'null']],
+                'relationship' => ['type' => 'string', 'enum' => self::PATCH_TARGET_RELATIONSHIPS],
+                'operation' => ['type' => 'string', 'enum' => self::PATCH_OPERATIONS],
+                'superseded_substance' => ['type' => ['string', 'null']],
+                'replacement_substance' => ['type' => ['string', 'null']],
+                'source_element_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'preserve_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'reason' => ['type' => 'string'],
+            ],
+            'required' => [
+                'target_page_id',
+                'target_page_title',
+                'target_page_type',
+                'target_topic',
+                'target_heading',
+                'relationship',
+                'operation',
+                'superseded_substance',
+                'replacement_substance',
+                'source_element_keys',
+                'preserve_topics',
+                'reason',
+            ],
+            'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * Sentinel for a target that names no heading. A fixed marker, never a unique value: "no heading"
+     * is ONE identity shared by every target that declines to name one.
+     */
+    public const NO_HEADING_IDENTITY = '~no-heading';
+
+    /**
+     * The semantic identity of a patch target — the single definition of "these two targets are the
+     * same target". Both the validator (conflict/duplicate detection) and the merger (split-flow
+     * dedupe) use this; they previously carried two subtly different keys of their own, which is
+     * exactly how one rule starts meaning two things.
+     *
+     * Identity is (page, topic, heading) — deliberately including the heading. Run 27 showed why: an
+     * existing page legitimately stated the same superseded requirement under TWO different headings
+     * (a duplicated section inherited from an earlier run), so the maintainer needed two targets for
+     * one topic. Keying on (page, topic) alone collapsed them into a "duplicate", and the bounded
+     * repair pass dropped one — which would have left the second occurrence stale after 8K-3, with
+     * the page contradicting itself.
+     *
+     * A null heading is a real, distinct identity, not a wildcard: it means "this topic on this page,
+     * with no specific heading anchor". Two targets that both decline to name a heading for the same
+     * topic ARE indistinguishable, so null maps to one fixed sentinel rather than to a unique value.
+     *
+     * Normalization is whitespace + case only, plus a trailing ATX "#" run on headings (matching
+     * EnterpriseWikiPatchTargetResolver's own heading comparison). Punctuation is deliberately NOT
+     * stripped: two headings differing only in punctuation are far more likely to be one heading
+     * written twice than two genuinely different sections, and collapsing them is the safer error.
+     *
+     * @param  array<string, mixed>  $target
+     */
+    public static function patchTargetIdentity(array $target): string
+    {
+        $pageId = $target['target_page_id'] ?? null;
+        $heading = $target['target_heading'] ?? null;
+
+        return implode('|', [
+            is_int($pageId) ? (string) $pageId : '?',
+            self::normalizeIdentityPart((string) ($target['target_topic'] ?? '')),
+            is_string($heading) && trim($heading) !== ''
+                ? self::normalizeIdentityPart((string) (preg_replace('/\s+#+\s*$/u', '', trim($heading)) ?? $heading))
+                : self::NO_HEADING_IDENTITY,
+        ]);
+    }
+
+    private static function normalizeIdentityPart(string $value): string
+    {
+        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value)));
     }
 
     /**
@@ -342,6 +544,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
+        $errors = array_merge($errors, self::validatePatchTargets($raw));
+
         if (
             array_key_exists('no_action_reason', $raw)
             && $raw['no_action_reason'] !== null
@@ -355,6 +559,188 @@ class EnterpriseWikiMaintainerDecisionPrompt
         }
 
         return $errors;
+    }
+
+    /**
+     * Fase 8K-2 — schema-level patch-target validation.
+     *
+     * Absent `patch_targets` is valid and means "this document changes nothing existing": a
+     * decision consisting only of create/reuse/reference_only entries stays valid exactly as
+     * before, and a stored decision predating this field parses unchanged. Same optional-in-PHP
+     * treatment as every other collection field in this contract.
+     *
+     * Nothing here touches the database. Target existence, customer scoping, page type and
+     * availability are EnterpriseWikiPatchTargetResolver's job; cross-entry rules (create-gate,
+     * duplicate ownership, conflicting operations) are EnterpriseWikiCanonicalOwnershipValidator's.
+     *
+     * @param  array<string, mixed>  $raw
+     * @return string[]
+     */
+    private static function validatePatchTargets(array $raw): array
+    {
+        if (! array_key_exists('patch_targets', $raw)) {
+            return [];
+        }
+
+        if (! is_array($raw['patch_targets'])) {
+            return ['patch_targets must be an array.'];
+        }
+
+        $errors = [];
+
+        foreach ($raw['patch_targets'] as $i => $entry) {
+            $errors = array_merge($errors, self::validatePatchTargetEntry($entry, "patch_targets[{$i}]"));
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    private static function validatePatchTargetEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = [];
+
+        if (! isset($entry['target_page_id']) || ! is_int($entry['target_page_id']) || $entry['target_page_id'] < 1) {
+            $errors[] = "{$ctx}.target_page_id is required and must be a positive integer.";
+        }
+
+        foreach (['target_page_title', 'target_page_type', 'target_topic', 'reason'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        foreach (['target_heading', 'superseded_substance', 'replacement_substance'] as $field) {
+            if (! array_key_exists($field, $entry) || $entry[$field] === null) {
+                continue;
+            }
+
+            if (! is_string($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be a string or null.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
+        }
+
+        if (! isset($entry['relationship']) || ! in_array($entry['relationship'], self::PATCH_TARGET_RELATIONSHIPS, true)) {
+            $errors[] = "{$ctx}.relationship must be one of: ".implode(', ', self::PATCH_TARGET_RELATIONSHIPS).
+                ' (independent_new_topic is never valid on a patch target — it means a new page, not a patch).';
+        }
+
+        if (! isset($entry['operation']) || ! in_array($entry['operation'], self::PATCH_OPERATIONS, true)) {
+            $errors[] = "{$ctx}.operation must be one of: ".implode(', ', self::PATCH_OPERATIONS).'.';
+        }
+
+        foreach (['source_element_keys', 'preserve_topics'] as $field) {
+            if (! array_key_exists($field, $entry)) {
+                continue;
+            }
+
+            if (! is_array($entry[$field])) {
+                $errors[] = "{$ctx}.{$field} must be an array of strings.";
+
+                continue;
+            }
+
+            foreach ($entry[$field] as $j => $value) {
+                if (! is_string($value) || trim($value) === '') {
+                    $errors[] = "{$ctx}.{$field}[{$j}] must be a non-empty string.";
+
+                    continue;
+                }
+
+                $errors = array_merge($errors, self::validateNoControlCharacters($value, "{$ctx}.{$field}[{$j}]"));
+            }
+        }
+
+        return array_merge($errors, self::validatePatchTargetSemantics($entry, $ctx));
+    }
+
+    /**
+     * The operation <-> substance <-> relationship coupling. This is what stops `operation` from
+     * being a label: a `replace` that cannot say what it replaces, or an `amend` that cannot say
+     * what it adds, gives 8K-3 nothing to act on and is rejected here rather than silently
+     * degenerating into "regenerate the page from the new document", which is precisely the
+     * destructive behaviour Fase 8K exists to remove.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return string[]
+     */
+    private static function validatePatchTargetSemantics(array $entry, string $ctx): array
+    {
+        $operation = $entry['operation'] ?? null;
+        $relationship = $entry['relationship'] ?? null;
+        $superseded = self::nonEmptyOrNull($entry['superseded_substance'] ?? null);
+        $replacement = self::nonEmptyOrNull($entry['replacement_substance'] ?? null);
+        $sourceKeys = array_values(array_filter(
+            (array) ($entry['source_element_keys'] ?? []),
+            static fn (mixed $key): bool => is_string($key) && trim($key) !== '',
+        ));
+
+        $errors = [];
+
+        if ($operation === 'replace') {
+            if ($superseded === null) {
+                $errors[] = "{$ctx}.superseded_substance is required for operation \"replace\" — state the existing substance being superseded.";
+            }
+
+            if ($replacement === null) {
+                $errors[] = "{$ctx}.replacement_substance is required for operation \"replace\" — state the substance that takes its place.";
+            }
+
+            if ($relationship !== null && $relationship !== 'substance_changed') {
+                $errors[] = "{$ctx}.operation \"replace\" requires relationship \"substance_changed\", got \"{$relationship}\".";
+            }
+        }
+
+        if ($operation === 'amend') {
+            if ($replacement === null) {
+                $errors[] = "{$ctx}.replacement_substance is required for operation \"amend\" — state the substance being added or made more precise.";
+            }
+
+            if ($relationship !== null && ! in_array($relationship, ['topic_extended', 'topic_specialized'], true)) {
+                $errors[] = "{$ctx}.operation \"amend\" requires relationship \"topic_extended\" or \"topic_specialized\", got \"{$relationship}\".";
+            }
+        }
+
+        if ($operation === 'preserve') {
+            if ($superseded !== null || $replacement !== null) {
+                $errors[] = "{$ctx}.operation \"preserve\" must not carry superseded_substance or replacement_substance — it asserts that this page is left untouched.";
+            }
+
+            if ($sourceKeys !== []) {
+                $errors[] = "{$ctx}.source_element_keys must be empty for operation \"preserve\" — nothing in the source authorises a change to this page.";
+            }
+
+            if ($relationship !== null && $relationship !== 'reference_only') {
+                $errors[] = "{$ctx}.operation \"preserve\" requires relationship \"reference_only\", got \"{$relationship}\".";
+            }
+        }
+
+        if (in_array($operation, ['replace', 'amend'], true) && $sourceKeys === []) {
+            $errors[] = "{$ctx}.source_element_keys must name at least one source element authorising a \"{$operation}\" — a substantive change must be traceable to the source document.";
+        }
+
+        return $errors;
+    }
+
+    private static function nonEmptyOrNull(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        return trim($value) === '' ? null : trim($value);
     }
 
     /**
@@ -382,6 +768,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
             'concept_candidates' => $raw['concept_candidates'] ?? [],
             'concept_pages' => $raw['concept_pages'] ?? [],
             'entity_pages' => $raw['entity_pages'] ?? [],
+            'patch_targets' => $raw['patch_targets'] ?? [],
             'no_action_reason' => $raw['no_action_reason'] ?? null,
             'warnings' => $raw['warnings'] ?? [],
         ];
@@ -428,6 +815,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
+        $errors = array_merge($errors, self::validatePatchTargets($raw));
+
         if (
             array_key_exists('no_action_reason', $raw)
             && $raw['no_action_reason'] !== null
@@ -463,6 +852,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
             'source_article' => $raw['source_article'],
             'source_summary' => $raw['source_summary'],
             'entity_pages' => $raw['entity_pages'] ?? [],
+            'patch_targets' => $raw['patch_targets'] ?? [],
             'concept_candidate_mentions' => $raw['concept_candidate_mentions'] ?? [],
             'no_action_reason' => $raw['no_action_reason'] ?? null,
             'warnings' => $raw['warnings'] ?? [],
@@ -497,7 +887,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
-        return $errors;
+        return array_merge($errors, self::validatePatchTargets($raw));
     }
 
     /**
@@ -519,6 +909,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
         return [
             'concept_candidates' => $raw['concept_candidates'],
             'concept_pages' => $raw['concept_pages'],
+            'patch_targets' => $raw['patch_targets'] ?? [],
         ];
     }
 
@@ -719,6 +1110,21 @@ class EnterpriseWikiMaintainerDecisionPrompt
             if (array_key_exists($field, $entry) && ! is_bool($entry[$field])) {
                 $errors[] = "{$ctx}.{$field} must be a boolean.";
             }
+        }
+
+        // Fase 8K-2 granularity fields. Optional in PHP exactly like every other responsibility
+        // field in this contract, so a stored decision predating them still parses; the strict
+        // JSON schema requires them, so every newly generated decision carries them.
+        if (array_key_exists('relationship', $entry) && ! in_array($entry['relationship'], self::TOPIC_RELATIONSHIPS, true)) {
+            $errors[] = "{$ctx}.relationship must be one of: ".implode(', ', self::TOPIC_RELATIONSHIPS).'.';
+        }
+
+        if (
+            array_key_exists('existing_owner_page_id', $entry)
+            && $entry['existing_owner_page_id'] !== null
+            && (! is_int($entry['existing_owner_page_id']) || $entry['existing_owner_page_id'] < 1)
+        ) {
+            $errors[] = "{$ctx}.existing_owner_page_id must be a positive integer or null.";
         }
 
         return $errors;

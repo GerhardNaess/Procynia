@@ -425,15 +425,56 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
         $this->assertNotSame(AiCapacityPlan::STRATEGY_SPLIT_REQUIRED, $plan->strategy);
     }
 
+    /**
+     * Count updated for Fase 8K-2 to what the schema actually has: 13. Two of those are 8K-2's
+     * granularity fields (relationship, existing_owner_page_id); the assertion had additionally been
+     * stale at 9 since has_separate_source_evidence/has_reuse_value were added, so it could not pass
+     * at any value but 13.
+     *
+     * The review this tripwire demands WAS done, and its conclusion is that the capacity profile is
+     * NOT yet correct — deliberately left unchanged here rather than adjusted on a guess:
+     *
+     *  - `patch_targets` is entirely new output that scales with how many existing pages a document
+     *    affects, which no existing knob models directly.
+     *  - Measured on run 27 (1858-char document, 6 patch targets): the first maintainer attempt was
+     *    rejected on max_output_tokens at 4442 tokens, and only the capacity retry at 7774 succeeded.
+     *    Raising tokens_per_input_chars_unit 120 -> 150 was tried and did NOT prevent that first-attempt
+     *    truncation, so it was reverted — it is not a validated value.
+     *  - The bounded repair prompt also grew to 29 676 input chars on that run and routed
+     *    split_required, which is a separate cost this profile does not account for.
+     *
+     * Capacity therefore needs its own measurement pass against logged token usage, not a tuning
+     * guess bundled into a contract change. Until then the retry path is what absorbs it.
+     */
     public function test_concept_candidate_field_count_is_a_deliberate_capacity_tripwire(): void
     {
         $schema = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
         $candidateProps = $schema['json_schema']['schema']['properties']['concept_candidates']['items']['properties'];
 
         $this->assertCount(
-            9,
+            13,
             $candidateProps,
             'concept_candidates field count changed — review the enterprise_wiki_maintainer_decision '.
+            'capacity profile in config/ai_capacity.php before assuming existing budgets still hold.',
+        );
+    }
+
+    /**
+     * Fase 8K-2 companion tripwire: patch_targets is output the profile has to pay for too, and its
+     * field count is the per-target cost driver. Same contract as the candidate tripwire above —
+     * changing it means re-reviewing the capacity profile, not just updating a number. It matters more
+     * than the candidate one, because per-target output is the cost the profile currently does not
+     * model at all (see the note above).
+     */
+    public function test_patch_target_field_count_is_a_deliberate_capacity_tripwire(): void
+    {
+        $schema = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
+        $targetProps = $schema['json_schema']['schema']['properties']['patch_targets']['items']['properties'];
+
+        $this->assertCount(
+            12,
+            $targetProps,
+            'patch_targets field count changed — review the enterprise_wiki_maintainer_decision '.
             'capacity profile in config/ai_capacity.php before assuming existing budgets still hold.',
         );
     }

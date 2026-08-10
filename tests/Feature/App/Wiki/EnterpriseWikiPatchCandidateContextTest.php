@@ -304,6 +304,220 @@ class EnterpriseWikiPatchCandidateContextTest extends TestCase
      *
      * @return array{0: Customer, 1: EnterpriseWikiDocument, 2: array<string, EnterpriseWikiPage>}
      */
+    // =========================================================================
+    // Signal 3 — substance match (added after run 27)
+    // =========================================================================
+
+    /**
+     * The run-27 gap, as a fixture. The Wiki states one superseded value on four pages; a fifth page
+     * is a graph neighbour of the named page but states nothing the document changes. Before the
+     * substance signal, that neighbour took a candidate slot ahead of two pages that genuinely held
+     * the old values, so they were never offered to the maintainer and never got a patch target.
+     *
+     * Domain-free: invented values, generic titles, no subject matter.
+     */
+    public function test_pages_stating_the_changed_substance_outrank_an_unaffected_graph_neighbour(): void
+    {
+        [, $document, $pages] = $this->staleOwnerScenario();
+
+        $ranked = array_column($this->service()->findForDocument($document), 'page_id');
+
+        $this->assertSame($pages['entity']->id, $ranked[0], 'the named page that also matches substance ranks first');
+        $this->assertContains($pages['article']->id, $ranked, 'a page holding both old values must be a candidate');
+        $this->assertContains($pages['summary']->id, $ranked, 'the summary holding both old values must be a candidate');
+        $this->assertNotContains(
+            $pages['neighbour']->id,
+            $ranked,
+            'a graph neighbour stating nothing the document changes must not take a slot from a stale owner',
+        );
+    }
+
+    public function test_substance_match_is_reported_per_candidate(): void
+    {
+        [, $document, $pages] = $this->staleOwnerScenario();
+
+        $byId = [];
+
+        foreach ($this->service()->findForDocument($document) as $candidate) {
+            $byId[$candidate['page_id']] = $candidate;
+        }
+
+        $this->assertGreaterThan(0, $byId[$pages['article']->id]['substance_match_count']);
+        $this->assertArrayHasKey('neighbour_degree', $byId[$pages['article']->id]);
+    }
+
+    public function test_a_page_holding_the_changed_substance_is_found_without_any_graph_edge(): void
+    {
+        // Substance match must stand on its own: an unlinked page that states the superseded value is
+        // exactly the page a change note silently invalidates. Own minimal fixture, so the assertion
+        // is about reachability and not about competing for a capped slot.
+        $customer = $this->createCustomer();
+
+        $orphan = $this->createPage($customer, 'Frittstaaende regelside', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $this->createVersion($orphan, "# Frittstaaende regelside\n\nHer gjelder ".self::OLD_VALUE_A.' og ingenting annet.');
+
+        $document = $this->createDocument(
+            $customer,
+            'Endringsnotat. Maalsatt verdi endres fra '.self::OLD_VALUE_A.' til terskelverdi 99,7 prosent.',
+        );
+
+        $candidates = $this->service()->findForDocument($document);
+
+        $this->assertSame([$orphan->id], array_column($candidates, 'page_id'), 'no wikilink edge and no title mention is required');
+        $this->assertGreaterThan(0, $candidates[0]['substance_match_count']);
+        $this->assertSame(0, $candidates[0]['mention_count']);
+        $this->assertSame(0, $candidates[0]['neighbour_degree']);
+    }
+
+    public function test_substance_match_never_crosses_customer_boundaries(): void
+    {
+        [, $document] = $this->staleOwnerScenario();
+        $otherCustomer = $this->createCustomer('Annen Kunde AS');
+        $foreign = $this->createPage($otherCustomer, 'Fremmed regelside', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        // Identical superseded substance, different customer.
+        $this->createVersion($foreign, "# Fremmed regelside\n\nHer gjelder ".self::OLD_VALUE_A.' og '.self::OLD_VALUE_B.'.');
+
+        $ranked = array_column($this->service()->findForDocument($document), 'page_id');
+
+        $this->assertNotContains($foreign->id, $ranked);
+    }
+
+    public function test_substance_match_reads_only_the_current_version(): void
+    {
+        [$customer, $document] = $this->staleOwnerScenario();
+        $page = $this->createPage($customer, 'Side med historikk', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+
+        // Superseded value lives only in a HISTORICAL version; the current one says nothing relevant.
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => false,
+            'content_markdown' => "# Side med historikk\n\nGammelt innhold med ".self::OLD_VALUE_A.'.',
+            'generated_by_model' => 'gpt-5',
+        ]);
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Side med historikk\n\nHelt urelatert gjeldende innhold.",
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $ranked = array_column($this->service()->findForDocument($document), 'page_id');
+
+        $this->assertNotContains($page->id, $ranked, 'a superseded value in history must not make a page a candidate');
+    }
+
+    public function test_substance_match_respects_the_status_filter(): void
+    {
+        [$customer, $document] = $this->staleOwnerScenario();
+
+        foreach ([
+            EnterpriseWikiPage::STATUS_ARCHIVED,
+            EnterpriseWikiPage::STATUS_SUPERSEDED,
+            EnterpriseWikiPage::STATUS_REJECTED,
+        ] as $status) {
+            $page = $this->createPage($customer, 'Utgaatt '.$status, EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+            $page->update(['status' => $status]);
+            $this->createVersion($page, "# Utgaatt\n\nHer gjelder ".self::OLD_VALUE_A.'.');
+
+            $ranked = array_column($this->service()->findForDocument($document), 'page_id');
+
+            $this->assertNotContains($page->id, $ranked, "status [{$status}] must never be a candidate");
+        }
+    }
+
+    public function test_substance_ranking_is_deterministic_across_calls(): void
+    {
+        [, $document] = $this->staleOwnerScenario();
+
+        $first = $this->service()->findForDocument($document);
+        $second = $this->service()->findForDocument($document);
+
+        $this->assertSame(array_column($first, 'page_id'), array_column($second, 'page_id'));
+        $this->assertSame(
+            EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($first),
+            EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($second),
+        );
+    }
+
+    public function test_a_shared_number_alone_is_not_a_substance_match(): void
+    {
+        // The measured reason bigrams were chosen over bare numeric tokens: incidental numbers are
+        // shared everywhere, and a page sharing only those must not outrank a real stale owner.
+        [$customer, $document] = $this->staleOwnerScenario();
+        $incidental = $this->createPage($customer, 'Side med tilfeldige tall', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        // Reuses the document's numbers, but never next to the same word.
+        $this->createVersion($incidental, "# Side med tilfeldige tall\n\nKapittel 99,5 og vedlegg 30 beskriver noe helt annet.");
+
+        $byId = [];
+
+        foreach ($this->service()->findForDocument($document, []) as $candidate) {
+            $byId[$candidate['page_id']] = $candidate['substance_match_count'];
+        }
+
+        $this->assertArrayNotHasKey($incidental->id, $byId, 'a bare shared number must not earn a candidate slot');
+    }
+
+    public function test_a_document_that_never_restates_an_old_value_still_uses_the_other_signals(): void
+    {
+        // Documented limitation: the substance signal fires only when the change document restates
+        // what it supersedes. When it does not, discovery degrades to naming + graph hop exactly as
+        // before — additive, never subtractive.
+        [, $document, $pages] = $this->changeDocumentScenario();
+
+        $ranked = array_column($this->service()->findForDocument($document), 'page_id');
+
+        $this->assertContains($pages['entity']->id, $ranked, 'the named page is still found');
+        $this->assertContains($pages['procedure']->id, $ranked, 'the graph hop still works');
+    }
+
+    /**
+     * Four existing pages hold superseded substance (the shape run 27 actually had), plus one graph
+     * neighbour that holds none. The document restates both old values while announcing the new ones,
+     * which is what an authoritative change note does.
+     *
+     * @return array{0: Customer, 1: EnterpriseWikiDocument, 2: array<string, EnterpriseWikiPage>}
+     */
+    private function staleOwnerScenario(): array
+    {
+        $customer = $this->createCustomer();
+
+        $entity = $this->createPage($customer, 'Plattform Alfa', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $this->createVersion($entity, "# Plattform Alfa\n\n".self::PADDING."\n\nMaalsatt verdi er ".self::OLD_VALUE_A.'.');
+
+        $article = $this->createPage($customer, 'Styrende prosedyre for Alfa', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createVersion($article, "# Styrende prosedyre for Alfa\n\n".self::PADDING
+            ."\n\nMaalsatt verdi er ".self::OLD_VALUE_A.' og hendelser bekreftes innen '.self::OLD_VALUE_B.'.');
+
+        $summary = $this->createPage($customer, 'Sammendrag: Styrende prosedyre for Alfa', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $this->createVersion($summary, "# Sammendrag: Styrende prosedyre for Alfa\n\nKort: "
+            .self::OLD_VALUE_A.' og '.self::OLD_VALUE_B.'.');
+
+        $roles = $this->createPage($customer, 'Roller og ansvar generelt', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $this->createVersion($roles, "# Roller og ansvar generelt\n\nAnsvarlig bekrefter innen ".self::OLD_VALUE_B.'.');
+
+        // Related to the named page, but states nothing this document changes.
+        $neighbour = $this->createPage($customer, 'Nabotema uten berort substans', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $this->createVersion($neighbour, "# Nabotema uten berort substans\n\nHelt urelatert beskrivelse uten tallfestede krav.");
+
+        $this->link($customer, $entity, $article);
+        $this->link($customer, $entity, $neighbour);
+        $this->link($customer, $entity, $summary);
+        $this->link($customer, $entity, $roles);
+
+        // Restates both old values, exactly as an authoritative change note does.
+        $document = $this->createDocument(
+            $customer,
+            'Endringsnotat. Kravene for Plattform Alfa skjerpes. '
+            .'Maalsatt verdi endres fra '.self::OLD_VALUE_A.' til terskelverdi 99,7 prosent. '
+            .'Hendelser skal bekreftes innen 15 minutter, som erstatter tidligere frist paa 30 minutter. '
+            .'Oevrige bestemmelser viderefoeres uendret.',
+        );
+
+        return [$customer, $document, compact('entity', 'article', 'summary', 'roles', 'neighbour')];
+    }
+
     private function changeDocumentScenario(): array
     {
         $customer = $this->createCustomer();

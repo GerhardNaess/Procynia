@@ -24,6 +24,14 @@ use Illuminate\Support\Facades\Log;
  * has combined every batch, so overfragmentation spanning multiple batches is still caught. When
  * either check finds issues, one bounded AI repair pass is attempted; if the repaired decision is
  * still inconsistent or overfragmented, this throws rather than silently applying it.
+ *
+ * Fase 8K-2 adds two more checks to that same loop, so a patch-contract violation is repaired by
+ * the identical bounded pass rather than a parallel mechanism:
+ *  - EnterpriseWikiCanonicalOwnershipValidator — canonical ownership, page granularity, the
+ *    create-gate, patch-target coherence and the anti-shadow-channel rule. Pure array rules.
+ *  - EnterpriseWikiPatchTargetResolver — the DB-authoritative half: a patch target must exist,
+ *    belong to this customer, be live knowledge with a current version, and match the page_type
+ *    and heading it claims. The row is the only authority on page_type; nothing here writes it.
  */
 class EnterpriseWikiMaintainerDecisionService
 {
@@ -34,6 +42,8 @@ class EnterpriseWikiMaintainerDecisionService
         private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
         private readonly EnterpriseWikiMaintainerDecisionHierarchyValidator $hierarchyValidator,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiCanonicalOwnershipValidator $canonicalOwnershipValidator,
+        private readonly EnterpriseWikiPatchTargetResolver $patchTargetResolver,
     ) {}
 
     /**
@@ -124,7 +134,13 @@ class EnterpriseWikiMaintainerDecisionService
         $figureCandidates = $this->figureCandidatesFromElements($elements);
         $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
         $validFigureKeys = array_column($figureCandidates, 'source_element_key');
-        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys);
+        // Every addressable element of this document, not just its images: a patch target's
+        // source_element_keys authorise a substance change, which is normally prose or a table row.
+        $validSourceElementKeys = array_values(array_filter(array_map(
+            static fn (array $element): string => (string) ($element['source_element_key'] ?? ''),
+            $sourceElements,
+        ), static fn (string $key): bool => $key !== ''));
+        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
 
         if ($issues === []) {
             Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -140,7 +156,7 @@ class EnterpriseWikiMaintainerDecisionService
         [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
 
         if ($normalizations !== []) {
-            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys);
+            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
 
             if ($normalizedIssues === []) {
                 Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -168,7 +184,7 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context, $sourceElements);
-        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys);
+        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
 
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
@@ -194,11 +210,26 @@ class EnterpriseWikiMaintainerDecisionService
      * @param  string[]  $validFigureKeys
      * @return string[]
      */
-    private function findAllIssues(array $decision, array $indexContext, array $validFigureKeys): array
-    {
+    private function findAllIssues(
+        array $decision,
+        array $indexContext,
+        array $validFigureKeys,
+        int $customerId = 0,
+        array $validSourceElementKeys = [],
+    ): array {
         return array_merge(
             $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
             $this->hierarchyValidator->findIssues($decision),
+            // Fase 8K-2: canonical ownership + page granularity + patch-target coherence. Pure
+            // array rules, so it joins the existing bounded AI repair loop unchanged.
+            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys),
+            // Fase 8K-2: the DB-authoritative half — target exists, belongs to this customer, is
+            // live, has a current version, and its real page_type/heading match what was claimed.
+            // customerId 0 means a caller with no tenant context (never the document flow); skip
+            // rather than invent a failure from missing context.
+            $customerId > 0
+                ? $this->patchTargetResolver->resolveForCustomer($customerId, $decision)['errors']
+                : [],
         );
     }
 

@@ -725,6 +725,9 @@ class EnterpriseWikiDocumentFlowService
             'run_id' => $run->id,
             'created_pages' => $result['created'] ?? null,
             'updated_pages' => $result['updated'] ?? null,
+            // Fase 8K-2: existing pages this decision patches. They intentionally get no pivot row
+            // and no generation — patch application is 8K-3.
+            'patch_targets_deferred' => $result['patch_targets_deferred'] ?? 0,
         ]);
     }
 

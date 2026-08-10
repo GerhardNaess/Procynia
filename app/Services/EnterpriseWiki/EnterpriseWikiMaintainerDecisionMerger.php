@@ -100,11 +100,66 @@ class EnterpriseWikiMaintainerDecisionMerger
             'concept_candidates' => $conceptCandidates,
             'concept_pages' => $conceptPages,
             'entity_pages' => $globalPlan['entity_pages'] ?? [],
+            'patch_targets' => $this->mergePatchTargets($globalPlan, $batchResults),
             'no_action_reason' => $globalPlan['no_action_reason'] ?? null,
             'warnings' => $globalPlan['warnings'] ?? [],
         ];
 
         return $this->deduplicateFigures($merged);
+    }
+
+    /**
+     * Fase 8K-2: union of Phase A's patch targets and every batch's own.
+     *
+     * A batch discovers candidate disposition, so it is the only place that can find out that one of
+     * its candidates changes substance an existing page owns — Phase A never evaluates candidates and
+     * therefore cannot produce that target. Both contribute, and the union is what the validators
+     * and the apply layer see.
+     *
+     * Deduplicated on EnterpriseWikiMaintainerDecisionPrompt::patchTargetIdentity() — (page, topic,
+     * heading) — first occurrence kept, so Phase A's target wins if a batch restates it. This is the
+     * SAME identity the validator's conflict check uses; the two must never drift apart, or one rule
+     * starts meaning two things. Two targets for the same page are kept when they differ in topic OR
+     * in heading: run 27 showed a page stating one superseded requirement under two duplicated
+     * headings, which needs one target per occurrence.
+     *
+     * A genuine disagreement about the same identity is deliberately NOT resolved here: it is left
+     * for EnterpriseWikiCanonicalOwnershipValidator to report as a conflict, exactly like the merger
+     * leaves other semantic conflicts to validation rather than silently picking a winner.
+     *
+     * @param  array<string, mixed>  $globalPlan
+     * @param  list<array<string, mixed>>  $batchResults
+     * @return list<array<string, mixed>>
+     */
+    private function mergePatchTargets(array $globalPlan, array $batchResults): array
+    {
+        $targets = [];
+        $seen = [];
+
+        $lists = [(array) ($globalPlan['patch_targets'] ?? [])];
+
+        foreach ($batchResults as $batch) {
+            $lists[] = (array) ($batch['patch_targets'] ?? []);
+        }
+
+        foreach ($lists as $list) {
+            foreach ($list as $target) {
+                if (! is_array($target)) {
+                    continue;
+                }
+
+                $key = EnterpriseWikiMaintainerDecisionPrompt::patchTargetIdentity($target);
+
+                if (in_array($key, $seen, true)) {
+                    continue;
+                }
+
+                $seen[] = $key;
+                $targets[] = $target;
+            }
+        }
+
+        return $targets;
     }
 
     /**

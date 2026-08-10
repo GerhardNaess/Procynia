@@ -100,7 +100,7 @@ class EnterpriseWikiMaintainerDecisionConceptPageStabilityIntegrationTest extend
 
         $result = app(EnterpriseWikiMaintainerDecisionApplyService::class)->apply($run);
 
-        $this->assertSame(['created' => 3, 'updated' => 0], $result);
+        $this->assertSame(['created' => 3, 'updated' => 0, 'patch_targets_deferred' => 0], $result);
 
         $pages = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->get();
         $this->assertCount(3, $pages);

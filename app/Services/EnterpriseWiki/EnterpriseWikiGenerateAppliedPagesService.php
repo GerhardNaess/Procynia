@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki;
 use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
+use App\Exceptions\EnterpriseWikiPatchTargetRegenerationBlockedException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -589,6 +590,14 @@ class EnterpriseWikiGenerateAppliedPagesService
                 "Run [{$run->id}] source_type is not enterprise_wiki_document."
             );
         }
+
+        // Fase 8K-2 destructive-update guard — BEFORE the lease is claimed and before any AI call,
+        // so a blocked page is never marked running and no content is ever produced for it. This
+        // method regenerates a page from the new source document alone; for a page the decision
+        // patches, that is a full-page rewrite that discards exactly what the patch preserves.
+        // Structurally unreachable in the normal flow (a patch target gets no pivot row, so no job
+        // is dispatched) — this is the backstop for a pivot that exists anyway.
+        $this->guardAgainstPatchTargetRegeneration($run, $page);
 
         $token = (string) Str::uuid();
 
@@ -1780,6 +1789,31 @@ class EnterpriseWikiGenerateAppliedPagesService
         $contentBlocks[] = $linkBlock;
 
         return [trim($markdown."\n\n".$linkBlock['markdown']), $contentBlocks];
+    }
+
+    /**
+     * Fase 8K-2: refuse to regenerate a page the run's maintainer decision names as a patch target.
+     *
+     * @throws EnterpriseWikiPatchTargetRegenerationBlockedException
+     */
+    private function guardAgainstPatchTargetRegeneration(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
+    {
+        $targetPageIds = EnterpriseWikiPatchTargetResolver::targetPageIds(
+            (array) ($run->maintainer_decision_json ?? []),
+        );
+
+        if (! in_array((int) $page->id, $targetPageIds, true)) {
+            return;
+        }
+
+        Log::error('[WIKI_PAGE_GENERATION] Blocked full-page regeneration of a patch target.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'reason' => 'structured_patch_intent_pending_8k3',
+        ]);
+
+        throw new EnterpriseWikiPatchTargetRegenerationBlockedException((int) $run->id, (int) $page->id);
     }
 
     private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = []): void

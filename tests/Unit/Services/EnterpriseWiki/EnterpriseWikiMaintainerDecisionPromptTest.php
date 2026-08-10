@@ -992,12 +992,21 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertFalse($schema['json_schema']['schema']['additionalProperties']);
     }
 
-    public function test_candidate_batch_schema_requires_concept_candidates_and_concept_pages_only(): void
+    /**
+     * A batch decides candidate disposition and nothing else about the document — with one Fase 8K-2
+     * addition: it may contribute patch_targets for its OWN candidates. Only this phase discovers
+     * that a candidate changes substance an existing page owns, so without it the create-gate's
+     * "an identified substance change must be a structured target" rule would be unsatisfiable in the
+     * split flow and the finding would fall back into free-text warnings.
+     */
+    public function test_candidate_batch_schema_requires_candidates_pages_and_patch_targets_only(): void
     {
         $schema = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema()['json_schema']['schema'];
 
-        $this->assertSame(['concept_candidates', 'concept_pages'], $schema['required']);
-        $this->assertSame(['concept_candidates', 'concept_pages'], array_keys($schema['properties']));
+        $this->assertSame(['concept_candidates', 'concept_pages', 'patch_targets'], $schema['required']);
+        $this->assertSame(['concept_candidates', 'concept_pages', 'patch_targets'], array_keys($schema['properties']));
+        $this->assertArrayNotHasKey('source_article', $schema['properties'], 'a batch never redecides the document pages');
+        $this->assertArrayNotHasKey('entity_pages', $schema['properties']);
     }
 
     public function test_candidate_batch_schema_reuses_the_exact_same_fragments_as_the_full_schema(): void
