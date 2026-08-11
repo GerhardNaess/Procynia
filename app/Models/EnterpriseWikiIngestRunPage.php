@@ -20,9 +20,21 @@ class EnterpriseWikiIngestRunPage extends Model
 
     public const ACTION_UPDATED = 'updated';
 
+    /**
+     * Fase 8K-3: this run patched a bounded area of an EXISTING page's current version
+     * (EnterpriseWikiPatchApplicationService), rather than generating the page from the source
+     * document. Distinct from ACTION_UPDATED, which records the ordinary reuse-then-generate path.
+     *
+     * A patched row is always created with generated_page_version_id already set, so it is never
+     * selected as pending generation work by EnterpriseWikiDocumentFlowService::beginGeneratingPages()
+     * or FinalizeEnterpriseWikiPageGeneration — both filter on a null version id.
+     */
+    public const ACTION_PATCHED = 'patched';
+
     public const ACTIONS = [
         self::ACTION_CREATED,
         self::ACTION_UPDATED,
+        self::ACTION_PATCHED,
     ];
 
     public const GENERATION_STATUS_PENDING = 'pending';

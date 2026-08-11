@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiPatchApplicationException;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 
@@ -18,7 +19,14 @@ use App\Models\EnterpriseWikiPageVersion;
  *  - it is live Wiki knowledge, not archived/superseded/rejected
  *  - it has a current version at all — there is nothing to patch otherwise
  *  - its real page_type, read from the row and never taken from the model
- *  - target_heading, when given, is a heading that actually exists on the current version
+ *  - the target area can be located at all — by heading, or as the body of a page that has no
+ *    sub-sections (see EnterpriseWikiPatchSectionResolver, which this shares with the patch engine)
+ *  - for a `replace`, the superseded_substance is present VERBATIM inside that area
+ *
+ * The last two use the same resolver the patch engine uses at apply time, deliberately: run 28 showed
+ * what happens when validation and execution answer "where is this, and is the old text there?"
+ * differently — a decision validated, was persisted, and only failed later inside the engine, long
+ * after the bounded repair pass that could have fixed it.
  *
  * The page_type contract is the important one. The model states `target_page_type` so its belief is
  * visible and checkable, but the row is the only authority: a mismatch is reported as an error and
@@ -37,6 +45,35 @@ class EnterpriseWikiPatchTargetResolver
         EnterpriseWikiPage::STATUS_SUPERSEDED,
         EnterpriseWikiPage::STATUS_REJECTED,
     ];
+
+    /** Ceiling for echoing back the maintainer's OWN short values in an issue. */
+    private const ISSUE_EXCERPT_CHARS = 400;
+
+    /**
+     * A resolved target area up to this size is shown to the repair pass IN FULL.
+     *
+     * Measured against the real pages this operates on rather than guessed: the areas involved in
+     * run 29 flatten to 1634, 1589 and 2002 characters, and the other sections of those pages to
+     * 495–644. 2500 therefore shows every observed area complete, with margin, while still bounding
+     * what a repair prompt can grow to.
+     */
+    private const AREA_CONTEXT_CHARS = 2500;
+
+    /**
+     * Window size when an area exceeds AREA_CONTEXT_CHARS: the repair pass sees this much text
+     * centred on the part of the area that best matches the substance it must correct.
+     */
+    private const AREA_CONTEXT_WINDOW_CHARS = 1400;
+
+    /** A one-token anchor shorter than this is too generic to centre a window on. */
+    private const ANCHOR_MIN_CHARS = 4;
+
+    /** Bounds the anchor search on pathological input. A substance is a sentence, not a document. */
+    private const ANCHOR_MAX_TOKENS = 40;
+
+    public function __construct(
+        private readonly EnterpriseWikiPatchSectionResolver $sectionResolver,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $decision
@@ -143,9 +180,13 @@ class EnterpriseWikiPatchTargetResolver
 
             $heading = is_string($target['target_heading'] ?? null) ? trim((string) $target['target_heading']) : '';
 
-            if ($heading !== '' && ! $this->headingExists($heading, (string) $version->content_markdown)) {
-                $errors[] = "{$ctx}.target_heading [{$heading}] is not a heading on the current version of page [{$pageId}] — "
-                    .'name an existing heading or leave it null and rely on target_topic.';
+            // Area resolution and superseded-substance verification use the SAME resolver the patch
+            // engine will use at apply time. Validating with a second, near-identical implementation
+            // is how a decision passes here and fails there — which is exactly what run 28 did.
+            $areaError = $this->verifyTargetArea($target, $version, $heading, $pageId, $ctx);
+
+            if ($areaError !== null) {
+                $errors[] = $areaError;
             }
 
             $resolved[] = [
@@ -196,38 +237,224 @@ class EnterpriseWikiPatchTargetResolver
     }
 
     /**
-     * Whether the markdown carries this ATX heading, comparing on the heading text alone and
-     * ignoring level, surrounding whitespace and case. Deliberately a plain, level-agnostic text
-     * comparison: this validates that the anchor the maintainer named is real, it does not attempt
-     * to locate, bound or splice a section — that is 8K-3's work.
+     * Verify, at DECISION time, the two things that decide whether a patch can actually be carried
+     * out: that the target area can be located, and — for a `replace` — that the substance it claims
+     * to supersede is genuinely there.
+     *
+     * Run 28 is why this exists. A decision named a heading that existed, so it validated, was
+     * persisted, and only failed hours later inside the patch engine because the maintainer had quoted
+     * a clause as a whole sentence: it wrote "… innen 30 minutter." while the page says
+     * "… innen 30 minutter, driftsleder skal varsle …". By then the bounded repair pass was long over,
+     * and the failure took nine otherwise-valid targets on that page down with it.
+     *
+     * Checking here instead means the same mistake becomes an ordinary validation issue, repairable by
+     * the pass that already exists. The patch engine stays strict on purpose — it must never decide
+     * that a comma and a full stop "probably mean the same thing" — so the fix belongs in the
+     * decision, not in the mutation.
+     *
+     * @param  array<string, mixed>  $target
+     * @return string|null one issue, or null when the target is sound
      */
-    private function headingExists(string $heading, string $markdown): bool
-    {
-        $needle = $this->normalizeHeading($heading);
+    private function verifyTargetArea(
+        array $target,
+        EnterpriseWikiPageVersion $version,
+        string $heading,
+        int $pageId,
+        string $ctx,
+    ): ?string {
+        $blocks = $this->blocksFor($version);
 
-        if ($needle === '') {
-            return false;
+        if ($blocks === []) {
+            return null; // nothing to locate against; an empty version is reported elsewhere.
         }
 
-        foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
-            if (preg_match('/^\s{0,3}#{1,6}\s+(.*)$/u', (string) $line, $matches) !== 1) {
-                continue;
-            }
+        $topic = trim((string) ($target['target_topic'] ?? ''));
 
-            if ($this->normalizeHeading($matches[1]) === $needle) {
-                return true;
-            }
+        try {
+            $area = $this->sectionResolver->resolve($blocks, $heading === '' ? null : $heading, $topic, $ctx);
+        } catch (EnterpriseWikiPatchApplicationException $e) {
+            return $heading !== ''
+                ? "{$ctx}.target_heading [{$heading}] is not a heading on the current version of page [{$pageId}] — "
+                    .'name an existing heading, or leave it null when the page has no sub-sections.'
+                : "{$ctx} names no target_heading and target_topic [{$topic}] does not identify a section of page [{$pageId}], "
+                    .'which does have sub-sections — name the heading the affected substance sits under.';
         }
 
-        return false;
+        if ((string) ($target['operation'] ?? '') !== 'replace') {
+            return null; // amend adds; preserve mutates nothing. Neither claims existing substance.
+        }
+
+        $superseded = trim((string) ($target['superseded_substance'] ?? ''));
+
+        if ($superseded === '') {
+            return null; // schema validation already reports a missing superseded_substance.
+        }
+
+        $areaText = $this->areaText($blocks, $area);
+
+        if (mb_strpos($areaText, $superseded) !== false) {
+            return null;
+        }
+
+        $where = $heading !== '' ? "under heading [{$heading}]" : 'in the page body (this page has no sub-sections)';
+
+        return "{$ctx}.superseded_substance is not present verbatim {$where} on page [{$pageId}]. "
+            ."Given: [{$this->excerpt($superseded)}]. "
+            ."The relevant target area currently states: [{$this->areaContext($areaText, $superseded)}]. "
+            .'Correct superseded_substance by copying an EXACT substring out of that text — character for character, '
+            .'including its punctuation. It does not have to be a whole sentence; it has to be text that occurs there '
+            .'exactly, and be specific enough to identify the substance being replaced. Do not paraphrase, do not '
+            .'shorten a clause into a sentence, and do not use wording from a different page or a different target. '
+            .'Do not drop the patch target, do not move the finding to warnings, do not change the relationship, and '
+            .'do not turn the replace into a create.';
     }
 
-    private function normalizeHeading(string $value): string
+    /**
+     * The text the repair pass is shown so it can copy from it.
+     *
+     * Run 29 is why this is not simply "the first N characters". The repair pass was told to copy
+     * `superseded_substance` verbatim out of the target area and was shown the area's opening 400
+     * characters — while the sentence it needed sat 537, 658 and 1077 characters past that cut on the
+     * three failing targets. It could not follow the instruction, so it paraphrased, and on two
+     * targets it reached for wording it COULD see: another target's page. The two targets whose text
+     * happened to fall inside the window were repaired correctly. The correlation was exact.
+     *
+     * So the rule is: show the whole area when it is small enough (which covers every area observed
+     * on these pages), and otherwise show a window centred on the part of the area that best matches
+     * what the maintainer wrote.
+     *
+     * THE ANCHOR SEARCH IS FOR LOCATING CONTEXT ONLY. It never decides whether a patch is valid and
+     * never selects text to mutate — verifyTargetArea() above still demands an exact substring, and
+     * EnterpriseWikiPatchApplicationService still replaces only an exact substring. Nothing here can
+     * make an inexact patch acceptable; it only decides which part of the page the model gets to read.
+     */
+    private function areaContext(string $areaText, string $superseded): string
     {
-        // Strip a trailing closed-ATX run of #, collapse whitespace, casefold.
-        $value = preg_replace('/\s+#+\s*$/u', '', trim($value)) ?? trim($value);
-        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        $flat = $this->flatten($areaText);
 
-        return mb_strtolower(trim($value));
+        if (mb_strlen($flat) <= self::AREA_CONTEXT_CHARS) {
+            return $flat;
+        }
+
+        $anchor = $this->anchorPosition($flat, $superseded);
+        $half = intdiv(self::AREA_CONTEXT_WINDOW_CHARS, 2);
+
+        // No usable anchor: deterministic fallback to the start of the area, as before.
+        $start = $anchor === null ? 0 : max(0, $anchor - $half);
+        $window = mb_substr($flat, $start, self::AREA_CONTEXT_WINDOW_CHARS);
+
+        return ($start > 0 ? '...' : '')
+            .$window
+            .($start + self::AREA_CONTEXT_WINDOW_CHARS < mb_strlen($flat) ? '...' : '');
+    }
+
+    /**
+     * Where in the area the maintainer's substance most nearly occurs — the longest run of its own
+     * words that appears there exactly, leftmost when several runs tie.
+     *
+     * Deliberately generic: it compares the maintainer's own words against the page's own words and
+     * knows nothing about languages, units, numbers or subject matter. A near-miss quote ("… 30
+     * minutter." for "… 30 minutter, driftsleder …") shares a long run and lands exactly on the right
+     * sentence; a wholesale paraphrase shares less and lands approximately; nothing at all returns
+     * null and the fallback applies.
+     *
+     * Deterministic: fixed search order, so identical input always yields the same window.
+     */
+    private function anchorPosition(string $areaText, string $superseded): ?int
+    {
+        $tokens = array_values(array_filter(
+            preg_split('/\s+/u', $this->flatten($superseded)) ?: [],
+            static fn (string $token): bool => $token !== '',
+        ));
+
+        $count = min(count($tokens), self::ANCHOR_MAX_TOKENS);
+
+        for ($length = $count; $length >= 1; $length--) {
+            for ($start = 0; $start + $length <= $count; $start++) {
+                $needle = implode(' ', array_slice($tokens, $start, $length));
+
+                if (mb_strlen($needle) < self::ANCHOR_MIN_CHARS) {
+                    continue;
+                }
+
+                $position = mb_strpos($areaText, $needle);
+
+                if ($position !== false) {
+                    return $position;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function flatten(string $value): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', trim($value)) ?? trim($value));
+    }
+
+    /**
+     * The version's blocks for area resolution.
+     *
+     * Normally this is `content_blocks_json`. When a version carries none — a legacy row, or a version
+     * written before block metadata existed — the blocks are derived from `content_markdown` using the
+     * same `\n{2,}` split that defines the relationship between the two representations
+     * (EnterpriseWikiPageContentBlockService::buildBlocks()). Validation must still be able to answer
+     * "does this heading exist, and is the old text under it" for such a version; deriving keeps that
+     * working without claiming the derived blocks are real provenance-bearing blocks.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function blocksFor(EnterpriseWikiPageVersion $version): array
+    {
+        $blocks = [];
+
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '') {
+                $blocks[] = $block;
+            }
+        }
+
+        if ($blocks !== []) {
+            return $blocks;
+        }
+
+        foreach (preg_split("/\n{2,}/", trim((string) $version->content_markdown)) ?: [] as $part) {
+            if (trim((string) $part) !== '') {
+                $blocks[] = ['markdown' => trim((string) $part)];
+            }
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * The text of the resolved area, as the patch engine will see it.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     * @param  array<string, mixed>  $area
+     */
+    private function areaText(array $blocks, array $area): string
+    {
+        $parts = [];
+
+        for ($i = (int) $area['start_index']; $i <= (int) $area['end_index']; $i++) {
+            $parts[] = $this->sectionResolver->inSectionText($area, $i, (string) ($blocks[$i]['markdown'] ?? ''));
+        }
+
+        return trim(implode("\n\n", $parts));
+    }
+
+    /**
+     * Bounded excerpt for an issue message — enough for the repair pass to see the real wording,
+     * never enough to blow up the repair prompt.
+     */
+    private function excerpt(string $value): string
+    {
+        $value = $this->flatten($value);
+
+        return mb_strlen($value) > self::ISSUE_EXCERPT_CHARS
+            ? mb_substr($value, 0, self::ISSUE_EXCERPT_CHARS - 3).'...'
+            : $value;
     }
 }

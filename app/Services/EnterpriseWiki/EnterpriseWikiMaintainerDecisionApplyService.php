@@ -119,28 +119,34 @@ class EnterpriseWikiMaintainerDecisionApplyService
     }
 
     /**
-     * Fase 8K-2: record that this run carries structured patch intent, and deliberately do NOTHING
-     * else with it.
+     * Record that this run carries structured patch intent. Apply deliberately does NOT act on it.
      *
      * The patch targets stay where the decision put them — in `maintainer_decision_json`, already
-     * persisted, already validated. No pivot row is created for a patch target, and that absence is
-     * the safety mechanism rather than an omission: page generation is driven entirely by
-     * `enterprise_wiki_ingest_run_pages` (see EnterpriseWikiDocumentFlowService::beginGeneratingPages()
-     * and FinalizeEnterpriseWikiPageGeneration), so a page with no pivot is never dispatched, never
+     * persisted, already validated. No GENERATION pivot row is created for a patch target here, and
+     * that absence is a safety mechanism rather than an omission: page generation is driven entirely
+     * by `enterprise_wiki_ingest_run_pages` (see
+     * EnterpriseWikiDocumentFlowService::beginGeneratingPages() and
+     * FinalizeEnterpriseWikiPageGeneration), so a page with no pivot is never dispatched, never
      * reaches EnterpriseWikiGenerateAppliedPagesService::generatePageForRun(), and therefore cannot
      * be regenerated from the new source document alone — which is exactly the destructive behaviour
      * observed after 8K-1, where an existing page lost unrelated substance, its provenance and two
      * wikilinks to a full-page rewrite triggered by `action=update`.
      *
-     * It also means the run does not stall: the finalizer only ever counts pivots, so a deferred
-     * patch target is invisible to it and the flow continues to QA exactly as before.
+     * It also means the run does not stall: the finalizer only ever counts pivots, so a target that is
+     * invisible here lets the flow continue exactly as before.
      *
-     * No new table, column or status is introduced for this. 8K-3 reads the same
-     * `maintainer_decision_json['patch_targets']` when it implements the real patch write.
+     * Fase 8K-3 now consumes these targets — EnterpriseWikiPatchApplicationService::applyForRun(),
+     * called from EnterpriseWikiDocumentFlowService::performApplyPatchTargets() once the run's own
+     * pages are generated. It reads this same `maintainer_decision_json['patch_targets']`, patches the
+     * bounded area each target authorizes, and writes at most one new current version per page —
+     * creating its own pivot row with `action=patched` and the version id already set, which is why
+     * that row can never be mistaken for pending generation work.
+     *
+     * No new table, column or status is introduced by either phase.
      *
      * @param  array<string, mixed>  $decision
      * @param  list<int>  $patchTargetPageIds
-     * @return int number of patch targets deferred to 8K-3
+     * @return int number of patch targets handed to 8K-3
      */
     private function deferPatchTargets(EnterpriseWikiIngestRun $run, array $decision, array $patchTargetPageIds): int
     {
@@ -150,7 +156,7 @@ class EnterpriseWikiMaintainerDecisionApplyService
             return 0;
         }
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Patch targets deferred — structured patch intent recorded, no content written (Fase 8K-3 not implemented).', [
+        Log::info('[WIKI_DOCUMENT_FLOW] Patch targets recorded by apply — applied later by the patch step, never by page generation.', [
             'run_id' => $run->id,
             'customer_id' => $run->customer_id,
             'patch_targets' => count($targets),

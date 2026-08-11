@@ -772,6 +772,44 @@ class EnterpriseWikiPatchDecisionContractTest extends TestCase
     // preserve_topics is target-local, and absence is never permission to delete
     // =========================================================================
 
+    // =========================================================================
+    // superseded_substance means ONE thing in every layer (runs 28 + 29)
+    // =========================================================================
+
+    public function test_the_contract_defines_superseded_substance_as_an_exact_substring(): void
+    {
+        $doc = (string) (new \ReflectionClass(EnterpriseWikiMaintainerDecisionPrompt::class))->getDocComment()
+            .$this->patchTargetSchemaDocComment();
+
+        $this->assertStringContainsString('EXACT, VERBATIM SUBSTRING', $doc);
+        $this->assertStringContainsString('does NOT have to be a whole sentence', $doc);
+        $this->assertStringContainsString('unique within that area', $doc);
+    }
+
+    public function test_the_decision_prompt_demands_an_exact_copy_not_a_description(): void
+    {
+        // Run 29's root contract defect: the decision prompt asked the maintainer to "state" the
+        // substance while the validator and engine demanded an exact substring, so the mistake was
+        // reintroduced on every single run.
+        $rules = implode("\n", EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules());
+
+        $this->assertStringContainsString('COPY AN EXACT SUBSTRING', $rules);
+        $this->assertStringContainsString('Do NOT', $rules);
+        $this->assertStringContainsString('paraphrase', $rules);
+        $this->assertStringContainsString('does not have to be a whole sentence', $rules);
+        $this->assertStringContainsString('occurs exactly once', $rules);
+        $this->assertStringContainsString('CLAUSE that continues', $rules, 'the observed failure mode must be named');
+    }
+
+    public function test_the_contract_wording_stays_domain_free(): void
+    {
+        $rules = mb_strtolower(implode("\n", EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules()));
+
+        foreach (['aurora', 'itsm', '99,5', '99.5', 'fjellglimt', 'prosent'] as $forbidden) {
+            $this->assertStringNotContainsString($forbidden, $rules, "prompt must not hardcode [{$forbidden}]");
+        }
+    }
+
     public function test_prompt_states_preserve_topics_is_target_local(): void
     {
         $rules = implode("\n", EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules());

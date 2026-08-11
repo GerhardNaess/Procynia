@@ -14,6 +14,7 @@ use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiCanonicalOwnershipValidator;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPatchSectionResolver;
 use App\Services\EnterpriseWiki\EnterpriseWikiPatchTargetResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -51,6 +52,12 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
     private const NEW_B = 'fristen er 15 minutter';
 
     private const UNRELATED = 'Denne siden beskriver ogsaa formaal og omfang, som dette dokumentet ikke berorer i det hele tatt.';
+
+    /** Stated verbatim on every fixture page, and named verbatim by target()'s superseded_substance. */
+    private const SUPERSEDED_SENTENCE = 'Siden oppgir at terskelverdien er 99 enheter.';
+
+    /** The second shared sentence, for targets about the deadline rather than the threshold. */
+    private const SUPERSEDED_SENTENCE_B = 'Siden oppgir at fristen er 30 minutter.';
 
     // =========================================================================
     // Target resolution — the database is the only authority
@@ -192,19 +199,170 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
         $this->assertStringContainsString('is not a heading on the current version', implode(' | ', $invalid['errors']));
     }
 
-    public function test_target_topic_alone_is_a_valid_target_without_a_heading(): void
+    public function test_a_flat_page_accepts_a_target_with_no_heading(): void
     {
-        // Documented limitation: the Wiki has no stable section identifier, so a descriptor-only
-        // target must remain expressible.
+        // The Wiki has no stable section identifier, so a descriptor-only target has to stay
+        // expressible — and on a page with no sub-sections it is the only honest form. Run 28 showed
+        // a real summary losing all four of its targets to the older rule.
+        [$customer, , $pages] = $this->existingWiki();
+
+        $result = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([
+            $this->target($pages['summary'], 'summary'),
+        ]));
+
+        $this->assertSame([], $result['errors']);
+        $this->assertNull($result['resolved'][0]['target_heading']);
+        $this->assertSame('Terskelverdi', $result['resolved'][0]['target_topic']);
+    }
+
+    public function test_a_sectioned_page_rejects_a_target_with_no_heading(): void
+    {
+        // The other half of the rule: once a page HAS sub-sections, "somewhere on this page" is not a
+        // bounded area, and the flat-page fallback must not fire. Rejecting it at decision time is what
+        // gives the bounded repair pass a chance to name the heading.
         [$customer, , $pages] = $this->existingWiki();
 
         $result = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([
             array_merge($this->target($pages['article'], 'article'), ['target_heading' => null]),
         ]));
 
+        $joined = implode(' | ', $result['errors']);
+
+        $this->assertStringContainsString('does not identify a section', $joined);
+        $this->assertStringContainsString('which does have sub-sections', $joined);
+    }
+
+    public function test_a_superseded_substance_that_is_not_present_is_rejected_at_decision_time(): void
+    {
+        // THE RUN-28 REGRESSION. The maintainer quoted a clause as if it were a whole sentence:
+        // the page states "... innen 30 minutter, driftsleder skal varsle ...", the decision wrote
+        // "... innen 30 minutter." Before this check the decision validated, was persisted, and only
+        // failed later inside the patch engine — after the bounded repair pass could have fixed it.
+        [$customer, , $pages] = $this->existingWiki();
+
+        $result = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([
+            array_merge($this->target($pages['article'], 'article'), [
+                'superseded_substance' => 'Siden oppgir at terskelverdien er 99 enheter og noe mer som ikke staar der.',
+            ]),
+        ]));
+
+        $joined = implode(' | ', $result['errors']);
+
+        $this->assertStringContainsString('is not present verbatim', $joined);
+        $this->assertStringContainsString('under heading [Krav og terskler]', $joined);
+        $this->assertStringContainsString('The relevant target area currently states', $joined, 'the repair pass needs the real wording');
+        $this->assertStringContainsString(self::SUPERSEDED_SENTENCE, $joined, 'the context must show the actual text');
+        $this->assertStringContainsString('copying an EXACT substring', $joined);
+        $this->assertStringContainsString('does not have to be a whole sentence', $joined, 'a shorter exact substring must be allowed');
+        $this->assertStringContainsString('a different page or a different target', $joined, 'cross-target contamination must be forbidden');
+        $this->assertStringContainsString('do not move', $joined, 'the issue must forbid escaping into warnings');
+    }
+
+    public function test_a_large_target_area_is_windowed_around_the_relevant_text(): void
+    {
+        // Beyond the whole-area limit the context must still centre on the part the maintainer is
+        // trying to correct — showing the opening of a long page is exactly what failed in run 29.
+        $customer = $this->createCustomer();
+        $filler = str_repeat('Denne innledende teksten beskriver bakgrunn og omfang uten aa tallfeste noe som helst. ', 40);
+        $needle = 'Terskelverdien er 99 enheter, maalt paa tvers av hele tjenesten.';
+
+        $page = $this->createPage($customer, 'Lang Prosedyre', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createVersion($page, "# Lang Prosedyre\n\n## Krav og terskler\n\n".$filler."\n\n".$needle."\n\n".$filler);
+
+        $result = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([
+            array_merge($this->target($page, 'article'), [
+                'target_heading' => 'Krav og terskler',
+                // A near-miss quote of the real sentence — enough to anchor the window on it.
+                'superseded_substance' => 'Terskelverdien er 99 enheter.',
+            ]),
+        ]));
+
+        $joined = implode(' | ', $result['errors']);
+
+        $this->assertStringContainsString('is not present verbatim', $joined);
+        $this->assertStringContainsString($needle, $joined, 'the window must be centred on the relevant text, not the page opening');
+        $this->assertStringContainsString('...', $joined, 'a windowed context is marked as truncated');
+    }
+
+    public function test_a_large_area_without_any_anchor_still_produces_bounded_context(): void
+    {
+        // Nothing in the given substance occurs in the area: the fallback must stay deterministic and
+        // bounded rather than dumping the whole page.
+        $customer = $this->createCustomer();
+        $filler = str_repeat('Denne teksten beskriver bakgrunn og omfang uten tallfesting. ', 60);
+
+        $page = $this->createPage($customer, 'Lang Prosedyre', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createVersion($page, "# Lang Prosedyre\n\n## Krav og terskler\n\n".$filler);
+
+        $decision = $this->decisionTargeting([
+            array_merge($this->target($page, 'article'), [
+                'target_heading' => 'Krav og terskler',
+                'superseded_substance' => 'Zzzzq Yyyyw Xxxxr.',
+            ]),
+        ]);
+
+        $first = implode(' | ', $this->resolver()->resolveForCustomer($customer->id, $decision)['errors']);
+        $second = implode(' | ', $this->resolver()->resolveForCustomer($customer->id, $decision)['errors']);
+
+        $this->assertStringContainsString('is not present verbatim', $first);
+        $this->assertSame($first, $second, 'the fallback must be deterministic');
+        $this->assertLessThan(2600, mb_strlen($first), 'the context must stay bounded');
+    }
+
+    public function test_substance_verification_only_applies_to_replace(): void
+    {
+        // amend adds; preserve mutates nothing. Neither claims existing substance, so neither is
+        // checked — the scope stays exactly where run 28 showed it was needed.
+        [$customer, , $pages] = $this->existingWiki();
+
+        $result = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([
+            array_merge($this->target($pages['article'], 'article'), [
+                'operation' => 'amend',
+                'relationship' => 'topic_extended',
+                'superseded_substance' => null,
+                'replacement_substance' => 'Ny presisering.',
+            ]),
+            array_merge($this->target($pages['entity'], 'entity'), [
+                'operation' => 'preserve',
+                'relationship' => 'reference_only',
+                'superseded_substance' => null,
+                'replacement_substance' => null,
+                'source_element_keys' => [],
+            ]),
+        ]));
+
         $this->assertSame([], $result['errors']);
-        $this->assertNull($result['resolved'][0]['target_heading']);
-        $this->assertSame('Terskelverdi', $result['resolved'][0]['target_topic']);
+    }
+
+    public function test_decision_validation_and_the_patch_engine_agree_on_the_area(): void
+    {
+        // The alignment run 28 was missing: whatever the resolver accepts here, the engine must be
+        // able to locate. A target the validator passes must not die inside the patch.
+        [$customer, , $pages] = $this->existingWiki();
+
+        foreach ([$pages['article'], $pages['summary'], $pages['concept'], $pages['entity']] as $page) {
+            $target = $this->target($page, $page->page_type);
+
+            $errors = $this->resolver()->resolveForCustomer($customer->id, $this->decisionTargeting([$target]))['errors'];
+
+            $this->assertSame([], $errors, "validation accepted nothing for [{$page->page_type}]");
+
+            // The engine's own resolver must find the same area without throwing.
+            $blocks = [];
+
+            foreach (preg_split("/\n{2,}/", trim((string) $page->currentVersion->content_markdown)) ?: [] as $part) {
+                $blocks[] = ['markdown' => trim((string) $part)];
+            }
+
+            $area = app(EnterpriseWikiPatchSectionResolver::class)->resolve(
+                $blocks,
+                $target['target_heading'],
+                $target['target_topic'],
+                'engine',
+            );
+
+            $this->assertLessThanOrEqual($area['end_index'], $area['start_index']);
+        }
     }
 
     // =========================================================================
@@ -447,9 +605,9 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
             $this->target($pages['article'], 'article', topic: 'Terskelverdi'),
             $this->target($pages['summary'], 'summary', topic: 'Terskelverdi'),
             $this->target($pages['entity'], 'entity', topic: 'Terskelverdi'),
-            $this->target($pages['article'], 'article', topic: 'Frist', oldValue: self::OLD_B, newValue: self::NEW_B, key: 'paragraph-4'),
-            $this->target($pages['summary'], 'summary', topic: 'Frist', oldValue: self::OLD_B, newValue: self::NEW_B, key: 'paragraph-4'),
-            $this->target($pages['concept'], 'concept', topic: 'Frist', oldValue: self::OLD_B, newValue: self::NEW_B, key: 'paragraph-4'),
+            $this->target($pages['article'], 'article', topic: 'Frist', superseded: self::SUPERSEDED_SENTENCE_B, newValue: self::NEW_B, key: 'paragraph-4'),
+            $this->target($pages['summary'], 'summary', topic: 'Frist', superseded: self::SUPERSEDED_SENTENCE_B, newValue: self::NEW_B, key: 'paragraph-4'),
+            $this->target($pages['concept'], 'concept', topic: 'Frist', superseded: self::SUPERSEDED_SENTENCE_B, newValue: self::NEW_B, key: 'paragraph-4'),
             // C — a sub-topic of an existing topic: amended onto the owner, never a new page.
             array_merge($this->target($pages['concept'], 'concept', topic: 'Undertema C'), [
                 'relationship' => 'topic_specialized',
@@ -545,22 +703,26 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
     {
         $customer = $this->createCustomer();
 
+        // Every page states SUPERSEDED_SENTENCE verbatim, because target() names exactly that as the
+        // substance it supersedes. Since Fase 8K-3's correction, EnterpriseWikiPatchTargetResolver
+        // verifies that at decision time, so a fixture whose targets quote text the page does not
+        // contain would (correctly) be rejected.
         $article = $this->createPage($customer, 'Styrende Prosedyre', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $this->createVersion($article, implode("\n\n", [
             '# Styrende Prosedyre',
             self::UNRELATED,
             '## Krav og terskler',
-            'Her gjelder at '.self::OLD_A.', og at '.self::OLD_B.'.',
+            self::SUPERSEDED_SENTENCE.' '.self::SUPERSEDED_SENTENCE_B,
         ]));
 
         $summary = $this->createPage($customer, 'Sammendrag: Styrende Prosedyre', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
-        $this->createVersion($summary, "# Sammendrag: Styrende Prosedyre\n\nKort: ".self::OLD_A.' og '.self::OLD_B.'.');
+        $this->createVersion($summary, "# Sammendrag: Styrende Prosedyre\n\nKort: ".self::SUPERSEDED_SENTENCE.' '.self::SUPERSEDED_SENTENCE_B);
 
         $concept = $this->createPage($customer, 'Generelt Hovedtema', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
-        $this->createVersion($concept, "# Generelt Hovedtema\n\nGenerell beskrivelse der ".self::OLD_B.'.');
+        $this->createVersion($concept, "# Generelt Hovedtema\n\n".self::SUPERSEDED_SENTENCE.' '.self::SUPERSEDED_SENTENCE_B);
 
         $entity = $this->createPage($customer, 'Plattform Alfa', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
-        $this->createVersion($entity, "# Plattform Alfa\n\nPlattformen styres slik at ".self::OLD_A.'.');
+        $this->createVersion($entity, "# Plattform Alfa\n\n".self::SUPERSEDED_SENTENCE.' '.self::SUPERSEDED_SENTENCE_B);
 
         $untouched = $this->createPage($customer, 'Nabotema Uten Endring', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
         $this->createVersion($untouched, "# Nabotema Uten Endring\n\nHelt urelatert innhold som ingen endring beroerer.");
@@ -597,11 +759,17 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
     }
 
     /** @return array<string, mixed> */
+    /**
+     * The article fixture has a `## Krav og terskler` section, so a target on it must name that
+     * heading — a descriptor-only target on a SECTIONED page is not locatable and is rejected at
+     * decision time since 8K-3. The flat fixture pages (summary/concept/entity) legitimately pass
+     * null and resolve against the page body.
+     */
     private function target(
         EnterpriseWikiPage $page,
         string $statedType,
         string $topic = 'Terskelverdi',
-        string $oldValue = self::OLD_A,
+        string $superseded = self::SUPERSEDED_SENTENCE,
         string $newValue = self::NEW_A,
         string $key = 'paragraph-3',
     ): array {
@@ -610,10 +778,10 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
             'target_page_title' => $page->title,
             'target_page_type' => $statedType,
             'target_topic' => $topic,
-            'target_heading' => null,
+            'target_heading' => $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 'Krav og terskler' : null,
             'relationship' => 'substance_changed',
             'operation' => 'replace',
-            'superseded_substance' => 'Siden oppgir at '.$oldValue.'.',
+            'superseded_substance' => $superseded,
             'replacement_substance' => 'Kilden fastsetter at '.$newValue.'.',
             'source_element_keys' => [$key],
             'preserve_topics' => [],

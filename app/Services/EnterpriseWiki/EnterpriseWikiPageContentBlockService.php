@@ -293,9 +293,15 @@ class EnterpriseWikiPageContentBlockService
     }
 
     /**
+     * One entry of a block's plural `source_elements` list. Public because Fase 8K-3's patch path
+     * builds provenance for newly patched substance and must produce byte-identical payload shape to
+     * ordinary generation — a second, near-identical copy of this mapping is exactly how provenance
+     * starts drifting between the two write paths.
+     *
+     * @param  array<string, mixed>  $element
      * @return array<string, mixed>
      */
-    private function sourceElementPayload(EnterpriseWikiDocument $document, array $element): array
+    public function sourceElementPayload(EnterpriseWikiDocument $document, array $element): array
     {
         return [
             'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,

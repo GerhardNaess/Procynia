@@ -6,6 +6,7 @@ use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
@@ -484,6 +485,341 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
                     return $this->validDecision();
                 }
             );
+    }
+
+    // =========================================================================
+    // Fase 8K-3 correction — superseded_substance is verified at DECISION time
+    // =========================================================================
+
+    /**
+     * THE RUN-28 REGRESSION. The maintainer quoted a clause as if it were a whole sentence: it wrote
+     * "... innen 30 minutter." while the page states "... innen 30 minutter, driftsleder skal varsle ...".
+     *
+     * Before this correction the decision validated (the heading existed), was persisted, and only
+     * failed hours later inside the patch engine — long after the bounded repair pass that could have
+     * fixed it, taking nine otherwise-valid targets on that page down with it.
+     *
+     * The fix is NOT fuzzy matching in the engine. The engine must stay strict; the maintainer gets a
+     * repair opportunity instead.
+     */
+    public function test_a_superseded_substance_quoted_as_a_sentence_triggers_a_bounded_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createExistingPageWithClause($customer);
+
+        $broken = $this->decisionWithReplaceTarget($page->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.');
+        $repaired = $this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE);
+
+        $captured = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($broken);
+        $mock->shouldReceive('repair')->once()
+            ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
+                $captured = $args[5] ?? [];
+
+                return $repaired;
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $issues = implode(' | ', $captured);
+
+        $this->assertStringContainsString('is not present verbatim', $issues, 'the repair pass must be told what is wrong');
+        $this->assertStringContainsString(self::REAL_CLAUSE, $issues, 'and shown the wording that actually exists');
+        $this->assertStringContainsString('copying an EXACT substring', $issues);
+        $this->assertSame(self::REAL_CLAUSE, $result['patch_targets'][0]['superseded_substance'], 'the repaired decision is what is returned');
+    }
+
+    public function test_a_correctly_quoted_superseded_substance_needs_no_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createExistingPageWithClause($customer);
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()
+            ->andReturn($this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE));
+        $mock->shouldNotReceive('repair');
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
+    /** The clause as the page actually states it — note it continues past the deadline. */
+    private const REAL_CLAUSE = 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter, driftsleder skal varsle tjenesteeier ved alle P1-hendelser.';
+
+    /**
+     * Filler that pushes the real clause deep into the target area, reproducing run 29's geometry:
+     * there, the text the repair pass had to copy sat 537–1077 characters past where the old
+     * 400-character excerpt stopped, so the instruction "copy it verbatim" was unfollowable.
+     */
+    private const DEEP_FILLER = 'Denne innledende teksten beskriver bakgrunn, formaal og omfang i generelle vendinger uten aa tallfeste noe som helst. Den forklarer hvordan styringen henger sammen med oevrige rutiner, hvilke roller som deltar, og hvordan avvik foelges opp i den loepende driften. Teksten fortsetter tilstrekkelig lenge til at et kort utdrag fra begynnelsen av seksjonen ikke naar frem til det konkrete kravet som staar lenger nede, slik tilfellet var i den observerte kjoeringen.';
+
+    // =========================================================================
+    // Run-29 regression — the repair pass must SEE the text it is told to copy
+    // =========================================================================
+
+    /**
+     * THE RUN-29 REGRESSION. The clause sits ~900 characters into the target area. With the old
+     * "first 400 characters" excerpt it was invisible, and the repair pass paraphrased. The context
+     * must now contain it, so a repair that copies an exact substring re-validates cleanly.
+     */
+    public function test_repair_context_contains_the_clause_even_when_it_sits_deep_in_the_area(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createExistingPageWithClause($customer, deep: true);
+
+        $captured = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()
+            ->andReturn($this->decisionWithReplaceTarget($page->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.'));
+        $mock->shouldReceive('repair')->once()
+            ->andReturnUsing(function (...$args) use (&$captured, $page): array {
+                $captured = $args[5] ?? [];
+
+                // A repair pass that can actually READ the clause copies an exact substring of it.
+                return $this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE);
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $issues = implode(' | ', $captured);
+        $contextStart = mb_strpos($issues, 'The relevant target area currently states');
+        $clauseAt = mb_strpos($issues, self::REAL_CLAUSE);
+
+        $this->assertNotFalse($clauseAt, 'the deep clause must be visible in the repair context');
+        // Guards the test itself: if the clause ever drifts back inside the first 400 characters of
+        // the area, this stops reproducing run 29 and would pass for the wrong reason.
+        $this->assertGreaterThan(
+            400,
+            $clauseAt - (int) $contextStart,
+            'the fixture must keep the clause past the old 400-character cut',
+        );
+        $this->assertSame(self::REAL_CLAUSE, $result['patch_targets'][0]['superseded_substance']);
+    }
+
+    public function test_a_shorter_exact_substring_is_an_acceptable_repair(): void
+    {
+        // The contract does not demand a whole sentence — only exact, present and identifying. A
+        // shorter fragment is usually the safer correction.
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createExistingPageWithClause($customer, deep: true);
+
+        $fragment = 'innen 30 minutter, driftsleder skal varsle';
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()
+            ->andReturn($this->decisionWithReplaceTarget($page->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.'));
+        $mock->shouldReceive('repair')->once()
+            ->andReturn($this->decisionWithReplaceTarget($page->id, $fragment));
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame($fragment, $result['patch_targets'][0]['superseded_substance']);
+    }
+
+    /**
+     * Run 29 also showed the repair pass reaching for wording it COULD see — from another target's
+     * page — when its own was cut off. Each issue must therefore quote its own target's area.
+     */
+    public function test_each_issue_quotes_its_own_target_area_and_not_another_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        // Two pages stating the SAME value in DIFFERENT words — run 29's exact contamination setup.
+        $pageA = $this->createExistingPageWithClause($customer, deep: true);
+        $pageB = $this->createPageStating(
+            $customer,
+            'Sammendrag: Styrende prosedyre',
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            self::DEEP_FILLER.' Tjenesten styres mot en bekreftelsestid paa 30 minutter, og rapporteres maanedlig.',
+        );
+
+        $decision = $this->decisionWithReplaceTarget($pageA->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.');
+        $decision['patch_targets'][] = array_merge($decision['patch_targets'][0], [
+            'target_page_id' => $pageB->id,
+            'target_page_title' => $pageB->title,
+            'target_page_type' => EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            'target_heading' => null,
+            'superseded_substance' => 'Tjenesten styres mot en bekreftelsestid paa 30 minutter.',
+        ]);
+
+        $captured = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $mock->shouldReceive('repair')->once()
+            ->andReturnUsing(function (...$args) use (&$captured): array {
+                $captured = $args[5] ?? [];
+
+                throw new \RuntimeException('stop-after-capture');
+            });
+
+        try {
+            $this->service()->runForDocument($customer->id, $document->id, 'no');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('stop-after-capture', $e->getMessage());
+        }
+
+        $this->assertCount(2, $captured, 'both targets must raise their own issue');
+
+        $issueA = $this->issueMentioning($captured, "page [{$pageA->id}]");
+        $issueB = $this->issueMentioning($captured, "page [{$pageB->id}]");
+
+        $this->assertStringContainsString(self::REAL_CLAUSE, $issueA, "page A's issue must quote page A");
+        $this->assertStringNotContainsString('Tjenesten styres mot en bekreftelsestid', $issueA, "page A's issue must not leak page B's wording");
+
+        $this->assertStringContainsString('Tjenesten styres mot en bekreftelsestid', $issueB, "page B's issue must quote page B");
+        $this->assertStringNotContainsString(self::REAL_CLAUSE, $issueB, "page B's issue must not leak page A's wording");
+    }
+
+    public function test_a_flat_summary_area_is_shown_in_the_repair_context(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $needed = 'Kort: bekreftelse skjer innen 30 minutter, og avvik rapporteres maanedlig.';
+        $page = $this->createPageStating(
+            $customer,
+            'Sammendrag: Styrende prosedyre',
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            self::DEEP_FILLER.' '.$needed,
+        );
+
+        $decision = $this->decisionWithReplaceTarget($page->id, 'Bekreftelse skjer innen 30 minutter.');
+        $decision['patch_targets'][0]['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_SUMMARY;
+        $decision['patch_targets'][0]['target_page_title'] = $page->title;
+        $decision['patch_targets'][0]['target_heading'] = null;
+
+        $captured = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $mock->shouldReceive('repair')->once()
+            ->andReturnUsing(function (...$args) use (&$captured, $page, $needed): array {
+                $captured = $args[5] ?? [];
+                $repaired = $this->decisionWithReplaceTarget($page->id, $needed);
+                $repaired['patch_targets'][0]['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_SUMMARY;
+                $repaired['patch_targets'][0]['target_page_title'] = $page->title;
+                $repaired['patch_targets'][0]['target_heading'] = null;
+
+                return $repaired;
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+        $issues = implode(' | ', $captured);
+
+        $this->assertStringContainsString('page body (this page has no sub-sections)', $issues);
+        $this->assertStringContainsString($needed, $issues, 'a flat page body must be shown to the repair pass too');
+        $this->assertSame($needed, $result['patch_targets'][0]['superseded_substance']);
+    }
+
+    /** @param list<string> $issues */
+    private function issueMentioning(array $issues, string $needle): string
+    {
+        foreach ($issues as $issue) {
+            if (str_contains($issue, $needle)) {
+                return $issue;
+            }
+        }
+
+        $this->fail("no issue mentions [{$needle}]");
+    }
+
+    private function createPageStating(Customer $customer, string $title, string $pageType, string $body): EnterpriseWikiPage
+    {
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        $this->writeVersion($page, "# {$title}\n\n{$body}");
+
+        return $page;
+    }
+
+    /**
+     * @param  bool  $deep  place the clause ~900 characters into the section, as run 29's pages did
+     */
+    private function createExistingPageWithClause(Customer $customer, bool $deep = false): EnterpriseWikiPage
+    {
+        $page = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'styrende-prosedyre-'.Str::lower(Str::random(4)),
+            'title' => 'Styrende prosedyre',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+
+        $body = $deep
+            ? self::DEEP_FILLER."\n\n".self::REAL_CLAUSE
+            : self::REAL_CLAUSE;
+
+        $this->writeVersion($page, "# Styrende prosedyre\n\n## Krav og praksis\n\n".$body);
+
+        return $page;
+    }
+
+    private function writeVersion(EnterpriseWikiPage $page, string $markdown): void
+    {
+        $parts = explode("\n\n", $markdown);
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => $markdown,
+            'content_blocks_json' => array_map(
+                static fn (string $part, int $i): array => [
+                    'block_key' => 'block-'.str_pad((string) ($i + 1), 4, '0', STR_PAD_LEFT),
+                    'position' => $i,
+                    'markdown' => $part,
+                ],
+                $parts,
+                array_keys($parts),
+            ),
+            'generated_by_model' => 'gpt-5',
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function decisionWithReplaceTarget(int $pageId, string $superseded): array
+    {
+        $decision = $this->validDecision();
+
+        $decision['patch_targets'] = [[
+            'target_page_id' => $pageId,
+            'target_page_title' => 'Styrende prosedyre',
+            'target_page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'target_topic' => 'P1-responstid',
+            'target_heading' => 'Krav og praksis',
+            'relationship' => 'substance_changed',
+            'operation' => 'replace',
+            'superseded_substance' => $superseded,
+            'replacement_substance' => 'P1-hendelser skal bekreftes av driftsteamet innen 15 minutter, driftsleder skal varsle tjenesteeier ved alle P1-hendelser.',
+            'source_element_keys' => [],
+            'preserve_topics' => [],
+            'reason' => 'Kilden halverer bekreftelsestiden.',
+        ]];
+
+        return $decision;
     }
 
     private function validDecision(): array

@@ -83,6 +83,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
      *
      *  - replace:  the existing substance is expressly superseded by the new source document and
      *              must be replaced. Requires superseded_substance AND replacement_substance.
+     *              `superseded_substance` is an EXACT, VERBATIM SUBSTRING of the target area's
+     *              current text — see the field notes on patchTargetSchema().
      *  - amend:    the existing topic stands, but is extended or made more precise. Requires
      *              replacement_substance (the addition); superseded_substance stays null.
      *  - preserve: the page was considered against the new document and must be left UNTOUCHED.
@@ -392,6 +394,24 @@ class EnterpriseWikiMaintainerDecisionPrompt
      * verified against the database and never trusted (see EnterpriseWikiPatchTargetResolver). The
      * database is the only authority on a page's type, and nothing here can change it.
      *
+     * `superseded_substance` is an EXACT, VERBATIM SUBSTRING of the target area's current text — not a
+     * description of it, and not a paraphrase. It is the text a `replace` removes, so the patch engine
+     * locates it by plain substring search and rewrites exactly those characters
+     * (EnterpriseWikiPatchApplicationService); EnterpriseWikiPatchTargetResolver verifies its presence
+     * at decision time so a near-miss quote becomes a repairable validation issue rather than a late
+     * failure.
+     *
+     * It does NOT have to be a whole sentence, clause or paragraph. It has to be:
+     *  - character-for-character present in the target area, punctuation included, and
+     *  - specific enough to identify the substance being replaced, and unique within that area.
+     *
+     * A shorter exact substring is therefore perfectly valid, and often safer than a long quote: the
+     * failure mode observed twice in production (runs 28 and 29) was a maintainer quoting a CLAUSE as
+     * though it were a sentence — writing "… within 30 minutes." where the page says "… within 30
+     * minutes, the manager shall …" — which is not a substring at all. Copying less, exactly, avoids
+     * that entirely. If the same text occurs more than once in the area, the patch engine refuses it
+     * as ambiguous rather than guessing, so a longer, distinguishing substring is what disambiguates.
+     *
      * `preserve_topics` is TARGET-LOCAL, not page-wide. It names substance inside THIS target's own
      * section/topic area that must survive the patch — the neighbouring statements a replace or amend
      * sits next to and must not take with it. It is explicitly NOT a list of everything else on the
@@ -691,7 +711,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
 
         if ($operation === 'replace') {
             if ($superseded === null) {
-                $errors[] = "{$ctx}.superseded_substance is required for operation \"replace\" — state the existing substance being superseded.";
+                $errors[] = "{$ctx}.superseded_substance is required for operation \"replace\" — copy the exact, verbatim text being superseded from the target area.";
             }
 
             if ($replacement === null) {

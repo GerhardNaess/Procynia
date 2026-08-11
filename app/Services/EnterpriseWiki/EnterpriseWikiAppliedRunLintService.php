@@ -431,7 +431,48 @@ class EnterpriseWikiAppliedRunLintService
 
         $entry = (array) data_get($decisionJson, 'source_article', []);
 
+        if (! $this->pageIsDecisionEntry($page, $entry)) {
+            return [];
+        }
+
         return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+    }
+
+    /**
+     * Whether $page is the page a `source_article`/`source_summary` decision entry actually
+     * describes — the identity guard the source_* branches need but the concept/entity branch
+     * gets for free from its firstWhere('title', ...) entry lookup.
+     *
+     * Before Fase 8K-3 a run's pivot rows only ever contained pages the run itself created or
+     * regenerated, so "this run's only article" and "this run's source_article" were the same
+     * page and page_type alone was sufficient identity. 8K-3 puts patched EXISTING pages into
+     * the same pivot rows (EnterpriseWikiIngestRunPage::ACTION_PATCHED), so a run can now carry
+     * several article pages of which at most one is the source_article. Without this guard an
+     * existing patched article inherits the new document's planned sections and fails a blocking
+     * planned_section_missing check for headings that belong to a different page entirely
+     * (observed on run 30: change note FG-DEC-027's owned_topics asserted against the patched
+     * procedure page FG-OPS-001).
+     *
+     * Identity is the proposed_slug, not the title. EnterpriseWikiMaintainerDecisionApplyService
+     * resolves a source_article/source_summary page purely by canonical (customer_id,
+     * proposed_slug) and creates it with that exact slug — those entries never carry a page_id —
+     * while syncReusedPage() deliberately never rewrites the title of a reused page. So the slug
+     * is guaranteed to equal the entry's proposed_slug, whereas a title can legitimately drift
+     * from the decision that last touched the page. Falling back to the title keeps the guard
+     * working for any decision payload that predates the required proposed_slug field rather
+     * than silently disabling a blocking check.
+     */
+    private function pageIsDecisionEntry(EnterpriseWikiPage $page, array $entry): bool
+    {
+        $slug = trim((string) ($entry['proposed_slug'] ?? ''));
+
+        if ($slug !== '') {
+            return $page->slug === $slug;
+        }
+
+        $title = trim((string) ($entry['title'] ?? ''));
+
+        return $title !== '' && $page->title === $title;
     }
 
     /** @return list<string> */
@@ -662,6 +703,16 @@ class EnterpriseWikiAppliedRunLintService
         }
 
         $entry = (array) data_get($decisionJson, $decisionKey, []);
+
+        // Same source_* identity guard as plannedOwnedTopicsForPage(): a patched existing article
+        // or summary must not inherit the new document's planned_figures. Here a false match cuts
+        // both ways — it would not only assert the wrong figures against the wrong page, it would
+        // also register that page as a legitimate owner in
+        // checkPlannedFigureCrossPageAssignment()'s $plannedPageIdsByKey and thereby mask a real
+        // wrong-page materialization.
+        if (! $this->pageIsDecisionEntry($page, $entry)) {
+            return [];
+        }
 
         return $this->validPlannedFigureList($entry['planned_figures'] ?? []);
     }
@@ -1300,6 +1351,11 @@ class EnterpriseWikiAppliedRunLintService
         $query = EnterpriseWikiLintFinding::query()
             ->where('customer_id', $customerId)
             ->where('enterprise_wiki_ingest_run_id', $runId)
+            // Fase 8K-4: the cross-page consistency pass owns its own codes and its own
+            // open/resolve lifecycle (EnterpriseWikiCrossPageConsistencyService). This pass never
+            // touches them, so they must not be swept up as "untouched and therefore resolved" —
+            // otherwise whichever pass ran second would silently close the other's findings.
+            ->whereNotIn('code', EnterpriseWikiLintFinding::CROSS_PAGE_CONSISTENCY_CODES)
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
 
         if (! empty($touchedIds)) {

@@ -104,6 +104,27 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_PLANNED_FIGURE_DUPLICATE = 'planned_figure_duplicate';
 
+    /**
+     * Fase 8K-4 — post-patch cross-page current-state consistency. Written by
+     * EnterpriseWikiCrossPageConsistencyService, NOT by EnterpriseWikiAppliedRunLintService: they are
+     * separate passes with separate lifecycles, which is why closeStaleFindings() excludes these codes.
+     */
+    public const CODE_STALE_CURRENT_ASSERTION = 'stale_current_assertion';
+
+    public const CODE_CROSS_PAGE_CURRENT_CONFLICT = 'cross_page_current_conflict';
+
+    public const CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT = 'historical_wording_in_current_canonical_content';
+
+    public const CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN = 'cross_page_consistency_unknown';
+
+    /** Every code owned by the 8K-4 cross-page pass rather than the applied-run lint pass. */
+    public const CROSS_PAGE_CONSISTENCY_CODES = [
+        self::CODE_STALE_CURRENT_ASSERTION,
+        self::CODE_CROSS_PAGE_CURRENT_CONFLICT,
+        self::CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT,
+        self::CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN,
+    ];
+
     public const CODES = [
         self::CODE_CLAIM_MISSING_SOURCE,
         self::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
@@ -144,6 +165,10 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_PLANNED_FIGURE_WRONG_PAGE,
         self::CODE_PLANNED_FIGURE_SOURCE_MISSING,
         self::CODE_PLANNED_FIGURE_DUPLICATE,
+        self::CODE_STALE_CURRENT_ASSERTION,
+        self::CODE_CROSS_PAGE_CURRENT_CONFLICT,
+        self::CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT,
+        self::CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN,
     ];
 
     public const SEVERITY_INFO = 'info';
