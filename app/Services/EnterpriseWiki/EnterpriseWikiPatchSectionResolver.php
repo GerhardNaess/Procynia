@@ -62,6 +62,38 @@ class EnterpriseWikiPatchSectionResolver
     }
 
     /**
+     * Non-root headings from a markdown version, in document order.
+     *
+     * Used to expose the authoritative heading choices for a page in prompt/context material.
+     *
+     * @return list<string>
+     */
+    public static function sectionHeadingsFromMarkdown(string $markdown): array
+    {
+        $headings = [];
+        $lines = preg_split('/\R/', $markdown) ?: [];
+
+        foreach ($lines as $line) {
+            if (preg_match('/^\s{0,3}(#{1,6})\s+(.*)$/u', (string) $line, $matches) !== 1) {
+                continue;
+            }
+
+            if (mb_strlen($matches[1]) <= 1) {
+                continue;
+            }
+
+            $text = preg_replace('/\s+#+\s*$/u', '', trim($matches[2])) ?? trim($matches[2]);
+            $text = trim($text);
+
+            if ($text !== '') {
+                $headings[] = $text;
+            }
+        }
+
+        return array_values($headings);
+    }
+
+    /**
      * The in-section text of one block. For the block that carries the section's own heading, only
      * the part from the heading line onward belongs to this section — content ABOVE that heading
      * belongs to the previous section and must stay outside the patch area even though it shares a

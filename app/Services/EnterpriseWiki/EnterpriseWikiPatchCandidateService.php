@@ -130,6 +130,8 @@ class EnterpriseWikiPatchCandidateService
      *     page_type: string,
      *     page_version_id: int,
      *     version_number: int,
+     *     page_has_subsections: bool,
+     *     valid_target_headings: list<string>,
      *     content: string,
      *     truncated: bool,
      *     mention_count: int,
@@ -243,6 +245,7 @@ class EnterpriseWikiPatchCandidateService
             }
 
             [$content, $truncated] = $this->contentFor($version);
+            $validTargetHeadings = EnterpriseWikiPatchSectionResolver::sectionHeadingsFromMarkdown((string) $version->content_markdown);
 
             if (trim($content) === '') {
                 continue;
@@ -255,6 +258,8 @@ class EnterpriseWikiPatchCandidateService
                 'page_type' => (string) $row['page']->page_type,
                 'page_version_id' => (int) $version->id,
                 'version_number' => (int) $version->version_number,
+                'page_has_subsections' => $validTargetHeadings !== [],
+                'valid_target_headings' => $validTargetHeadings,
                 'content' => $content,
                 'truncated' => $truncated,
                 'mention_count' => $row['mentions'],

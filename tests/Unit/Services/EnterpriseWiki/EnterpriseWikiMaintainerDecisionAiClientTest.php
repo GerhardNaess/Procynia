@@ -50,6 +50,16 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertStringContainsString('OLD-THRESHOLD-MARKER', $prompt);
     }
 
+    public function test_candidate_block_includes_authoritative_heading_contract_data(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringContainsString('page_has_subsections: false', $prompt);
+        $this->assertStringContainsString('page_has_subsections: true', $prompt);
+        $this->assertStringContainsString('valid_target_headings: []', $prompt);
+        $this->assertStringContainsString('"Response times"', $prompt);
+    }
+
     public function test_prompt_is_unchanged_when_there_are_no_candidates(): void
     {
         $withCandidates = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
@@ -127,6 +137,8 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
                 'page_version_id' => 77,
                 'version_number' => 2,
                 'content' => "# Existing Platform Page\n\nTarget availability is OLD-THRESHOLD-MARKER per month.",
+                'page_has_subsections' => false,
+                'valid_target_headings' => [],
                 'truncated' => false,
                 'mention_count' => 2,
             ],
@@ -137,7 +149,9 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
                 'page_type' => 'article',
                 'page_version_id' => 78,
                 'version_number' => 1,
-                'content' => "# Governing Procedure\n\nIncidents are confirmed within OLD-DEADLINE-MARKER.",
+                'content' => "# Governing Procedure\n\n## Response times\n\nIncidents are confirmed within OLD-DEADLINE-MARKER.",
+                'page_has_subsections' => true,
+                'valid_target_headings' => ['Response times'],
                 'truncated' => true,
                 'mention_count' => 0,
             ],

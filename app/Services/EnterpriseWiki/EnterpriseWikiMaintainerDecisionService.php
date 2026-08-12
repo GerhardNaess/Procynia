@@ -140,7 +140,7 @@ class EnterpriseWikiMaintainerDecisionService
             static fn (array $element): string => (string) ($element['source_element_key'] ?? ''),
             $sourceElements,
         ), static fn (string $key): bool => $key !== ''));
-        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
+        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
 
         if ($issues === []) {
             Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -156,7 +156,7 @@ class EnterpriseWikiMaintainerDecisionService
         [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
 
         if ($normalizations !== []) {
-            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
+            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
 
             if ($normalizedIssues === []) {
                 Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -184,7 +184,9 @@ class EnterpriseWikiMaintainerDecisionService
         ]);
 
         $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context, $sourceElements);
-        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys);
+        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+
+        $this->logHeadingRepairOutcome($context->runId, $decision, $repaired, $remainingIssues);
 
         if ($remainingIssues !== []) {
             Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
@@ -216,6 +218,7 @@ class EnterpriseWikiMaintainerDecisionService
         array $validFigureKeys,
         int $customerId = 0,
         array $validSourceElementKeys = [],
+        ?int $runId = null,
     ): array {
         return array_merge(
             $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
@@ -228,9 +231,99 @@ class EnterpriseWikiMaintainerDecisionService
             // customerId 0 means a caller with no tenant context (never the document flow); skip
             // rather than invent a failure from missing context.
             $customerId > 0
-                ? $this->patchTargetResolver->resolveForCustomer($customerId, $decision)['errors']
+                ? $this->patchTargetResolver->resolveForCustomer($customerId, $decision, $runId)['errors']
                 : [],
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $originalDecision
+     * @param  array<string, mixed>  $repairedDecision
+     * @param  string[]  $remainingIssues
+     */
+    private function logHeadingRepairOutcome(?int $runId, array $originalDecision, array $repairedDecision, array $remainingIssues): void
+    {
+        if ($runId === null) {
+            return;
+        }
+
+        $headingIssue = null;
+
+        foreach ($remainingIssues as $issue) {
+            if (str_contains($issue, 'issue_code=invalid_target_heading') || str_contains($issue, 'issue_code=missing_target_heading')) {
+                $headingIssue = $issue;
+
+                break;
+            }
+        }
+
+        if ($headingIssue === null) {
+            return;
+        }
+
+        $parsed = $this->parseHeadingIssue($headingIssue);
+
+        if ($parsed === null) {
+            return;
+        }
+
+        $originalTarget = (array) ($originalDecision['patch_targets'][$parsed['target_index']] ?? []);
+        $repairedTarget = (array) ($repairedDecision['patch_targets'][$parsed['target_index']] ?? []);
+        $resolution = 'still_invalid';
+
+        if ($originalTarget !== [] && $repairedTarget !== []) {
+            $originalPageId = (int) ($originalTarget['target_page_id'] ?? 0);
+            $repairedPageId = (int) ($repairedTarget['target_page_id'] ?? 0);
+            $originalHeading = $originalTarget['target_heading'] ?? null;
+            $repairedHeading = $repairedTarget['target_heading'] ?? null;
+
+            if ($repairedPageId !== $originalPageId) {
+                $resolution = 'target_changed';
+            } elseif ($repairedHeading === null && $originalHeading !== null) {
+                $resolution = 'set_null';
+            } elseif ($repairedHeading !== $originalHeading) {
+                $resolution = 'corrected';
+            }
+        }
+
+        Log::info('[WIKI_MAINTAINER_DECISION] Heading repair outcome.', [
+            'run_id' => $runId,
+            'target_page_id' => $parsed['target_page_id'],
+            'current_version_id' => $parsed['current_version_id'],
+            'invalid_heading' => $parsed['invalid_heading'],
+            'valid_heading_count' => $parsed['valid_heading_count'],
+            'issue_code' => $parsed['issue_code'],
+            'repair_resolution' => $resolution,
+        ]);
+    }
+
+    /**
+     * @return array{target_index: int, target_page_id: int, current_version_id: int, invalid_heading: ?string, valid_heading_count: int, issue_code: string}|null
+     */
+    private function parseHeadingIssue(string $issue): ?array
+    {
+        if (! preg_match('/issue_code=(?<code>[a-z_]+); target_page_id=(?<page>\d+); .* current_version_id=(?<version>\d+); .* valid_target_headings=(?<headings>\[[^\]]*\])/u', $issue, $matches)) {
+            return null;
+        }
+
+        if (! preg_match('/patch_targets\[(?<index>\d+)\]/u', $issue, $indexMatches)) {
+            return null;
+        }
+
+        $invalidHeading = null;
+
+        if (preg_match('/target_heading \[(?<heading>.*?)\]/u', $issue, $headingMatches) === 1) {
+            $invalidHeading = $headingMatches['heading'] !== '' ? $headingMatches['heading'] : null;
+        }
+
+        return [
+            'target_index' => (int) $indexMatches['index'],
+            'target_page_id' => (int) $matches['page'],
+            'current_version_id' => (int) $matches['version'],
+            'invalid_heading' => $invalidHeading,
+            'valid_heading_count' => count(json_decode($matches['headings'], true) ?: []),
+            'issue_code' => (string) $matches['code'],
+        ];
     }
 
     /**

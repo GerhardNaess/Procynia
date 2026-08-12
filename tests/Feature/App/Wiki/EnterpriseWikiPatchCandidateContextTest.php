@@ -293,6 +293,21 @@ class EnterpriseWikiPatchCandidateContextTest extends TestCase
         $this->assertStringContainsString('CURRENT content', $rendered);
     }
 
+    public function test_candidate_blocks_include_current_version_heading_contract_data(): void
+    {
+        [, $document] = $this->changeDocumentScenario();
+
+        $rendered = EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock(
+            $this->service()->findForDocument($document),
+        );
+
+        $this->assertStringContainsString('page_has_subsections: true', $rendered);
+        $this->assertStringContainsString('page_has_subsections: false', $rendered);
+        $this->assertStringContainsString('valid_target_headings: [', $rendered);
+        $this->assertStringContainsString('"Tjenestestyring"', $rendered);
+        $this->assertStringContainsString('valid_target_headings: []', $rendered);
+    }
+
     // =========================================================================
     // Fixture
     // =========================================================================
@@ -523,7 +538,7 @@ class EnterpriseWikiPatchCandidateContextTest extends TestCase
         $customer = $this->createCustomer();
 
         $entity = $this->createPage($customer, 'Plattform Alfa', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
-        $this->createVersion($entity, "# Plattform Alfa\n\n".self::PADDING."\n\nMaalsatt maanedlig ".self::OLD_VALUE_A.' for plattformen.');
+        $this->createVersion($entity, "# Plattform Alfa\n\n## Tjenestestyring\n\n".self::PADDING."\n\nMaalsatt maanedlig ".self::OLD_VALUE_A.' for plattformen.');
 
         $procedure = $this->createPage($customer, 'Styrende prosedyre for Alfa', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $this->createVersion($procedure, "# Styrende prosedyre for Alfa\n\n".self::PADDING."\n\nHendelser skal bekreftes innen ".self::OLD_VALUE_B.'. Maalsatt tilgjengelighet er '.self::OLD_VALUE_A.'.');

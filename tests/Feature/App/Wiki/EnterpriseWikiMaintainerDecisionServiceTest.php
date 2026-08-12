@@ -332,10 +332,46 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
 
+    public function test_invalid_target_heading_triggers_repair_with_structured_heading_metadata(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $page = $this->createExistingPageWithClause($customer);
+
+        $broken = $this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE);
+        $broken['patch_targets'][0]['target_heading'] = 'Standardendringer';
+
+        $repaired = $this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE);
+        $repaired['patch_targets'][0]['target_heading'] = 'Krav og praksis';
+
+        $captured = [];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($broken);
+        $mock->shouldReceive('repair')
+            ->once()
+            ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
+                $captured = $args[5] ?? [];
+
+                return $repaired;
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+        $issues = implode(' | ', $captured);
+
+        $this->assertStringContainsString('issue_code=invalid_target_heading', $issues);
+        $this->assertStringContainsString('page_has_subsections=true', $issues);
+        $this->assertStringContainsString('valid_target_headings=[', $issues);
+        $this->assertStringContainsString('"Krav og praksis"', $issues);
+        $this->assertSame('Krav og praksis', $result['patch_targets'][0]['target_heading']);
+    }
+
     public function test_overfragmented_decision_triggers_one_bounded_repair_pass(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
+        $owner = $this->createPageStating($customer, 'Overordnet rammeverk', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Kort rammeverk som eier denne praksisen.');
 
         $overfragmented = $this->validDecision();
         $overfragmented['concept_candidates'] = [[
@@ -362,7 +398,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $repaired = $this->validDecision();
         $repaired['concept_candidates'] = $overfragmented['concept_candidates'];
         $repaired['concept_candidates'][0]['decision'] = 'reference_only';
-        $repaired['concept_candidates'][0]['owning_page_title'] = 'Test Artikkel';
+        $repaired['concept_candidates'][0]['owning_page_title'] = $owner->title;
         $repaired['concept_pages'] = [];
 
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */

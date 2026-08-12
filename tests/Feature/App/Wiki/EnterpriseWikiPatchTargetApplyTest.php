@@ -196,7 +196,12 @@ class EnterpriseWikiPatchTargetApplyTest extends TestCase
         ]));
 
         $this->assertSame([], $valid['errors'], 'an existing heading is a valid anchor');
-        $this->assertStringContainsString('is not a heading on the current version', implode(' | ', $invalid['errors']));
+        $invalidError = implode(' | ', $invalid['errors']);
+
+        $this->assertStringContainsString('issue_code=invalid_target_heading', $invalidError);
+        $this->assertStringContainsString('page_has_subsections=true', $invalidError);
+        $this->assertStringContainsString('valid_target_headings=[', $invalidError);
+        $this->assertStringContainsString('is not a heading on the current version', $invalidError);
     }
 
     public function test_a_flat_page_accepts_a_target_with_no_heading(): void

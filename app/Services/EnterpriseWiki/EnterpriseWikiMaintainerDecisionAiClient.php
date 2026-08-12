@@ -700,6 +700,10 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  target_topic: a short descriptor of WHICH topic on that page is affected — not the',
             '  whole page. target_heading: the exact existing heading that topic sits under when there',
             '  is one, otherwise null. A heading you name must already exist on that page.',
+            '  The EXISTING PAGE CANDIDATES block also shows page_has_subsections and',
+            '  valid_target_headings for the CURRENT version of each candidate. If page_has_subsections',
+            '  is true, target_heading MUST be exactly one of valid_target_headings. If the page has',
+            '  no sub-sections, valid_target_headings is empty and target_heading MUST be null.',
             '  operation is exactly one of:',
             '    "replace": the existing substance is expressly superseded by this document. Requires',
             '    superseded_substance (what the page states today) AND replacement_substance (what',
@@ -1034,6 +1038,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 (int) ($candidate['page_version_id'] ?? 0),
                 (int) ($candidate['version_number'] ?? 0),
                 ($candidate['truncated'] ?? false) ? ' | content truncated' : '',
+            );
+            $parts[] = sprintf(
+                'page_has_subsections: %s | valid_target_headings: %s',
+                ! empty($candidate['page_has_subsections']) ? 'true' : 'false',
+                (string) json_encode(array_values((array) ($candidate['valid_target_headings'] ?? [])), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             );
             $parts[] = 'content:';
             $parts[] = (string) ($candidate['content'] ?? '');

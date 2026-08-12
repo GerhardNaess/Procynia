@@ -5,6 +5,7 @@ namespace App\Services\EnterpriseWiki;
 use App\Exceptions\EnterpriseWikiPatchApplicationException;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Fase 8K-2: resolves the patch targets in a maintainer decision against the database, and reports
@@ -94,7 +95,7 @@ class EnterpriseWikiPatchTargetResolver
      *     errors: string[],
      * }
      */
-    public function resolveForCustomer(int $customerId, array $decision): array
+    public function resolveForCustomer(int $customerId, array $decision, ?int $runId = null): array
     {
         $targets = $decision['patch_targets'] ?? [];
 
@@ -171,6 +172,9 @@ class EnterpriseWikiPatchTargetResolver
                 continue;
             }
 
+            $validTargetHeadings = EnterpriseWikiPatchSectionResolver::sectionHeadingsFromMarkdown((string) $version->content_markdown);
+            $pageHasSubsections = $validTargetHeadings !== [];
+
             $statedType = is_string($target['target_page_type'] ?? null) ? trim((string) $target['target_page_type']) : '';
 
             if ($statedType !== '' && $statedType !== $page->page_type) {
@@ -183,7 +187,17 @@ class EnterpriseWikiPatchTargetResolver
             // Area resolution and superseded-substance verification use the SAME resolver the patch
             // engine will use at apply time. Validating with a second, near-identical implementation
             // is how a decision passes here and fails there — which is exactly what run 28 did.
-            $areaError = $this->verifyTargetArea($target, $version, $heading, $pageId, $ctx);
+            $areaError = $this->verifyTargetArea(
+                $target,
+                $version,
+                $heading,
+                $pageId,
+                (string) $page->title,
+                $validTargetHeadings,
+                $pageHasSubsections,
+                $ctx,
+                $runId,
+            );
 
             if ($areaError !== null) {
                 $errors[] = $areaError;
@@ -260,7 +274,11 @@ class EnterpriseWikiPatchTargetResolver
         EnterpriseWikiPageVersion $version,
         string $heading,
         int $pageId,
+        string $pageTitle,
+        array $validTargetHeadings,
+        bool $pageHasSubsections,
         string $ctx,
+        ?int $runId = null,
     ): ?string {
         $blocks = $this->blocksFor($version);
 
@@ -273,11 +291,36 @@ class EnterpriseWikiPatchTargetResolver
         try {
             $area = $this->sectionResolver->resolve($blocks, $heading === '' ? null : $heading, $topic, $ctx);
         } catch (EnterpriseWikiPatchApplicationException $e) {
+            $issueCode = $heading !== '' ? 'invalid_target_heading' : 'missing_target_heading';
+
+            if ($runId !== null) {
+                Log::warning('[WIKI_MAINTAINER_DECISION] Invalid patch target heading detected.', [
+                    'run_id' => $runId,
+                    'target_page_id' => $pageId,
+                    'target_page_title' => $pageTitle,
+                    'current_version_id' => $version->id,
+                    'invalid_heading' => $heading !== '' ? $heading : null,
+                    'page_has_subsections' => $pageHasSubsections,
+                    'valid_heading_count' => count($validTargetHeadings),
+                    'issue_code' => $issueCode,
+                ]);
+            }
+
+            $structuredContext = sprintf(
+                'issue_code=%s; target_page_id=%d; target_page_title=[%s]; current_version_id=%d; page_has_subsections=%s; valid_target_headings=%s',
+                $issueCode,
+                $pageId,
+                $pageTitle,
+                (int) $version->id,
+                $pageHasSubsections ? 'true' : 'false',
+                (string) (json_encode(array_values($validTargetHeadings), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]'),
+            );
+
             return $heading !== ''
-                ? "{$ctx}.target_heading [{$heading}] is not a heading on the current version of page [{$pageId}] — "
-                    .'name an existing heading, or leave it null when the page has no sub-sections.'
-                : "{$ctx} names no target_heading and target_topic [{$topic}] does not identify a section of page [{$pageId}], "
-                    .'which does have sub-sections — name the heading the affected substance sits under.';
+                ? "{$structuredContext}; {$ctx}.target_heading [{$heading}] is not a heading on the current version of page [{$pageId}] — "
+                    .'name one of the valid_target_headings, or leave it null only when the page has no sub-sections.'
+                : "{$structuredContext}; {$ctx} names no target_heading and target_topic [{$topic}] does not identify a section of page [{$pageId}], "
+                    .'which does have sub-sections — name one of the valid_target_headings.';
         }
 
         if ((string) ($target['operation'] ?? '') !== 'replace') {
