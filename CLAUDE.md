@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Obligatorisk lesing
+
+- Les [`AGENTS.md`](/Applications/XAMPP/xamppfiles/htdocs/procynia/AGENTS.md) før arbeid.
+- Enterprise Wiki architecture invariants i `AGENTS.md` er bindende.
+- Les den autoritative arkitekturen i [`docs/enterprise-wiki-architecture.md`](/Applications/XAMPP/xamppfiles/htdocs/procynia/docs/enterprise-wiki-architecture.md) før Wiki-relaterte endringer.
+- Ikke implementer en løsning som omgår disse prinsippene.
+- Ved konflikt: stopp og rapporter før koding.
+- Samtalehistorikk er ikke tilstrekkelig som arkitekturkilde; repoets arkitekturfiler er source of truth.
+
 ## Procynia strategidoktrine – følges i all videre utvikling
 
 Procynia skal ikke posisjoneres som en enkel AI-skriveassistent eller et gratis anbudsvarsel-produkt.

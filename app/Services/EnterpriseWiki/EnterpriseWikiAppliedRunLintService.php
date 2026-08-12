@@ -35,24 +35,11 @@ class EnterpriseWikiAppliedRunLintService
     public function __construct(
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
+        private readonly EnterpriseWikiArticleSummaryLinkService $articleSummaryLinkService,
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
     ) {}
-
-    /** Expected reverse link type for each forward link type. */
-    private const REVERSE_LINK_TYPES = [
-        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE,
-        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
-        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT => EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE,
-        EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT,
-        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY => EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE,
-        EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY,
-        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT => EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY,
-        EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT,
-        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ENTITY => EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY,
-        EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ENTITY,
-    ];
 
     /**
      * @return array{pages_checked: int, claims_checked: int, source_refs_checked: int,
@@ -140,7 +127,6 @@ class EnterpriseWikiAppliedRunLintService
         // ----------------------------------------------------------------
         // Per-page checks
         // ----------------------------------------------------------------
-        $runPageIds = array_map(fn (array $entry) => $entry['page']->id, $allPages);
         $sourceText = $this->sourceTextForRun($run);
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
         $validFigureKeys = $this->figureSourceElementKeysForRun($run);
@@ -154,8 +140,8 @@ class EnterpriseWikiAppliedRunLintService
 
             if ($version !== null && trim((string) ($version->content_markdown ?? '')) !== '') {
                 $this->checkPageClaims($run, $page, $version, $touchedIds, $counts);
-                $this->checkPageLinks($run, $page, $touchedIds, $counts);
-                $this->checkWikilinkIntegrity($run, $page, $version, $runPageIds, $touchedIds, $counts);
+                $this->checkArticleSummaryPairing($run, $page, $version, $touchedIds, $counts);
+                $this->checkWikilinkIntegrity($run, $page, $version, $touchedIds, $counts);
                 $this->checkPlannedSectionCoverage($run, $page, $version, $decisionJson, $sourceText, $touchedIds, $counts);
                 $this->checkPlannedFigureCoverage($run, $page, $version, $decisionJson, $validFigureKeys, $touchedIds, $counts);
             }
@@ -886,90 +872,6 @@ class EnterpriseWikiAppliedRunLintService
             ->values();
     }
 
-    private function checkPageLinks(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $page,
-        array &$touchedIds,
-        array &$counts,
-    ): void {
-        $outgoing = EnterpriseWikiPageLink::query()
-            ->where('customer_id', $run->customer_id)
-            ->where('from_page_id', $page->id)
-            ->get();
-
-        $counts['links_checked'] += $outgoing->count();
-
-        // page_without_outgoing_links
-        if ($outgoing->isEmpty()) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_OUTGOING_LINKS),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Page has no outgoing links.',
-                $touchedIds,
-                $counts,
-            );
-        }
-
-        // page_without_incoming_links
-        $hasIncoming = EnterpriseWikiPageLink::query()
-            ->where('customer_id', $run->customer_id)
-            ->where('to_page_id', $page->id)
-            ->exists();
-
-        if (! $hasIncoming) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_INCOMING_LINKS),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Page has no incoming links (backlinks).',
-                $touchedIds,
-                $counts,
-            );
-        }
-
-        // Type-specific link checks
-        $outgoingTypes = $outgoing->pluck('link_type')->all();
-
-        match ($page->page_type) {
-            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $this->checkArticleLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
-            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $this->checkSummaryLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
-            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->checkConceptLinks($run, $page, $outgoing, $touchedIds, $counts),
-            EnterpriseWikiPage::PAGE_TYPE_ENTITY => $this->checkEntityLinks($run, $page, $outgoing, $touchedIds, $counts),
-            default => null,
-        };
-
-        // missing_reverse_link: for each outgoing link, check if reverse exists
-        $missingReverses = [];
-
-        foreach ($outgoing as $link) {
-            $reverseType = self::REVERSE_LINK_TYPES[$link->link_type] ?? null;
-
-            if ($reverseType === null) {
-                continue;
-            }
-
-            $reverseExists = EnterpriseWikiPageLink::query()
-                ->where('customer_id', $run->customer_id)
-                ->where('from_page_id', $link->to_page_id)
-                ->where('to_page_id', $page->id)
-                ->where('link_type', $reverseType)
-                ->exists();
-
-            if (! $reverseExists) {
-                $missingReverses[] = $reverseType;
-            }
-        }
-
-        if (! empty($missingReverses)) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_MISSING_REVERSE_LINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Expected reverse link(s) are missing: '.implode(', ', $missingReverses).'.',
-                $touchedIds,
-                $counts,
-            );
-        }
-    }
-
     /**
      * Canonical wikilink integrity (8I-6): every check here is derived deterministically from
      * content_markdown → parser → resolver → EnterpriseWikiPageLink, never from the graph or
@@ -979,7 +881,6 @@ class EnterpriseWikiAppliedRunLintService
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
         EnterpriseWikiPageVersion $version,
-        array $runPageIds,
         array &$touchedIds,
         array &$counts,
     ): void {
@@ -987,10 +888,22 @@ class EnterpriseWikiAppliedRunLintService
         $parsed = $this->linkParser->parse($markdown);
         $rawOccurrences = $this->linkParser->countRawOccurrences($markdown);
 
+        $counts['links_checked'] += count($parsed);
+
+        if (str_contains($markdown, '{{wiki_link:')) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_UNMATERIALIZED_WIKILINK_MARKER),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Current version contains an unmaterialized server-side wikilink marker.',
+                $touchedIds,
+                $counts,
+            );
+        }
+
         if ($rawOccurrences > count($parsed)) {
             $this->upsertFinding(
                 $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_MALFORMED_WIKILINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
                 sprintf('Content contains %d malformed wikilink attempt(s).', $rawOccurrences - count($parsed)),
                 $touchedIds,
                 $counts,
@@ -1014,7 +927,7 @@ class EnterpriseWikiAppliedRunLintService
 
             $this->upsertFinding(
                 $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
                 'Content contains broken wikilink(s): '.implode(', ', $brokenSlugs).'.',
                 $touchedIds,
                 $counts,
@@ -1040,7 +953,7 @@ class EnterpriseWikiAppliedRunLintService
         if ($selfSlugs !== []) {
             $this->upsertFinding(
                 $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_SELF_WIKILINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
                 'Content contains (a) self-referencing wikilink(s).',
                 $touchedIds,
                 $counts,
@@ -1071,7 +984,7 @@ class EnterpriseWikiAppliedRunLintService
             if ($underMaterialized !== []) {
                 $this->upsertFinding(
                     $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_WIKILINK_PROJECTION_MISMATCH),
-                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    EnterpriseWikiLintFinding::SEVERITY_ERROR,
                     'Current version contains a valid wikilink not reflected in the materialized page-link projection.',
                     $touchedIds,
                     $counts,
@@ -1083,7 +996,7 @@ class EnterpriseWikiAppliedRunLintService
             if ($overMaterialized !== []) {
                 $this->upsertFinding(
                     $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_STALE_WIKILINK_GRAPH_EDGE),
-                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    EnterpriseWikiLintFinding::SEVERITY_ERROR,
                     'A materialized wikilink graph edge no longer has a matching link in the current version.',
                     $touchedIds,
                     $counts,
@@ -1091,194 +1004,43 @@ class EnterpriseWikiAppliedRunLintService
             }
         }
 
-        // Orphan concept/entity pages: no incoming canonical wikilink at all.
-        if (in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_CONCEPT, EnterpriseWikiPage::PAGE_TYPE_ENTITY], true)) {
-            $hasIncomingWikilink = EnterpriseWikiPageLink::query()
-                ->where('customer_id', $run->customer_id)
-                ->where('to_page_id', $page->id)
-                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
-                ->exists();
-
-            if (! $hasIncomingWikilink) {
-                $code = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-                    ? EnterpriseWikiLintFinding::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK
-                    : EnterpriseWikiLintFinding::CODE_ENTITY_WITHOUT_INCOMING_WIKILINK;
-
-                $this->upsertFinding(
-                    $this->pageKey($run, $page, $version, $code),
-                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                    ucfirst($page->page_type).' page has no incoming canonical wikilink from any page.',
-                    $touchedIds,
-                    $counts,
-                );
-            }
-        }
-
-        // Article/summary pages with other run pages available but zero outgoing wikilinks.
-        if (in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY], true)
-            && count($runPageIds) > 1
-        ) {
-            $hasOutgoingWikilink = EnterpriseWikiPageLink::query()
-                ->where('customer_id', $run->customer_id)
-                ->where('from_page_id', $page->id)
-                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
-                ->exists();
-
-            if (! $hasOutgoingWikilink) {
-                $this->upsertFinding(
-                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED),
-                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                    'Other pages exist in this run but the page has no outgoing canonical wikilink.',
-                    $touchedIds,
-                    $counts,
-                );
-            }
-        }
-    }
-
-    private function checkArticleLinks(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $page,
-        array $outgoingTypes,
-        array &$touchedIds,
-        array &$counts,
-    ): void {
-        if (! in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY, $outgoingTypes, true)) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_SUMMARY_LINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Article page has no link to a summary page.',
-                $touchedIds,
-                $counts,
-            );
-        }
-
-        $hasConceptOrEntity = in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT, $outgoingTypes, true)
-            || in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY, $outgoingTypes, true);
-
-        if (! $hasConceptOrEntity) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_CONCEPT_OR_ENTITY_LINKS),
-                EnterpriseWikiLintFinding::SEVERITY_INFO,
-                'Article page has no links to concept or entity pages.',
-                $touchedIds,
-                $counts,
-            );
-        }
-    }
-
-    private function checkSummaryLinks(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $page,
-        array $outgoingTypes,
-        array &$touchedIds,
-        array &$counts,
-    ): void {
-        if (! in_array(EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE, $outgoingTypes, true)) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_SUMMARY_WITHOUT_ARTICLE_LINK),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Summary page has no link back to its article page.',
-                $touchedIds,
-                $counts,
-            );
-        }
     }
 
     /**
-     * A concept page counts as linked when it has an outgoing link to an article or summary
-     * page — either the legacy structural link_type (concept_to_article/concept_to_summary,
-     * built from run co-membership) or a canonical wikilink whose target page is actually an
-     * article or summary. A wikilink to another concept page never counts.
-     *
-     * @param  Collection<int, EnterpriseWikiPageLink>  $outgoing
+     * An article/summary link is the only retained link-shape check: it is an explicit,
+     * deterministic pair when this run has exactly one article and one summary. All other
+     * wikilinks remain optional semantic navigation signals.
      */
-    private function checkConceptLinks(
+    private function checkArticleSummaryPairing(
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
-        Collection $outgoing,
+        EnterpriseWikiPageVersion $version,
         array &$touchedIds,
         array &$counts,
     ): void {
-        $outgoingTypes = $outgoing->pluck('link_type')->all();
-
-        $hasBacklink = in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE, $outgoingTypes, true)
-            || in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY, $outgoingTypes, true);
-
-        if (! $hasBacklink) {
-            $wikilinkTargetIds = $outgoing
-                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
-                ->pluck('to_page_id')
-                ->all();
-
-            if ($wikilinkTargetIds !== []) {
-                $hasBacklink = EnterpriseWikiPage::query()
-                    ->whereIn('id', $wikilinkTargetIds)
-                    ->whereIn('page_type', [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY])
-                    ->exists();
-            }
+        if (! in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY], true)) {
+            return;
         }
 
-        if (! $hasBacklink) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Concept page has no outgoing link to an article or summary page.',
-                $touchedIds,
-                $counts,
-            );
-        }
-    }
+        $pairedPage = $this->articleSummaryLinkService->findPairedPage($run, $page);
 
-    /**
-     * An entity page counts as linked on exactly the same principle as a concept page: an
-     * outgoing link to an article or summary page — either the legacy structural link_type
-     * (entity_to_article/entity_to_summary, built from run co-membership) or a canonical
-     * wikilink whose target page is actually an article or summary. A wikilink to a concept
-     * or another entity page never counts.
-     *
-     * The typed rows only exist after the opt-in wiki:build-page-links; the normal pipeline
-     * builds article<->summary links alone. Without the wikilink fallback, every entity page
-     * of an ordinary run was reported as an orphan no matter how well it was linked in its
-     * own content.
-     *
-     * @param  Collection<int, EnterpriseWikiPageLink>  $outgoing
-     */
-    private function checkEntityLinks(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $page,
-        Collection $outgoing,
-        array &$touchedIds,
-        array &$counts,
-    ): void {
-        $outgoingTypes = $outgoing->pluck('link_type')->all();
-
-        $hasBacklink = in_array(EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE, $outgoingTypes, true)
-            || in_array(EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY, $outgoingTypes, true);
-
-        if (! $hasBacklink) {
-            $wikilinkTargetIds = $outgoing
-                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
-                ->pluck('to_page_id')
-                ->all();
-
-            if ($wikilinkTargetIds !== []) {
-                $hasBacklink = EnterpriseWikiPage::query()
-                    ->whereIn('id', $wikilinkTargetIds)
-                    ->whereIn('page_type', [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY])
-                    ->exists();
-            }
+        if ($pairedPage === null || $this->articleSummaryLinkService->hasLinkToPage($page, (string) $version->content_markdown, $pairedPage)) {
+            return;
         }
 
-        if (! $hasBacklink) {
-            $this->upsertFinding(
-                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ORPHAN_ENTITY_PAGE),
-                EnterpriseWikiLintFinding::SEVERITY_WARNING,
-                'Entity page has no links to article or summary pages.',
-                $touchedIds,
-                $counts,
-            );
-        }
+        $code = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE
+            ? EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_SUMMARY_LINK
+            : EnterpriseWikiLintFinding::CODE_SUMMARY_WITHOUT_ARTICLE_LINK;
+
+        $this->upsertFinding(
+            $this->pageKey($run, $page, $version, $code),
+            EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE
+                ? 'Article page is missing its explicit paired summary wikilink.'
+                : 'Summary page is missing its explicit paired article wikilink.',
+            $touchedIds,
+            $counts,
+        );
     }
 
     // =========================================================================

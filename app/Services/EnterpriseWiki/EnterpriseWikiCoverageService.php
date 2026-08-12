@@ -17,9 +17,10 @@ class EnterpriseWikiCoverageService
     {
         return [
             'source_coverage' => $this->computeSourceCoverage($customerId),
-            'page_quality'    => $this->computePageQuality($customerId),
-            'claim_coverage'  => $this->computeClaimCoverage($customerId),
-            'lint'            => $this->computeLint($customerId),
+            'page_quality' => $this->computePageQuality($customerId),
+            'claim_coverage' => $this->computeClaimCoverage($customerId),
+            'graph_quality' => $this->computeGraphQuality($customerId),
+            'lint' => $this->computeLint($customerId),
         ];
     }
 
@@ -37,13 +38,13 @@ class EnterpriseWikiCoverageService
 
         if ($docs->isEmpty()) {
             return [
-                'extracted_documents'            => 0,
-                'documents_with_applied_run'     => 0,
-                'documents_with_article'         => 0,
-                'documents_with_summary'         => 0,
+                'extracted_documents' => 0,
+                'documents_with_applied_run' => 0,
+                'documents_with_article' => 0,
+                'documents_with_summary' => 0,
                 'documents_with_article_content' => 0,
                 'documents_with_summary_content' => 0,
-                'gaps'                           => [],
+                'gaps' => [],
             ];
         }
 
@@ -87,12 +88,12 @@ class EnterpriseWikiCoverageService
                 ->keyBy('enterprise_wiki_page_id')
             : collect();
 
-        $docsWithAppliedRun         = 0;
-        $docsWithArticle            = 0;
-        $docsWithSummary            = 0;
-        $docsWithArticleContent     = 0;
-        $docsWithSummaryContent     = 0;
-        $gaps                       = [];
+        $docsWithAppliedRun = 0;
+        $docsWithArticle = 0;
+        $docsWithSummary = 0;
+        $docsWithArticleContent = 0;
+        $docsWithSummaryContent = 0;
+        $gaps = [];
 
         foreach ($docs as $doc) {
             $docRuns = $appliedRuns->get($doc->id, collect());
@@ -100,9 +101,10 @@ class EnterpriseWikiCoverageService
             if ($docRuns->isEmpty()) {
                 $gaps[] = [
                     'document_id' => $doc->id,
-                    'filename'    => $doc->original_filename,
-                    'missing'     => ['applied_run'],
+                    'filename' => $doc->original_filename,
+                    'missing' => ['applied_run'],
                 ];
+
                 continue;
             }
 
@@ -184,20 +186,20 @@ class EnterpriseWikiCoverageService
             if (! empty($missing)) {
                 $gaps[] = [
                     'document_id' => $doc->id,
-                    'filename'    => $doc->original_filename,
-                    'missing'     => $missing,
+                    'filename' => $doc->original_filename,
+                    'missing' => $missing,
                 ];
             }
         }
 
         return [
-            'extracted_documents'            => $docs->count(),
-            'documents_with_applied_run'     => $docsWithAppliedRun,
-            'documents_with_article'         => $docsWithArticle,
-            'documents_with_summary'         => $docsWithSummary,
+            'extracted_documents' => $docs->count(),
+            'documents_with_applied_run' => $docsWithAppliedRun,
+            'documents_with_article' => $docsWithArticle,
+            'documents_with_summary' => $docsWithSummary,
             'documents_with_article_content' => $docsWithArticleContent,
             'documents_with_summary_content' => $docsWithSummaryContent,
-            'gaps'                           => $gaps,
+            'gaps' => $gaps,
         ];
     }
 
@@ -208,21 +210,21 @@ class EnterpriseWikiCoverageService
             ->withCount('claims')
             ->get();
 
-        $total      = $pages->count();
-        $pageIds    = $pages->pluck('id');
+        $total = $pages->count();
+        $pageIds = $pages->pluck('id');
         $byPageType = $pages->groupBy('page_type')->map->count()->toArray();
-        $byStatus   = $pages->groupBy('status')->map->count()->toArray();
+        $byStatus = $pages->groupBy('status')->map->count()->toArray();
 
         if ($pageIds->isEmpty()) {
             return [
-                'total'                    => 0,
-                'by_page_type'             => [],
-                'by_status'                => [],
-                'with_current_version'     => 0,
-                'without_current_version'  => 0,
-                'without_content'          => 0,
-                'with_claims'              => 0,
-                'without_claims'           => 0,
+                'total' => 0,
+                'by_page_type' => [],
+                'by_status' => [],
+                'with_current_version' => 0,
+                'without_current_version' => 0,
+                'without_content' => 0,
+                'with_claims' => 0,
+                'without_claims' => 0,
             ];
         }
 
@@ -240,18 +242,18 @@ class EnterpriseWikiCoverageService
             ->distinct()
             ->count('enterprise_wiki_page_id');
 
-        $withClaims    = $pages->filter(fn ($p) => $p->claims_count > 0)->count();
+        $withClaims = $pages->filter(fn ($p) => $p->claims_count > 0)->count();
         $withoutClaims = $total - $withClaims;
 
         return [
-            'total'                   => $total,
-            'by_page_type'            => $byPageType,
-            'by_status'               => $byStatus,
-            'with_current_version'    => $withCurrentVersion,
+            'total' => $total,
+            'by_page_type' => $byPageType,
+            'by_status' => $byStatus,
+            'with_current_version' => $withCurrentVersion,
             'without_current_version' => $total - $withCurrentVersion,
-            'without_content'         => $total - $withContent,
-            'with_claims'             => $withClaims,
-            'without_claims'          => $withoutClaims,
+            'without_content' => $total - $withContent,
+            'with_claims' => $withClaims,
+            'without_claims' => $withoutClaims,
         ];
     }
 
@@ -282,20 +284,67 @@ class EnterpriseWikiCoverageService
             ->count('enterprise_wiki_claim_id');
 
         return [
-            'claims_total'                  => $total,
-            'claims_with_source_reference'  => $claimsWithSource,
+            'claims_total' => $total,
+            'claims_with_source_reference' => $claimsWithSource,
             'claims_without_source_reference' => $total - $claimsWithSource,
-            'claim_coverage_pct'            => round($claimsWithSource / $total * 100, 1),
+            'claim_coverage_pct' => round($claimsWithSource / $total * 100, 1),
         ];
     }
 
     private function emptyClaims(): array
     {
         return [
-            'claims_total'                    => 0,
-            'claims_with_source_reference'    => 0,
+            'claims_total' => 0,
+            'claims_with_source_reference' => 0,
             'claims_without_source_reference' => 0,
-            'claim_coverage_pct'              => null,
+            'claim_coverage_pct' => null,
+        ];
+    }
+
+    /**
+     * Read-only navigation observability for the authoritative canonical wikilink graph.
+     * These are deliberately not lint findings: a page may be valid knowledge with no links.
+     * Archived/superseded pages and non-current versions are excluded from the current graph.
+     */
+    private function computeGraphQuality(int $customerId): array
+    {
+        $pageIds = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->whereNotIn('status', [EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED])
+            ->whereHas('currentVersion')
+            ->pluck('id');
+
+        if ($pageIds->isEmpty()) {
+            return [
+                'pages_total' => 0,
+                'canonical_edges' => 0,
+                'pages_with_outgoing_links' => 0,
+                'pages_without_outgoing_links' => 0,
+                'pages_with_incoming_links' => 0,
+                'pages_without_incoming_links' => 0,
+                'isolated_pages' => 0,
+            ];
+        }
+
+        $edges = EnterpriseWikiPageLink::query()
+            ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+            ->whereIn('from_page_id', $pageIds)
+            ->whereIn('to_page_id', $pageIds)
+            ->get(['from_page_id', 'to_page_id']);
+
+        $outgoingIds = $edges->pluck('from_page_id')->unique();
+        $incomingIds = $edges->pluck('to_page_id')->unique();
+        $isolatedIds = $pageIds->diff($outgoingIds)->intersect($pageIds->diff($incomingIds));
+
+        return [
+            'pages_total' => $pageIds->count(),
+            'canonical_edges' => $edges->count(),
+            'pages_with_outgoing_links' => $outgoingIds->count(),
+            'pages_without_outgoing_links' => $pageIds->diff($outgoingIds)->count(),
+            'pages_with_incoming_links' => $incomingIds->count(),
+            'pages_without_incoming_links' => $pageIds->diff($incomingIds)->count(),
+            'isolated_pages' => $isolatedIds->count(),
         ];
     }
 
@@ -308,25 +357,10 @@ class EnterpriseWikiCoverageService
             ->groupBy('severity')
             ->pluck('cnt', 'severity');
 
-        $pageIds = EnterpriseWikiPage::query()
-            ->where('customer_id', $customerId)
-            ->pluck('id');
-
-        $orphanCount = 0;
-        if ($pageIds->isNotEmpty()) {
-            $linkedToIds = EnterpriseWikiPageLink::query()
-                ->whereIn('to_page_id', $pageIds)
-                ->pluck('to_page_id')
-                ->unique();
-
-            $orphanCount = $pageIds->diff($linkedToIds)->count();
-        }
-
         return [
-            'open_errors'   => (int) ($lintCounts[EnterpriseWikiLintFinding::SEVERITY_ERROR]   ?? 0),
+            'open_errors' => (int) ($lintCounts[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
             'open_warnings' => (int) ($lintCounts[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
-            'open_info'     => (int) ($lintCounts[EnterpriseWikiLintFinding::SEVERITY_INFO]    ?? 0),
-            'orphan_pages'  => $orphanCount,
+            'open_info' => (int) ($lintCounts[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
         ];
     }
 }

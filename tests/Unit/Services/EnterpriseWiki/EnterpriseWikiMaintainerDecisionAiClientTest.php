@@ -331,20 +331,60 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $sourceText = 'Noe innhold her.';
         $payload = $this->capturePayload(sourceText: $sourceText);
 
-        // The capacity decision is sized off the RAW source text, not the templated prompt text
-        // the payload actually embeds — see EnterpriseWikiMaintainerDecisionAiClient::decide()'s
-        // docblock: sizing off the (truncated) prompt text would cap the input measure at
-        // MAX_SOURCE_TEXT_CHARS regardless of true document size, making split_required
-        // effectively unreachable.
+        // The split decision remains based on raw source size, but the output budget must reflect
+        // the rendered maintainer context the model actually receives.
         $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
             operationType: 'enterprise_wiki_maintainer_decision',
             model: 'gpt-5',
-            inputSizeChars: mb_strlen($sourceText),
+            inputSizeChars: mb_strlen($this->userMessageText($payload)),
             expectedResultObjects: 2,
         ));
 
         $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
         $this->assertGreaterThan(0, $payload['max_output_tokens']);
+    }
+
+    public function test_small_prompt_keeps_a_modest_bounded_initial_capacity(): void
+    {
+        $payload = $this->capturePayload(sourceText: 'Kort beslutningsgrunnlag.');
+
+        $this->assertLessThan(6_000, $payload['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $payload['max_output_tokens']);
+    }
+
+    public function test_large_rendered_context_with_candidate_pages_gets_realistic_first_call_capacity(): void
+    {
+        $payload = $this->capturePayload(
+            sourceText: 'Endringsnotat med ny terskel og ny frist.',
+            indexContext: $this->largeIndexFixture(),
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->largeCandidateFixture(),
+        );
+
+        $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            inputSizeChars: min(20_000, mb_strlen($this->userMessageText($payload))),
+            expectedResultObjects: 5, // source article + summary + the three bounded patch candidates
+        ));
+
+        $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
+        $this->assertGreaterThanOrEqual(7_560, $payload['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $payload['max_output_tokens']);
+    }
+
+    public function test_candidate_context_increases_first_call_capacity_without_changing_split_routing(): void
+    {
+        $small = $this->capturePayload(sourceText: 'Kort endringsnotat.');
+        $contextual = $this->capturePayload(
+            sourceText: 'Kort endringsnotat.',
+            indexContext: $this->largeIndexFixture(),
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->largeCandidateFixture(),
+        );
+
+        $this->assertGreaterThan($small['max_output_tokens'], $contextual['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $contextual['max_output_tokens']);
     }
 
     public function test_larger_source_text_produces_a_larger_max_output_tokens_than_a_small_document(): void
@@ -1099,6 +1139,46 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ['source_element_key' => 'tbl0-row0', 'source_element_type' => 'table_row', 'section_number' => '2.', 'section_title' => 'Beta', 'reference_text' => 'Field: Value'],
             ['source_element_key' => 'img0', 'source_element_type' => 'image', 'section_number' => '2.', 'section_title' => 'Beta', 'reference_text' => 'A described figure.'],
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function largeCandidateFixture(): array
+    {
+        $candidates = $this->candidateFixture();
+        $candidates[] = [
+            'page_id' => 43,
+            'title' => 'Release Procedure',
+            'slug' => 'release-procedure',
+            'page_type' => 'article',
+            'page_version_id' => 79,
+            'version_number' => 4,
+            'content' => '# Release Procedure',
+            'page_has_subsections' => false,
+            'valid_target_headings' => [],
+            'truncated' => false,
+            'mention_count' => 1,
+        ];
+
+        foreach ($candidates as $index => $candidate) {
+            $candidates[$index]['content'] .= "\n\n".str_repeat('Current authoritative requirement context. ', 160);
+        }
+
+        return $candidates;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function largeIndexFixture(): array
+    {
+        return array_map(static fn (int $id): array => [
+            'id' => $id,
+            'title' => "Current Wiki Page {$id}",
+            'slug' => "current-wiki-page-{$id}",
+            'page_type' => 'article',
+            'status' => 'approved',
+            'excerpt' => str_repeat('Indexed current knowledge. ', 12),
+            'open_lint_count' => 0,
+            'updated_at' => '2026-08-12T12:00:00+00:00',
+        ], range(1, 12));
     }
 
     private function clientReturning(array $decision): EnterpriseWikiMaintainerDecisionAiClient

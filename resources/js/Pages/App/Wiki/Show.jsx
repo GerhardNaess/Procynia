@@ -440,11 +440,6 @@ function StructureFindingContextPanel({
     relatedArticles,
     relatedConcepts,
     relatedEntities,
-    onLinkCandidate,
-    linkingCandidateId,
-    confirmingCandidateId,
-    onRequestConfirm,
-    onCancelConfirm,
 }) {
     if (!finding) {
         return null;
@@ -555,17 +550,6 @@ function StructureFindingContextPanel({
                     </div>
                 </div>
             </div>
-
-            <OrphanConceptCandidateList
-                finding={finding}
-                tw={tw}
-                pageTypeLabel={pageTypeLabel}
-                onLinkCandidate={onLinkCandidate}
-                linkingCandidateId={linkingCandidateId}
-                confirmingCandidateId={confirmingCandidateId}
-                onRequestConfirm={onRequestConfirm}
-                onCancelConfirm={onCancelConfirm}
-            />
 
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-600">
                 <p className="font-semibold text-slate-800">
@@ -769,8 +753,6 @@ export default function WikiShow({
     const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
-    const [confirmingCandidateId, setConfirmingCandidateId] = useState(null);
-    const [linkingCandidateId, setLinkingCandidateId] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
@@ -865,29 +847,6 @@ export default function WikiShow({
                     setWikiBlockEditError(null);
                 },
                 onFinish: () => setWikiBlockSaveProcessingKey(null),
-            },
-        );
-    };
-
-    const linkOrphanConceptCandidate = (targetPageId) => {
-        if (linkingCandidateId !== null || !structureFinding?.id || !current_version?.id) {
-            return;
-        }
-
-        setLinkingCandidateId(targetPageId);
-        router.patch(
-            `/app/wiki/${page.slug}/structure-findings/${structureFinding.id}/link-target`,
-            {
-                target_page_id: targetPageId,
-                expected_page_version_id: current_version.id,
-                back_url: structureFinding?.back_url ?? undefined,
-            },
-            {
-                preserveScroll: true,
-                onFinish: () => {
-                    setLinkingCandidateId(null);
-                    setConfirmingCandidateId(null);
-                },
             },
         );
     };
@@ -2271,11 +2230,6 @@ export default function WikiShow({
                         relatedArticles={relatedArticles}
                         relatedConcepts={relatedConcepts}
                         relatedEntities={relatedEntities}
-                        onLinkCandidate={linkOrphanConceptCandidate}
-                        linkingCandidateId={linkingCandidateId}
-                        confirmingCandidateId={confirmingCandidateId}
-                        onRequestConfirm={setConfirmingCandidateId}
-                        onCancelConfirm={() => setConfirmingCandidateId(null)}
                     />
                 )}
 

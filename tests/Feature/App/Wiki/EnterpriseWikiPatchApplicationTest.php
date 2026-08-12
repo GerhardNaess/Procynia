@@ -200,6 +200,23 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $this->assertStringNotContainsString(self::OLD_B, $markdown);
     }
 
+    public function test_two_length_changing_replacements_in_the_same_block_preserve_every_other_fragment(): void
+    {
+        [$run, $page] = $this->sameBlockReplacementScenario();
+
+        $result = $this->service()->applyForRun($run);
+        $markdown = $page->fresh()->currentVersion->content_markdown;
+
+        $this->assertSame([], $result['failures']);
+        $this->assertSame(1, $result['pages_patched']);
+        $this->assertSame(2, $result['targets_applied']);
+        $this->assertStringContainsString(self::NEW_A, $markdown);
+        $this->assertStringContainsString(self::NEW_B, $markdown);
+        $this->assertStringContainsString(self::UNRELATED_IN_SECTION, $markdown);
+        $this->assertStringNotContainsString(self::OLD_A, $markdown);
+        $this->assertStringNotContainsString(self::OLD_B, $markdown);
+    }
+
     /**
      * The run-27 regression: one page stated the SAME requirement under TWO headings. 8K-2 keeps both
      * targets (identity includes the heading); 8K-3 must patch both occurrences, in one version, and
@@ -760,6 +777,34 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $second['target_heading'] = 'Krav og terskler for tjenesten';
 
         return [$this->createRun($customer, $patchDocument, [$first, $second]), ['article' => $article]];
+    }
+
+    /** @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiPage} */
+    private function sameBlockReplacementScenario(): array
+    {
+        $customer = $this->createCustomer();
+        $oldDocument = $this->createDocument($customer, 'gammel-prosedyre.docx', 'Gammelt grunnlag. '.self::OLD_A.'. '.self::OLD_B.'.');
+        $patchDocument = $this->createDocument($customer, 'endringsnotat.docx', $this->patchDocumentText());
+        $page = $this->createPage($customer, 'Samlet prosedyre', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $this->createVersionWithBlocks($page, $oldDocument, [
+            '# Samlet prosedyre',
+            '## Krav og terskler',
+            'Her gjelder '.self::OLD_A.'. '.self::UNRELATED_IN_SECTION.' I tillegg gjelder '.self::OLD_B.'.',
+        ]);
+
+        $first = $this->replaceTargetA();
+        $first['target_page_id'] = $page->id;
+        $first['target_page_title'] = $page->title;
+        $first['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_ARTICLE;
+
+        $second = $this->replaceTargetB();
+        $second['target_page_id'] = $page->id;
+        $second['target_page_title'] = $page->title;
+        $second['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_ARTICLE;
+        $second['target_heading'] = 'Krav og terskler';
+
+        return [$this->createRun($customer, $patchDocument, [$first, $second]), $page];
     }
 
     /**

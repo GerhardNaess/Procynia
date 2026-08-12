@@ -42,10 +42,19 @@ class EnterpriseWikiMaintainerDecisionAiClient
     /** Selects this operation's profile in config('ai_capacity.operations'). */
     private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_maintainer_decision';
 
-    // source_article + source_summary are always attempted; concept/entity page count is not
-    // known before the AI responds, so it is captured by the capacity planner's input-size-driven
-    // term instead of a guessed object count here.
+    // source_article + source_summary are always attempted. Existing page candidates are known
+    // before the call and may each require a patch-target decision, so they add bounded output
+    // shape pressure on top of this base. New concept/entity count remains input-driven.
     private const EXPECTED_RESULT_OBJECTS = 2;
+
+    /**
+     * The decision prompt may contain a bounded amount of current-Wiki context in addition to the
+     * source document. Use that real, rendered context when budgeting output, but never let a
+     * large current Wiki turn a short source document into the split flow: splitting remains a
+     * decision about the source document itself. The ceiling also prevents context growth from
+     * turning every call into the operation's absolute output ceiling.
+     */
+    private const MAX_CAPACITY_CONTEXT_CHARS = 20_000;
 
     public function __construct(
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
@@ -103,25 +112,34 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // rawSourceSizeChars at ~12000 regardless of how large the real document is, making
         // split_required effectively unreachable no matter how content-rich the document truly is.
         $rawSourceSizeChars = mb_strlen(trim($sourceText));
-        $plan = $this->planCapacity($rawSourceSizeChars, retryAttempt: 0);
+        $sourcePlan = $this->planCapacity($rawSourceSizeChars, self::EXPECTED_RESULT_OBJECTS, retryAttempt: 0);
 
         // A capacity retry always clamps to the exact same ceiling as the first attempt (see
         // EnterpriseWikiAiCapacityPlanner), so whenever the first attempt's own estimate already
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
-        if ($plan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
+        if ($sourcePlan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
             $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
         } else {
             $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements, $existingPageCandidates);
+            $capacityContext = $this->capacityContextForDecision($rawSourceSizeChars, $userPromptText, $existingPageCandidates);
+
+            // This emits only lengths/counts, never source or Wiki content. It makes a slow run
+            // distinguishable as prompt/decision pressure, a capacity retry, or an upstream call.
+            logger()->info('[PROCYNIA][WIKI_MAINTAINER_DECISION_CAPACITY] Decision capacity context prepared.', $capacityContext);
 
             $decoded = $this->capacityRetryExecutor->execute(
                 'EnterpriseWikiMaintainerDecisionAiClient',
-                $rawSourceSizeChars,
-                fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($rawSourceSizeChars, $retryAttempt),
+                $capacityContext['capacity_input_size_chars'],
+                fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity(
+                    $capacityContext['capacity_input_size_chars'],
+                    $capacityContext['expected_result_objects'],
+                    $retryAttempt,
+                ),
                 fn (int $maxOutputTokens): array => $this->buildPayload($languageName, $userPromptText, $maxOutputTokens),
                 fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                     operationType: self::CAPACITY_OPERATION_TYPE,
-                    inputSizeChars: $rawSourceSizeChars,
+                    inputSizeChars: $capacityContext['capacity_input_size_chars'],
                     chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
                     remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
                 )),
@@ -142,7 +160,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
     public function requiresSplit(string $sourceText): bool
     {
-        return $this->planCapacity(mb_strlen(trim($sourceText)), retryAttempt: 0)->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED;
+        return $this->planCapacity(mb_strlen(trim($sourceText)), self::EXPECTED_RESULT_OBJECTS, retryAttempt: 0)->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED;
     }
 
     /** @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>} */
@@ -211,7 +229,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $decoded = $this->capacityRetryExecutor->execute(
             'EnterpriseWikiMaintainerDecisionAiClient:repair',
             $inputSizeChars,
-            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($inputSizeChars, $retryAttempt),
+            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($inputSizeChars, self::EXPECTED_RESULT_OBJECTS, $retryAttempt),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
@@ -233,15 +251,35 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
     }
 
-    private function planCapacity(int $inputSizeChars, int $retryAttempt): AiCapacityPlan
+    private function planCapacity(int $inputSizeChars, int $expectedResultObjects, int $retryAttempt): AiCapacityPlan
     {
         return $this->capacityPlanner->plan(new AiCapacityRequest(
             operationType: self::CAPACITY_OPERATION_TYPE,
             model: self::MODEL,
             inputSizeChars: $inputSizeChars,
-            expectedResultObjects: self::EXPECTED_RESULT_OBJECTS,
+            expectedResultObjects: $expectedResultObjects,
             retryAttempt: $retryAttempt,
         ));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $existingPageCandidates
+     * @return array{raw_source_size_chars: int, rendered_prompt_size_chars: int, capacity_input_size_chars: int, capacity_context_was_capped: bool, expected_result_objects: int, existing_page_candidates: int}
+     */
+    private function capacityContextForDecision(int $rawSourceSizeChars, string $userPromptText, array $existingPageCandidates): array
+    {
+        $renderedPromptSizeChars = mb_strlen($userPromptText);
+        $boundedPromptSizeChars = min($renderedPromptSizeChars, self::MAX_CAPACITY_CONTEXT_CHARS);
+        $candidateCount = min(count($existingPageCandidates), EnterpriseWikiPatchCandidateService::MAX_CANDIDATES);
+
+        return [
+            'raw_source_size_chars' => $rawSourceSizeChars,
+            'rendered_prompt_size_chars' => $renderedPromptSizeChars,
+            'capacity_input_size_chars' => max($rawSourceSizeChars, $boundedPromptSizeChars),
+            'capacity_context_was_capped' => $renderedPromptSizeChars > self::MAX_CAPACITY_CONTEXT_CHARS,
+            'expected_result_objects' => self::EXPECTED_RESULT_OBJECTS + $candidateCount,
+            'existing_page_candidates' => $candidateCount,
+        ];
     }
 
     private function buildRepairPayload(string $languageName, string $repairPromptText, int $maxOutputTokens): array

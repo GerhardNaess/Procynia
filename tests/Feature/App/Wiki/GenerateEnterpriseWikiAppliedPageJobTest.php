@@ -4,6 +4,7 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
+use App\Exceptions\EnterpriseWikiPlannedSectionEvidenceMissingException;
 use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
@@ -17,6 +18,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPlannedSectionCoverageValidator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -821,6 +823,214 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $this->assertSame($version->id, $pivot->generated_page_version_id);
     }
 
+    public function test_repair_receives_the_complete_four_section_contract_and_preserves_valid_sections(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Konsept');
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['owned_topics' => []],
+            'concept_pages' => [[
+                'title' => $concept->title,
+                'owned_topics' => ['Alfa ansvar', 'Beta terskel', 'Gamma gjennomgang', 'Delta oppfølging'],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultFromBlocks([
+                '# Konsept',
+                "## Alfa ansvar\n\nAlfa har dokumentert ansvar for oppfølging.",
+                '## Beta terskel',
+                "## Gamma gjennomgang\n\nGamma gjennomgås månedlig. See [[{$article->slug}]] for details.",
+                "## Delta oppfølging\n\nDelta følges opp i den etablerte kadensen.",
+            ], $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(function (...$arguments) use ($article): array {
+                $plannedSections = $arguments['plannedSections'] ?? $arguments[10] ?? [];
+                $statuses = $arguments['sectionStatuses'] ?? $arguments[11] ?? [];
+
+                $this->assertCount(4, $plannedSections);
+                $this->assertSame(['valid', EnterpriseWikiPlannedSectionCoverageValidator::TYPE_EMPTY, 'valid', 'valid'], array_column($statuses, 'status'));
+
+                $sourceElements = $arguments['sourceElements'] ?? $arguments[8] ?? [];
+
+                return [
+                    $this->repairedSectionResult('Alfa ansvar', 'Alfa har dokumentert ansvar for oppfølging.', $sourceElements),
+                    $this->repairedSectionResult('Beta terskel', 'Beta skal registreres når terskelen er nådd.', $sourceElements),
+                    $this->repairedSectionResult('Gamma gjennomgang', "Gamma gjennomgås månedlig. See [[{$article->slug}]] for details.", $sourceElements),
+                    $this->repairedSectionResult('Delta oppfølging', 'Delta følges opp i den etablerte kadensen.', $sourceElements),
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(app(EnterpriseWikiGenerateAppliedPagesService::class));
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+        $this->assertStringContainsString('Alfa har dokumentert ansvar for oppfølging.', $version->content_markdown);
+        $this->assertStringContainsString('Beta skal registreres når terskelen er nådd.', $version->content_markdown);
+        $this->assertStringContainsString('Gamma gjennomgås månedlig.', $version->content_markdown);
+        $this->assertStringContainsString('Delta følges opp i den etablerte kadensen.', $version->content_markdown);
+    }
+
+    public function test_link_only_first_output_receives_run_41_repair_context_and_grounded_repair_passes(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $document->update(['extracted_text' => 'Open problems are reviewed every second week. Root cause must be documented.']);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Operations article');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Problem management');
+        $plannedTopic = 'Review cadence for open problems';
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['owned_topics' => []],
+            'concept_pages' => [[
+                'title' => $concept->title,
+                'owned_topics' => [$plannedTopic],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultFromBlocks([
+                "# {$pageTitle}",
+                "## {$plannedTopic}\n\n[[{$article->slug}|Operations article]]",
+            ], $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(function (...$arguments) use ($article, $plannedTopic): array {
+                $issues = $arguments['issues'] ?? $arguments[3] ?? [];
+                $plannedSections = $arguments['plannedSections'] ?? $arguments[10] ?? [];
+                $sourceElements = $arguments['sourceElements'] ?? $arguments[8] ?? [];
+
+                $this->assertCount(1, $issues);
+                $this->assertSame(EnterpriseWikiPlannedSectionCoverageValidator::TYPE_ONLY_LINKS, $issues[0]['issue_code']);
+                $this->assertSame(0, $issues[0]['section_index']);
+                $this->assertSame($plannedTopic, $issues[0]['planned_topic']);
+                $this->assertSame("[[{$article->slug}|Operations article]]", $issues[0]['current_invalid_body']);
+                $this->assertSame($plannedSections[0]['source_element_keys'], $issues[0]['assigned_source_element_keys']);
+                $this->assertSame($plannedSections[0]['source_evidence'], $issues[0]['assigned_source_evidence']);
+                $this->assertStringContainsString('Open problems are reviewed every second week.', $issues[0]['assigned_source_evidence'][0]['reference_text']);
+
+                return [
+                    $this->repairedSectionResult(
+                        $plannedTopic,
+                        "Open problems are reviewed every second week as part of [[{$article->slug}|Operations article]].",
+                        $sourceElements,
+                    ),
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class),
+        );
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->firstOrFail();
+        $this->assertStringContainsString('Open problems are reviewed every second week as part of', $version->content_markdown);
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->value('generation_status'));
+    }
+
+    public function test_repair_issue_context_preserves_unicode_link_anchor_without_creating_a_truncated_byte(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $document->update(['extracted_text' => 'Årsaksanalyse gjennomgås annenhver uke.']);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Årsaksanalyse');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Problem management');
+        $plannedTopic = 'Review cadence for open problems';
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['owned_topics' => []],
+            'concept_pages' => [[
+                'title' => $concept->title,
+                'owned_topics' => [$plannedTopic],
+                'reference_only_topics' => [],
+                'excluded_topics' => [],
+                'related_page_guidance' => [],
+            ]],
+            'entity_pages' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generatePageFromSource')
+            ->once()
+            ->andReturnUsing(fn (
+                string $pageTitle,
+                string $pageType,
+                string $sourceText,
+                string $languageCode,
+                string $additionalContext = '',
+                array $linkCatalog = [],
+                array $sourceElements = [],
+            ): array => $this->structuredPageResultFromBlocks([
+                "# {$pageTitle}",
+                "## {$plannedTopic}\n\n[[{$article->slug}|Å]]",
+            ], $sourceElements))
+            ->shouldReceive('repairPlannedSections')
+            ->once()
+            ->andReturnUsing(function (...$arguments) use ($article, $plannedTopic): array {
+                $issues = $arguments['issues'] ?? $arguments[3] ?? [];
+                $sourceElements = $arguments['sourceElements'] ?? $arguments[8] ?? [];
+
+                $this->assertSame("[[{$article->slug}|Å]]", $issues[0]['current_invalid_body']);
+                $this->assertTrue(mb_check_encoding($issues[0]['current_invalid_body'], 'UTF-8'));
+                $this->assertNotFalse(json_encode([
+                    'current_invalid_body' => $issues[0]['current_invalid_body'],
+                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+
+                return [
+                    $this->repairedSectionResult(
+                        $plannedTopic,
+                        "Årsaksanalyse og åpne problemer gjennomgås annenhver uke i [[{$article->slug}|Å]].",
+                        $sourceElements,
+                    ),
+                ];
+            });
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class),
+        );
+
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->value('generation_status'));
+    }
+
     /**
      * Wiki run-593: the repair AI is never given a heading to invent — the caller
      * (EnterpriseWikiGenerateAppliedPagesService) prepends the EXACT planned_topic text as the
@@ -1108,6 +1318,37 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         );
 
         $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+    }
+
+    public function test_required_planned_section_without_evidence_stops_before_generation_or_repair(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $document->update(['extracted_text' => '']);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Konsept');
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => ['owned_topics' => []],
+            'concept_pages' => [[
+                'title' => $concept->title,
+                'owned_topics' => ['Uten dokumentasjon'],
+            ]],
+            'entity_pages' => [],
+        ]]);
+
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldNotReceive('generatePageFromSource')
+            ->shouldNotReceive('repairPlannedSections');
+
+        Queue::fake();
+
+        $this->expectException(EnterpriseWikiPlannedSectionEvidenceMissingException::class);
+        $this->expectExceptionMessage('planned_section_no_evidence');
+
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
+            app(EnterpriseWikiGenerateAppliedPagesService::class),
+        );
     }
 
     public function test_planned_sections_with_real_substance_never_trigger_a_repair_call(): void

@@ -12,6 +12,7 @@ export const WIKI_QUALITY_CHECKS = {
     empty_page_content: 'empty_page_content',
     entity_without_incoming_wikilink: 'entity_without_incoming_wikilink',
     malformed_wikilink: 'malformed_wikilink',
+    unmaterialized_wikilink_marker: 'unmaterialized_wikilink_marker',
     missing_current_version: 'missing_current_version',
     missing_reverse_link: 'missing_reverse_link',
     missing_wikilink_materialization: 'missing_wikilink_materialization',

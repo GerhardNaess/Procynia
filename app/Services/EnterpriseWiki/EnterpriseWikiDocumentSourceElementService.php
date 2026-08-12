@@ -16,6 +16,7 @@ class EnterpriseWikiDocumentSourceElementService
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly EnterpriseWikiImageClassificationService $imageClassificationService,
         private readonly EnterpriseWikiImageDescriptionBuilder $imageDescriptionBuilder,
+        private readonly EnterpriseWikiUtf8Guard $utf8Guard,
     ) {}
 
     /**
@@ -252,11 +253,17 @@ class EnterpriseWikiDocumentSourceElementService
 
         usort($elements, static fn (array $left, array $right): int => ($left['sort_order'] ?? 0) <=> ($right['sort_order'] ?? 0));
 
-        return array_map(static function (array $element): array {
+        $elements = array_map(static function (array $element): array {
             unset($element['sort_order']);
 
             return $element;
         }, $elements);
+
+        $this->utf8Guard->assertValid([
+            'source_elements' => $elements,
+        ], 'enterprise_wiki_document_source_elements');
+
+        return $elements;
     }
 
     /**

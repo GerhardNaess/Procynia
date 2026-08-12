@@ -518,6 +518,18 @@ class EnterpriseWikiPostIngestQaService
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
             ->blocking()
+            // A finding bound to an earlier immutable version is historical once a newer
+            // version is current. Lint normally reconciles before QA, but QA must itself remain
+            // fail-closed for current truth rather than fail on stale diagnostic rows.
+            ->where(function ($query): void {
+                $query->whereNull('enterprise_wiki_page_version_id')
+                    ->orWhereExists(function ($versionQuery): void {
+                        $versionQuery->selectRaw('1')
+                            ->from('enterprise_wiki_page_versions')
+                            ->whereColumn('enterprise_wiki_page_versions.id', 'enterprise_wiki_lint_findings.enterprise_wiki_page_version_id')
+                            ->where('enterprise_wiki_page_versions.is_current', true);
+                    });
+            })
             ->exists();
 
         if ($hasCriticalLint) {

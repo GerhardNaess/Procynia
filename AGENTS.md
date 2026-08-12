@@ -54,6 +54,30 @@ Bruk heller formuleringer som:
 
 Alle nye sider, tekster og funksjoner skal vurderes mot denne posisjoneringen før implementering.
 
+## Enterprise Wiki architecture invariants
+
+For alt arbeid som berører Enterprise Wiki, retrieval, Q&A, requirement research eller wiki-vedlikehold, er disse reglene bindende:
+
+- Enterprise Wiki er Procynias authoritative knowledge layer for Wiki-basert kunnskapsarbeid.
+- Arkitekturen er Karpathy-inspirert: kunnskap kompilert til eksplisitte Wiki-sider, konsepter, entities, summaries og relasjoner som en LLM kan lese og navigere i.
+- Flyten skal være `map/index → select/read → navigate → evidence → grounded answer`, ikke `query → lexical top-N hard gate → answer`.
+- AI skal få et lesbart index/kart over current Wiki-sider og kunne orientere seg i Wiki-en.
+- Lexical ranking er bare et prioriterings-, observability- eller tie-breaker-signal; det skal aldri skjule semantisk relevante score-0-sider.
+- `Spør Wiki` og anbud/requirement-research skal bruke samme felles Wiki-navigation/retrieval-kjerne.
+- Q&A og anbud skiller seg primært etter evidence selection: Q&A gir grounded Wiki-svar, requirement/anbud gir grounded requirement/proposal-svar.
+- Wiki-navigation skal bruke current, eligible canonical Wiki-kunnskap. Ikke bypass Enterprise Wiki ved å hente rå dokumentchunks som alternativ knowledge layer.
+- Grounding skal ikke svekkes for å få flere svar. Hvis Wikien ikke støtter påstanden, er `insufficient evidence` et gyldig utfall.
+- System- eller kundespesifikk evidens skal ikke generaliseres til organisasjons- eller policy-nivå uten eksplisitt støtte.
+- Wiki-relasjoner og wikilinks er navigation-signaler, ikke automatisk evidence.
+- Navigation og traversal skal være bounded og observerbar. Ingen ukontrollerte recursive agent-loops uten eksplisitt arkitekturbeslutning.
+- Ikke innfør stor domenespesifikk synonymtabell som erstatning for semantisk navigation.
+- Ikke innfør embeddings/vector database som standardløsning. Slike endringer krever eksplisitt arkitekturbeslutning og dokumentert behov.
+- Wiki-ingest og maintenance skal kompilere sammenhenger inn i Wiki-en: canonical concept pages, entity pages, topic/synthesis pages, summaries, cross-references og current state.
+- Når en oppgave berører Enterprise Wiki ingest, page generation, patching, knowledge ownership, retrieval, semantic navigation, graph, Q&A, requirement research eller answer generation, skal agenten lese den autoritative Wiki-arkitekturen før implementasjon.
+- Hvis en foreslått løsning bryter disse prinsippene, stopp før kodeendring og rapporter konflikten eksplisitt.
+
+Autoritativ arkitekturdetalj: [docs/enterprise-wiki-architecture.md](/Applications/XAMPP/xamppfiles/htdocs/procynia/docs/enterprise-wiki-architecture.md)
+
 # Autonomous programming workflow
 
 For programming tasks in this repository:

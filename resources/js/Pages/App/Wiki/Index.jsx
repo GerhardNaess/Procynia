@@ -1518,6 +1518,7 @@ function CoveragePanel({ coverage, tw }) {
     const sc = coverage.source_coverage ?? {};
     const pq = coverage.page_quality ?? {};
     const cc = coverage.claim_coverage ?? {};
+    const gq = coverage.graph_quality ?? {};
     const lint = coverage.lint ?? {};
     const gaps = sc.gaps ?? [];
 
@@ -1584,7 +1585,10 @@ function CoveragePanel({ coverage, tw }) {
                         <CoverageSection title={tw.coverage_section_graph ?? 'Graf og struktur'}>
                             <CoverageStat label={tw.lint_severity_error ?? 'Feil'} value={lint.open_errors ?? 0} error />
                             <CoverageStat label={tw.lint_severity_warning ?? 'Advarsler'} value={lint.open_warnings ?? 0} warn />
-                            <CoverageStat label={tw.coverage_orphan_pages ?? 'Foreldreløse sider'} value={lint.orphan_pages ?? 0} warn />
+                            <CoverageStat label={tw.coverage_canonical_edges ?? 'Kanoniske wikilenker'} value={gq.canonical_edges ?? 0} />
+                            <CoverageStat label={tw.coverage_pages_without_outgoing_links ?? 'Sider uten utgående lenker'} value={gq.pages_without_outgoing_links ?? 0} />
+                            <CoverageStat label={tw.coverage_pages_without_incoming_links ?? 'Sider uten innkommende lenker'} value={gq.pages_without_incoming_links ?? 0} />
+                            <CoverageStat label={tw.coverage_isolated_pages ?? 'Isolerte sider'} value={gq.isolated_pages ?? 0} />
                         </CoverageSection>
                     </div>
                 </div>

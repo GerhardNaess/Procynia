@@ -18,6 +18,34 @@ class EnterpriseWikiPlannedSectionCoverageValidatorTest extends TestCase
         return new EnterpriseWikiPlannedSectionCoverageValidator;
     }
 
+    public function test_unicode_line_splitting_does_not_split_the_final_byte_of_norwegian_aa(): void
+    {
+        $markdown = "# Test\n\n## Tiltak\n\nTiltak Å\n\n## Neste\n\nNeste seksjon.";
+
+        // Characterization of the pre-fix byte-mode regex: PCRE sees 0x85 (the second byte of
+        // Å) as NEL, producing the exact C3 0A corruption observed in run 43.
+        $legacy = implode("\n", preg_split('/\R/', 'Tiltak Å\nNeste') ?: []);
+        $this->assertFalse(mb_check_encoding($legacy, 'UTF-8'));
+        $this->assertStringContainsString('20c30a', bin2hex($legacy));
+
+        $body = $this->validator()->sectionBodyForPlannedTopic($markdown, 'Tiltak');
+
+        $this->assertSame('Tiltak Å', $body);
+        $this->assertTrue(mb_check_encoding((string) $body, 'UTF-8'));
+        $this->assertNotFalse(json_encode(['current_invalid_body' => $body], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+    }
+
+    public function test_unicode_line_splitting_preserves_norwegian_and_typographic_characters_at_boundaries(): void
+    {
+        $body = 'Ærlig øvelse med å, en–dash, em—dash og «anførselstegn». Å';
+        $markdown = "# Test\n\n## Unicode\n\n{$body}\n\n## Neste\n\nNeste seksjon.";
+
+        $resolved = $this->validator()->sectionBodyForPlannedTopic($markdown, 'Unicode');
+
+        $this->assertSame($body, $resolved);
+        $this->assertTrue(mb_check_encoding((string) $resolved, 'UTF-8'));
+    }
+
     // =========================================================================
     // 1: Two planned sections, both with substance — passes
     // =========================================================================
@@ -155,6 +183,41 @@ class EnterpriseWikiPlannedSectionCoverageValidatorTest extends TestCase
         $this->assertCount(1, $issues);
         $this->assertSame(EnterpriseWikiPlannedSectionCoverageValidator::TYPE_ONLY_LINKS, $issues[0]['type']);
         $this->assertTrue(EnterpriseWikiPlannedSectionCoverageValidator::isBlocking($issues[0]));
+    }
+
+    public function test_all_link_only_variants_are_rejected_fail_closed(): void
+    {
+        foreach ([
+            '[[problem-management|Problem management]]',
+            "[[problem-management|Problem management]]\n[[incident-management|Incident management]]",
+            "- [[problem-management|Problem management]]\n- [[incident-management|Incident management]]",
+            " \n [[problem-management|Problem management]] \n ",
+        ] as $body) {
+            $issues = $this->validator()->validate(
+                ['Review cadence for open problems'],
+                "# Test\n\n## Review cadence for open problems\n\n{$body}",
+                'concept',
+            );
+
+            $this->assertCount(1, $issues);
+            $this->assertSame(EnterpriseWikiPlannedSectionCoverageValidator::TYPE_ONLY_LINKS, $issues[0]['type']);
+        }
+    }
+
+    public function test_short_grounded_prose_with_or_without_an_inline_link_passes(): void
+    {
+        foreach ([
+            'Gjennomgang skjer annenhver uke.',
+            'Open problems are reviewed every second week as part of [[problem-management|problem management]].',
+        ] as $body) {
+            $issues = $this->validator()->validate(
+                ['Review cadence for open problems'],
+                "# Test\n\n## Review cadence for open problems\n\n{$body}",
+                'concept',
+            );
+
+            $this->assertSame([], $issues);
+        }
     }
 
     // =========================================================================

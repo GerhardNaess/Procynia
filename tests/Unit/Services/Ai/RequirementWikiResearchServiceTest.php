@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiPage;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
 use App\Services\Ai\Wiki\RequirementWikiResearchService;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +37,10 @@ class RequirementWikiResearchServiceTest extends TestCase
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
         config(['services.enterprise_wiki.ai_enabled' => true]);
+        $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('planWikiReading')
+            ->zeroOrMoreTimes()
+            ->andReturnUsing(fn (string $input, array $index): array => $this->semanticReadingPlan($index)));
     }
 
     protected function tearDown(): void
@@ -328,6 +333,15 @@ class RequirementWikiResearchServiceTest extends TestCase
         $this->createWikilink($customer, $pageA, $pageB);
         $this->createWikilink($customer, $pageB, $pageC);
 
+        $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('planWikiReading')
+            ->once()
+            ->andReturn($this->semanticReadingPlan([[
+                'page_id' => $pageA->id,
+                'intended_use' => 'navigation_seed',
+                'reason' => 'The initial concept is the navigation seed.',
+            ]])));
+
         $callCount = 0;
         $this->mock(RequirementWikiResearchAiClient::class, function (MockInterface $mock) use (&$callCount, $pageA, $pageB, $pageC): void {
             $mock->shouldReceive('selectNextAction')->times(3)->andReturnUsing(
@@ -416,5 +430,28 @@ class RequirementWikiResearchServiceTest extends TestCase
             'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
             'published_at' => now(),
         ]);
+    }
+
+    private function semanticReadingPlan(array $indexOrSelectedPages, array $overrides = []): array
+    {
+        $selectedPages = isset($indexOrSelectedPages[0]['intended_use'])
+            ? $indexOrSelectedPages
+            : array_map(static fn (array $page): array => [
+                'page_id' => $page['page_id'],
+                'intended_use' => 'primary_evidence',
+                'reason' => 'Test navigation plan.',
+            ], $indexOrSelectedPages);
+
+        return array_merge([
+            'query_understanding' => [
+                'topic' => 'unknown',
+                'intent' => 'find documented knowledge',
+                'explicit_entities' => [],
+                'explicit_services_or_systems' => [],
+                'scope' => 'unknown',
+            ],
+            'selected_pages' => $selectedPages,
+            'model' => 'stub/1.0',
+        ], $overrides);
     }
 }

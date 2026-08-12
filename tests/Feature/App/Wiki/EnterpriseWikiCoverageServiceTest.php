@@ -252,26 +252,31 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
         $this->assertSame(0, $lint['open_info']);
     }
 
-    public function test_orphan_pages_detected_correctly(): void
+    public function test_graph_quality_uses_current_canonical_edges_and_reports_isolation_as_a_metric(): void
     {
         $customer = $this->createCustomer();
         $linked = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-        $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY); // orphan — no incoming link
-
-        // $source and the summary page have no incoming links; only $linked has one
+        $isolated = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
         $source = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $this->createPageVersion($linked);
+        $this->createPageVersion($isolated);
+        $this->createPageVersion($source);
+
         EnterpriseWikiPageLink::query()->create([
             'customer_id' => $customer->id,
             'from_page_id' => $source->id,
             'to_page_id' => $linked->id,
-            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
             'source' => 'test',
         ]);
 
-        $lint = $this->service()->computeForCustomer($customer->id)['lint'];
+        $graph = $this->service()->computeForCustomer($customer->id)['graph_quality'];
 
-        // orphan and source have no incoming links → 2 orphans; linked has an incoming link → not orphan
-        $this->assertSame(2, $lint['orphan_pages']);
+        $this->assertSame(3, $graph['pages_total']);
+        $this->assertSame(1, $graph['canonical_edges']);
+        $this->assertSame(2, $graph['pages_without_outgoing_links']);
+        $this->assertSame(2, $graph['pages_without_incoming_links']);
+        $this->assertSame(1, $graph['isolated_pages']);
     }
 
     public function test_closed_lint_findings_not_counted(): void
@@ -315,7 +320,7 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
 
         return Customer::query()->create([
             'name' => $name,
-            'slug' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
@@ -355,7 +360,7 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
     ): EnterpriseWikiPage {
         return EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
-            'slug' => 'coverage-' . Str::random(8),
+            'slug' => 'coverage-'.Str::random(8),
             'title' => 'Coverage Test Side',
             'status' => $status,
             'page_type' => $pageType,
@@ -383,7 +388,7 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
         return EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Test-påstand ' . Str::random(6),
+            'claim_text' => 'Test-påstand '.Str::random(6),
             'position_order' => 1,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,

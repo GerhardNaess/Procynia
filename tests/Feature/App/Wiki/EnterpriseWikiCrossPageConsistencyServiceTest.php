@@ -14,6 +14,7 @@ use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiCrossPageConsistencyAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiCrossPageConsistencyService;
+use App\Services\EnterpriseWiki\EnterpriseWikiCrossPageReconciliationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -114,6 +115,55 @@ class EnterpriseWikiCrossPageConsistencyServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiLintFinding::SEVERITY_ERROR, $finding->severity);
         $this->assertTrue($finding->isBlocking());
         $this->assertSame(1, $counts['errors']);
+    }
+
+    public function test_high_confidence_non_target_current_assertion_is_reconciled_before_final_check(): void
+    {
+        [$run, $pages] = $this->scenarioWithUntargetedOwner();
+
+        $this->stubClassification(WikiCrossPageConsistencyAiClient::CLASSIFICATION_CURRENT_ASSERTION, WikiCrossPageConsistencyAiClient::CONFIDENCE_HIGH);
+
+        $result = app(EnterpriseWikiCrossPageReconciliationService::class)->reconcileForRun($run);
+
+        $this->assertSame(1, $result['discovered']);
+        $this->assertSame(1, $result['validated']);
+        $this->assertSame(1, $result['pages_patched']);
+        $this->assertSame(1, $result['targets_applied']);
+        $this->assertStringContainsString(self::NEW_SENTENCE, $pages['untargeted']->fresh()->currentVersion->content_markdown);
+        $this->assertStringNotContainsString(self::OLD_SENTENCE, $pages['untargeted']->fresh()->currentVersion->content_markdown);
+
+        $record = $run->fresh()->maintainer_decision_json['cross_page_reconciliation'] ?? [];
+        $this->assertCount(1, $record['derived_patch_targets'] ?? []);
+        $this->assertSame([], $record['unresolved'] ?? []);
+    }
+
+    public function test_paraphrased_numeric_assertion_with_unicode_dash_is_reconciled_as_a_bounded_token_replacement(): void
+    {
+        [$run, $pages] = $this->scenarioWithUntargetedOwner('Confirm P1‑capacity does not exceed 120 units before approving.');
+
+        $this->stubClassification(WikiCrossPageConsistencyAiClient::CLASSIFICATION_CURRENT_ASSERTION, WikiCrossPageConsistencyAiClient::CONFIDENCE_HIGH);
+
+        $result = app(EnterpriseWikiCrossPageReconciliationService::class)->reconcileForRun($run);
+
+        $this->assertSame(1, $result['pages_patched']);
+        $markdown = $pages['untargeted']->fresh()->currentVersion->content_markdown;
+        $this->assertStringContainsString('P1‑capacity does not exceed 150 units before approving.', $markdown);
+        $this->assertStringNotContainsString('120 units', $markdown);
+    }
+
+    public function test_ambiguous_paraphrased_value_fails_closed_and_is_not_patched(): void
+    {
+        [$run, $pages] = $this->scenarioWithUntargetedOwner('The 120 units operational threshold is checked against a separate 120 units planning value.');
+
+        $this->stubClassification(WikiCrossPageConsistencyAiClient::CLASSIFICATION_CURRENT_ASSERTION, WikiCrossPageConsistencyAiClient::CONFIDENCE_HIGH);
+
+        $result = app(EnterpriseWikiCrossPageReconciliationService::class)->reconcileForRun($run);
+
+        $this->assertSame(1, $result['discovered']);
+        $this->assertSame(0, $result['validated']);
+        $this->assertSame(0, $result['pages_patched']);
+        $this->assertGreaterThan(0, $result['unresolved']);
+        $this->assertStringContainsString('120 units', $pages['untargeted']->fresh()->currentVersion->content_markdown);
     }
 
     public function test_two_current_pages_asserting_old_and_new_is_a_conflict(): void

@@ -91,6 +91,7 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiPatchApplicationService $patchApplicationService,
         private readonly EnterpriseWikiCrossPageConsistencyService $crossPageConsistencyService,
+        private readonly EnterpriseWikiCrossPageReconciliationService $crossPageReconciliationService,
     ) {}
 
     /**
@@ -346,6 +347,13 @@ class EnterpriseWikiDocumentFlowService
             // (see EnterpriseWikiPatchApplicationService), so it belongs with the other synchronous
             // steps in this continuation rather than needing its own lease/fan-in machinery.
             $this->performApplyPatchTargets($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
+            // A maintainer prompt is intentionally bounded. Reconcile any additional, high-confidence
+            // current assertions it could not see before materializing links and running QA.
+            $this->performCrossPageReconciliation($run);
             if (($run->fresh() ?? $run)->isTerminal()) {
                 return;
             }
@@ -932,6 +940,38 @@ class EnterpriseWikiDocumentFlowService
 
         if ($result['failures'] !== []) {
             Log::error('[WIKI_DOCUMENT_FLOW] Some patch targets could not be applied — existing versions left untouched.', [
+                'run_id' => $run->id,
+                'failures' => $result['failures'],
+            ]);
+        }
+    }
+
+    /**
+     * Reconcile high-confidence dependent current assertions before the normal content passes and
+     * final detection-only consistency check. The reconciler can only emit targets seeded by this
+     * run's already-authorised replacements and still uses the normal resolver/patch engine.
+     */
+    private function performCrossPageReconciliation(EnterpriseWikiIngestRun $run): void
+    {
+        $result = $this->crossPageReconciliationService->reconcileForRun($run->fresh() ?? $run);
+
+        if ($result['discovered'] === 0 && $result['unresolved'] === 0) {
+            return;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Cross-page current-state reconciliation completed.', [
+            'run_id' => $run->id,
+            'discovered' => $result['discovered'],
+            'validated' => $result['validated'],
+            'rejected' => $result['rejected'],
+            'unresolved' => $result['unresolved'],
+            'pages_patched' => $result['pages_patched'],
+            'targets_applied' => $result['targets_applied'],
+            'failures' => count($result['failures']),
+        ]);
+
+        if ($result['failures'] !== []) {
+            Log::error('[WIKI_DOCUMENT_FLOW] Some derived cross-page targets could not be applied — final QA remains strict.', [
                 'run_id' => $run->id,
                 'failures' => $result['failures'],
             ]);

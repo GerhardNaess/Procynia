@@ -6,10 +6,13 @@ use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
+use App\Exceptions\EnterpriseWikiPlannedSectionRepairShapeException;
 use App\Models\EnterpriseWikiClaim;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiUtf8Guard;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -57,6 +60,7 @@ class WikiPageContentAiClient
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
         private readonly EnterpriseWikiAiRequestTimeoutPolicy $timeoutPolicy,
+        private readonly EnterpriseWikiUtf8Guard $utf8Guard,
     ) {}
 
     public static function isAvailable(): bool
@@ -69,9 +73,9 @@ class WikiPageContentAiClient
      * Pass $additionalContext for concept/entity pages to include article/summary content
      * and maintainer notes alongside the source text.
      * Pass $linkCatalog (see EnterpriseWikiLinkCatalogService) so the model can reference
-     * other wiki pages via inline [[slug]]/[[slug|anchor]] wikilinks without inventing slugs.
+     * other wiki pages through server-authoritative link intents without inventing slugs.
      *
-     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $linkCatalog
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
      */
@@ -109,20 +113,30 @@ class WikiPageContentAiClient
         array $linkCatalog = [],
         array $sourceElements = [],
         ?AiCallContext $context = null,
+        array $plannedSections = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
         $context ??= AiCallContext::none();
+        $this->utf8Guard->assertValid([
+            'page_title' => $pageTitle,
+            'source_text' => $sourceText,
+            'additional_context' => $additionalContext,
+            'link_catalog' => $linkCatalog,
+            'source_elements' => $sourceElements,
+            'planned_sections' => $plannedSections,
+        ], 'enterprise_wiki_ai_request_input');
         $languageName = $this->languageName($languageCode);
-        $inputSizeChars = mb_strlen($sourceText);
+        $generationPromptText = $this->userPrompt($pageTitle, $sourceText, $additionalContext, $linkCatalog, $sourceElements, $plannedSections);
+        $inputSizeChars = mb_strlen($generationPromptText);
 
         $decoded = $this->capacityRetryExecutor->execute(
             'WikiPageContentAiClient',
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
-            fn (int $maxOutputTokens): array => $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $languageName, $linkCatalog, $sourceElements, $maxOutputTokens),
+            fn (int $maxOutputTokens): array => $this->buildPayload($pageType, $languageName, $generationPromptText, $plannedSections, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
                 inputSizeChars: $inputSizeChars,
@@ -131,6 +145,8 @@ class WikiPageContentAiClient
             )),
             $context,
         );
+
+        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
 
         return $this->parseBlocksResponse($decoded, 'generation', $pageType);
     }
@@ -158,8 +174,8 @@ class WikiPageContentAiClient
      * for the FULL corrected page back and relied on the prompt alone to avoid rewriting content
      * that was already good.
      *
-     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
-     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array<string, mixed>>  $issues
+     * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      * @return list<array{planned_topic: string, blocks: list<array<string, mixed>>}> one entry per
      *                                                                                requested issue, in the same order; `blocks` is body content only (no heading line),
@@ -178,14 +194,30 @@ class WikiPageContentAiClient
         array $linkCatalog = [],
         array $sourceElements = [],
         ?AiCallContext $context = null,
+        array $plannedSections = [],
+        array $sectionStatuses = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
         $context ??= AiCallContext::none();
+        $this->utf8Guard->assertValid([
+            'page_title' => $pageTitle,
+            'existing_markdown' => $existingMarkdown,
+            'issues' => $issues,
+            'source_text' => $sourceText,
+            'additional_context' => $additionalContext,
+            'link_catalog' => $linkCatalog,
+            'source_elements' => $sourceElements,
+            'planned_sections' => $plannedSections,
+            'section_statuses' => $sectionStatuses,
+        ], 'enterprise_wiki_ai_request_input');
         $languageName = $this->languageName($languageCode);
-        $repairPromptText = $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $sourceText, $additionalContext, $linkCatalog, $sourceElements);
+        $requestedPlannedTopics = $plannedSections === []
+            ? $this->requestedPlannedTopics($issues)
+            : $this->plannedTopicsFromContract($plannedSections);
+        $repairPromptText = $this->repairUserPrompt($pageTitle, $existingMarkdown, $issues, $requestedPlannedTopics, $sourceText, $additionalContext, $linkCatalog, $sourceElements, $plannedSections, $sectionStatuses);
         $inputSizeChars = mb_strlen($repairPromptText);
         // Wiki run-6: each missing/empty/link-only planned section is sized as one "candidate" —
         // repairing 2 sections at once (run 6's article page) must get a materially larger budget
@@ -196,7 +228,7 @@ class WikiPageContentAiClient
             'WikiPageContentAiClient(repair)',
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->planSectionRepairCapacity($inputSizeChars, $sectionsToRepair, $retryAttempt),
-            fn (int $maxOutputTokens): array => $this->buildRepairPayload($pageType, $languageName, $repairPromptText, $maxOutputTokens),
+            fn (int $maxOutputTokens): array => $this->buildRepairPayload($pageType, $languageName, $repairPromptText, $requestedPlannedTopics, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForBatch(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
                 inputSizeChars: $inputSizeChars,
@@ -206,7 +238,9 @@ class WikiPageContentAiClient
             $context,
         );
 
-        return $this->parseSectionRepairResponse($decoded, $issues, $pageType);
+        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
+
+        return $this->parseSectionRepairResponse($decoded, $requestedPlannedTopics, $pageType, $plannedSections);
     }
 
     private function planSectionRepairCapacity(int $inputSizeChars, int $sectionsToRepair, int $retryAttempt): AiCapacityPlan
@@ -230,7 +264,7 @@ class WikiPageContentAiClient
      * from "the figure-coverage repair this task adds".
      *
      * @param  list<array{type: string, source_element_key: string, required: bool, planned_section: ?string}>  $issues
-     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
+     * @param  list<array{page_id: int, slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      * @return array{markdown: string, blocks: list<array<string, mixed>>}
      *
@@ -253,6 +287,15 @@ class WikiPageContentAiClient
         }
 
         $context ??= AiCallContext::none();
+        $this->utf8Guard->assertValid([
+            'page_title' => $pageTitle,
+            'existing_markdown' => $existingMarkdown,
+            'issues' => $issues,
+            'source_text' => $sourceText,
+            'additional_context' => $additionalContext,
+            'link_catalog' => $linkCatalog,
+            'source_elements' => $sourceElements,
+        ], 'enterprise_wiki_ai_request_input');
         $languageName = $this->languageName($languageCode);
         // Returns the FULL corrected page (unlike repairPlannedSections()), so it shares the
         // main page-content capacity profile — sized here off the actual built prompt (which
@@ -264,7 +307,7 @@ class WikiPageContentAiClient
             'WikiPageContentAiClient(figure_repair)',
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($pageType, $inputSizeChars, $retryAttempt),
-            fn (int $maxOutputTokens): array => $this->buildFigureRepairPayload($pageType, $languageName, $figureRepairPromptText, $maxOutputTokens),
+            fn (int $maxOutputTokens): array => $this->buildFigureRepairPayload($pageType, $languageName, $figureRepairPromptText, $linkCatalog, $maxOutputTokens),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
                 inputSizeChars: $inputSizeChars,
@@ -273,6 +316,8 @@ class WikiPageContentAiClient
             )),
             $context,
         );
+
+        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
 
         return $this->parseBlocksResponse($decoded, 'figure_repair', $pageType);
     }
@@ -352,18 +397,17 @@ class WikiPageContentAiClient
      * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
      * @return list<array{planned_topic: string, blocks: list<array<string, mixed>>}>
      */
-    private function parseSectionRepairResponse(array $decoded, array $issues, string $pageType): array
+    private function parseSectionRepairResponse(array $decoded, array $requestedPlannedTopics, string $pageType, array $plannedSections = []): array
     {
         $sections = data_get($decoded, 'sections', []);
 
         if (! is_array($sections) || $sections === []) {
-            throw new RuntimeException('WikiPageContentAiClient: repaired sections were empty.');
+            throw new EnterpriseWikiPlannedSectionRepairShapeException(count($requestedPlannedTopics), 0);
         }
 
-        $requestedTopics = array_map(
-            static fn (array $issue): string => trim((string) $issue['planned_topic']),
-            $issues,
-        );
+        if (count($sections) !== count($requestedPlannedTopics)) {
+            throw new EnterpriseWikiPlannedSectionRepairShapeException(count($requestedPlannedTopics), count($sections));
+        }
 
         $result = [];
 
@@ -373,10 +417,11 @@ class WikiPageContentAiClient
             }
 
             $plannedTopic = trim((string) ($section['planned_topic'] ?? ''));
+            $requestedTopic = $requestedPlannedTopics[$sectionIndex] ?? null;
 
-            if (! in_array($plannedTopic, $requestedTopics, true)) {
+            if ($requestedTopic === null || $plannedTopic !== $requestedTopic) {
                 throw new RuntimeException(
-                    "WikiPageContentAiClient: repaired section [{$sectionIndex}] did not match any requested planned_topic."
+                    "WikiPageContentAiClient: repaired section [{$sectionIndex}] did not match requested planned_topic."
                 );
             }
 
@@ -387,6 +432,7 @@ class WikiPageContentAiClient
             }
 
             $markdownParts = [];
+            $assignedKeys = $this->assignedSourceElementKeys($plannedSections, $sectionIndex);
 
             foreach ($blocks as $blockIndex => $block) {
                 if (! is_array($block)) {
@@ -415,6 +461,10 @@ class WikiPageContentAiClient
 
                 if ($origin === EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED && $sourceElementKeys === []) {
                     throw new RuntimeException("WikiPageContentAiClient: source-based repaired block [{$sectionIndex}][{$blockIndex}] has no source_element_keys.");
+                }
+
+                if ($assignedKeys !== [] && array_diff($sourceElementKeys, $assignedKeys) !== []) {
+                    throw new RuntimeException("repair_section_unassigned_evidence: repaired section [{$sectionIndex}] cited source evidence outside its assigned planned section.");
                 }
 
                 $blocks[$blockIndex]['markdown'] = $blockMarkdown;
@@ -505,7 +555,7 @@ class WikiPageContentAiClient
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    private function buildRepairPayload(string $pageType, string $languageName, string $repairPromptText, int $maxOutputTokens): array
+    private function buildRepairPayload(string $pageType, string $languageName, string $repairPromptText, array $plannedTopics, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
             'model' => self::MODEL,
@@ -515,7 +565,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->repairDeveloperPrompt($pageType, $languageName),
+                            'text' => $this->repairDeveloperPrompt($pageType, $languageName, $plannedTopics),
                         ],
                     ],
                 ],
@@ -534,7 +584,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::repairSectionsSchema(),
+                    'schema' => self::repairSectionsSchema($plannedTopics, $linkCatalog),
                 ],
             ],
             'reasoning' => [
@@ -545,16 +595,26 @@ class WikiPageContentAiClient
         ];
     }
 
-    private function repairDeveloperPrompt(string $pageType, string $languageName): string
+    private function repairDeveloperPrompt(string $pageType, string $languageName, array $plannedTopics): string
     {
+        $allowedPlannedTopics = implode("\n", array_map(
+            static fn (string $plannedTopic): string => '- '.$plannedTopic,
+            $plannedTopics,
+        ));
+
         return implode("\n", [
             "You are an editorial wiki writer repairing specific missing or empty planned sections of a previously generated {$pageType} page in {$languageName}.",
             '',
             'REPAIR RULES (mandatory):',
-            '- Return ONLY the content for the section(s) listed in "SECTIONS TO REPAIR" below — never the rest of the page, and never repeat or rewrite content from a section not listed there.',
+            '- Return one entry for EVERY planned section listed below, in the exact order. For status=valid, reproduce the existing section body without changing its meaning; for an invalid status, supply a grounded replacement body.',
             '- Do NOT write the section heading (the "## ..." line) yourself — return only the body content that belongs under that heading. The exact heading text is added separately by the caller, verbatim from the planned topic.',
             '- Return exactly one entry in "sections" per requested planned_topic, in the same order, each with "planned_topic" copied back verbatim and its own "blocks".',
-            '- Write a real, substantial paragraph of flowing prose for each section — grounded in the source document. Never return an empty section, a section containing only a wikilink, or a bare punctuation mark.',
+            '- The only valid planned_topic values for this response are the exact allowed topics listed below; do not reword, shorten, translate, merge, or invent any alternative.',
+            '',
+            'ALLOWED PLANNED TOPICS (exact copy only):',
+            $allowedPlannedTopics,
+            '- Write a real, substantial paragraph of flowing prose for each section — grounded in the assigned source evidence. Never return an empty section, a section containing only a wikilink, or a bare punctuation mark.',
+            '- For planned_section_only_links, replace the link-only body with concise grounded prose supported by the assigned evidence. Existing valid wikilinks may remain inline, but the section must contain substantive prose. Do not use general model knowledge.',
             '- Preserve concrete details the source document actually states for each section — roles, responsibilities, agenda items, participants, frequency, and decision flow — when the source material describes them.',
             '- Do not invent facts not supported by the source document; if the source genuinely says nothing more about a section, write the fullest accurate paragraph the source material supports rather than an empty or thin section.',
             '',
@@ -566,6 +626,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. structural is for a pure "Se også"/cross-reference one-liner with no assertion of its own; best_practice requires a concrete obligation, control, or mechanism that goes beyond the source, never a bare heading or reference.',
+            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker where the link belongs. Never write [[...]] markup or a slug yourself.',
             'Write every block as finished agreement text, exactly as the rest of the page: a best_practice block states its clause normatively ("skal ...") and never as advice — no "Procynia anbefaler", "det anbefales", "beste praksis tilsier", or any equivalent advisory opener, and no "fordi ..." justification in the text itself. The justification belongs in best_practice_reason.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
@@ -573,7 +634,7 @@ class WikiPageContentAiClient
     }
 
     /**
-     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @param  list<array<string, mixed>>  $issues
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      */
@@ -581,10 +642,13 @@ class WikiPageContentAiClient
         string $pageTitle,
         string $existingMarkdown,
         array $issues,
+        array $plannedTopics,
         string $sourceText,
         string $additionalContext,
         array $linkCatalog = [],
         array $sourceElements = [],
+        array $plannedSections = [],
+        array $sectionStatuses = [],
     ): string {
         $parts = [
             "Page title: {$pageTitle}",
@@ -595,14 +659,45 @@ class WikiPageContentAiClient
             '',
             '---',
             '',
-            'SECTIONS TO REPAIR (return ONLY these, one per planned_topic, in this exact order — do not include the heading itself):',
+            'COMPLETE PLANNED SECTION SET — SECTIONS TO REPAIR (return every planned_topic below, one per entry in exact order — do not include the heading itself):',
             '',
         ];
 
-        foreach ($issues as $issue) {
-            $parts[] = sprintf('- planned_topic: %s (previous problem: %s)', $issue['planned_topic'], $issue['type']);
+        $parts[] = 'ALLOWED PLANNED TOPICS FOR THIS PAGE (use these exact values and nothing else):';
+        $parts[] = '';
+
+        foreach ($plannedTopics as $plannedTopic) {
+            $parts[] = '- '.$plannedTopic;
         }
 
+        $parts[] = '';
+        $parts[] = 'The planned_topic in each returned section must match one of the allowed values above exactly.';
+        $parts[] = 'Each requested section is mandatory, must be populated individually, must not be merged with any other section, and must contain non-empty body content.';
+        $parts[] = '';
+
+        foreach ($issues as $issue) {
+            $parts[] = 'REPAIR ISSUE (authoritative):';
+            $parts[] = sprintf('  issue_code: %s', (string) ($issue['issue_code'] ?? $issue['type'] ?? 'planned_section_invalid'));
+            $parts[] = sprintf('  section_index: %d', (int) ($issue['section_index'] ?? -1));
+            $parts[] = sprintf('  planned_topic: %s', (string) ($issue['planned_topic'] ?? ''));
+            $parts[] = sprintf('  heading: %s', (string) ($issue['heading'] ?? ''));
+            $parts[] = sprintf('  current_invalid_body: %s', (string) ($issue['current_invalid_body'] ?? '(not available)'));
+            $parts[] = '  assigned_source_element_keys: '.implode(', ', (array) ($issue['assigned_source_element_keys'] ?? []));
+            $parts[] = '  assigned_source_evidence:';
+            $parts[] = $this->renderSourceElementsBlock((array) ($issue['assigned_source_evidence'] ?? []), 3600);
+            $parts[] = '  repair_instruction: Replace the link-only body with concise grounded prose supported by the assigned evidence. Existing valid wikilinks may remain inline, but the section must contain substantive prose. Do not use general model knowledge.';
+            $parts[] = '';
+        }
+
+        $parts[] = '';
+        $parts[] = '---';
+        $parts[] = '';
+
+        $parts[] = 'PLANNED SECTION EVIDENCE (authoritative contract):';
+        $parts[] = '';
+        $parts[] = $plannedSections === []
+            ? $this->plannedSectionEvidenceBlock($issues, $sourceElements)
+            : $this->plannedSectionsBlock($plannedSections, $sectionStatuses);
         $parts[] = '';
         $parts[] = '---';
         $parts[] = '';
@@ -637,9 +732,9 @@ class WikiPageContentAiClient
         $parts[] = '';
 
         if ($linkCatalog !== []) {
-            foreach ($linkCatalog as $entry) {
-                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
-            }
+            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker in markdown; do not write [[...]] markup or a slug.';
+            $parts[] = '';
+            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
             $parts[] = 'No other pages available to link to.';
         }
@@ -652,9 +747,163 @@ class WikiPageContentAiClient
         $parts[] = 'Every source_based block must cite one or more source_element_key values from this list.';
         $parts[] = 'Do not invent source_element_key values.';
         $parts[] = '';
-        $parts[] = (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $parts[] = $plannedSections === []
+            ? $this->renderSourceElementsBlock($sourceElements)
+            : 'The authoritative per-section evidence above is the complete source context for this repair. Cite only source_element_keys assigned to the matching section.';
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function plannedSectionEvidenceBlock(array $issues, array $sourceElements): string
+    {
+        $parts = [];
+
+        foreach ($issues as $issue) {
+            $plannedTopic = trim((string) ($issue['planned_topic'] ?? ''));
+            $plannedTopicLabel = $plannedTopic !== '' ? $plannedTopic : '(empty planned_topic)';
+            $matchedSourceElements = $this->matchingSourceElementsForPlannedTopic($plannedTopic, $sourceElements);
+
+            $parts[] = sprintf('- planned_topic: %s', $plannedTopicLabel);
+            $parts[] = sprintf('  required_heading: %s', $plannedTopicLabel);
+            $parts[] = '  section_purpose: Write the full body for this exact section and keep it non-empty; do not merge it with any other planned topic.';
+            $parts[] = '  must_be_non_empty: true';
+            $parts[] = sprintf(
+                '  source_element_keys: %s',
+                $matchedSourceElements !== []
+                    ? implode(', ', array_map(static fn (array $element): string => (string) ($element['source_element_key'] ?? ''), $matchedSourceElements))
+                    : '(no direct match found; inspect the full SOURCE ELEMENTS block below)'
+            );
+            $parts[] = '  relevant_source_elements:';
+            $parts[] = $matchedSourceElements !== []
+                ? $this->renderSourceElementsBlock($matchedSourceElements, 3000)
+                : '    (none matched directly — inspect the full SOURCE ELEMENTS block below)';
+            $parts[] = '';
+        }
+
+        return implode("\n", $parts);
+    }
+
+    /** @param list<array<string, mixed>> $plannedSections @param list<array<string, mixed>> $sectionStatuses */
+    private function plannedSectionsBlock(array $plannedSections, array $sectionStatuses = []): string
+    {
+        $statusByTopic = [];
+        foreach ($sectionStatuses as $status) {
+            if (is_array($status) && trim((string) ($status['planned_topic'] ?? '')) !== '') {
+                $statusByTopic[(string) $status['planned_topic']] = (string) ($status['status'] ?? 'valid');
+            }
+        }
+
+        $parts = [];
+        foreach ($plannedSections as $section) {
+            $topic = trim((string) ($section['planned_topic'] ?? ''));
+            $parts[] = sprintf('- section_index: %d', (int) ($section['section_index'] ?? 0));
+            $parts[] = sprintf('  planned_topic: %s', $topic);
+            $parts[] = sprintf('  required_heading: %s', (string) ($section['required_heading'] ?? $topic));
+            $parts[] = sprintf('  section_purpose: %s', (string) ($section['section_purpose'] ?? 'Explain this exact planned topic.'));
+            $parts[] = sprintf('  status: %s', $statusByTopic[$topic] ?? 'required');
+            $parts[] = '  required: true';
+            $parts[] = '  must_contain_grounded_prose: true';
+            $parts[] = '  links_may_be_used_as_inline_references: true';
+            $parts[] = '  links_must_not_be_the_only_content: true';
+            $parts[] = '  do_not_output_link_only_sections: true';
+            $parts[] = '  source_element_keys: '.implode(', ', (array) ($section['source_element_keys'] ?? []));
+            $parts[] = '  source_evidence:';
+            $parts[] = $this->renderSourceElementsBlock((array) ($section['source_evidence'] ?? []), 3600);
+            $parts[] = '';
+        }
+
+        return implode("\n", $parts);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return list<array<string, mixed>>
+     */
+    private function matchingSourceElementsForPlannedTopic(string $plannedTopic, array $sourceElements): array
+    {
+        $plannedTopic = trim($plannedTopic);
+
+        if ($plannedTopic === '' || $sourceElements === []) {
+            return [];
+        }
+
+        $keywords = $this->plannedTopicKeywords($plannedTopic);
+        $scored = [];
+
+        foreach ($sourceElements as $index => $element) {
+            if (! is_array($element)) {
+                continue;
+            }
+
+            $haystack = mb_strtolower(implode(' ', array_filter([
+                (string) ($element['section_title'] ?? ''),
+                (string) ($element['page_reference'] ?? ''),
+                (string) ($element['reference_text'] ?? ''),
+                (string) ($element['display_text'] ?? ''),
+            ], static fn (string $value): bool => trim($value) !== '')));
+
+            $score = 0;
+
+            foreach ($keywords as $keyword) {
+                if ($keyword !== '' && str_contains($haystack, $keyword)) {
+                    $score++;
+                }
+            }
+
+            if ($score > 0) {
+                $scored[] = [
+                    'score' => $score,
+                    'index' => $index,
+                    'element' => $element,
+                ];
+            }
+        }
+
+        if ($scored === []) {
+            return [];
+        }
+
+        usort($scored, static function (array $left, array $right): int {
+            $scoreComparison = ($right['score'] ?? 0) <=> ($left['score'] ?? 0);
+
+            if ($scoreComparison !== 0) {
+                return $scoreComparison;
+            }
+
+            return ($left['index'] ?? 0) <=> ($right['index'] ?? 0);
+        });
+
+        return array_map(
+            static fn (array $item): array => $item['element'],
+            array_slice($scored, 0, 6),
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function plannedTopicKeywords(string $plannedTopic): array
+    {
+        $words = preg_split('/[^\p{L}]+/u', mb_strtolower($plannedTopic), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $keywords = array_filter(
+            $words,
+            static fn (string $word): bool => mb_strlen($word) >= 4,
+        );
+
+        return array_values(array_unique($keywords));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     */
+    private function renderSourceElementsBlock(array $sourceElements, int $maxChars = 6000): string
+    {
+        return EnterpriseWikiMaintainerDecisionAiClient::sourceElementsBlock($sourceElements, $maxChars);
     }
 
     /**
@@ -662,7 +911,7 @@ class WikiPageContentAiClient
      * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    private function buildFigureRepairPayload(string $pageType, string $languageName, string $figureRepairPromptText, int $maxOutputTokens): array
+    private function buildFigureRepairPayload(string $pageType, string $languageName, string $figureRepairPromptText, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
             'model' => self::MODEL,
@@ -691,7 +940,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::schema(),
+                    'schema' => self::schema($linkCatalog),
                 ],
             ],
             'reasoning' => [
@@ -722,6 +971,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every ordinary content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. Keep every existing block\'s own content_origin unchanged unless you are correcting it.',
+            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker where the link belongs. Never write [[...]] markup or a slug yourself.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -794,9 +1044,9 @@ class WikiPageContentAiClient
         $parts[] = '';
 
         if ($linkCatalog !== []) {
-            foreach ($linkCatalog as $entry) {
-                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
-            }
+            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker in markdown; do not write [[...]] markup or a slug.';
+            $parts[] = '';
+            $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
             $parts[] = 'No other pages available to link to.';
         }
@@ -814,7 +1064,7 @@ class WikiPageContentAiClient
         return implode("\n", $parts);
     }
 
-    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName, array $linkCatalog, array $sourceElements, int $maxOutputTokens): array
+    private function buildPayload(string $pageType, string $languageName, string $generationPromptText, array $plannedSections, array $linkCatalog, int $maxOutputTokens): array
     {
         return [
             'model' => self::MODEL,
@@ -824,7 +1074,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->developerPrompt($pageType, $languageName),
+                            'text' => $this->developerPrompt($pageType, $languageName, $plannedSections),
                         ],
                     ],
                 ],
@@ -833,7 +1083,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($pageTitle, $sourceText, $additionalContext, $linkCatalog, $sourceElements),
+                            'text' => $generationPromptText,
                         ],
                     ],
                 ],
@@ -843,7 +1093,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::schema(),
+                    'schema' => self::schema($linkCatalog),
                 ],
             ],
             'reasoning' => [
@@ -854,7 +1104,7 @@ class WikiPageContentAiClient
         ];
     }
 
-    private function developerPrompt(string $pageType, string $languageName): string
+    private function developerPrompt(string $pageType, string $languageName, array $plannedSections = []): string
     {
         $prohibitions = implode("\n", [
             'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
@@ -917,18 +1167,27 @@ class WikiPageContentAiClient
             '- Being absent from the source is never a reason to withhold a relevant recommendation — that absence is precisely what makes it a Procynia contribution rather than source_based content. Procynia is expected to add professional value here, and every best_practice block is routed to a human reviewer who approves or rejects it before it counts as accepted, so a well-founded recommendation is safe to put forward.',
             '- No quota, no minimum, no padding: propose only what the comparison in step 3 genuinely supports, and never manufacture a recommendation to fill space or reach a number. Zero best_practice blocks is the correct outcome when the source already treats its subject well — but reach that conclusion by actually performing the comparison, not by defaulting to it.',
             '',
-            'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful.',
+            'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful. For every intent, choose an intent_id and target_page_id from ALLOWED WIKILINK TARGETS, then put exactly one {{wiki_link:intent_id|visible anchor}} marker at the natural location in this block\'s markdown. Never write [[...]] Wiki markup yourself: the server materializes the link.',
         ]);
 
         $responsibilityRules = implode("\n", [
             'PAGE RESPONSIBILITY:',
             '- "Additional context" (if present) states this page\'s own content responsibility in three tiers: what to explain in depth ("own content responsibility"), what to mention only briefly ("Reference only"), and what to never mention ("EXCLUDED").',
             '- Treat every EXCLUDED topic as a hard, binding boundary: do not mention it, allude to it, or give it a section, list, or even one sentence — not even to note that it exists or that it is covered elsewhere.',
-            '- For a "Reference only" topic, write AT MOST one short sentence plus an inline [[wikilink]] to the page that owns it — never its own heading, paragraph, or list of sub-points. This one-liner is structural (a cross-reference), not best_practice — unless it also happens to state a genuine Procynia recommendation of its own, which the "Reference only" tier does not call for.',
+            '- For a "Reference only" topic, write AT MOST one short sentence and, when useful, add a link_intent to the page that owns it — never its own heading, paragraph, or list of sub-points. This one-liner is structural (a cross-reference), not best_practice — unless it also happens to state a genuine Procynia recommendation of its own, which the "Reference only" tier does not call for.',
             '- Stay strictly inside this page\'s own content responsibility for everything else. The number of sections this page contains should track directly with the number of items in its own content responsibility — do not add or expand a section to cover something that is not one of those items, even if it is topically related.',
             '- When no such guidance is given at all, fall back to writing only what the source material actually supports for this specific page — a short, thin source document justifies a short, thin page; do not expand into a comprehensive treatment of the wider subject just because more could technically be said about it.',
             '- Never restate the same sentence, fact, or near-identical wording more than once on this page, and never copy wording verbatim from another page\'s content given as context — express a shared idea once, in your own words, in the place it actually belongs.',
         ]);
+
+        if ($plannedSections !== []) {
+            $responsibilityRules .= "\n\nPLANNED SECTION OUTPUT CONTRACT:\n"
+                .'- The authoritative user contract lists every required section with section_index, planned_topic, required_heading, and assigned source evidence.\n'
+                .'- Generate exactly one substantial ## section for every contract entry, in section_index order. Copy required_heading verbatim.\n'
+                .'- A section body must be grounded in that section\'s assigned source_element_keys. Do not place evidence for one planned section under another.\n'
+                .'- Every required body must_contain_grounded_prose = true. Wikilinks may be used as inline references, but links_must_not_be_the_only_content and do_not_output_link_only_sections.\n'
+                .'- Do not omit, merge, replace with a wikilink, or leave any required section empty. Runtime validation rejects every one of those outcomes.';
+        }
 
         $figureRules = implode("\n", [
             'PLANNED FIGURES:',
@@ -941,14 +1200,11 @@ class WikiPageContentAiClient
         ]);
 
         $wikilinkRules = implode("\n", [
-            'INLINE WIKILINKS:',
-            '- content_markdown is wiki content — reference other pages inline the way a wiki article does.',
-            '- Use [[target-slug|natural visible text]] inside ordinary prose to reference a page from the "ALLOWED WIKILINK TARGETS" list provided in the user message.',
-            '- Use [[target-slug]] only when the slug itself already reads naturally as the visible text.',
-            '- The "slug" field is the exact, literal identifier you must copy into the [[...]] markup — it is frequently lowercase or hyphenated and different from the page\'s "title" field. Never substitute the title text where the slug is expected, and never change the slug\'s case, spelling, or hyphenation.',
-            '- The user message includes ready-to-copy [[slug|Title]] markup for every allowed target — copy that markup verbatim rather than typing the slug from memory.',
-            '- Only link to slugs that appear in the allowed wikilink target list — never invent a slug, and never link to this page\'s own slug.',
-            '- Link the first or most natural occurrence of a concept or entity — do not repeat the same link for every mention.',
+            'INLINE WIKILINK INTENTS:',
+            '- content_markdown is wiki content — identify useful visible cross-references through link_intents, not through [[...]] markup.',
+            '- For each useful link, add one link_intent with a unique intent_id, the exact target_page_id from the "ALLOWED WIKILINK TARGETS" list, and a concise reason. Put its visible anchor and placement exactly once in markdown as {{wiki_link:intent_id|natural visible text}}.',
+            '- Never write a target slug, [[...]] markup, or a page identifier not listed in the allowed target list. The server owns target identity, canonical slug, and link syntax.',
+            '- Select the first or most natural occurrence of a concept or entity for the marker — do not repeat the same link for every mention.',
             '- Only link semantically important concepts and entities that the text is actually about — do not link generic words.',
             '- Place links inside normal flowing prose. Never replace natural inline linking with a separate "Related pages" list or section.',
             '- Do not create a link for every allowed target just to reach a number — link only where it reads naturally.',
@@ -1059,15 +1315,24 @@ class WikiPageContentAiClient
         };
     }
 
-    private function userPrompt(string $pageTitle, string $sourceText, string $additionalContext, array $linkCatalog = [], array $sourceElements = []): string
+    private function userPrompt(string $pageTitle, string $sourceText, string $additionalContext, array $linkCatalog = [], array $sourceElements = [], array $plannedSections = []): string
     {
         $parts = [
             "Page title: {$pageTitle}",
             '',
-            'Source document:',
-            '',
-            $sourceText,
         ];
+
+        if ($plannedSections === []) {
+            $parts[] = 'Source document:';
+            $parts[] = '';
+            $parts[] = $sourceText;
+        } else {
+            $parts[] = 'AUTHORITATIVE PLANNED SECTION CONTRACT:';
+            $parts[] = '';
+            $parts[] = $this->plannedSectionsBlock($plannedSections);
+            $parts[] = '';
+            $parts[] = 'Return one populated section for every contract entry, in section_index order. Each section must use its exact required_heading and only its assigned source evidence. Every section must contain grounded prose; links may be inline references but can never be the only content. Do not merge sections, omit a section, or return a link-only or whitespace-only body.';
+        }
 
         if (trim($additionalContext) !== '') {
             $parts[] = '';
@@ -1085,15 +1350,9 @@ class WikiPageContentAiClient
         $parts[] = '';
 
         if ($linkCatalog !== []) {
-            $parts[] = 'Copy the exact markup below when linking to a page — do not retype the slug from the title, and do not change its case or spelling:';
+            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Keep its natural anchor in markdown and return it in link_intents; do not write [[...]] markup or a slug.';
             $parts[] = '';
-
-            foreach ($linkCatalog as $entry) {
-                $parts[] = sprintf('[[%s|%s]]', $entry['slug'], $entry['title']);
-            }
-
-            $parts[] = '';
-            $parts[] = 'Full catalog (slug, title, page_type):';
+            $parts[] = 'Full catalog (page_id, title, canonical slug, page_type):';
             $parts[] = '';
             $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
@@ -1108,7 +1367,9 @@ class WikiPageContentAiClient
         $parts[] = 'Every source_based block must cite one or more source_element_key values from this list.';
         $parts[] = 'Do not invent source_element_key values.';
         $parts[] = '';
-        $parts[] = (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $parts[] = $plannedSections === []
+            ? (string) json_encode($sourceElements, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : 'The authoritative per-section evidence above is the complete source context for this planned generation. Cite only source_element_keys assigned to the matching section.';
 
         return implode("\n", $parts);
     }
@@ -1118,8 +1379,14 @@ class WikiPageContentAiClient
      * repairSectionsSchema() (Wiki run-593: section-only repair) — kept as one definition so the
      * two request shapes can never silently drift apart on what a "block" is.
      */
-    private static function blockItemSchema(): array
+    private static function blockItemSchema(array $linkCatalog = []): array
     {
+        $allowedTargetPageIds = array_values(array_map(static fn (array $entry): int => (int) $entry['page_id'], $linkCatalog));
+        $targetPageIdSchema = ['type' => 'integer'];
+        if ($allowedTargetPageIds !== []) {
+            $targetPageIdSchema['enum'] = $allowedTargetPageIds;
+        }
+
         return [
             'type' => 'object',
             'properties' => [
@@ -1148,10 +1415,11 @@ class WikiPageContentAiClient
                     'items' => [
                         'type' => 'object',
                         'properties' => [
-                            'target_slug' => ['type' => 'string'],
+                            'intent_id' => ['type' => 'string', 'pattern' => '^[A-Za-z0-9_-]+$'],
+                            'target_page_id' => $targetPageIdSchema,
                             'reason' => ['type' => 'string'],
                         ],
-                        'required' => ['target_slug', 'reason'],
+                        'required' => ['intent_id', 'target_page_id', 'reason'],
                         'additionalProperties' => false,
                     ],
                 ],
@@ -1168,7 +1436,7 @@ class WikiPageContentAiClient
         ];
     }
 
-    private static function schema(): array
+    private static function schema(array $linkCatalog = []): array
     {
         return [
             'type' => 'object',
@@ -1179,7 +1447,7 @@ class WikiPageContentAiClient
                         'blocks' => [
                             'type' => 'array',
                             'minItems' => 1,
-                            'items' => self::blockItemSchema(),
+                            'items' => self::blockItemSchema($linkCatalog),
                         ],
                     ],
                     'required' => ['blocks'],
@@ -1197,22 +1465,26 @@ class WikiPageContentAiClient
      * (EnterpriseWikiGenerateAppliedPagesService) prepends the literal planned_topic text as the
      * `## ` heading itself; the model is never asked to produce a heading at all.
      */
-    private static function repairSectionsSchema(): array
+    private static function repairSectionsSchema(array $plannedTopics, array $linkCatalog = []): array
     {
         return [
             'type' => 'object',
             'properties' => [
                 'sections' => [
                     'type' => 'array',
-                    'minItems' => 1,
+                    'minItems' => count($plannedTopics),
+                    'maxItems' => count($plannedTopics),
                     'items' => [
                         'type' => 'object',
                         'properties' => [
-                            'planned_topic' => ['type' => 'string'],
+                            'planned_topic' => [
+                                'type' => 'string',
+                                'enum' => array_values($plannedTopics),
+                            ],
                             'blocks' => [
                                 'type' => 'array',
                                 'minItems' => 1,
-                                'items' => self::blockItemSchema(),
+                                'items' => self::blockItemSchema($linkCatalog),
                             ],
                         ],
                         'required' => ['planned_topic', 'blocks'],
@@ -1223,6 +1495,58 @@ class WikiPageContentAiClient
             'required' => ['sections'],
             'additionalProperties' => false,
         ];
+    }
+
+    /**
+     * @param  list<array{type: string, planned_topic: string, heading: ?string}>  $issues
+     * @return list<string>
+     */
+    private function requestedPlannedTopics(array $issues): array
+    {
+        $plannedTopics = [];
+
+        foreach ($issues as $issue) {
+            $plannedTopic = trim((string) ($issue['planned_topic'] ?? ''));
+
+            if ($plannedTopic === '') {
+                throw new RuntimeException('WikiPageContentAiClient: repair issue had an empty planned_topic.');
+            }
+
+            $plannedTopics[] = $plannedTopic;
+        }
+
+        return $plannedTopics;
+    }
+
+    /** @param list<array<string, mixed>> $plannedSections @return list<string> */
+    private function plannedTopicsFromContract(array $plannedSections): array
+    {
+        $topics = [];
+
+        foreach ($plannedSections as $section) {
+            $topic = trim((string) ($section['planned_topic'] ?? ''));
+
+            if ($topic === '') {
+                throw new RuntimeException('WikiPageContentAiClient: planned section contract had an empty planned_topic.');
+            }
+
+            $topics[] = $topic;
+        }
+
+        return $topics;
+    }
+
+    /** @param list<array<string, mixed>> $plannedSections @return list<string> */
+    private function assignedSourceElementKeys(array $plannedSections, int $sectionIndex): array
+    {
+        if ($plannedSections === []) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(
+            (array) ($plannedSections[$sectionIndex]['source_element_keys'] ?? []),
+            static fn (mixed $key): bool => is_string($key) && trim($key) !== '',
+        )));
     }
 
     private function languageName(string $code): string

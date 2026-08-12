@@ -335,8 +335,16 @@ class EnterpriseWikiPatchTargetResolver
 
         $areaText = $this->areaText($blocks, $area);
 
-        if (mb_strpos($areaText, $superseded) !== false) {
+        $occurrences = mb_substr_count($areaText, $superseded);
+
+        if ($occurrences === 1) {
             return null;
+        }
+
+        if ($occurrences > 1) {
+            return "{$ctx}.superseded_substance occurs [{$occurrences}] times in the target area on page [{$pageId}]. "
+                .'A replace target must identify exactly one occurrence; narrow the exact substring or split the target by heading. '
+                .'Do not guess which occurrence to mutate.';
         }
 
         $where = $heading !== '' ? "under heading [{$heading}]" : 'in the page body (this page has no sub-sections)';

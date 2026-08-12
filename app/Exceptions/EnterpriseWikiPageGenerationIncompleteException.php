@@ -18,7 +18,7 @@ use RuntimeException;
  */
 class EnterpriseWikiPageGenerationIncompleteException extends RuntimeException
 {
-    /** @param  list<string>  $missingOrEmptySections */
+    /** @param  list<string>  $missingOrEmptySections @param list<array<string, mixed>> $issues */
     public function __construct(
         public readonly int $runId,
         public readonly int $pageId,
@@ -26,14 +26,22 @@ class EnterpriseWikiPageGenerationIncompleteException extends RuntimeException
         public readonly array $missingOrEmptySections,
         public readonly bool $repairAttempted,
         public readonly ?int $pageVersionId = null,
+        public readonly array $issues = [],
     ) {
+        $typedSections = $issues === []
+            ? implode(', ', $missingOrEmptySections)
+            : implode(', ', array_map(
+                static fn (array $issue): string => sprintf('%s: %s', $issue['type'] ?? 'planned_section_invalid', $issue['planned_topic'] ?? ''),
+                $issues,
+            ));
+
         parent::__construct(sprintf(
-            'Run [%d] page [%d] (%s): planned section(s) still missing or empty after%s repair: %s.',
+            'Run [%d] page [%d] (%s): planned section validation failed after%s repair: %s.',
             $runId,
             $pageId,
             $pageType,
             $repairAttempted ? ' one' : ' no',
-            implode(', ', $missingOrEmptySections),
+            $typedSections,
         ));
     }
 }

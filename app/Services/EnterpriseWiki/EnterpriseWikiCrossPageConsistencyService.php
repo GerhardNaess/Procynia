@@ -18,9 +18,11 @@ use Throwable;
  *  - 8K-3 performs the safe, strict, local patch.
  *  - 8K-4 (this service) checks whether the RESULT is consistent across the customer's current Wiki.
  *
- * It is DETECTION ONLY. It never writes a page version, never patches a page that the decision did
- * not target, and never rewrites wording. Its entire output is EnterpriseWikiLintFinding rows, which
- * the existing QA aggregation already consumes — so no QA special-casing was needed.
+ * Its verification path is DETECTION ONLY. It never writes a page version or rewrites wording; its
+ * entire output is EnterpriseWikiLintFinding rows, which the existing QA aggregation already consumes.
+ * A separate reconciliation stage may ask this service for a read-only, high-confidence discovery
+ * result before QA. That stage must still route every result through the ordinary bounded patch
+ * resolver and deterministic patch engine — this class never performs a repair itself.
  *
  * THE CURRENT-STATE PRINCIPLE this implements:
  *   Current canonical Wiki content should describe current truth, not change history.
@@ -170,6 +172,190 @@ class EnterpriseWikiCrossPageConsistencyService
         ]);
 
         return $counts;
+    }
+
+    /**
+     * Find non-primary pages that still assert a changed fact as current, and compile only the
+     * narrowest patch shape that can be proved from the already-authorised change assertion.
+     *
+     * This is intentionally not a second candidate-ranking path. It starts only from a validated
+     * `replace` assertion already present in the run's decision, examines live current versions in
+     * the same bounded customer scope as the final consistency check, and requires the same
+     * high-confidence temporal classification that makes a stale assertion blocking in QA.
+     *
+     * The returned targets are proposals, not permission to mutate. The reconciliation caller must
+     * validate each one with EnterpriseWikiPatchTargetResolver before giving it to the deterministic
+     * patch engine. An unrepresentable paraphrase is reported as unresolved and deliberately left
+     * for the final strict check/QA instead of being guessed at.
+     *
+     * @return array{
+     *   targets: list<array<string, mixed>>, unresolved: list<array<string, mixed>>,
+     *   assertions: int, pages_considered: int, occurrences: int, classified: int,
+     *   classifications_skipped: int
+     * }
+     */
+    public function discoverAdditionalPatchTargetsForRun(EnterpriseWikiIngestRun $run): array
+    {
+        $result = [
+            'targets' => [],
+            'unresolved' => [],
+            'assertions' => 0,
+            'pages_considered' => 0,
+            'occurrences' => 0,
+            'classified' => 0,
+            'classifications_skipped' => 0,
+        ];
+
+        $assertions = $this->changeAssertionsForRun($run);
+        $result['assertions'] = count($assertions);
+
+        if ($assertions === []) {
+            return $result;
+        }
+
+        $pages = $this->livePagesWithCurrentVersion($run);
+        $result['pages_considered'] = count($pages);
+        $documentDerivedPageIds = $this->documentDerivedPageIds($run);
+        $primaryTargetPageIds = $this->patchTargetPageIds($assertions);
+        $languageCode = (string) ($run->customer?->language?->code ?? 'no');
+        $classified = 0;
+        $seen = [];
+
+        foreach ($assertions as $assertion) {
+            foreach ($pages as $row) {
+                $pageId = (int) $row['page']->id;
+
+                // Primary targets have their own authorised patch plan. Retrying or widening those
+                // from a consistency observation would hide a primary patch failure.
+                if (in_array($pageId, $primaryTargetPageIds, true)
+                    || in_array($pageId, $documentDerivedPageIds, true)) {
+                    continue;
+                }
+
+                $occurrence = $this->occurrenceFor($assertion, $row, false, false);
+
+                if ($occurrence === null) {
+                    continue;
+                }
+
+                $result['occurrences']++;
+
+                if ($classified >= self::MAX_CLASSIFICATIONS) {
+                    $result['classifications_skipped']++;
+
+                    continue;
+                }
+
+                $verdict = $this->classify($occurrence, $languageCode);
+                $classified++;
+                $result['classified']++;
+
+                if ($verdict['classification'] !== WikiCrossPageConsistencyAiClient::CLASSIFICATION_CURRENT_ASSERTION
+                    || $verdict['confidence'] !== WikiCrossPageConsistencyAiClient::CONFIDENCE_HIGH
+                    || $occurrence['new_state_present'] === true) {
+                    continue;
+                }
+
+                $compiled = $this->compileDerivedPatchTarget($assertion, $occurrence, $row);
+
+                if ($compiled['target'] === null) {
+                    $result['unresolved'][] = [
+                        'page_id' => $pageId,
+                        'page_version_id' => (int) $row['version']->id,
+                        'topic' => $assertion['topic'],
+                        'prefilter_signal' => $occurrence['prefilter_signal'],
+                        'reason' => $compiled['reason'],
+                    ];
+
+                    continue;
+                }
+
+                $target = $compiled['target'];
+                $key = implode('|', [
+                    $target['target_page_id'],
+                    $target['target_heading'] ?? '',
+                    $target['superseded_substance'],
+                    $target['replacement_substance'],
+                ]);
+
+                if (isset($seen[$key])) {
+                    continue;
+                }
+
+                $seen[$key] = true;
+                $result['targets'][] = $target;
+            }
+        }
+
+        if ($result['classifications_skipped'] > 0) {
+            Log::warning('[WIKI_CROSS_PAGE] Reconciliation discovery classification cap reached.', [
+                'run_id' => $run->id,
+                'cap' => self::MAX_CLASSIFICATIONS,
+                'skipped' => $result['classifications_skipped'],
+            ]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Convert one classified occurrence into an ordinary `replace` target without inventing prose.
+     *
+     * An exact old assertion can use the decision's authorised sentence. For a paraphrase, the only
+     * safe automatic form is a one-to-one distinctive numeric token replacement (for example 30 →
+     * 15). It remains confined to one immutable heading and is rejected later unless the exact token
+     * occurs exactly once in that target area.
+     *
+     * @param  array<string, mixed>  $assertion
+     * @param  array<string, mixed>  $occurrence
+     * @param  array{page: EnterpriseWikiPage, version: EnterpriseWikiPageVersion}  $row
+     * @return array{target: array<string, mixed>|null, reason: string}
+     */
+    private function compileDerivedPatchTarget(array $assertion, array $occurrence, array $row): array
+    {
+        $superseded = (string) $assertion['old'];
+        $replacement = (string) $assertion['new'];
+
+        if ($occurrence['old_substance_present'] !== true) {
+            $oldAnchors = $this->valueAnchors($superseded, $replacement);
+            $newAnchors = $this->valueAnchors($replacement, $superseded);
+
+            if (count($oldAnchors) !== 1 || count($newAnchors) !== 1) {
+                return [
+                    'target' => null,
+                    'reason' => 'Paraphrased current assertion has no unambiguous one-to-one numeric replacement.',
+                ];
+            }
+
+            $superseded = $oldAnchors[0];
+            $replacement = $newAnchors[0];
+        }
+
+        if ($superseded === '' || $replacement === '') {
+            return ['target' => null, 'reason' => 'No exact bounded replacement could be compiled.'];
+        }
+
+        return [
+            'target' => [
+                'target_page_id' => (int) $row['page']->id,
+                'target_page_title' => (string) $row['page']->title,
+                'target_page_type' => (string) $row['page']->page_type,
+                'target_topic' => trim((string) $assertion['topic']) !== ''
+                    ? (string) $assertion['topic']
+                    : 'Current-state consistency repair',
+                'target_heading' => $occurrence['heading'] !== null && $occurrence['heading'] !== ''
+                    ? (string) $occurrence['heading']
+                    : null,
+                'relationship' => 'substance_changed',
+                'operation' => 'replace',
+                'superseded_substance' => $superseded,
+                'replacement_substance' => $replacement,
+                'source_element_keys' => $assertion['source_element_keys'],
+                'preserve_topics' => [],
+                'reason' => 'Derived from a high-confidence current assertion in a bounded cross-page consistency pass.',
+            ],
+            'reason' => '',
+        ];
     }
 
     // =========================================================================

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Jobs\EnterpriseWiki\ContinueEnterpriseWikiDocumentFlowAfterPages;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiEscalatedRunRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
@@ -61,6 +62,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
     public function handle(
         EnterpriseWikiDocumentFlowService $flowService,
         EnterpriseWikiPostIngestQaService $qaService,
+        EnterpriseWikiAppliedRunLintService $lintService,
         EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
     ): int {
         $runIdOption = $this->option('run-id');
@@ -129,7 +131,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
         }
 
         if ($outcome === 'revalidate_and_finalize') {
-            $this->executeRevalidateAndFinalize($run, $flowService, $qaService);
+            $this->executeRevalidateAndFinalize($run, $flowService, $qaService, $lintService);
         } else {
             $this->executeResumeContinuation($run, $evaluation);
         }
@@ -148,10 +150,29 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiDocumentFlowService $flowService,
         EnterpriseWikiPostIngestQaService $qaService,
+        EnterpriseWikiAppliedRunLintService $lintService,
     ): void {
+        // runForRun() deliberately refuses terminal runs. This command is the explicit,
+        // guarded recovery owner for a failed run whose continuation checkpoints are complete,
+        // so restore only its lifecycle state to the ordinary QA phase before rechecking it.
+        // No page, version, link, claim, or maintainer-decision data is changed here.
+        $run->update([
+            'status' => EnterpriseWikiIngestRun::STATUS_QA,
+            'finished_at' => null,
+            'error_message' => null,
+            'failed_phase' => null,
+            'transient_failure' => null,
+        ]);
+
         if ($run->qa_status === EnterpriseWikiIngestRun::QA_STATUS_RUNNING) {
             $run->update(['qa_status' => EnterpriseWikiIngestRun::QA_STATUS_PENDING]);
         }
+
+        // QA deliberately only reads recorded findings. Reconcile this run's deterministic,
+        // run-scoped lint findings first so a recovery is judged against the current page
+        // versions rather than a stale finding from before a parser or validation correction.
+        // This neither writes content nor re-runs any generation, linking, or claim work.
+        $lintResult = $lintService->lint($run->fresh());
 
         $qaService->runForRun($run->fresh(), retry: true);
 
@@ -165,6 +186,7 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             'qa_status' => $fresh->qa_status,
             'status' => $fresh->status,
             'qa_attempt_count' => $fresh->qa_attempt_count,
+            'lint_findings_resolved' => $lintResult['findings_resolved'],
         ]);
 
         $this->info("[WIKI_RECOVERY] Run [{$run->id}] re-evaluated — qa_status=[{$fresh->qa_status}], status=[{$fresh->status}]. No stages re-run, no AI calls made.");

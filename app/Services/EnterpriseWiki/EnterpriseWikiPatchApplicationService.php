@@ -80,6 +80,34 @@ class EnterpriseWikiPatchApplicationService
             static fn (mixed $target): bool => is_array($target),
         ));
 
+        return $this->applyTargetsForRun($run, $targets);
+    }
+
+    /**
+     * Apply additional targets derived by the bounded cross-page reconciliation stage.
+     *
+     * Kept separate from applyForRun() so the immutable maintainer decision remains the authority
+     * for primary targets. These targets have already been derived from one of those authorised
+     * changes and independently checked by EnterpriseWikiPatchTargetResolver.
+     *
+     * @param  list<array<string, mixed>>  $targets
+     * @return array{pages_patched: int, pages_skipped: int, targets_applied: int, failures: list<string>}
+     */
+    public function applyAdditionalTargetsForRun(EnterpriseWikiIngestRun $run, array $targets): array
+    {
+        return $this->applyTargetsForRun($run, array_values(array_filter(
+            $targets,
+            static fn (mixed $target): bool => is_array($target),
+        )));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $targets
+     * @return array{pages_patched: int, pages_skipped: int, targets_applied: int, failures: list<string>}
+     */
+    private function applyTargetsForRun(EnterpriseWikiIngestRun $run, array $targets): array
+    {
+
         if ($targets === []) {
             return ['pages_patched' => 0, 'pages_skipped' => 0, 'targets_applied' => 0, 'failures' => []];
         }
@@ -424,12 +452,21 @@ class EnterpriseWikiPatchApplicationService
      */
     private function executePlan(array $blocks, array $plan): array
     {
-        // Replacements first, in place — they never change block count, so insertion indexes planned
-        // against the original block list stay valid.
-        foreach ($plan as $step) {
-            if ($step['operation'] !== 'replace') {
-                continue;
-            }
+        // Replacements first, in place. Within one block apply from the end backwards: each offset
+        // was planned against the original text, so a length-changing replacement must not shift an
+        // earlier target's offset.
+        $replacements = array_values(array_filter(
+            $plan,
+            static fn (array $step): bool => $step['operation'] === 'replace',
+        ));
+
+        usort($replacements, static fn (array $a, array $b): int => [
+            $a['block_index'], -$a['offset'],
+        ] <=> [
+            $b['block_index'], -$b['offset'],
+        ]);
+
+        foreach ($replacements as $step) {
 
             $index = (int) $step['block_index'];
             $original = (string) ($blocks[$index]['markdown'] ?? '');
@@ -642,9 +679,7 @@ class EnterpriseWikiPatchApplicationService
             $carried = $afterByOriginal[$index];
 
             if (isset($authorized[$index])) {
-                $remainder = $this->remainderOf($originalBlock, $plan, $index);
-
-                if ($remainder !== '' && mb_strpos((string) ($carried['markdown'] ?? ''), $remainder) === false) {
+                if (! $this->untouchedRemaindersSurvive($originalBlock, $carried, $plan, $index)) {
                     throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
                         $context,
                         "block {$index} lost content the patch did not authorize changing.",
@@ -664,32 +699,78 @@ class EnterpriseWikiPatchApplicationService
     }
 
     /**
-     * The part of an authorized block that the replace did NOT touch — used to prove the rest of the
-     * block survived. Longest of the text before and after the replaced substring.
+     * Prove every untouched fragment of an authorised block remains in order. A block may carry
+     * several independent replace targets; checking only the remainder around the first one made
+     * the second authorised replacement look like data loss (run 46).
      *
      * @param  array<string, mixed>  $originalBlock
      * @param  list<array<string, mixed>>  $plan
      */
-    private function remainderOf(array $originalBlock, array $plan, int $index): string
+    private function untouchedRemaindersSurvive(array $originalBlock, array $carriedBlock, array $plan, int $index): bool
     {
         $markdown = (string) ($originalBlock['markdown'] ?? '');
+        $replacements = [];
 
         foreach ($plan as $step) {
             if ($step['operation'] !== 'replace' || (int) $step['block_index'] !== $index) {
                 continue;
             }
 
-            // Same offset the mutation used, so the remainder is measured around the occurrence that
-            // was actually rewritten.
-            $position = (int) $step['offset'];
-
-            $before = trim(mb_substr($markdown, 0, $position));
-            $after = trim(mb_substr($markdown, $position + mb_strlen((string) $step['superseded'])));
-
-            return mb_strlen($before) >= mb_strlen($after) ? $before : $after;
+            $replacements[] = [
+                'offset' => (int) $step['offset'],
+                'length' => mb_strlen((string) $step['superseded']),
+            ];
         }
 
-        return '';
+        usort($replacements, static fn (array $a, array $b): int => $a['offset'] <=> $b['offset']);
+
+        $cursor = 0;
+        $carriedMarkdown = (string) ($carriedBlock['markdown'] ?? '');
+        $carriedCursor = 0;
+
+        foreach ($replacements as $replacement) {
+            $offset = $replacement['offset'];
+
+            // Overlapping mutations cannot be independently preservation-safe.
+            if ($offset < $cursor) {
+                return false;
+            }
+
+            if (! $this->fragmentSurvivesInOrder(
+                mb_substr($markdown, $cursor, $offset - $cursor),
+                $carriedMarkdown,
+                $carriedCursor,
+            )) {
+                return false;
+            }
+
+            $cursor = $offset + $replacement['length'];
+        }
+
+        return $this->fragmentSurvivesInOrder(
+            mb_substr($markdown, $cursor),
+            $carriedMarkdown,
+            $carriedCursor,
+        );
+    }
+
+    private function fragmentSurvivesInOrder(string $fragment, string $markdown, int &$cursor): bool
+    {
+        $fragment = trim($fragment);
+
+        if ($fragment === '') {
+            return true;
+        }
+
+        $position = mb_strpos($markdown, $fragment, $cursor);
+
+        if ($position === false) {
+            return false;
+        }
+
+        $cursor = $position + mb_strlen($fragment);
+
+        return true;
     }
 
     /**
