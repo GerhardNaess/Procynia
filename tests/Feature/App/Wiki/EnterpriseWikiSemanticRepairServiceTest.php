@@ -381,7 +381,7 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         $this->assertSame('block-0002', $match['block_key']);
     }
 
-    public function test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_semantic_repair(): void
+    public function test_a_semantic_revision_that_cannot_keep_its_blocks_is_declined(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -400,9 +400,10 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         );
         $articleVersion = $this->currentVersion($article);
 
-        // The revision merges both paragraphs into a single segment — segment count (1) no
-        // longer matches the prior block count (2); reconstruction must refuse, not guess. The
-        // semantic repair itself is otherwise valid and must still succeed.
+        // The revision merges both paragraphs into a single segment — segment count (1) no longer
+        // matches the prior block count (2); reconstruction must refuse, not guess. Promoting it
+        // anyway would leave the page with no blocks at all, taking its image figures, source
+        // provenance and claim anchors with it (run 54, page 191). The repair is declined.
         $revisedMarkdown = 'Første avsnitt. Andre avsnitt om Topic B.';
         $this->mock(WikiSemanticReviserAiClient::class)
             ->shouldReceive('revise')->once()->andReturn($revisedMarkdown);
@@ -410,13 +411,15 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
         $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
         $result = $this->repairService()->repair($run, $diagnosis);
 
-        $this->assertTrue($result['success']);
+        $this->assertFalse($result['success']);
+        $this->assertSame('block_provenance_at_risk', $result['reason']);
 
-        $newVersion = EnterpriseWikiPageVersion::query()->find($result['page_version_id']);
-        $this->assertEmpty($newVersion->content_blocks_json ?? []);
+        $articleVersion->refresh();
+        $this->assertTrue((bool) $articleVersion->is_current, 'the page keeps the version that still has blocks');
+        $this->assertCount(2, $articleVersion->content_blocks_json ?? []);
     }
 
-    public function test_old_version_blocks_are_never_touched_by_block_provenance_restore(): void
+    public function test_a_revision_that_cannot_keep_its_blocks_is_declined_and_the_old_version_stays_current(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -436,10 +439,16 @@ class EnterpriseWikiSemanticRepairServiceTest extends TestCase
             ->shouldReceive('revise')->once()->andReturn('Innhold om Topic B.');
 
         $diagnosis = $this->failingAiResult(action: 'targeted_revision', pageVersionId: $articleVersion->id);
-        $this->repairService()->repair($run, $diagnosis);
+        $result = $this->repairService()->repair($run, $diagnosis);
+
+        // The revision rewrites the single block's text beyond recognition, so reconstruction
+        // cannot map it back. Promoting it would leave the page blockless — the repair is declined
+        // and the version that still carries the blocks stays current (run 54, page 191).
+        $this->assertFalse($result['success']);
+        $this->assertSame('block_provenance_at_risk', $result['reason']);
 
         $articleVersion->refresh();
-        $this->assertFalse((bool) $articleVersion->is_current);
+        $this->assertTrue((bool) $articleVersion->is_current);
         $this->assertSame($blocks, $articleVersion->content_blocks_json);
     }
 

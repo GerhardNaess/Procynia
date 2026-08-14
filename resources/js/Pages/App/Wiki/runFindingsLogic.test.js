@@ -444,7 +444,7 @@ describe('activeWikiRunLikeObjectsForTab / hasActiveWikiRunForTab — per-tab po
 });
 
 /**
- * Wiki run-11: the Kjøringer tab kept rendering a run's first snapshot ("Vedlikeholdersbeslutning
+ * Wiki run-11: the Kjøringer tab kept rendering a run's first snapshot ("Sideplanlegging
  * behandles", 0 pages, 0 findings) long after the backend had taken it all the way to
  * awaiting_document_owner_approval with 3 generated pages. The backend and the built bundle were
  * both verified correct — the poll request returns the fresh `runs` prop — so the defect was the

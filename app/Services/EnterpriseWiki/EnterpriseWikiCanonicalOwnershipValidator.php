@@ -208,9 +208,11 @@ class EnterpriseWikiCanonicalOwnershipValidator
             if (
                 in_array($relationship, EnterpriseWikiMaintainerDecisionPrompt::EXISTING_OWNER_RELATIONSHIPS, true)
                 && ! is_int($candidate['existing_owner_page_id'] ?? null)
+                && ! $this->namesPlannedOwner($candidate, $decision, $relationship)
             ) {
                 $issues[] = "{$ctx} classifies [{$name}] as \"{$relationship}\", which asserts that an existing page already owns this topic — "
-                    .'name that page in existing_owner_page_id, or reclassify the candidate.';
+                    .'name that page in existing_owner_page_id, name a page this decision itself creates in owning_page_title, '
+                    .'or reclassify the candidate.';
             }
 
             if ($relationship === 'independent_new_topic' && is_int($candidate['existing_owner_page_id'] ?? null)) {
@@ -220,6 +222,59 @@ class EnterpriseWikiCanonicalOwnershipValidator
         }
 
         return $issues;
+    }
+
+    /**
+     * A sub-topic whose owner is being created in THIS SAME decision.
+     *
+     * `existing_owner_page_id` can only ever name a page that already exists, so on a young or
+     * empty Wiki every "this belongs under a broader topic" classification was unsatisfiable: run
+     * 51 classified four migration variants as `topic_specialized` under "Migreringsstrategi", a
+     * page the same decision was creating, and had no legal way to say so. Requiring the model to
+     * relabel them `independent_new_topic` instead would have produced four duplicate canonical
+     * pages — exactly what rule 2 exists to prevent.
+     *
+     * `substance_changed` is deliberately NOT included: superseding substance requires substance
+     * that already exists in the Wiki, and it has to arrive as a structured patch target against
+     * that existing page (see findUntargetedSubstanceChanges()). A page being created in this run
+     * has no current substance to supersede.
+     *
+     * The owner must be a concept/entity page this decision plans — never source_article/
+     * source_summary, which represent the document rather than the subject matter.
+     *
+     * @param  array<string, mixed>  $candidate
+     * @param  array<string, mixed>  $decision
+     */
+    private function namesPlannedOwner(array $candidate, array $decision, string $relationship): bool
+    {
+        if ($relationship === 'substance_changed') {
+            return false;
+        }
+
+        $owningTitle = trim((string) ($candidate['owning_page_title'] ?? ''));
+        $candidateName = trim((string) ($candidate['name'] ?? ''));
+
+        if ($owningTitle === '') {
+            return false;
+        }
+
+        foreach (self::CANONICAL_PAGE_KEYS as $key) {
+            foreach ((array) ($decision[$key] ?? []) as $entry) {
+                $title = is_array($entry) ? trim((string) ($entry['title'] ?? '')) : '';
+
+                // A candidate may not be its own owner: that would assert the topic belongs on a
+                // broader page while pointing at the page created for the topic itself.
+                if ($title === '' || ($candidateName !== '' && EnterpriseWikiConceptIdentityMatcher::sameIdentity($candidateName, $title))) {
+                    continue;
+                }
+
+                if (EnterpriseWikiConceptIdentityMatcher::sameIdentity($owningTitle, $title)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

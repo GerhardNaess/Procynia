@@ -38,8 +38,15 @@ class EnterpriseWikiPlannedSectionCoverageValidator
 
     public const TYPE_BELOW_MINIMUM_SUBSTANCE = 'planned_section_below_minimum_substance';
 
-    /** Page types whose prompt maps owned_topics onto `## ` sections. */
-    private const CHECKED_PAGE_TYPES = ['article', 'concept', 'entity'];
+    /**
+     * Page types whose prompt maps owned_topics onto `## ` sections.
+     *
+     * Public because it is the single authority on "does this page type HAVE sections at all",
+     * which the planned-figure contract needs too: a figure planned into a named section of a page
+     * type that never renders sections can only ever end up somewhere else (run 54, page 188 — a
+     * summary, whose markdown has no `## ` headings at all).
+     */
+    public const CHECKED_PAGE_TYPES = ['article', 'concept', 'entity'];
 
     /**
      * Secondary signal only (per the task's own instruction: minimum length is never the sole

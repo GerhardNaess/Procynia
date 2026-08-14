@@ -129,7 +129,7 @@ const SEVERITY_STYLES = {
 
 const RUN_TIMELINE_DISPLAY_LABELS = {
     queued: 'Kø',
-    maintainer_decision: 'Beslutning',
+    maintainer_decision: 'Sideplanlegging',
     applying: 'Sidestruktur',
     generating_pages: 'Sider',
     verification_linking: 'Verifisering',
@@ -141,8 +141,8 @@ const INGEST_STATUS_LABELS = {
     queued: 'I kø',
     running: 'Kjører',
     sections_planned: 'Seksjoner planlagt',
-    maintainer_decision: 'Vedlikeholdersbeslutning',
-    applying: 'Anvender beslutning',
+    maintainer_decision: 'Sideplanlegging',
+    applying: 'Anvender sideplan',
     generating_pages: 'Genererer sider',
     generating_concept_entity_pages: 'Genererer konsept- og entitetssider',
     verifying_claims: 'Verifiserer påstander',
@@ -153,7 +153,7 @@ const INGEST_STATUS_LABELS = {
     completed: 'Fullført',
     failed: 'Feilet',
     escalated: 'Eskalert',
-    decision_only: 'Beslutning lagret',
+    decision_only: 'Sideplan lagret',
     cancelled: 'Avbrutt',
 };
 
@@ -716,7 +716,7 @@ function RunActivityBlock({ run, tw, locale, onOpenFindings = null, onRetryMaint
                             onClick={() => onRetryMaintainerDecision(run)}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-base font-semibold leading-6 text-violet-700 transition hover:border-violet-400 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                         >
-                            {tw.run_retry_maintainer_decision_button ?? 'Prøv beslutningsfasen på nytt'}
+                            {tw.run_retry_maintainer_decision_button ?? 'Prøv sideplanleggingen på nytt'}
                         </button>
                     )}
                 </div>
@@ -1387,7 +1387,7 @@ function DecisionModal({ run, tw, onClose }) {
             <div className="relative w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
                     <h2 className="text-base font-semibold text-slate-950">
-                        {tw.decision_panel_heading ?? 'Vedlikeholdersbeslutning'}
+                        {tw.decision_panel_heading ?? 'Sideplanlegging'}
                     </h2>
                     <button
                         type="button"
@@ -2081,6 +2081,83 @@ function SourcesTab({
                         </p>
                     </div>
 
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                        <form onSubmit={submitUpload} className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,20rem)_auto] lg:items-end">
+                            <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <input
+                                        ref={fileInputRef}
+                                        id="wiki-source-file"
+                                        type="file"
+                                        accept=".pdf,.docx"
+                                        disabled={uploadForm.processing}
+                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                        className="peer sr-only"
+                                    />
+                                    <label
+                                        htmlFor="wiki-source-file"
+                                        className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-700"
+                                    >
+                                        {tw.sources_file_label ?? 'Velg fil'}
+                                    </label>
+                                    <span className="min-w-0 break-all text-base text-slate-700">
+                                        {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
+                                    </span>
+                                </div>
+                                <p className="text-base text-slate-500">
+                                    {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
+                                </p>
+                                {uploadForm.errors.file ? (
+                                    <p className="text-base text-rose-600">{uploadForm.errors.file}</p>
+                                ) : null}
+                            </div>
+
+                            {canAssignDocumentOwner ? (
+                                <div className="space-y-1.5">
+                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="wiki-source-owner">
+                                        {tw.document_owner_label ?? 'Dokumenteier'}
+                                    </label>
+                                    <select
+                                        id="wiki-source-owner"
+                                        value={uploadForm.data.owner_user_id}
+                                        onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
+                                        className={`${RUNS_SELECT_CLS} w-full`}
+                                    >
+                                        <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
+                                        {ownerOptions.map((option) => (
+                                            <option key={option.id} value={option.id}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {uploadForm.errors.owner_user_id ? (
+                                        <p className="text-base text-rose-600">{uploadForm.errors.owner_user_id}</p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    <span className="block text-base font-semibold uppercase tracking-wide text-slate-500">
+                                        {tw.document_owner_label ?? 'Dokumenteier'}
+                                    </span>
+                                    <p className="flex h-9 items-center text-base text-slate-700">
+                                        {currentUser.name ?? (tw.document_owner_current_user ?? 'Deg')}
+                                    </p>
+                                    <input type="hidden" name="owner_user_id" value={uploadForm.data.owner_user_id} />
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={!uploadForm.data.file || uploadForm.processing}
+                                className="inline-flex h-11 items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {uploadForm.processing
+                                    ? (tw.sources_uploading ?? 'Laster opp...')
+                                    : (tw.sources_upload_button ?? 'Last opp kilde')}
+                            </button>
+                        </form>
+                    </div>
+
                     {/* Filter bar */}
                     <div className="flex flex-wrap items-end gap-2">
                         <form onSubmit={handleSrcSearchSubmit} className="flex items-center gap-1.5">
@@ -2131,7 +2208,7 @@ function SourcesTab({
                             {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                         </p>
                     ) : (
-                        <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                        <div className="max-h-[min(56vh,42rem)] overflow-auto rounded-2xl border border-slate-100">
                             <table className="min-w-full table-fixed divide-y divide-slate-100">
                                 <colgroup>
                                     <col />
@@ -2141,7 +2218,7 @@ function SourcesTab({
                                     <col style={{ width: '200px' }} />
                                     <col style={{ width: '420px' }} />
                                 </colgroup>
-                                <thead className="bg-slate-50">
+                                <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
                                     <tr className="text-left text-base font-semibold uppercase tracking-wide leading-6 text-slate-500">
                                         <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                         <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
@@ -2331,74 +2408,6 @@ function SourcesTab({
                         </div>
                     )}
 
-                    <div className="border-t border-slate-100 pt-4">
-                        <form onSubmit={submitUpload} className="space-y-4">
-                            <div className="space-y-1.5">
-                                <div className="flex flex-wrap items-center gap-3">
-                                    <input
-                                        ref={fileInputRef}
-                                        id="wiki-source-file"
-                                        type="file"
-                                        accept=".pdf,.docx"
-                                        disabled={uploadForm.processing}
-                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
-                                        className="peer sr-only"
-                                    />
-                                    <label
-                                        htmlFor="wiki-source-file"
-                                        className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-700"
-                                    >
-                                        {tw.sources_file_label ?? 'Velg fil'}
-                                    </label>
-                                    <span className="min-w-0 break-all text-base text-slate-700">
-                                        {uploadForm.data.file?.name ?? (tw.sources_no_file_selected ?? 'Ingen fil valgt')}
-                                    </span>
-                                </div>
-                                <p className="text-base text-slate-500">
-                                    {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
-                                </p>
-                                {uploadForm.errors.file ? (
-                                    <p className="text-base text-rose-600">{uploadForm.errors.file}</p>
-                                ) : null}
-                            </div>
-
-                            {canAssignDocumentOwner ? (
-                                <div className="space-y-1.5">
-                                    <label className="block text-base font-semibold uppercase tracking-wide text-slate-500" htmlFor="wiki-source-owner">
-                                        {tw.document_owner_label ?? 'Dokumenteier'}
-                                    </label>
-                                    <select
-                                        id="wiki-source-owner"
-                                        value={uploadForm.data.owner_user_id}
-                                        onChange={(event) => uploadForm.setData('owner_user_id', event.target.value)}
-                                        className={`${RUNS_SELECT_CLS} w-full max-w-sm`}
-                                    >
-                                        <option value="">{tw.document_owner_choose ?? 'Velg dokumenteier'}</option>
-                                        {ownerOptions.map((option) => (
-                                            <option key={option.id} value={option.id}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {uploadForm.errors.owner_user_id ? (
-                                        <p className="text-base text-rose-600">{uploadForm.errors.owner_user_id}</p>
-                                    ) : null}
-                                </div>
-                            ) : (
-                                <input type="hidden" name="owner_user_id" value={uploadForm.data.owner_user_id} />
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={!uploadForm.data.file || uploadForm.processing}
-                                className="inline-flex h-11 items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {uploadForm.processing
-                                    ? (tw.sources_uploading ?? 'Laster opp...')
-                                    : (tw.sources_upload_button ?? 'Last opp kilde')}
-                            </button>
-                        </form>
-                    </div>
                 </div>
             </section>
             {decisionView && (
@@ -2872,13 +2881,13 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
                     <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
                         <h2 className="mb-4 text-base font-semibold text-slate-900">
-                            {tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv beslutningsfasen på nytt?'}
+                            {tw.run_retry_maintainer_decision_confirm_title ?? 'Prøv sideplanleggingen på nytt?'}
                         </h2>
                         <p className="text-base font-medium leading-6 text-slate-800 break-all">
                             {retryTarget.source_document_filename}
                         </p>
                         <p className="mt-2 text-base leading-6 text-slate-600">
-                            {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Beslutningsfasen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
+                            {tw.run_retry_maintainer_decision_confirm_body ?? 'Dokumentet og kildegrunnlaget er bevart. Sideplanleggingen startes på nytt med samme kjøring — du trenger ikke laste opp dokumentet igjen.'}
                         </p>
                         <div className="mt-5 flex justify-end gap-3">
                             <button

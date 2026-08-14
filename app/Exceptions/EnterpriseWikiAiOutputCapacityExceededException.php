@@ -27,13 +27,21 @@ class EnterpriseWikiAiOutputCapacityExceededException extends RuntimeException
             'Raise this operation\'s configured max_output_tokens ceiling in config(ai_capacity.operations), '.
             'or — once adaptive budgeting and one capacity retry are no longer enough — a future '.
             "split_required capacity strategy. Never raise it above the model's configured maximum.",
+        public readonly bool $retrySkippedAsPointless = false,
     ) {
         $actual = $actualOutputTokens !== null ? (string) $actualOutputTokens : 'unknown';
         $response = $responseId ?? 'unknown';
 
+        // Two different failures, never conflated in the message: a retry that ran and still did
+        // not fit, and a retry that was deliberately not run because it would have been given the
+        // exact same budget as the attempt that just failed.
+        $cause = $retrySkippedAsPointless
+            ? 'status=incomplete/reason=max_output_tokens, and no capacity retry was attempted because a retry '
+                .'clamps to the same ceiling and could not have produced a larger response'
+            : "exhausted capacity retry — still status=incomplete/reason=max_output_tokens after retry level {$lastPlan->retryLevel}";
+
         parent::__construct(
-            "{$operationLabel}: exhausted capacity retry — still status=incomplete/reason=max_output_tokens ".
-            "after retry level {$lastPlan->retryLevel} (chosen max_output_tokens={$lastPlan->chosenMaxOutputTokens}, ".
+            "{$operationLabel}: {$cause} (chosen max_output_tokens={$lastPlan->chosenMaxOutputTokens}, ".
             "actual output_tokens={$actual}, response ID: {$response}). {$recommendedNextMechanism}"
         );
     }

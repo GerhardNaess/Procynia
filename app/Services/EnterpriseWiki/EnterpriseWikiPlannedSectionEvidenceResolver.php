@@ -6,9 +6,29 @@ namespace App\Services\EnterpriseWiki;
  * Creates the generation-time evidence contract for already planned sections. The maintainer
  * decision remains authoritative for section identity; this class only binds each identity to
  * existing extracted source elements before an AI call is made.
+ *
+ * TWO BINDING PATHS, and the difference between them is the whole point:
+ *
+ *  - PLANNER-BOUND (every decision made under the current contract): the owned topic names its own
+ *    source_element_keys, validated at decision time by EnterpriseWikiPlannedTopicEvidenceValidator.
+ *    Binding here is then a pure lookup — no scoring, no guessing, and the planner and this class
+ *    use one and the same evidence identity.
+ *  - LEGACY KEYWORD (a stored decision whose owned_topics are plain strings, predating the
+ *    binding): the old literal keyword overlap, kept only so stored runs remain regenerable.
+ *
+ * The legacy path is what run 53 died on, and it shows exactly why guessing cannot be the contract:
+ * "Budsjett og kostnadsrammer" scored zero against 515 real elements because the document says
+ * "kostnadsramme" and the topic says "kostnadsrammer"; "Godkjenningstidspunkt" scored zero although
+ * 75 elements contain "godkjenning", because a Norwegian compound is not a substring of its parts.
+ * No amount of tuning fixes that class of failure — only the planner knows which elements it meant,
+ * so the planner is now required to say so.
  */
 class EnterpriseWikiPlannedSectionEvidenceResolver
 {
+    public const BINDING_PLANNER = 'planner_bound';
+
+    public const BINDING_LEGACY_KEYWORD = 'legacy_keyword';
+
     private const MAX_ELEMENTS_PER_SECTION = 6;
 
     private const MAX_EVIDENCE_CHARS_PER_SECTION = 3600;
@@ -41,17 +61,28 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
     ];
 
     /**
-     * @param  list<string>  $plannedTopics
+     * @param  list<string|array{topic: string, source_element_keys: list<string>}>  $plannedTopics  Either
+     *                                                                                               bound owned-topic entries (current contract) or plain strings (legacy) — normalise with
+     *                                                                                               EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries() before calling.
      * @param  list<array<string, mixed>>  $sourceElements
-     * @return list<array{section_index: int, planned_topic: string, required_heading: string, section_purpose: string, source_element_keys: list<string>, source_evidence: list<array<string, mixed>>, source_element_count: int, evidence_char_count: int, required: bool}>
+     * @return list<array{section_index: int, planned_topic: string, required_heading: string, section_purpose: string, source_element_keys: list<string>, source_evidence: list<array<string, mixed>>, source_element_count: int, evidence_char_count: int, required: bool, evidence_binding: string}>
      */
     public function resolve(array $plannedTopics, array $sourceElements): array
     {
+        $elementsByKey = $this->elementsByKey($sourceElements);
         $sections = [];
 
         foreach (array_values($plannedTopics) as $sectionIndex => $plannedTopic) {
-            $plannedTopic = trim($plannedTopic);
-            $matches = $this->matchingElements($plannedTopic, $sourceElements);
+            [$topic, $plannedKeys] = $this->normalizeTopic($plannedTopic);
+
+            if ($topic === '') {
+                continue;
+            }
+
+            $binding = $plannedKeys !== [] ? self::BINDING_PLANNER : self::BINDING_LEGACY_KEYWORD;
+            $matches = $plannedKeys !== []
+                ? $this->plannerBoundElements($plannedKeys, $elementsByKey)
+                : $this->matchingElements($topic, $sourceElements);
             $evidenceChars = array_sum(array_map(
                 static fn (array $element): int => mb_strlen((string) ($element['reference_text'] ?? $element['display_text'] ?? '')),
                 $matches,
@@ -59,8 +90,8 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
 
             $sections[] = [
                 'section_index' => $sectionIndex,
-                'planned_topic' => $plannedTopic,
-                'required_heading' => $plannedTopic,
+                'planned_topic' => $topic,
+                'required_heading' => $topic,
                 'section_purpose' => 'Explain this exact planned topic using only its assigned source evidence.',
                 'source_element_keys' => array_values(array_filter(array_map(
                     static fn (array $element): string => trim((string) ($element['source_element_key'] ?? '')),
@@ -70,10 +101,101 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
                 'source_element_count' => count($matches),
                 'evidence_char_count' => $evidenceChars,
                 'required' => true,
+                'evidence_binding' => $binding,
             ];
         }
 
         return $sections;
+    }
+
+    /**
+     * @param  string|array<string, mixed>  $plannedTopic
+     * @return array{0: string, 1: list<string>}
+     */
+    private function normalizeTopic(mixed $plannedTopic): array
+    {
+        if (is_string($plannedTopic)) {
+            return [trim($plannedTopic), []];
+        }
+
+        if (! is_array($plannedTopic)) {
+            return ['', []];
+        }
+
+        return [
+            trim((string) ($plannedTopic['topic'] ?? '')),
+            array_values(array_filter(array_map(
+                static fn (mixed $key): string => is_string($key) ? trim($key) : '',
+                (array) ($plannedTopic['source_element_keys'] ?? []),
+            ), static fn (string $key): bool => $key !== '')),
+        ];
+    }
+
+    /**
+     * A pure lookup of the keys the planner itself assigned to this topic, in the planner's own
+     * order, bounded by the same per-section limits the keyword path uses.
+     *
+     * A key that resolves to nothing is silently absent rather than fabricated: the section then has
+     * fewer (or zero) elements, and zero is what topicsWithoutEvidence() fails the run on. Decision-
+     * time validation already rejects keys outside the catalog, so reaching this with an unresolvable
+     * key means the document itself changed under the decision — which must fail, not degrade.
+     *
+     * @param  list<string>  $plannedKeys
+     * @param  array<string, array<string, mixed>>  $elementsByKey
+     * @return list<array<string, mixed>>
+     */
+    private function plannerBoundElements(array $plannedKeys, array $elementsByKey): array
+    {
+        $selected = [];
+        $remainingChars = self::MAX_EVIDENCE_CHARS_PER_SECTION;
+
+        foreach (array_values(array_unique($plannedKeys)) as $key) {
+            if (count($selected) >= self::MAX_ELEMENTS_PER_SECTION || $remainingChars <= 0) {
+                break;
+            }
+
+            $element = $elementsByKey[$key] ?? null;
+
+            if ($element === null) {
+                continue;
+            }
+
+            $referenceText = trim((string) ($element['reference_text'] ?? $element['display_text'] ?? ''));
+
+            if ($referenceText === '') {
+                continue;
+            }
+
+            $element['reference_text'] = mb_substr($referenceText, 0, $remainingChars);
+            $element['display_text'] = mb_substr((string) ($element['display_text'] ?? $referenceText), 0, min(700, $remainingChars));
+            $remainingChars -= mb_strlen($element['reference_text']);
+            $selected[] = $element;
+        }
+
+        return $selected;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return array<string, array<string, mixed>>
+     */
+    private function elementsByKey(array $sourceElements): array
+    {
+        $byKey = [];
+
+        foreach ($sourceElements as $element) {
+            if (! is_array($element)) {
+                continue;
+            }
+
+            $key = trim((string) ($element['source_element_key'] ?? ''));
+
+            if ($key !== '') {
+                $byKey[$key] = $element;
+            }
+        }
+
+        return $byKey;
     }
 
     /** @param list<array<string, mixed>> $sections @return list<string> */

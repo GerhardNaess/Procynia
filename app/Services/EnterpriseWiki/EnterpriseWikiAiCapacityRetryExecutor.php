@@ -84,6 +84,31 @@ class EnterpriseWikiAiCapacityRetryExecutor
 
             $retryPlan = $planFor(1);
 
+            // A retry only helps when it actually buys output tokens. When the first attempt's
+            // budget was already clamped to the operation's ceiling, the retry plan clamps to the
+            // very same number — so the second call is a guaranteed repeat of the first failure at
+            // full cost and latency (run 51 spent ~95 seconds on exactly this). Fail precisely
+            // instead, and let the caller pick a bounded/split strategy.
+            if ($retryPlan->chosenMaxOutputTokens <= $plan->chosenMaxOutputTokens) {
+                Log::warning('[PROCYNIA][WIKI_AI_CAPACITY] Skipping capacity retry — a retry cannot raise this call\'s budget.', [
+                    'operation' => $operationLabel,
+                    'operation_type' => $plan->operationType,
+                    'first_attempt_max_output_tokens' => $plan->chosenMaxOutputTokens,
+                    'retry_max_output_tokens' => $retryPlan->chosenMaxOutputTokens,
+                    'strategy' => $retryPlan->strategy,
+                    'input_size_chars' => $inputSizeChars,
+                    'run_id' => $context->runId,
+                ]);
+
+                throw new EnterpriseWikiAiOutputCapacityExceededException(
+                    operationLabel: $operationLabel,
+                    lastPlan: $plan,
+                    actualOutputTokens: $e->diagnostics['output_tokens'] ?? null,
+                    responseId: $e->diagnostics['response_id'] ?? null,
+                    retrySkippedAsPointless: true,
+                );
+            }
+
             try {
                 return $this->attemptCall($buildPayload($retryPlan->chosenMaxOutputTokens), $operationLabel, $retryPlan, $inputSizeChars, $timeoutPlanFor, $context);
             } catch (EnterpriseWikiResponseIncompleteException $e2) {

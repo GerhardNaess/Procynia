@@ -290,6 +290,101 @@ class EnterpriseWikiPatchDecisionContractTest extends TestCase
     }
 
     // =========================================================================
+    // Same-run canonical ownership — the owner may be a page THIS decision creates
+    //
+    // Run 51 classified four migration variants as "topic_specialized" under
+    // "Migreringsstrategi", a page the same decision was creating. existing_owner_page_id can only
+    // name a page that already exists, so on an empty or young Wiki the classification was
+    // unsatisfiable — and the only way out the model had was to relabel them
+    // "independent_new_topic", producing four duplicate canonical pages.
+    // =========================================================================
+
+    public function test_a_sub_topic_may_name_an_owner_this_decision_itself_creates(): void
+    {
+        $decision = $this->baseDecision([
+            'concept_candidates' => [
+                $this->candidate(['name' => 'Migreringsstrategi']),
+                $this->candidate([
+                    'name' => 'Cutover (Big Bang)',
+                    'decision' => 'reference_only',
+                    'relationship' => 'topic_specialized',
+                    'existing_owner_page_id' => null,
+                    'owning_page_title' => 'Migreringsstrategi',
+                ]),
+            ],
+            'concept_pages' => [$this->page(['title' => 'Migreringsstrategi', 'proposed_slug' => 'migreringsstrategi'])],
+        ]);
+
+        $this->assertSame([], $this->validator()->findIssues($decision, [], ['paragraph-3']));
+    }
+
+    public function test_a_sub_topic_without_any_owner_is_still_rejected(): void
+    {
+        $decision = $this->baseDecision([
+            'concept_candidates' => [
+                $this->candidate([
+                    'name' => 'Cutover (Big Bang)',
+                    'decision' => 'reference_only',
+                    'relationship' => 'topic_specialized',
+                    'existing_owner_page_id' => null,
+                    'owning_page_title' => 'En side som ikke finnes',
+                ]),
+            ],
+        ]);
+
+        $joined = implode(' | ', $this->validator()->findIssues($decision, [], ['paragraph-3']));
+
+        $this->assertStringContainsString('which asserts that an existing page already owns this topic', $joined);
+    }
+
+    public function test_a_candidate_cannot_be_its_own_owner(): void
+    {
+        // Pointing at the page created for the candidate itself would assert both "this belongs
+        // under a broader topic" and "this topic is its own page".
+        $decision = $this->baseDecision([
+            'concept_candidates' => [
+                $this->candidate([
+                    'name' => 'Migreringsstrategi',
+                    'decision' => 'reference_only',
+                    'relationship' => 'topic_specialized',
+                    'existing_owner_page_id' => null,
+                    'owning_page_title' => 'Migreringsstrategi',
+                ]),
+            ],
+            'concept_pages' => [$this->page(['title' => 'Migreringsstrategi', 'proposed_slug' => 'migreringsstrategi'])],
+        ]);
+
+        $joined = implode(' | ', $this->validator()->findIssues($decision, [], ['paragraph-3']));
+
+        $this->assertStringContainsString('which asserts that an existing page already owns this topic', $joined);
+    }
+
+    /**
+     * The relaxation stops at substance_changed on purpose: superseding substance requires
+     * substance that already exists in the Wiki, and a structured patch target against that page.
+     * A page being created in this run has nothing to supersede.
+     */
+    public function test_substance_changed_still_requires_a_real_existing_owner(): void
+    {
+        $decision = $this->baseDecision([
+            'concept_candidates' => [
+                $this->candidate([
+                    'name' => 'Responstid',
+                    'decision' => 'reference_only',
+                    'relationship' => 'substance_changed',
+                    'existing_owner_page_id' => null,
+                    'owning_page_title' => 'Migreringsstrategi',
+                ]),
+            ],
+            'concept_pages' => [$this->page(['title' => 'Migreringsstrategi', 'proposed_slug' => 'migreringsstrategi'])],
+        ]);
+
+        $joined = implode(' | ', $this->validator()->findIssues($decision, [], ['paragraph-3']));
+
+        $this->assertStringContainsString('which asserts that an existing page already owns this topic', $joined);
+    }
+
+    // =========================================================================
     // Target identity — (page, topic, heading), not (page, topic)
     // =========================================================================
 

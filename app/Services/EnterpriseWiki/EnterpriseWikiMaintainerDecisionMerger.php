@@ -99,7 +99,7 @@ class EnterpriseWikiMaintainerDecisionMerger
             'source_summary' => $globalPlan['source_summary'],
             'concept_candidates' => $conceptCandidates,
             'concept_pages' => $conceptPages,
-            'entity_pages' => $globalPlan['entity_pages'] ?? [],
+            'entity_pages' => $this->mergeEntityPages($globalPlan, $batchResults),
             'patch_targets' => $this->mergePatchTargets($globalPlan, $batchResults),
             'no_action_reason' => $globalPlan['no_action_reason'] ?? null,
             'warnings' => $globalPlan['warnings'] ?? [],
@@ -131,6 +131,63 @@ class EnterpriseWikiMaintainerDecisionMerger
      * @param  list<array<string, mixed>>  $batchResults
      * @return list<array<string, mixed>>
      */
+    /**
+     * Entity pages come from Phase A (the entities the document is about) AND from any batch whose
+     * candidate turned out to be covered by an existing entity page — a disposition Phase A never
+     * evaluates. Unioned by page identity, so the same entity named twice stays one entry rather
+     * than becoming two claims about one row (run 55).
+     *
+     * @param  array<string, mixed>  $globalPlan
+     * @param  list<array<string, mixed>>  $batchResults
+     * @return list<array<string, mixed>>
+     */
+    private function mergeEntityPages(array $globalPlan, array $batchResults): array
+    {
+        $merged = [];
+        $seen = [];
+
+        foreach ([[(array) ($globalPlan['entity_pages'] ?? [])], array_map(
+            static fn (array $batch): array => (array) ($batch['entity_pages'] ?? []),
+            $batchResults,
+        )] as $group) {
+            foreach ($group as $entries) {
+                foreach ($entries as $entry) {
+                    if (! is_array($entry)) {
+                        continue;
+                    }
+
+                    $identity = $this->entityPageIdentity($entry);
+
+                    if ($identity !== null && isset($seen[$identity])) {
+                        continue;
+                    }
+
+                    if ($identity !== null) {
+                        $seen[$identity] = true;
+                    }
+
+                    $merged[] = $entry;
+                }
+            }
+        }
+
+        return $merged;
+    }
+
+    /** @param array<string, mixed> $entry */
+    private function entityPageIdentity(array $entry): ?string
+    {
+        $pageId = $entry['page_id'] ?? null;
+
+        if (is_int($pageId) && $pageId > 0) {
+            return "id:{$pageId}";
+        }
+
+        $title = trim((string) ($entry['title'] ?? ''));
+
+        return $title === '' ? null : 'title:'.mb_strtolower((string) preg_replace('/\s+/u', ' ', $title));
+    }
+
     private function mergePatchTargets(array $globalPlan, array $batchResults): array
     {
         $targets = [];

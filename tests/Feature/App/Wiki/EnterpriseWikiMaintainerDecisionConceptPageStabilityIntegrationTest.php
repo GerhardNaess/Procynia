@@ -61,24 +61,40 @@ class EnterpriseWikiMaintainerDecisionConceptPageStabilityIntegrationTest extend
             'necessary_for_article' => true,
         ]];
 
-        $repaired = $inconsistent;
-        $repaired['concept_candidates'][0]['decision'] = 'create';
-        $repaired['concept_pages'] = [[
-            'action' => 'create',
-            'page_id' => null,
-            'title' => 'ITIL Incident Management',
-            'proposed_slug' => 'itil-incident-management',
-            'reason' => 'Central concept the article and summary both point to.',
-            'owned_topics' => ['Definer ITIL Incident Management-prosessen.'],
-            'reference_only_topics' => [],
-            'excluded_topics' => [],
-            'related_page_guidance' => [],
-        ]];
+        $createdCandidate = $inconsistent['concept_candidates'][0];
+        $createdCandidate['decision'] = 'create';
 
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
-        $mock->shouldReceive('repair')->once()->andReturn($repaired);
+        $mock->shouldReceive('maxObjectsPerRepairCall')->andReturn(8);
+        $mock->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
+        // The bounded delta: promote the candidate and add the page it needs. The article and
+        // summary keep their guidance untouched — they are not part of the repair.
+        $mock->shouldReceive('repairGroup')->once()->andReturn(['operations' => [
+            [
+                'collection' => 'concept_candidates',
+                'object_id' => 'concept_candidates[0]',
+                'operation' => 'replace',
+                'object' => $createdCandidate,
+            ],
+            [
+                'collection' => 'concept_pages',
+                'object_id' => null,
+                'operation' => 'add',
+                'object' => [
+                    'action' => 'create',
+                    'page_id' => null,
+                    'title' => 'ITIL Incident Management',
+                    'proposed_slug' => 'itil-incident-management',
+                    'reason' => 'Central concept the article and summary both point to.',
+                    'owned_topics' => ['Definer ITIL Incident Management-prosessen.'],
+                    'reference_only_topics' => [],
+                    'excluded_topics' => [],
+                    'related_page_guidance' => [],
+                ],
+            ],
+        ], 'notes' => null]);
 
         $decision = app(EnterpriseWikiMaintainerDecisionService::class)
             ->runForDocument($customer->id, $document->id, 'no');
@@ -132,7 +148,11 @@ class EnterpriseWikiMaintainerDecisionConceptPageStabilityIntegrationTest extend
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
-        $mock->shouldReceive('repair')->once()->andReturn($inconsistent);
+        $mock->shouldReceive('maxObjectsPerRepairCall')->andReturn(8);
+        $mock->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
+        // A delta that changes nothing: the contradiction survives full revalidation of the merged
+        // decision, so nothing reaches apply.
+        $mock->shouldReceive('repairGroup')->once()->andReturn(['operations' => [], 'notes' => null]);
 
         $pagesBefore = EnterpriseWikiPage::query()->count();
         $runsBefore = EnterpriseWikiIngestRun::query()->count();

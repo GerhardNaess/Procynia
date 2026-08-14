@@ -3,6 +3,9 @@
 namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
+use App\Services\EnterpriseWiki\EnterpriseWikiCanonicalOwnershipValidator;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionConsistencyValidator;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionHierarchyValidator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
 use App\Services\OpenAi\OpenAiClient;
@@ -269,6 +272,107 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         config(['ai_capacity.operations.enterprise_wiki_maintainer_decision.batch.max_candidates_per_batch' => 1]);
     }
 
+    // =========================================================================
+    // Run 51 — a split run against an EMPTY Wiki must produce a decision the
+    // deterministic validators accept, without any repair pass at all.
+    //
+    // It did not: 15 of its 21 issues were candidates naming the source article as their owning
+    // page (the batch prompt called it a valid owning page while the consistency validator
+    // rejects it by design), and 4 were sub-topics of a page the same run was creating, which the
+    // canonical-ownership rule had no legal way to express.
+    // =========================================================================
+
+    public function test_a_split_run_on_an_empty_wiki_needs_no_repair_for_same_run_ownership(): void
+    {
+        config(['ai_capacity.operations.enterprise_wiki_maintainer_decision.batch.max_candidates_per_batch' => 2]);
+
+        $this->mockSequentialResponses([
+            $this->completedResponse($this->globalPlan([
+                $this->mention('Migreringsstrategi'),
+                $this->mention('Cutover (Big Bang)'),
+                $this->mention('Prosjektleder'),
+            ])),
+            // Batch 1 creates the owner page and specialises one candidate under it — the owner
+            // exists only in THIS decision, so existing_owner_page_id is legitimately null.
+            $this->completedResponse($this->batch([
+                $this->candidate('Migreringsstrategi', 'create', ['relationship' => 'independent_new_topic']),
+                $this->candidate('Cutover (Big Bang)', 'reference_only', [
+                    'relationship' => 'topic_specialized',
+                    'owning_page_title' => 'Migreringsstrategi',
+                ]),
+            ], [
+                $this->page('Migreringsstrategi'),
+            ])),
+            // Batch 2: a local role no concept page owns. The correct answer is "exclude", never
+            // pointing the reader at the source article.
+            $this->completedResponse($this->batch([
+                $this->candidate('Prosjektleder', 'exclude'),
+            ], [])),
+        ]);
+
+        $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($this->coordinator()->decide(
+            ['title' => 'Masterdata Prosjekt', 'filename' => 'Masterdata Prosjekt.docx'],
+            str_repeat('Prosjektdokumentasjon med migrering og testing. ', 60),
+            [], // EMPTY Wiki — no existing page can ever be named as an owner.
+            'no',
+        ));
+
+        $issues = array_merge(
+            app(EnterpriseWikiMaintainerDecisionConsistencyValidator::class)->findIssues($decision, []),
+            app(EnterpriseWikiMaintainerDecisionHierarchyValidator::class)->findIssues($decision),
+            app(EnterpriseWikiCanonicalOwnershipValidator::class)->findIssues($decision, []),
+        );
+
+        $this->assertSame([], $issues, 'a sound split decision on an empty Wiki must not need a repair pass');
+        $this->assertCount(3, $decision['concept_candidates']);
+        $this->assertCount(1, $decision['concept_pages']);
+    }
+
+    /**
+     * The prompt and the validator must state ONE policy about who may own a topic. Run 51's batch
+     * prompt advertised the source article as a valid owning page; the validator has always
+     * rejected it. Every candidate that believed the prompt became a validation issue.
+     */
+    public function test_batch_prompt_and_validator_agree_that_source_pages_are_not_owning_pages(): void
+    {
+        $capturedPrompts = [];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->twice()
+            ->andReturnUsing(function (array $payload) use (&$capturedPrompts): array {
+                $capturedPrompts[] = implode("\n", [
+                    $payload['input'][0]['content'][0]['text'],
+                    $payload['input'][1]['content'][0]['text'],
+                ]);
+
+                return count($capturedPrompts) === 1
+                    ? $this->completedResponse($this->globalPlan([$this->mention('Prosjektleder')]))
+                    : $this->completedResponse($this->batch([$this->candidate('Prosjektleder', 'exclude')], []));
+            });
+
+        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'tekst', [], 'no');
+
+        $batchPrompt = $capturedPrompts[1];
+
+        $this->assertStringContainsString('NEVER valid as owning_page_title', $batchPrompt);
+        $this->assertStringNotContainsString('they are valid owning pages', $batchPrompt);
+
+        // The other half of the same policy: naming the source article as an owning page is an
+        // issue, so a prompt that suggested it would be sending the model into a repair.
+        $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($this->globalPlan([]) + [
+            'concept_candidates' => [$this->candidate('Prosjektleder', 'reference_only', ['owning_page_title' => 'Test Artikkel'])],
+            'concept_pages' => [],
+            'patch_targets' => [],
+        ]);
+
+        $this->assertNotEmpty(
+            app(EnterpriseWikiMaintainerDecisionConsistencyValidator::class)->findIssues($decision, []),
+            'the validator must still refuse the source article as an owning page',
+        );
+    }
+
     private function mockSequentialResponses(array $responses): void
     {
         /** @var OpenAiClient&MockInterface $mock */
@@ -318,9 +422,10 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         return ['concept_candidates' => $candidates, 'concept_pages' => $pages];
     }
 
-    private function candidate(string $name, string $decision): array
+    /** @param array<string, mixed> $overrides */
+    private function candidate(string $name, string $decision, array $overrides = []): array
     {
-        return [
+        return array_merge([
             'name' => $name,
             'concept_type' => 'process',
             'independent_reason' => 'Independent concept.',
@@ -330,7 +435,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             'justification' => 'Test justification.',
             'owning_page_title' => null,
             'necessary_for_article' => false,
-        ];
+        ], $overrides);
     }
 
     private function page(string $title): array
@@ -342,5 +447,62 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             'proposed_slug' => strtolower(str_replace(' ', '-', $title)),
             'reason' => 'Concept page.',
         ];
+    }
+
+    /**
+     * A control byte in the model's own response text (run 34's fault) says nothing about the
+     * decision and everything about the transmission. Failing the batch aborts every other call in
+     * the run, so this one call is retried once — and only for that specific fault.
+     */
+    public function test_a_corrupted_batch_response_is_retried_once_and_then_succeeds(): void
+    {
+        $this->forceSingleCandidatePerBatch();
+
+        $corrupted = $this->batch([$this->candidate("Incident\x0BManagement", 'reference_only')], []);
+
+        $this->mockSequentialResponses([
+            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            $this->completedResponse($corrupted),
+            $this->completedResponse($this->batch([$this->candidate('Incident Management', 'reference_only')], [])),
+        ]);
+
+        $decision = EnterpriseWikiMaintainerDecisionPrompt::parse(
+            $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no')
+        );
+
+        $this->assertCount(1, $decision['concept_candidates']);
+        $this->assertSame('Incident Management', $decision['concept_candidates'][0]['name']);
+    }
+
+    public function test_a_batch_that_stays_corrupted_still_fails_the_decision(): void
+    {
+        $this->forceSingleCandidatePerBatch();
+
+        $corrupted = $this->batch([$this->candidate("Incident\x0BManagement", 'reference_only')], []);
+
+        $this->mockSequentialResponses([
+            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            $this->completedResponse($corrupted),
+            $this->completedResponse($corrupted),
+        ]);
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
+
+        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+    }
+
+    public function test_an_ordinary_schema_violation_is_never_retried(): void
+    {
+        // A real contract violation would only be repeated by a retry — it must cost exactly one call.
+        $this->forceSingleCandidatePerBatch();
+
+        $this->mockSequentialResponses([
+            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            $this->completedResponse(['concept_candidates' => [['name' => 'Incident Management']], 'concept_pages' => []]),
+        ]);
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
+
+        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
     }
 }

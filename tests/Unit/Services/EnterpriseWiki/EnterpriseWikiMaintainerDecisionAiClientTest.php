@@ -88,10 +88,10 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         $schema = $this->capturePayload(existingPageCandidates: $this->candidateFixture())['text']['format']['schema'];
 
-        // 8K-1 is context only — no patch contract, no owned_topics change (that would be 8K-2).
+        // 8K-1 is context only: it must not change the ownership contract's SHAPE either way.
         $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
         $this->assertSame('array', $ownedTopics['type']);
-        $this->assertSame(['type' => 'string'], $ownedTopics['items']);
+        $this->assertSame(['topic', 'source_element_keys'], $ownedTopics['items']['required']);
         $this->assertSame(['create', 'update'], $schema['properties']['source_article']['properties']['action']['enum']);
     }
 
@@ -293,10 +293,15 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame('object', $schema['type']);
         $this->assertArrayHasKey('concept_candidates', $schema['properties']);
 
-        // owned_topics must still be a plain string[] — 8J-1B does not touch the ownership schema.
+        // Every owned topic is evidence-bound: a topic name plus the source element keys the page
+        // will explain it from. Run 53 is why — a bare topic string let five concept pages plan
+        // sections no element supported, and only page generation ever found out.
         $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
         $this->assertSame('array', $ownedTopics['type']);
-        $this->assertSame(['type' => 'string'], $ownedTopics['items']);
+        $this->assertSame('object', $ownedTopics['items']['type']);
+        $this->assertSame(['topic', 'source_element_keys'], $ownedTopics['items']['required']);
+        $this->assertFalse($ownedTopics['items']['additionalProperties']);
+        $this->assertSame(['type' => 'string'], $ownedTopics['items']['properties']['source_element_keys']['items']);
     }
 
     // =========================================================================
@@ -903,58 +908,74 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $aiMock = $this->mock(OpenAiClient::class);
         $aiMock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode($this->validDecision()),
+            'output_text' => json_encode($this->emptyDelta()),
         ]);
 
         $largeSourceText = str_repeat('ITIL prosessbeskrivelse med mange rammeverk og konsepter. ', 700);
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no', $this->validDecision(), ['issue'],
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+            ['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no', $this->decisionWithCandidate(), $this->candidateGroup(),
         );
     }
 
     // =========================================================================
-    // repair() — Wiki run-581 fix: a single bounded pass to fix a decision that
-    // EnterpriseWikiMaintainerDecisionConsistencyValidator found logically inconsistent.
+    // repairGroup() — the bounded delta pass that replaced whole-decision repair.
+    // Run 51: a 31 599-character decision could not be re-emitted inside the 9 000-token
+    // ceiling, so its 21 issues (all local to individual concept candidates) were unrepairable.
     // =========================================================================
 
-    public function test_repair_returns_valid_corrected_decision(): void
+    public function test_repair_group_returns_a_parsed_delta(): void
     {
-        $corrected = $this->validDecision();
-        $corrected['concept_pages'] = [[
-            'action' => 'create',
-            'page_id' => null,
-            'title' => 'ITIL Incident Management',
-            'proposed_slug' => 'itil-incident-management',
-            'reason' => 'Central concept the article points to.',
+        $delta = $this->emptyDelta();
+        $delta['concept_page_repairs'] = [[
+            'object_id' => null,
+            'operation' => 'add',
+            'object' => $this->conceptPage('ITIL Incident Management'),
         ]];
 
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode($corrected),
+            'output_text' => json_encode($delta),
         ]);
 
-        $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
-
-        $result = $client->repair(
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
             sourceMeta: ['title' => 'Test Dokument', 'filename' => 'test.docx'],
             sourceText: 'Innhold.',
             indexContext: [],
             languageCode: 'no',
-            decision: $this->validDecision(),
-            issues: ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'],
+            decision: $this->decisionWithCandidate(),
+            group: $this->candidateGroup(),
         );
 
-        $this->assertCount(1, $result['concept_pages']);
-        $this->assertSame('ITIL Incident Management', $result['concept_pages'][0]['title']);
+        $this->assertCount(1, $result['operations']);
+        $this->assertSame('add', $result['operations'][0]['operation']);
+        $this->assertSame('concept_pages', $result['operations'][0]['collection']);
+        $this->assertSame('ITIL Incident Management', $result['operations'][0]['object']['title']);
     }
 
-    public function test_repair_payload_includes_previous_decision_and_issues_in_user_message(): void
+    public function test_repair_group_prompt_carries_only_the_groups_objects_and_issues(): void
     {
-        $previousDecision = $this->validDecision();
-        $issues = ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'];
+        $decision = $this->decisionWithCandidate();
+        // A second, VALIDATED candidate the repair group does not include. It must not be sent:
+        // the whole point of the bounded contract is that the model neither sees nor rewrites
+        // planning the deterministic validators already accepted.
+        $decision['concept_candidates'][] = [
+            'name' => 'UNRELATED-VALIDATED-CANDIDATE',
+            'concept_type' => 'process',
+            'independent_reason' => 'Own section.',
+            'mentioned_context' => 'section 4',
+            'existing_page_title' => null,
+            'decision' => 'exclude',
+            'justification' => 'Local detail.',
+            'owning_page_title' => null,
+            'necessary_for_article' => false,
+            'has_separate_source_evidence' => true,
+            'has_reuse_value' => false,
+            'relationship' => 'reference_only',
+            'existing_owner_page_id' => null,
+        ];
 
         $capturedPayload = null;
 
@@ -965,25 +986,102 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
             ['title' => 'Test Dokument', 'filename' => 'test.docx'],
             'Innhold.',
             [],
             'no',
-            $previousDecision,
-            $issues,
+            $decision,
+            $this->candidateGroup(),
         );
 
         $userText = $this->userMessageText($capturedPayload);
-        $this->assertStringContainsString('ITIL Incident Management', $userText);
+
+        $this->assertStringContainsString('OBJECTS TO REPAIR (1)', $userText);
+        $this->assertStringContainsString('[concept_candidates[0]]', $userText);
         $this->assertStringContainsString('ISSUES TO FIX', $userText);
-        $this->assertStringContainsString('Test Artikkel', $userText);
+        $this->assertStringContainsString('ITIL Incident Management', $userText);
+        $this->assertStringNotContainsString('UNRELATED-VALIDATED-CANDIDATE', $userText);
+        $this->assertStringNotContainsString('PREVIOUS DECISION', $userText);
     }
 
-    public function test_repair_uses_the_same_strict_schema_as_decide(): void
+    public function test_repair_group_prompt_lists_pages_planned_in_this_decision_as_owners(): void
+    {
+        $decision = $this->decisionWithCandidate();
+        $decision['concept_pages'] = [$this->conceptPage('Migreringsstrategi')];
+
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $decision, $this->candidateGroup(),
+        );
+
+        $userText = $this->userMessageText($capturedPayload);
+        $developerText = $capturedPayload['input'][0]['content'][0]['text'];
+
+        $this->assertStringContainsString('PAGES PLANNED IN THIS DECISION', $userText);
+        $this->assertStringContainsString('Migreringsstrategi', $userText);
+        $this->assertStringContainsString('never an owning page', $userText, 'the source pages must be shown as non-owners');
+        $this->assertStringContainsString('NOT valid owning pages for a concept candidate', $developerText);
+    }
+
+    /**
+     * A repair must be able to see what it would break. In the first bounded runtime verification,
+     * a repair demoted a concept two already-validated pages linked onward to, and the run failed
+     * on those pages — which the repair was never allowed to touch and never saw.
+     */
+    public function test_repair_group_prompt_shows_pages_outside_the_group_that_reference_it(): void
+    {
+        $decision = $this->decisionWithCandidate();
+        $decision['concept_pages'] = [
+            $this->conceptPage('ITIL Incident Management'),
+            array_merge($this->conceptPage('Endringshåndtering'), [
+                'related_page_guidance' => [['page_title' => 'ITIL Incident Management', 'relationship' => 'Se konseptsiden.']],
+            ]),
+        ];
+
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+            ['title' => 'T', 'filename' => 'T.docx'],
+            'text',
+            [],
+            'no',
+            $decision,
+            ['object_ids' => ['concept_pages[0]'], 'issues' => ['concept_pages[0] is wrong.']],
+        );
+
+        $userText = $this->userMessageText($capturedPayload);
+
+        $this->assertStringContainsString('REFERENCED BY', $userText);
+        $this->assertStringContainsString('concept_pages[1] ("Endringshåndtering") points to "ITIL Incident Management"', $userText);
+        $this->assertStringContainsString('You cannot edit these pages here', $userText);
+    }
+
+    public function test_repair_group_uses_the_bounded_delta_schema(): void
     {
         $capturedPayload = null;
 
@@ -994,18 +1092,55 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->decisionWithCandidate(), $this->candidateGroup(),
         );
 
-        $this->assertSame('maintainer_decision', $capturedPayload['text']['format']['name']);
+        $this->assertSame('maintainer_decision_repair_delta', $capturedPayload['text']['format']['name']);
         $this->assertTrue($capturedPayload['text']['format']['strict']);
     }
 
-    public function test_repair_throws_when_ai_is_disabled(): void
+    /**
+     * The failure that made run 51 unrepairable: repair's budget grew with the SOURCE DOCUMENT
+     * (its 60 000-character prompt computed a need of 15 985 tokens, clamped to the 9 000 ceiling)
+     * while the answer it demanded was the whole decision. A delta's budget must follow the number
+     * of repaired objects instead, so the same fix costs the same whatever document it came from.
+     */
+    public function test_repair_group_budget_does_not_grow_with_source_document_size(): void
+    {
+        $budgets = [];
+
+        foreach (['Kort kildetekst.', str_repeat('Lang kildetekst med mye innhold. ', 3_000)] as $sourceText) {
+            /** @var OpenAiClient&MockInterface $mock */
+            $mock = $this->mock(OpenAiClient::class);
+            $mock->shouldReceive('createResponse')
+                ->once()
+                ->andReturnUsing(function (array $payload) use (&$budgets): array {
+                    $budgets[] = $payload['max_output_tokens'];
+
+                    return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+                });
+
+            app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+                ['title' => 'T', 'filename' => 'T.docx'], $sourceText, [], 'no', $this->decisionWithCandidate(), $this->candidateGroup(),
+            );
+        }
+
+        $ceiling = (int) config('ai_capacity.operations.enterprise_wiki_maintainer_decision_repair.max_output_tokens');
+
+        $this->assertLessThan($ceiling, $budgets[0], 'a one-object repair must stay well inside the ceiling');
+        $this->assertLessThan($ceiling, $budgets[1], 'a large source document must not push a one-object repair to the ceiling');
+        $this->assertLessThan(
+            $budgets[0] * 1.5,
+            $budgets[1],
+            'the delta budget must be driven by repaired objects, not by source document size',
+        );
+    }
+
+    public function test_repair_group_throws_when_ai_is_disabled(): void
     {
         config(['services.enterprise_wiki.ai_enabled' => false]);
         $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
@@ -1013,24 +1148,22 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not enabled/');
 
-        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+        $client->repairGroup(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->decisionWithCandidate(), $this->candidateGroup());
     }
 
     /**
-     * repair() shares the same capacity-retry mechanism as decide() (both go through
-     * executeWithCapacityRetry) — its prompt is larger (it echoes the full previous decision), so
-     * it independently benefits from the same one-bounded-retry behaviour.
+     * repairGroup() keeps the same capacity-retry mechanism decide() uses — a delta is small, so a
+     * retry that genuinely raises the budget stays useful.
      */
-    public function test_repair_also_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
+    public function test_repair_group_also_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
     {
-        $corrected = $this->validDecision();
         $capturedPayloads = [];
 
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
             ->twice()
-            ->andReturnUsing(function (array $payload) use (&$capturedPayloads, $corrected): array {
+            ->andReturnUsing(function (array $payload) use (&$capturedPayloads): array {
                 $capturedPayloads[] = $payload;
 
                 if (count($capturedPayloads) === 1) {
@@ -1042,37 +1175,100 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
                     ];
                 }
 
-                return ['status' => 'completed', 'output_text' => json_encode($corrected)];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup(
+            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->decisionWithCandidate(), $this->candidateGroup(),
         );
 
-        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+        $this->assertSame([], $result['operations']);
         $this->assertGreaterThan($capturedPayloads[0]['max_output_tokens'], $capturedPayloads[1]['max_output_tokens']);
     }
 
-    public function test_repair_throws_on_schema_violation(): void
+    public function test_repair_group_throws_on_delta_schema_violation(): void
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode(['source_summary' => ['action' => 'create', 'title' => 'T', 'proposed_slug' => 'test', 'reason' => 'ok']]),
+            // "replace" without an object_id: the merge could not know what to replace.
+            'output_text' => json_encode(array_merge($this->emptyDelta(), [
+                'concept_candidate_repairs' => [['object_id' => null, 'operation' => 'replace', 'object' => ['name' => 'X']]],
+            ])),
         ]);
 
         $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/repaired decision failed schema validation/');
+        $this->expectExceptionMessageMatches('/repair delta failed schema validation/');
 
-        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+        $client->repairGroup(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->decisionWithCandidate(), $this->candidateGroup());
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /** A decision with one concept candidate — the object a repair group addresses. */
+    private function decisionWithCandidate(): array
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [[
+            'name' => 'ITIL Incident Management',
+            'concept_type' => 'framework',
+            'independent_reason' => 'Reusable professional practice.',
+            'mentioned_context' => 'section 2',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Central to the document.',
+            'owning_page_title' => null,
+            'necessary_for_article' => true,
+            'has_separate_source_evidence' => true,
+            'has_reuse_value' => true,
+            'relationship' => 'independent_new_topic',
+            'existing_owner_page_id' => null,
+        ]];
+
+        return $decision;
+    }
+
+    /** @return array{object_ids: list<string>, issues: list<string>} */
+    private function candidateGroup(): array
+    {
+        return [
+            'object_ids' => ['concept_candidates[0]'],
+            'issues' => ['Concept candidate "ITIL Incident Management" was decided "create" but no matching concept_pages entry exists.'],
+        ];
+    }
+
+    private function conceptPage(string $title): array
+    {
+        return [
+            'action' => 'create',
+            'page_id' => null,
+            'title' => $title,
+            'proposed_slug' => 'planned-page',
+            'reason' => 'Central concept the article points to.',
+            'owned_topics' => ['Scope'],
+            'reference_only_topics' => [],
+            'excluded_topics' => [],
+            'related_page_guidance' => [],
+            'planned_figures' => [],
+        ];
+    }
+
+    private function emptyDelta(): array
+    {
+        return [
+            'concept_candidate_repairs' => [],
+            'concept_page_repairs' => [],
+            'entity_page_repairs' => [],
+            'patch_target_repairs' => [],
+            'source_page_repairs' => [],
+            'notes' => null,
+        ];
+    }
 
     private function validDecision(): array
     {

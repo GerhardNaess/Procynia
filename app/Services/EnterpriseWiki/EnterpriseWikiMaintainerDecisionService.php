@@ -35,6 +35,17 @@ use Illuminate\Support\Facades\Log;
  */
 class EnterpriseWikiMaintainerDecisionService
 {
+    /**
+     * How many bounded repair ROUNDS a decision may go through before it is rejected.
+     *
+     * Deliberately small and fixed. Each round is a handful of short delta calls (never a
+     * regeneration), so a second round is affordable where the old whole-decision pass could only
+     * ever be attempted once; more than that starts to look like negotiating with the model
+     * instead of validating it, and fail-closed is the correct outcome for a decision this
+     * pipeline cannot make sound in two attempts.
+     */
+    private const MAX_REPAIR_ROUNDS = 2;
+
     public function __construct(
         private readonly EnterpriseWikiIndexContextService $indexContextService,
         private readonly EnterpriseWikiPatchCandidateService $patchCandidateService,
@@ -44,6 +55,10 @@ class EnterpriseWikiMaintainerDecisionService
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiCanonicalOwnershipValidator $canonicalOwnershipValidator,
         private readonly EnterpriseWikiPatchTargetResolver $patchTargetResolver,
+        private readonly EnterpriseWikiPlannedTopicEvidenceValidator $plannedTopicEvidenceValidator,
+        private readonly EnterpriseWikiPlannedPageSlotValidator $plannedPageSlotValidator,
+        private readonly EnterpriseWikiMaintainerDecisionIssueAttributor $issueAttributor,
+        private readonly EnterpriseWikiMaintainerDecisionDeltaMerger $deltaMerger,
     ) {}
 
     /**
@@ -175,23 +190,120 @@ class EnterpriseWikiMaintainerDecisionService
             $issues = $normalizedIssues;
         }
 
-        Log::warning('[WIKI_MAINTAINER_DECISION] Inconsistent decision detected — attempting one bounded repair pass.', [
-            'customer_id' => $customerId,
-            'document_id' => $document->id,
-            'validation_result' => 'ai_repair_required',
-            'normalizations' => $normalizations,
-            'issues' => $issues,
-        ]);
+        $originalDecision = $decision;
+        $remainingIssues = $issues;
 
-        $repaired = $this->aiClient->repair($sourceMeta, $sourceText, $indexContext, $languageCode, $decision, $issues, $figureCandidates, $context, $sourceElements);
-        $remainingIssues = $this->findAllIssues($repaired, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+        // Bounded ROUNDS, not one pass. A delta repair is small enough that a second round costs a
+        // couple of short calls, and the first runtime verification showed why it is needed: a
+        // correct fix inside one group can leave an object OUTSIDE that group dangling (a page
+        // whose related_page_guidance pointed at a concept the repair demoted). The merge refuses
+        // to touch such an object — correctly — so the follow-up has to be its own attributed
+        // repair. Rounds are capped, every round must make progress, and anything left after the
+        // cap still fails closed.
+        for ($round = 1; $round <= self::MAX_REPAIR_ROUNDS; $round++) {
+            $attribution = $this->issueAttributor->attribute(
+                $decision,
+                $remainingIssues,
+                fn (array $candidateDecision): array => $this->findPureIssues($candidateDecision, $indexContext, $validFigureKeys, $validSourceElementKeys),
+            );
 
-        $this->logHeadingRepairOutcome($context->runId, $decision, $repaired, $remainingIssues);
+            // An issue nobody can attribute to a specific object cannot be repaired within a
+            // bounded contract, and the alternative — handing the model the whole decision again —
+            // is the unbounded pass this flow exists to remove. Fail closed with the issue intact.
+            if ($attribution['unattributed'] !== []) {
+                Log::error('[WIKI_MAINTAINER_DECISION] Issue could not be attributed to a decision object — no bounded repair possible.', [
+                    'customer_id' => $customerId,
+                    'document_id' => $document->id,
+                    'round' => $round,
+                    'unattributed_issues' => $attribution['unattributed'],
+                ]);
 
-        if ($remainingIssues !== []) {
-            Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after repair pass.', [
+                throw new EnterpriseWikiMaintainerDecisionInconsistentException($remainingIssues);
+            }
+
+            $calls = $this->packRepairGroups($attribution['groups']);
+
+            Log::warning('[WIKI_MAINTAINER_DECISION] Inconsistent decision detected — attempting bounded delta repair.', [
                 'customer_id' => $customerId,
                 'document_id' => $document->id,
+                'validation_result' => 'ai_repair_required',
+                'round' => $round,
+                'normalizations' => $round === 1 ? $normalizations : [],
+                'issues' => $remainingIssues,
+                'decision_objects' => count(EnterpriseWikiMaintainerDecisionObjectIndex::objectIds($decision)),
+                'repair_groups' => count($attribution['groups']),
+                'repair_calls' => count($calls),
+            ]);
+
+            $repairs = [];
+
+            foreach ($calls as $callIndex => $group) {
+                $repairs[] = [
+                    'group' => $group,
+                    'delta' => $this->aiClient->repairGroup(
+                        $sourceMeta,
+                        $sourceText,
+                        $indexContext,
+                        $languageCode,
+                        $decision,
+                        $group,
+                        $figureCandidates,
+                        $context,
+                        $sourceElements,
+                    ),
+                ];
+
+                Log::info('[WIKI_MAINTAINER_DECISION] Bounded repair call completed.', [
+                    'customer_id' => $customerId,
+                    'document_id' => $document->id,
+                    'round' => $round,
+                    'call' => $callIndex + 1,
+                    'of' => count($calls),
+                    'objects' => $group['object_ids'],
+                    'issues' => count($group['issues']),
+                ]);
+            }
+
+            $merge = $this->deltaMerger->merge($decision, $repairs);
+            $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($merge['decision']);
+            $issuesBefore = $remainingIssues;
+            $remainingIssues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+
+            Log::info('[WIKI_MAINTAINER_DECISION] Repair delta merged.', [
+                'customer_id' => $customerId,
+                'document_id' => $document->id,
+                'round' => $round,
+                'applied_operations' => $merge['applied'],
+                'issues_before' => count($issuesBefore),
+                'issues_after' => count($remainingIssues),
+            ]);
+
+            if ($remainingIssues === []) {
+                break;
+            }
+
+            // No progress means another round would ask the same model the same thing about the
+            // same objects. Stop rather than spend calls on a fixpoint that will not move.
+            if ($merge['applied'] === [] || $remainingIssues === $issuesBefore) {
+                Log::error('[WIKI_MAINTAINER_DECISION] Bounded repair made no progress — stopping.', [
+                    'customer_id' => $customerId,
+                    'document_id' => $document->id,
+                    'round' => $round,
+                    'issues' => $remainingIssues,
+                ]);
+
+                break;
+            }
+        }
+
+        $repaired = $decision;
+        $this->logHeadingRepairOutcome($context->runId, $originalDecision, $repaired, $remainingIssues);
+
+        if ($remainingIssues !== []) {
+            Log::error('[WIKI_MAINTAINER_DECISION] Decision still inconsistent after bounded repair rounds.', [
+                'customer_id' => $customerId,
+                'document_id' => $document->id,
+                'rounds' => self::MAX_REPAIR_ROUNDS,
                 'issues' => $remainingIssues,
             ]);
 
@@ -226,6 +338,12 @@ class EnterpriseWikiMaintainerDecisionService
             // Fase 8K-2: canonical ownership + page granularity + patch-target coherence. Pure
             // array rules, so it joins the existing bounded AI repair loop unchanged.
             $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys),
+            // Every owned topic must be bound to real source evidence — the plan-to-evidence
+            // contract page generation already consumes but nothing used to produce. This is the
+            // cheapest place it can be checked: here an ungrounded planned section costs a few
+            // hundred repair tokens, at generation time it costs one failed page per section and
+            // takes the run down with it (run 53: five concept pages, five failed generations).
+            $this->plannedTopicEvidenceValidator->findIssues($decision, $validSourceElementKeys),
             // Fase 8K-2: the DB-authoritative half — target exists, belongs to this customer, is
             // live, has a current version, and its real page_type/heading match what was claimed.
             // customerId 0 means a caller with no tenant context (never the document flow); skip
@@ -233,7 +351,102 @@ class EnterpriseWikiMaintainerDecisionService
             $customerId > 0
                 ? $this->patchTargetResolver->resolveForCustomer($customerId, $decision, $runId)['errors']
                 : [],
+            // An existing page must be named through the slot matching the type it already has.
+            // Apply refuses to retype it (and still does) — but that refusal used to be the first
+            // check anywhere, so run 55 died mid-apply on something knowable at decision time.
+            $this->plannedPageSlotValidator->findIssues($decision, $customerId),
         );
+    }
+
+    /**
+     * The deterministic, pure-array half of validation — no database, no customer context, safe to
+     * run many times. Issue attribution re-runs this once per decision object to find out which
+     * object an issue actually depends on, so it must stay side-effect free and cheap.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array<int, array<string, mixed>>  $indexContext
+     * @param  string[]  $validFigureKeys
+     * @param  string[]  $validSourceElementKeys
+     * @return string[]
+     */
+    private function findPureIssues(
+        array $decision,
+        array $indexContext,
+        array $validFigureKeys,
+        array $validSourceElementKeys,
+    ): array {
+        return array_merge(
+            $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
+            $this->hierarchyValidator->findIssues($decision),
+            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys),
+            // Every owned topic must be bound to real source evidence before any page is generated.
+            // Cheapest possible place to catch an ungrounded planned section: here it is a few
+            // hundred repair tokens, at generation time it is a failed page per topic (run 53).
+            $this->plannedTopicEvidenceValidator->findIssues($decision, $validSourceElementKeys),
+        );
+    }
+
+    /**
+     * Packs attributed repair groups into calls, filling each call up to the delta-repair profile's
+     * own object budget.
+     *
+     * A group is kept whole whenever it fits, because objects that share an issue have to be
+     * decided together. When a single group is larger than one bounded call can answer — a
+     * consolidation finding naming seven candidates plus the seven pages created for them is the
+     * ordinary case, not a pathological one — it is CHUNKED rather than refused: each chunk may
+     * edit only its own objects, but every chunk is shown the whole cluster and the same issues as
+     * read-only context, so each one decides against the same picture. A chunk that gets this wrong
+     * is caught by full revalidation and handled in the next bounded round; refusing outright would
+     * make an everyday fault unrepairable, which is the failure mode this whole design exists to
+     * remove.
+     *
+     * @param  list<array{object_ids: list<string>, issues: list<string>}>  $groups
+     * @return list<array{object_ids: list<string>, issues: list<string>, context_object_ids: list<string>}>
+     */
+    private function packRepairGroups(array $groups): array
+    {
+        $maxObjects = max(1, $this->aiClient->maxObjectsPerRepairCall());
+        $calls = [];
+        $current = ['object_ids' => [], 'issues' => [], 'context_object_ids' => []];
+
+        foreach ($groups as $group) {
+            if (! $this->aiClient->repairGroupFitsOneCall($group)) {
+                if ($current['object_ids'] !== []) {
+                    $calls[] = $current;
+                    $current = ['object_ids' => [], 'issues' => [], 'context_object_ids' => []];
+                }
+
+                foreach (array_chunk($group['object_ids'], $maxObjects) as $chunk) {
+                    $calls[] = [
+                        'object_ids' => $chunk,
+                        'issues' => $group['issues'],
+                        'context_object_ids' => $group['object_ids'],
+                    ];
+                }
+
+                Log::warning('[WIKI_MAINTAINER_DECISION] Repair group chunked across calls.', [
+                    'group_objects' => count($group['object_ids']),
+                    'max_objects_per_call' => $maxObjects,
+                    'issues' => count($group['issues']),
+                ]);
+
+                continue;
+            }
+
+            if ($current['object_ids'] !== [] && count($current['object_ids']) + count($group['object_ids']) > $maxObjects) {
+                $calls[] = $current;
+                $current = ['object_ids' => [], 'issues' => [], 'context_object_ids' => []];
+            }
+
+            $current['object_ids'] = array_merge($current['object_ids'], $group['object_ids']);
+            $current['issues'] = array_merge($current['issues'], $group['issues']);
+        }
+
+        if ($current['object_ids'] !== []) {
+            $calls[] = $current;
+        }
+
+        return $calls;
     }
 
     /**

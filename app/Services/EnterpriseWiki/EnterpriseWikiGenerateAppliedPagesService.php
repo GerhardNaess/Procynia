@@ -165,6 +165,18 @@ class EnterpriseWikiGenerateAppliedPagesService
             ));
         }
 
+        // A PLANNED figure is materialized whether or not the model happened to cite it. The plan
+        // is a backend decision about a real, extracted source element (validated at decision time),
+        // so making its materialization depend on the model mentioning it in prose means an
+        // ordinary omission silently drops a figure the plan promised — run 54, page 193: img1 was
+        // planned onto the page, never cited, never materialized, and only QA at the end of the run
+        // noticed. Citation still governs UNPLANNED images exactly as before.
+        $imageIndexes = array_values(array_unique(array_merge(
+            $imageIndexes,
+            $this->plannedImageIndexes($plannedFigures),
+        )));
+        sort($imageIndexes);
+
         $imageBlocks = [];
 
         if ($imageIndexes !== []) {
@@ -182,6 +194,30 @@ class EnterpriseWikiGenerateAppliedPagesService
         }
 
         return [$markdown, $contentBlocks];
+    }
+
+    /**
+     * The image indexes this page's own planned_figures name — `img{N}` is the extraction's own
+     * stable key shape (EnterpriseWikiDocumentSourceElementService), so the mapping is exact and
+     * never guessed. A key that is not of that shape is left to the decision-time validators, which
+     * already reject a planned figure that no extracted figure matches.
+     *
+     * @param  list<array<string, mixed>>  $plannedFigures
+     * @return list<int>
+     */
+    private function plannedImageIndexes(array $plannedFigures): array
+    {
+        $indexes = [];
+
+        foreach ($plannedFigures as $figure) {
+            $key = trim((string) ($figure['source_element_key'] ?? ''));
+
+            if (preg_match('/^img(\d+)$/', $key, $matches) === 1) {
+                $indexes[] = (int) $matches[1];
+            }
+        }
+
+        return array_values(array_unique($indexes));
     }
 
     /**
@@ -970,7 +1006,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $plannedSections,
         ));
 
-        if ($plannedTopics !== $this->plannedOwnedTopicsForPage($run, $page)) {
+        if ($plannedTopics !== $this->plannedOwnedTopicNamesForPage($run, $page)) {
             throw new \RuntimeException('Enterprise Wiki planned section contract drifted from the maintainer decision.');
         }
 
@@ -1511,13 +1547,14 @@ class EnterpriseWikiGenerateAppliedPagesService
     }
 
     /**
-     * Raw owned_topics list for a page from maintainer_decision_json — the same lookup
-     * responsibilityGuidance()'s callers already perform, but returning the plain topic strings
-     * rather than formatted prompt text, for EnterpriseWikiPlannedSectionCoverageValidator.
+     * Owned topics for a page from maintainer_decision_json, as evidence-bound entries
+     * (topic + the source_element_keys the planner assigned to it). The same lookup
+     * responsibilityGuidance()'s callers already perform, but returning the planning contract
+     * rather than formatted prompt text.
      *
-     * @return list<string>
+     * @return list<array{topic: string, source_element_keys: list<string>}>
      */
-    private function plannedOwnedTopicsForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    private function plannedOwnedTopicEntriesForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
     {
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
@@ -1529,7 +1566,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             $match = collect($entries)->firstWhere('title', $page->title);
 
-            return $match !== null ? $this->nonEmptyStringList($match['owned_topics'] ?? []) : [];
+            return $match !== null ? EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries($match['owned_topics'] ?? []) : [];
         }
 
         $decisionKey = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 'source_article' : null;
@@ -1540,7 +1577,21 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $entry = (array) data_get($decisionJson, $decisionKey, []);
 
-        return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+        return EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries($entry['owned_topics'] ?? []);
+    }
+
+    /**
+     * Just the topic names, in planning order — what the section-coverage validator and the
+     * plan-to-markdown drift guard compare against.
+     *
+     * @return list<string>
+     */
+    private function plannedOwnedTopicNamesForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    {
+        return array_values(array_map(
+            static fn (array $entry): string => $entry['topic'],
+            $this->plannedOwnedTopicEntriesForPage($run, $page),
+        ));
     }
 
     /**
@@ -1557,13 +1608,13 @@ class EnterpriseWikiGenerateAppliedPagesService
             return [];
         }
 
-        $plannedTopics = $this->plannedOwnedTopicsForPage($run, $page);
+        $plannedTopicEntries = $this->plannedOwnedTopicEntriesForPage($run, $page);
 
-        if ($plannedTopics === []) {
+        if ($plannedTopicEntries === []) {
             return [];
         }
 
-        $sections = $this->plannedSectionEvidenceResolver->resolve($plannedTopics, $sourceElements);
+        $sections = $this->plannedSectionEvidenceResolver->resolve($plannedTopicEntries, $sourceElements);
         $withoutEvidence = $this->plannedSectionEvidenceResolver->topicsWithoutEvidence($sections);
 
         Log::info('[WIKI_PAGE_GENERATION] Planned section evidence contract.', [
@@ -1572,6 +1623,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'page_type' => $page->page_type,
             'planned_section_count' => count($sections),
             'total_evidence_chars' => array_sum(array_column($sections, 'evidence_char_count')),
+            'evidence_binding' => array_values(array_unique(array_column($sections, 'evidence_binding'))),
             'sections' => $this->plannedSectionObservability($sections),
             'result' => $withoutEvidence === [] ? 'valid' : 'planned_section_no_evidence',
         ]);
@@ -1596,6 +1648,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             'planned_topic' => $section['planned_topic'] ?? '',
             'source_element_count' => (int) ($section['source_element_count'] ?? 0),
             'evidence_chars' => (int) ($section['evidence_char_count'] ?? 0),
+            'evidence_binding' => (string) ($section['evidence_binding'] ?? ''),
         ], $sections);
     }
 
@@ -1621,12 +1674,12 @@ class EnterpriseWikiGenerateAppliedPagesService
 
     /**
      * This page's own planned_figures list from maintainer_decision_json — same page-entry lookup
-     * pattern as plannedOwnedTopicsForPage(), but returning the raw planned_figures entries (each
+     * pattern as plannedOwnedTopicEntriesForPage(), but returning the raw planned_figures entries (each
      * with source_element_key/classification/section_placement/purpose/required/caption_hint)
      * rather than formatted prompt text, for appendImageBlocksIfRelevant()'s per-page materialization
      * gate/placement and ensurePlannedFigureCoverage()'s validator input.
      *
-     * Unlike plannedOwnedTopicsForPage() (article-only for the source_* branch, since only article
+     * Unlike plannedOwnedTopicEntriesForPage() (article-only for the source_* branch, since only article
      * is in SECTION_COVERAGE_CHECKED_TYPES), this covers BOTH source_article and source_summary —
      * a figure can be planned onto either.
      *
@@ -1770,7 +1823,7 @@ class EnterpriseWikiGenerateAppliedPagesService
     private function conceptCanGenerateWithoutArticleSummaryContext(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): bool
     {
         return $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-            && $this->plannedOwnedTopicsForPage($run, $page) !== [];
+            && $this->plannedOwnedTopicEntriesForPage($run, $page) !== [];
     }
 
     /**
@@ -1972,7 +2025,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $lines[] = "Maintainer note for this page: {$reason}";
         }
 
-        $ownedTopics = $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+        $ownedTopics = EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []);
 
         if ($ownedTopics !== []) {
             $lines[] = "This page's own content responsibility — explain ONLY these in depth, nothing beyond them:\n".implode("\n", array_map(

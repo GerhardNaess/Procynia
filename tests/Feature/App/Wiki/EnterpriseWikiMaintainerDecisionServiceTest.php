@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiMaintainerDecisionDeltaRejectedException;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
@@ -202,7 +203,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($this->validDecision());
-        $mock->shouldNotReceive('repair');
+        $mock->shouldNotReceive('repairGroup');
 
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
@@ -226,6 +227,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'title' => 'ITIL',
             'proposed_slug' => 'itil',
             'reason' => 'Central framework in the source.',
+            'owned_topics' => [['topic' => 'ITIL som rammeverk', 'source_element_keys' => ['paragraph-0']]],
             'related_page_guidance' => [
                 ['page_title' => 'Masterdata ITIL', 'relationship' => 'Link to the article for source-specific application.'],
             ],
@@ -234,7 +236,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($decision);
-        $mock->shouldNotReceive('repair');
+        $mock->shouldNotReceive('repairGroup');
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
 
@@ -258,7 +260,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($decision);
-        $mock->shouldNotReceive('repair');
+        $mock->shouldNotReceive('repairGroup');
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
 
@@ -281,32 +283,340 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
         ];
 
-        $repaired = $this->validDecision();
-        $repaired['source_article']['related_page_guidance'] = $inconsistent['source_article']['related_page_guidance'];
-        $repaired['concept_pages'] = [[
-            'action' => 'create',
-            'page_id' => null,
-            'title' => 'ITIL Incident Management',
-            'proposed_slug' => 'itil-incident-management',
-            'reason' => 'Central concept the article points to.',
-        ]];
-
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
-        $mock->shouldReceive('repair')
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')
             ->once()
-            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $issues) use ($inconsistent): bool {
+            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $group) use ($inconsistent): bool {
                 return $decision === $inconsistent
-                    && $issues !== []
-                    && str_contains(implode(' ', $issues), 'ITIL Incident Management');
+                    && $group['object_ids'] === ['source_article']
+                    && str_contains(implode(' ', $group['issues']), 'ITIL Incident Management');
             })
-            ->andReturn($repaired);
+            ->andReturn($this->delta([[
+                'collection' => 'concept_pages',
+                'object_id' => null,
+                'operation' => 'add',
+                'object' => $this->conceptPageObject('ITIL Incident Management'),
+            ]]));
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
 
         $this->assertCount(1, $result['concept_pages']);
         $this->assertSame('ITIL Incident Management', $result['concept_pages'][0]['title']);
+        $this->assertSame(
+            $inconsistent['source_article'],
+            $result['source_article'],
+            'an object the delta does not name must survive the repair byte for byte',
+        );
+    }
+
+    /**
+     * Run 55: the decision named an existing ENTITY page through the concept slot. Nothing checked
+     * it until apply refused to retype the page — mid-run, after the decision had been validated,
+     * repaired and persisted. The mismatch is knowable the moment the decision exists, and it is
+     * repairable: drop the wrong-slot claim, keep the one that matches the page's real type.
+     */
+    public function test_an_existing_page_in_the_wrong_typed_slot_is_repaired_at_decision_time(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $entity = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'et-selskap',
+            'title' => 'Et Selskap',
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ENTITY,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+        ]);
+
+        $mismatched = $this->validDecision();
+        $wrongSlotEntry = array_merge($this->conceptPageObject('Et Selskap'), [
+            'action' => 'update',
+            'page_id' => $entity->id,
+        ]);
+        $mismatched['concept_pages'] = [$wrongSlotEntry];
+        $mismatched['entity_pages'] = [array_merge($this->conceptPageObject('Et Selskap'), [
+            'action' => 'update',
+            'page_id' => $entity->id,
+        ])];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($mismatched);
+        $this->allowRepairPacking($mock);
+
+        $captured = [];
+
+        $mock->shouldReceive('repairGroup')
+            ->once()
+            ->andReturnUsing(function (...$args) use (&$captured): array {
+                $captured = $args[5];
+
+                // The correct resolution: the entity page keeps its own slot, the concept claim goes.
+                return $this->delta([[
+                    'collection' => 'concept_pages',
+                    'object_id' => 'concept_pages[0]',
+                    'operation' => 'remove',
+                    'object' => null,
+                ]]);
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame(['concept_pages[0]'], $captured['object_ids']);
+        $this->assertStringContainsString('through a [concept] slot', implode(' ', $captured['issues']));
+        $this->assertSame([], $result['concept_pages']);
+        $this->assertCount(1, $result['entity_pages'], 'the correctly slotted claim survives');
+        $this->assertSame($entity->id, $result['entity_pages'][0]['page_id']);
+    }
+
+    /**
+     * Run 53's cost lesson: an owned topic no source element supports must be caught while the
+     * decision is still being validated — a few hundred repair tokens — instead of one page-
+     * generation call per unsupported section, five failed pages and a failed run.
+     */
+    public function test_an_owned_topic_without_evidence_is_repaired_at_decision_time(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer, ['extracted_text' => 'Kildetekst med innhold.']);
+
+        $ungrounded = $this->validDecision();
+        $ungrounded['concept_pages'] = [array_merge($this->conceptPageObject('Et Konsept'), [
+            'owned_topics' => [
+                ['topic' => 'Godt underbygget tema', 'source_element_keys' => ['manual-0']],
+                ['topic' => 'Plausibel men ikke dekket', 'source_element_keys' => []],
+            ],
+        ])];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($ungrounded);
+        $this->allowRepairPacking($mock);
+
+        $captured = [];
+
+        $mock->shouldReceive('repairGroup')
+            ->once()
+            ->andReturnUsing(function (...$args) use (&$captured, $ungrounded): array {
+                $captured = $args[5];
+                $page = $ungrounded['concept_pages'][0];
+                // The correct resolution: stop owning what the document does not cover.
+                $page['owned_topics'] = [$page['owned_topics'][0]];
+
+                return $this->delta([[
+                    'collection' => 'concept_pages',
+                    'object_id' => 'concept_pages[0]',
+                    'operation' => 'replace',
+                    'object' => $page,
+                ]]);
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame(['concept_pages[0]'], $captured['object_ids']);
+        $this->assertStringContainsString('Plausibel men ikke dekket', implode(' ', $captured['issues']));
+        $this->assertStringContainsString('without naming any source element', implode(' ', $captured['issues']));
+        $this->assertCount(1, $result['concept_pages'][0]['owned_topics']);
+        $this->assertSame('Godt underbygget tema', $result['concept_pages'][0]['owned_topics'][0]['topic']);
+    }
+
+    /**
+     * A correct fix inside one group can leave an object OUTSIDE that group dangling — observed in
+     * the first bounded runtime verification, where demoting a concept left two already-validated
+     * pages pointing at a page that no longer existed. The merge refuses to touch those objects, so
+     * the follow-up must be its own attributed repair in a second bounded round.
+     */
+    public function test_a_fault_introduced_outside_the_repaired_group_is_fixed_in_a_second_round(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->candidate('Teststrategi', ['decision' => 'reference_only'])];
+        $decision['concept_pages'] = [
+            $this->conceptPageObject('Teststrategi'),
+            array_merge($this->conceptPageObject('Endringshåndtering'), [
+                'related_page_guidance' => [['page_title' => 'Teststrategi', 'relationship' => 'Se testsiden.']],
+            ]),
+        ];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $this->allowRepairPacking($mock);
+
+        $rounds = [];
+
+        $mock->shouldReceive('repairGroup')
+            ->twice()
+            ->andReturnUsing(function (...$args) use (&$rounds, $decision): array {
+                $group = $args[5];
+                $rounds[] = $group['object_ids'];
+
+                // Round 1: demote the candidate and drop its page — correct for the reported issue,
+                // but it leaves "Endringshåndtering" pointing at a page that is now gone.
+                if (count($rounds) === 1) {
+                    return $this->delta([
+                        [
+                            'collection' => 'concept_candidates',
+                            'object_id' => 'concept_candidates[0]',
+                            'operation' => 'replace',
+                            'object' => array_merge($decision['concept_candidates'][0], ['decision' => 'exclude']),
+                        ],
+                        [
+                            'collection' => 'concept_pages',
+                            'object_id' => 'concept_pages[0]',
+                            'operation' => 'remove',
+                            'object' => null,
+                        ],
+                    ]);
+                }
+
+                // Round 2: the now-dangling page is its own repair group.
+                return $this->delta([[
+                    'collection' => 'concept_pages',
+                    'object_id' => $group['object_ids'][0],
+                    'operation' => 'replace',
+                    'object' => $this->conceptPageObject('Endringshåndtering'),
+                ]]);
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame([['concept_candidates[0]', 'concept_pages[0]'], ['concept_pages[0]']], $rounds);
+        $this->assertCount(1, $result['concept_pages']);
+        $this->assertSame('Endringshåndtering', $result['concept_pages'][0]['title']);
+        $this->assertSame([], $result['concept_pages'][0]['related_page_guidance'] ?? [], 'the dangling reference is gone');
+    }
+
+    /**
+     * Rounds are for progress, not for negotiating: a round that changes nothing about the issue
+     * set ends the repair immediately instead of spending another call on the same question.
+     */
+    public function test_a_repair_round_that_makes_no_progress_stops_instead_of_retrying(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [$this->candidate('Teststrategi', ['decision' => 'reference_only'])];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($decision);
+        $this->allowRepairPacking($mock);
+        // Exactly one call: the empty delta means no progress, so no second round is attempted.
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([]));
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionInconsistentException::class);
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
+    /**
+     * The bounded contract's core guarantee: a repair that names an object it was not given is
+     * rejected before anything is merged, rather than silently rewriting validated planning.
+     */
+    public function test_repair_delta_touching_an_object_outside_its_group_is_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $inconsistent = $this->validDecision();
+        $inconsistent['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
+        ];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([[
+            'collection' => 'source_summary',
+            'object_id' => 'source_summary',
+            'operation' => 'replace',
+            'object' => array_merge($inconsistent['source_summary'], ['title' => 'REWRITTEN BEHIND THE VALIDATORS BACK']),
+        ]]));
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionDeltaRejectedException::class);
+        $this->expectExceptionMessageMatches('/was not part of this repair group/');
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
+    public function test_repair_delta_naming_an_unknown_object_is_rejected(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $inconsistent = $this->validDecision();
+        $inconsistent['source_article']['related_page_guidance'] = [
+            ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
+        ];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([[
+            'collection' => 'concept_candidates',
+            'object_id' => 'concept_candidates[7]',
+            'operation' => 'remove',
+            'object' => null,
+        ]]));
+
+        $this->expectException(EnterpriseWikiMaintainerDecisionDeltaRejectedException::class);
+        $this->expectExceptionMessageMatches('/not an object of this decision/');
+
+        $this->service()->runForDocument($customer->id, $document->id, 'no');
+    }
+
+    /**
+     * Several independent faults are repaired as several bounded calls, and every delta lands in
+     * the same final decision — the shape run 51 needed and could not express as one call.
+     */
+    public function test_multiple_invalid_objects_are_repaired_as_bounded_calls_and_merged_together(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $inconsistent = $this->validDecision();
+        $inconsistent['concept_candidates'] = [
+            $this->candidate('Migreringsstrategi', ['decision' => 'reference_only', 'owning_page_title' => null]),
+            $this->candidate('Testplan', ['decision' => 'reference_only', 'owning_page_title' => null]),
+        ];
+
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
+        $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
+        // One object per call, so two independent faults become two bounded calls.
+        $mock->shouldReceive('maxObjectsPerRepairCall')->andReturn(1);
+        $mock->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
+
+        $seenGroups = [];
+
+        $mock->shouldReceive('repairGroup')
+            ->twice()
+            ->andReturnUsing(function (...$args) use (&$seenGroups, $inconsistent): array {
+                $group = $args[5];
+                $seenGroups[] = $group['object_ids'];
+                $index = (int) str_replace(['concept_candidates[', ']'], '', $group['object_ids'][0]);
+
+                return $this->delta([[
+                    'collection' => 'concept_candidates',
+                    'object_id' => $group['object_ids'][0],
+                    'operation' => 'replace',
+                    'object' => array_merge($inconsistent['concept_candidates'][$index], ['decision' => 'exclude']),
+                ]]);
+            });
+
+        $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
+
+        $this->assertSame([['concept_candidates[0]'], ['concept_candidates[1]']], $seenGroups);
+        $this->assertSame(['exclude', 'exclude'], array_column($result['concept_candidates'], 'decision'));
+        $this->assertSame('Migreringsstrategi', $result['concept_candidates'][0]['name'], 'untouched fields survive the merge');
     }
 
     public function test_decision_still_inconsistent_after_repair_throws(): void
@@ -319,13 +629,13 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             ['page_title' => 'ITIL Incident Management', 'relationship' => 'See the concept page.'],
         ];
 
-        // Repair pass returns a decision with the exact same unresolved contradiction.
-        $stillInconsistent = $inconsistent;
-
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($inconsistent);
-        $mock->shouldReceive('repair')->once()->andReturn($stillInconsistent);
+        $this->allowRepairPacking($mock);
+        // A delta that changes nothing leaves the contradiction in place — full revalidation of the
+        // merged decision must still fail the run rather than accept it.
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([]));
 
         $this->expectException(EnterpriseWikiMaintainerDecisionInconsistentException::class);
 
@@ -349,12 +659,18 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($broken);
-        $mock->shouldReceive('repair')
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')
             ->once()
             ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
-                $captured = $args[5] ?? [];
+                $captured = $args[5]['issues'] ?? [];
 
-                return $repaired;
+                return $this->delta([[
+                    'collection' => 'patch_targets',
+                    'object_id' => 'patch_targets[0]',
+                    'operation' => 'replace',
+                    'object' => $repaired['patch_targets'][0],
+                ]]);
             });
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
@@ -393,25 +709,30 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'title' => 'Incident Logging',
             'proposed_slug' => 'incident-logging',
             'reason' => 'Practice under framework.',
+            'owned_topics' => [['topic' => 'Logging av hendelser', 'source_element_keys' => ['paragraph-0']]],
         ]];
 
-        $repaired = $this->validDecision();
-        $repaired['concept_candidates'] = $overfragmented['concept_candidates'];
-        $repaired['concept_candidates'][0]['decision'] = 'reference_only';
-        $repaired['concept_candidates'][0]['owning_page_title'] = $owner->title;
-        $repaired['concept_pages'] = [];
+        $demoted = $overfragmented['concept_candidates'][0];
+        $demoted['decision'] = 'reference_only';
+        $demoted['owning_page_title'] = $owner->title;
 
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($overfragmented);
-        $mock->shouldReceive('repair')
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')
             ->once()
-            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $issues) use ($overfragmented): bool {
+            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $group) use ($overfragmented): bool {
+                // The candidate AND the page created for it: demoting one without dropping the
+                // other is not a valid fix, so both must be in the same bounded group.
                 return $decision === $overfragmented
-                    && $issues !== []
-                    && str_contains(implode(' ', $issues), 'Incident Logging');
+                    && $group['object_ids'] === ['concept_candidates[0]', 'concept_pages[0]']
+                    && str_contains(implode(' ', $group['issues']), 'Incident Logging');
             })
-            ->andReturn($repaired);
+            ->andReturn($this->delta([
+                ['collection' => 'concept_candidates', 'object_id' => 'concept_candidates[0]', 'operation' => 'replace', 'object' => $demoted],
+                ['collection' => 'concept_pages', 'object_id' => 'concept_pages[0]', 'operation' => 'remove', 'object' => null],
+            ]));
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
 
@@ -444,15 +765,14 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'title' => 'Incident Logging',
             'proposed_slug' => 'incident-logging',
             'reason' => 'Practice under framework.',
+            'owned_topics' => [['topic' => 'Logging av hendelser', 'source_element_keys' => ['paragraph-0']]],
         ]];
-
-        // Repair pass returns the exact same unresolved overfragmentation.
-        $stillOverfragmented = $overfragmented;
 
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($overfragmented);
-        $mock->shouldReceive('repair')->once()->andReturn($stillOverfragmented);
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([]));
 
         $this->expectException(EnterpriseWikiMaintainerDecisionInconsistentException::class);
 
@@ -465,7 +785,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $document = $this->createDocument($customer);
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldNotReceive('decide');
-        $mock->shouldNotReceive('repair');
+        $mock->shouldNotReceive('repairGroup');
 
         $result = $this->service()->validateAndRepairForDocument($customer->id, $document, 'no', $this->validDecision());
 
@@ -478,11 +798,15 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $document = $this->createDocument($customer);
         $decision = $this->validDecision();
         $decision['source_article']['related_page_guidance'] = [['page_title' => 'ITIL Incident Management', 'relationship' => 'See']];
-        $repaired = $decision;
-        $repaired['concept_pages'] = [['action' => 'create', 'page_id' => null, 'title' => 'ITIL Incident Management', 'proposed_slug' => 'itil-incident-management', 'reason' => 'Required']];
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldNotReceive('decide');
-        $mock->shouldReceive('repair')->once()->andReturn($repaired);
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()->andReturn($this->delta([[
+            'collection' => 'concept_pages',
+            'object_id' => null,
+            'operation' => 'add',
+            'object' => $this->conceptPageObject('ITIL Incident Management'),
+        ]]));
 
         $this->assertCount(1, $this->service()->validateAndRepairForDocument($customer->id, $document, 'no', $decision)['concept_pages']);
     }
@@ -494,6 +818,73 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
     private function service(): EnterpriseWikiMaintainerDecisionService
     {
         return app(EnterpriseWikiMaintainerDecisionService::class);
+    }
+
+    /**
+     * The capacity questions the service asks the client before packing repair groups into calls.
+     * Answering them generously keeps each test about the repair semantics it is actually written
+     * for; the packing arithmetic itself is covered in EnterpriseWikiAiCapacityPlannerTest.
+     */
+    private function allowRepairPacking(MockInterface $mock): void
+    {
+        $mock->shouldReceive('maxObjectsPerRepairCall')->andReturn(8);
+        $mock->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
+    }
+
+    /**
+     * A repair delta in the shape EnterpriseWikiMaintainerDecisionAiClient::repairGroup() returns
+     * it (already parsed by EnterpriseWikiMaintainerDecisionDeltaPrompt).
+     *
+     * @param  list<array{collection: string, object_id: ?string, operation: string, object: ?array<string, mixed>}>  $operations
+     */
+    private function delta(array $operations): array
+    {
+        return ['operations' => $operations, 'notes' => null];
+    }
+
+    /** Replaces patch_targets[0] with the corrected target from an already-built decision. */
+    private function patchTargetDelta(array $repairedDecision): array
+    {
+        return $this->delta([[
+            'collection' => 'patch_targets',
+            'object_id' => 'patch_targets[0]',
+            'operation' => 'replace',
+            'object' => $repairedDecision['patch_targets'][0],
+        ]]);
+    }
+
+    private function conceptPageObject(string $title): array
+    {
+        return [
+            'action' => 'create',
+            'page_id' => null,
+            'title' => $title,
+            'proposed_slug' => Str::slug($title),
+            'reason' => 'Central concept the article points to.',
+            // A created concept page owns at least one evidence-bound topic — see
+            // EnterpriseWikiPlannedTopicEvidenceValidator. A page with no scope is not a page.
+            'owned_topics' => [['topic' => $title.': omfang', 'source_element_keys' => ['paragraph-0']]],
+        ];
+    }
+
+    /** @param array<string, mixed> $overrides */
+    private function candidate(string $name, array $overrides = []): array
+    {
+        return array_merge([
+            'name' => $name,
+            'concept_type' => 'process',
+            'independent_reason' => 'Own section in the source.',
+            'mentioned_context' => 'section 2',
+            'existing_page_title' => null,
+            'decision' => 'reference_only',
+            'justification' => 'Belongs to a broader page.',
+            'owning_page_title' => null,
+            'necessary_for_article' => false,
+            'has_separate_source_evidence' => true,
+            'has_reuse_value' => true,
+            'relationship' => 'reference_only',
+            'existing_owner_page_id' => null,
+        ], $overrides);
     }
 
     private function mockAiClient(array $decision): void
@@ -552,11 +943,12 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($broken);
-        $mock->shouldReceive('repair')->once()
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
-                $captured = $args[5] ?? [];
+                $captured = $args[5]['issues'] ?? [];
 
-                return $repaired;
+                return $this->patchTargetDelta($repaired);
             });
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
@@ -579,7 +971,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()
             ->andReturn($this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE));
-        $mock->shouldNotReceive('repair');
+        $mock->shouldNotReceive('repairGroup');
 
         $this->service()->runForDocument($customer->id, $document->id, 'no');
     }
@@ -615,12 +1007,13 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()
             ->andReturn($this->decisionWithReplaceTarget($page->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.'));
-        $mock->shouldReceive('repair')->once()
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $page): array {
-                $captured = $args[5] ?? [];
+                $captured = $args[5]['issues'] ?? [];
 
                 // A repair pass that can actually READ the clause copies an exact substring of it.
-                return $this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE);
+                return $this->patchTargetDelta($this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE));
             });
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
@@ -654,8 +1047,9 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()
             ->andReturn($this->decisionWithReplaceTarget($page->id, 'P1-hendelser skal bekreftes av driftsteamet innen 30 minutter.'));
-        $mock->shouldReceive('repair')->once()
-            ->andReturn($this->decisionWithReplaceTarget($page->id, $fragment));
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()
+            ->andReturn($this->patchTargetDelta($this->decisionWithReplaceTarget($page->id, $fragment)));
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
 
@@ -694,9 +1088,10 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($decision);
-        $mock->shouldReceive('repair')->once()
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured): array {
-                $captured = $args[5] ?? [];
+                $captured = $args[5]['issues'] ?? [];
 
                 throw new \RuntimeException('stop-after-capture');
             });
@@ -741,15 +1136,16 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $mock */
         $mock = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
         $mock->shouldReceive('decide')->once()->andReturn($decision);
-        $mock->shouldReceive('repair')->once()
+        $this->allowRepairPacking($mock);
+        $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $page, $needed): array {
-                $captured = $args[5] ?? [];
+                $captured = $args[5]['issues'] ?? [];
                 $repaired = $this->decisionWithReplaceTarget($page->id, $needed);
                 $repaired['patch_targets'][0]['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_SUMMARY;
                 $repaired['patch_targets'][0]['target_page_title'] = $page->title;
                 $repaired['patch_targets'][0]['target_heading'] = null;
 
-                return $repaired;
+                return $this->patchTargetDelta($repaired);
             });
 
         $result = $this->service()->runForDocument($customer->id, $document->id, 'no');
@@ -850,7 +1246,11 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
             'operation' => 'replace',
             'superseded_substance' => $superseded,
             'replacement_substance' => 'P1-hendelser skal bekreftes av driftsteamet innen 15 minutter, driftsleder skal varsle tjenesteeier ved alle P1-hendelser.',
-            'source_element_keys' => [],
+            // A replace must name the source element authorising it — the merged decision is
+            // re-parsed against the full contract after a delta repair, exactly as a first-pass
+            // decision is, so a fixture that skipped this would not be a decision the pipeline
+            // could ever have produced.
+            'source_element_keys' => ['paragraph-0'],
             'preserve_topics' => [],
             'reason' => 'Kilden halverer bekreftelsestiden.',
         ]];

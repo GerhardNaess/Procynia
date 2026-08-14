@@ -1733,7 +1733,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
      * A required planned figure the AI's first response fails to cite triggers exactly one bounded
      * repair (repairPlannedFigures()) — when the repair cites it, generation succeeds normally.
      */
-    public function test_required_figure_missing_from_first_response_is_recovered_by_one_bounded_repair(): void
+    public function test_a_required_figure_the_model_never_cites_is_materialized_without_any_repair_call(): void
     {
         Storage::fake('local');
 
@@ -1757,26 +1757,11 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 array $linkCatalog = [],
                 array $sourceElements = [],
             ): array => $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", $this->nonImageSourceElements($sourceElements)))
-            ->shouldReceive('repairPlannedFigures')
-            ->once()
-            ->andReturnUsing(function (
-                string $pageTitle,
-                string $pageType,
-                string $existingMarkdown,
-                array $issues,
-                string $sourceText,
-                string $languageCode,
-                string $additionalContext = '',
-                array $linkCatalog = [],
-                array $sourceElements = [],
-            ) use ($article): array {
-                $this->assertNotEmpty($issues);
-                $this->assertSame('img0', $issues[0]['source_element_key']);
-
-                $imageElement = collect($sourceElements)->firstWhere('source_element_type', 'image');
-
-                return $this->structuredPageResult(self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.", [$imageElement]);
-            });
+            // A planned figure is a backend decision about a real extracted element, so it is
+            // materialized deterministically — the model's citation is not its trigger, and no
+            // repair call is needed to deliver it (run 54, page 193: planned, never cited, never
+            // materialized, discovered only by QA at the end of the run).
+            ->shouldNotReceive('repairPlannedFigures');
 
         Queue::fake();
         (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle(
@@ -1812,7 +1797,10 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Masterdata Samhandling');
 
         $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
-        $run->update(['maintainer_decision_json' => $this->decisionWithPlannedFigure($article, $concept, required: true)]);
+        // A required figure deterministic materialization CANNOT deliver: the plan names a figure
+        // this document does not contain. The bounded repair is the only remaining chance, and when
+        // it also fails the page must never be persisted.
+        $run->update(['maintainer_decision_json' => $this->decisionWithPlannedFigure($article, $concept, required: true, figureKey: 'img7')]);
 
         $this->mock(WikiPageContentAiClient::class)
             ->shouldReceive('generatePageFromSource')
@@ -1852,7 +1840,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
             $this->assertSame($run->id, $e->runId);
             $this->assertSame($concept->id, $e->pageId);
             $this->assertTrue($e->repairAttempted);
-            $this->assertContains('img0', $e->failedSourceElementKeys);
+            $this->assertContains('img7', $e->failedSourceElementKeys);
         }
 
         $pivot = EnterpriseWikiIngestRunPage::query()
@@ -1925,7 +1913,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         ];
     }
 
-    private function decisionWithPlannedFigure(EnterpriseWikiPage $article, EnterpriseWikiPage $concept, bool $required): array
+    private function decisionWithPlannedFigure(EnterpriseWikiPage $article, EnterpriseWikiPage $concept, bool $required, string $figureKey = 'img0'): array
     {
         return [
             'source_article' => ['action' => 'create', 'title' => $article->title, 'proposed_slug' => $article->slug, 'reason' => 'r'],
@@ -1940,7 +1928,7 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 'reference_only_topics' => [],
                 'excluded_topics' => [],
                 'related_page_guidance' => [],
-                'planned_figures' => [$this->plannedFigure('img0', required: $required)],
+                'planned_figures' => [$this->plannedFigure($figureKey, required: $required)],
             ]],
             'entity_pages' => [],
             'no_action_reason' => null,

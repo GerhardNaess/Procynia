@@ -142,6 +142,21 @@ class EnterpriseWikiMaintainerDecisionPrompt
     private const FILE_EXTENSIONS = ['pdf', 'docx', 'xlsx', 'txt', 'doc', 'pptx', 'odt', 'csv'];
 
     /**
+     * Marks the one validation failure that says nothing about the DECISION and everything about
+     * the response text carrying it: the model emitted a raw control byte where a character
+     * belonged (see validateNoControlCharacters() and the run-34 incident). Callers use it to tell
+     * a corrupted transmission apart from a genuinely invalid decision — the first is worth one
+     * bounded retry of that call, the second never is.
+     */
+    public const CORRUPTED_TEXT_MARKER = 'contains an invalid control character — the AI response text is corrupted';
+
+    /** Whether a validation failure is the corrupted-text kind rather than a real contract violation. */
+    public static function isCorruptedTextFailure(string $message): bool
+    {
+        return str_contains($message, self::CORRUPTED_TEXT_MARKER);
+    }
+
+    /**
      * Returns the OpenAI Responses API text.format block for strict JSON output.
      * Use as: ['text' => self::jsonSchema()] in the API request body.
      */
@@ -250,6 +265,14 @@ class EnterpriseWikiMaintainerDecisionPrompt
                     'properties' => [
                         'concept_candidates' => ['type' => 'array', 'items' => self::conceptCandidateSchema()],
                         'concept_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        // A batch decides candidate disposition, and a candidate can turn out to be
+                        // covered by an existing ENTITY page. Without this slot the only legal way to
+                        // say "reuse that page" was concept_pages — naming an entity through a concept
+                        // slot, which is exactly what run 55 did and what the apply guard then refused
+                        // mid-run. Same reasoning as patch_targets below: Phase A cannot know a
+                        // disposition Phase B decides, so Phase B needs the slot to obey the rule.
+                        // EnterpriseWikiMaintainerDecisionMerger unions these with Phase A's.
+                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
                         // A batch can discover that one of ITS candidates changes substance an
                         // existing page owns. Phase A cannot know that (it never evaluates
                         // candidate disposition), so a batch must be able to contribute its own
@@ -259,18 +282,72 @@ class EnterpriseWikiMaintainerDecisionPrompt
                         // EnterpriseWikiMaintainerDecisionMerger unions these with Phase A's.
                         'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
                     ],
-                    'required' => ['concept_candidates', 'concept_pages', 'patch_targets'],
+                    'required' => ['concept_candidates', 'concept_pages', 'entity_pages', 'patch_targets'],
                     'additionalProperties' => false,
                 ],
             ],
         ];
     }
 
+    /**
+     * The object-level fragments of this contract, exposed so the bounded delta-repair contract
+     * (EnterpriseWikiMaintainerDecisionDeltaPrompt) can require the EXACT same object shapes when
+     * the model returns a corrected object. One definition, two contracts — a repaired object can
+     * never be a different shape than the object it replaces.
+     *
+     * @return array<string, mixed>
+     */
+    public static function sourcePageObjectSchema(): array
+    {
+        return self::sourcePageSchema();
+    }
+
+    /** @return array<string, mixed> */
+    public static function sharedPageObjectSchema(): array
+    {
+        return self::sharedPageSchema();
+    }
+
+    /** @return array<string, mixed> */
+    public static function conceptCandidateObjectSchema(): array
+    {
+        return self::conceptCandidateSchema();
+    }
+
+    /** @return array<string, mixed> */
+    public static function patchTargetObjectSchema(): array
+    {
+        return self::patchTargetSchema();
+    }
+
     /** @return array<string, mixed> */
     private static function responsibilityProperties(): array
     {
         return [
-            'owned_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
+            // An owned topic is a promise that this page will EXPLAIN something, so it is the one
+            // responsibility field that has to be source-grounded at planning time. Run 53 shows
+            // what a bare string costs: five concept pages planned sections ("Godkjenningstidspunkt",
+            // "Budsjett og kostnadsrammer", "Insentiver og kostnadsdeling", ...) that no source
+            // element supported, nothing checked it, and the run died one page-generation call at a
+            // time inside EnterpriseWikiGenerateAppliedPagesService. The keys use the same
+            // identities patch_targets and planned_figures already cite, so there is exactly one
+            // notion of source evidence in this contract.
+            //
+            // Legacy string items are still accepted by the PHP validator (see validateOwnedTopics())
+            // so a stored decision predating this field keeps parsing; the strict schema requires
+            // the bound shape, so every newly generated decision carries evidence.
+            'owned_topics' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'topic' => ['type' => 'string'],
+                        'source_element_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => ['topic', 'source_element_keys'],
+                    'additionalProperties' => false,
+                ],
+            ],
             'reference_only_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
             'excluded_topics' => ['type' => 'array', 'items' => ['type' => 'string']],
             'related_page_guidance' => [
@@ -907,6 +984,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
             }
         }
 
+        if (array_key_exists('entity_pages', $raw)) {
+            if (! is_array($raw['entity_pages'])) {
+                $errors[] = 'entity_pages must be an array.';
+            } else {
+                foreach ($raw['entity_pages'] as $i => $entry) {
+                    $errors = array_merge($errors, self::validateSharedEntry($entry, "entity_pages[{$i}]"));
+                }
+            }
+        }
+
         return array_merge($errors, self::validatePatchTargets($raw));
     }
 
@@ -929,6 +1016,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
         return [
             'concept_candidates' => $raw['concept_candidates'],
             'concept_pages' => $raw['concept_pages'],
+            'entity_pages' => $raw['entity_pages'] ?? [],
             'patch_targets' => $raw['patch_targets'] ?? [],
         ];
     }
@@ -986,7 +1074,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
             $errors = array_merge($errors, self::validateNoFileExtensionInSlug($entry['proposed_slug'], "{$ctx}.proposed_slug"));
         }
 
-        foreach (['owned_topics', 'reference_only_topics', 'excluded_topics'] as $field) {
+        foreach (['reference_only_topics', 'excluded_topics'] as $field) {
             if (! array_key_exists($field, $entry)) {
                 continue;
             }
@@ -1007,6 +1095,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 $errors = array_merge($errors, self::validateNoControlCharacters($item, "{$ctx}.{$field}[{$i}]"));
             }
         }
+
+        $errors = array_merge($errors, self::validateOwnedTopics($entry, $ctx));
 
         if (array_key_exists('related_page_guidance', $entry)) {
             if (! is_array($entry['related_page_guidance'])) {
@@ -1029,6 +1119,148 @@ class EnterpriseWikiMaintainerDecisionPrompt
         }
 
         return $errors;
+    }
+
+    /**
+     * `owned_topics` accepts two shapes, and only two:
+     *
+     *  - the BOUND shape `{topic, source_element_keys}` — what the strict schema requires, and what
+     *    every newly generated decision carries. A topic is a promise to explain something, so it
+     *    has to name the source elements it rests on, from this document's own catalog.
+     *  - a legacy plain string — a decision stored before the binding existed. Accepted so stored
+     *    runs still parse and can still be regenerated; see
+     *    EnterpriseWikiPlannedSectionEvidenceResolver for how those are bound (and why that path is
+     *    strictly the old, weaker behaviour rather than the one new decisions take).
+     *
+     * Whether the named keys actually exist in the document is NOT decided here — this class never
+     * sees the document. EnterpriseWikiPlannedTopicEvidenceValidator owns that check, exactly as
+     * EnterpriseWikiCanonicalOwnershipValidator owns it for patch targets.
+     *
+     * @param  array<string, mixed>  $entry
+     * @return string[]
+     */
+    private static function validateOwnedTopics(array $entry, string $ctx): array
+    {
+        if (! array_key_exists('owned_topics', $entry)) {
+            return [];
+        }
+
+        if (! is_array($entry['owned_topics'])) {
+            return ["{$ctx}.owned_topics must be an array."];
+        }
+
+        $errors = [];
+
+        foreach ($entry['owned_topics'] as $i => $item) {
+            $itemCtx = "{$ctx}.owned_topics[{$i}]";
+
+            if (is_string($item)) {
+                if (trim($item) === '') {
+                    $errors[] = "{$itemCtx} must be a non-empty string.";
+
+                    continue;
+                }
+
+                $errors = array_merge($errors, self::validateNoControlCharacters($item, $itemCtx));
+
+                continue;
+            }
+
+            if (! is_array($item)) {
+                $errors[] = "{$itemCtx} must be an object with topic and source_element_keys.";
+
+                continue;
+            }
+
+            if (! isset($item['topic']) || ! is_string($item['topic']) || trim($item['topic']) === '') {
+                $errors[] = "{$itemCtx}.topic is required and must be a non-empty string.";
+            } else {
+                $errors = array_merge($errors, self::validateNoControlCharacters($item['topic'], "{$itemCtx}.topic"));
+            }
+
+            $keys = $item['source_element_keys'] ?? null;
+
+            if (! is_array($keys)) {
+                $errors[] = "{$itemCtx}.source_element_keys must be an array of source element keys.";
+
+                continue;
+            }
+
+            $nonEmpty = 0;
+
+            foreach ($keys as $j => $key) {
+                if (! is_string($key) || trim($key) === '') {
+                    $errors[] = "{$itemCtx}.source_element_keys[{$j}] must be a non-empty string.";
+
+                    continue;
+                }
+
+                $nonEmpty++;
+                $errors = array_merge($errors, self::validateNoControlCharacters($key, "{$itemCtx}.source_element_keys[{$j}]"));
+            }
+
+            if ($nonEmpty === 0) {
+                $errors[] = "{$itemCtx}.source_element_keys must name at least one source element from the SOURCE ELEMENTS "
+                    .'catalog — a page may not promise to explain a topic this document does not support.';
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Normalises either owned_topics shape into the bound one. The single place the rest of the
+     * codebase reads owned topics through, so no consumer has to know that two shapes exist.
+     *
+     * @return list<array{topic: string, source_element_keys: list<string>}>
+     */
+    public static function ownedTopicEntries(mixed $ownedTopics): array
+    {
+        $entries = [];
+
+        foreach ((array) $ownedTopics as $item) {
+            if (is_string($item)) {
+                if (trim($item) !== '') {
+                    $entries[] = ['topic' => trim($item), 'source_element_keys' => []];
+                }
+
+                continue;
+            }
+
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $topic = trim((string) ($item['topic'] ?? ''));
+
+            if ($topic === '') {
+                continue;
+            }
+
+            $entries[] = [
+                'topic' => $topic,
+                'source_element_keys' => array_values(array_unique(array_filter(array_map(
+                    static fn (mixed $key): string => is_string($key) ? trim($key) : '',
+                    (array) ($item['source_element_keys'] ?? []),
+                ), static fn (string $key): bool => $key !== ''))),
+            ];
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Just the topic names — for the prompt text, the section-coverage validator and the lint
+     * service, none of which care where the evidence came from.
+     *
+     * @return list<string>
+     */
+    public static function ownedTopicNames(mixed $ownedTopics): array
+    {
+        return array_values(array_map(
+            static fn (array $entry): string => $entry['topic'],
+            self::ownedTopicEntries($ownedTopics),
+        ));
     }
 
     /** @return string[] */
@@ -1220,7 +1452,7 @@ class EnterpriseWikiMaintainerDecisionPrompt
         }
 
         if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', $value) === 1) {
-            return ["{$ctx} contains an invalid control character — the AI response text is corrupted."];
+            return ["{$ctx} ".self::CORRUPTED_TEXT_MARKER.'.'];
         }
 
         return [];

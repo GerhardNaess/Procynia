@@ -408,7 +408,7 @@ class EnterpriseWikiAppliedRunLintService
 
             $match = collect($entries)->firstWhere('title', $page->title);
 
-            return $match !== null ? $this->nonEmptyStringList($match['owned_topics'] ?? []) : [];
+            return $match !== null ? EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($match['owned_topics'] ?? []) : [];
         }
 
         if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_ARTICLE) {
@@ -421,7 +421,7 @@ class EnterpriseWikiAppliedRunLintService
             return [];
         }
 
-        return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+        return EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []);
     }
 
     /**

@@ -41,6 +41,39 @@ class EnterpriseWikiConceptIdentityMatcher
         return array_diff($tokensA, $tokensB) === [] || array_diff($tokensB, $tokensA) === [];
     }
 
+    /**
+     * Whether $pageTitle is the page for $conceptName — the DIRECTED question "did this candidate
+     * get its page?", which is weaker than sameIdentity() on purpose and must never be used as a
+     * general equality test.
+     *
+     * sameIdentity() requires exact equality when either side is a single token, because a subset
+     * match on a lone generic word ("Management") would match almost anything. That rule is right
+     * for symmetric matching and wrong here: a page created FOR a candidate is routinely titled
+     * with a qualifier the candidate name lacks — "Avvikshåndtering" gets the page
+     * "Avvikshåndtering i prosjekter" — and flagging that as a missing page sent run 51 into a
+     * repair it did not need.
+     *
+     * The relaxation is a PREFIX rule, not a subset rule: the page title must START with the
+     * concept's tokens. That is what keeps the generic-word failure out — "Management" does not
+     * match "Change Management", because the concept is not what that title leads with — while
+     * accepting the specialising-suffix case this exists for.
+     */
+    public static function titleCoversConcept(string $conceptName, string $pageTitle): bool
+    {
+        if (self::sameIdentity($conceptName, $pageTitle)) {
+            return true;
+        }
+
+        $conceptTokens = self::tokens($conceptName);
+        $titleTokens = self::tokens($pageTitle);
+
+        if ($conceptTokens === [] || count($titleTokens) <= count($conceptTokens)) {
+            return false;
+        }
+
+        return array_slice($titleTokens, 0, count($conceptTokens)) === $conceptTokens;
+    }
+
     /** @return string[] */
     private static function tokens(string $title): array
     {

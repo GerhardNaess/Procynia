@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -249,6 +250,16 @@ class EnterpriseWikiLinkSemanticRepairService
             }
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_APPLIED, null, $newVersion->id);
+        } catch (EnterpriseWikiPageVersionBlockProvenanceLostException $e) {
+            // Declining a link-wording improvement is cheap; promoting a version that has lost the
+            // page's figures and claim anchors is not (run 54, page 191).
+            Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Revision not promoted — it would have dropped the page\'s content blocks.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, EnterpriseWikiPageLinkQaAttempt::REASON_BLOCK_PROVENANCE_AT_RISK);
         } catch (EnterpriseWikiInvalidWikilinksException $e) {
             Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Revision rejected.', [
                 'run_id' => $run->id,
@@ -476,14 +487,17 @@ class EnterpriseWikiLinkSemanticRepairService
                 return null;
             }
 
-            $version = $this->versionWriter->writeNewCurrentVersion($pageId, [
-                'content_markdown' => $markdown,
-                'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
-            ]);
-
-            $this->restoreBlockProvenance($pageId, $version);
-
-            return $version;
+            // Write and restore are ONE unit: if the block provenance cannot be reconstructed the
+            // whole promotion is rolled back, and the page keeps the version that still has its
+            // image figures, source provenance and claim anchors (run 54, page 191).
+            return $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+                $pageId,
+                [
+                    'content_markdown' => $markdown,
+                    'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
+                ],
+                fn (EnterpriseWikiPageVersion $version) => $this->restoreBlockProvenance($pageId, $version),
+            );
         });
     }
 

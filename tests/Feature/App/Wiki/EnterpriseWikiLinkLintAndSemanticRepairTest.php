@@ -676,7 +676,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertSame('block-0002', $match['block_key']);
     }
 
-    public function test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_link_repair(): void
+    public function test_a_revision_that_would_drop_the_pages_blocks_is_declined_rather_than_promoted(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -699,13 +699,25 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
         // The revision merges both paragraphs into a single segment — segment count (1) no
         // longer matches the prior block count (2), so reconstruction must refuse rather than
-        // guess. The link repair itself is otherwise perfectly valid and must still succeed.
+        // guess. Promoting the revision anyway would leave the page with NO content blocks, which
+        // is where its image figures, source provenance and claim anchors live: run 54 lost a
+        // required figure exactly this way. The link improvement is declined instead, and the page
+        // keeps the version that still has its blocks.
         $this->mockRevision('Første avsnitt. Andre avsnitt om [[konsept|Konsept]].', changed: true);
 
         $result = $this->repairService()->repairForRun($run);
 
-        $this->assertSame(1, $result['applied']);
-        $this->assertEmpty($this->currentVersion($article)->content_blocks_json ?? []);
+        $this->assertSame(0, $result['applied']);
+        $this->assertCount(2, $this->currentVersion($article)->content_blocks_json ?? []);
+        $this->assertStringNotContainsString('[[konsept|Konsept]]', (string) $this->currentVersion($article)->content_markdown);
+
+        $attempt = EnterpriseWikiPageLinkQaAttempt::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->latest('id')
+            ->first();
+
+        $this->assertSame(EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, $attempt->status);
+        $this->assertSame(EnterpriseWikiPageLinkQaAttempt::REASON_BLOCK_PROVENANCE_AT_RISK, $attempt->reason);
     }
 
     public function test_prior_version_blocks_are_never_touched_by_block_provenance_restore(): void

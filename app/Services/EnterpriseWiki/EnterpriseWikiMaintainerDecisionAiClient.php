@@ -22,12 +22,17 @@ use RuntimeException;
  * Output-token budgeting is delegated to EnterpriseWikiAiCapacityPlanner instead of a fixed
  * local constant (see the Wiki run-583 incident: a fixed 3000-token budget did not grow when
  * commit 353aa98 added the concept_candidates field, truncating a content-rich document's
- * response). Both decide() and repair() get at most one bounded "capacity retry" — a second
+ * response). Both decide() and repairGroup() get at most one bounded "capacity retry" — a second
  * attempt at a higher, still-capped budget — ONLY when the first attempt's response was
- * status=incomplete/reason=max_output_tokens. This is deliberately separate from
+ * status=incomplete/reason=max_output_tokens, and only when that retry would genuinely raise the
+ * budget (see EnterpriseWikiAiCapacityRetryExecutor). This is deliberately separate from
  * EnterpriseWikiMaintainerDecisionConsistencyValidator's repair pass: a capacity retry reacts to
  * an INCOMPLETE API response (never parses or reuses the partial JSON); consistency repair reacts
  * to a COMPLETE but logically inconsistent decision. The two must never be conflated.
+ *
+ * Consistency repair is repairGroup(): a BOUNDED DELTA over one attributed group of objects, not a
+ * regeneration of the decision. See EnterpriseWikiMaintainerDecisionDeltaPrompt for why the
+ * whole-decision repair it replaced could not work for any decision large enough to be split.
  */
 class EnterpriseWikiMaintainerDecisionAiClient
 {
@@ -35,12 +40,39 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
     private const REASONING_EFFORT = 'low';
 
-    // Keeps the source text well within token limits while leaving room for
-    // the system prompt, index context, and the schema output.
+    // Keeps the FLAT source text (non-DOCX, no addressable elements) well within token limits while
+    // leaving room for the system prompt, index context, and the schema output.
     private const MAX_SOURCE_TEXT_CHARS = 12000;
+
+    /**
+     * Budget for the ADDRESSABLE element catalog, which is a different problem from flat text: the
+     * maintainer must now name the source elements each owned topic rests on, so an element it
+     * cannot see is an element it cannot cite. Under the old 12 000-char budget a 77 586-character
+     * document showed 112 of its 515 elements — 22 % — while the planner went on planning sections
+     * for pages about the whole document. That is exactly how run 53 produced five concept pages
+     * whose planned sections no element supported.
+     *
+     * Complete coverage instead, bounded two ways: a per-element snippet cap (enough to know what
+     * each element is about; generation reads the full text later) and a total ceiling that still
+     * truncates on whole-element boundaries for a pathological document. Deliberately large: input
+     * tokens here are far cheaper than the page-generation calls this prevents, and it changes
+     * neither output budgeting nor split routing (both are capped independently — see
+     * MAX_CAPACITY_CONTEXT_CHARS).
+     */
+    private const MAX_CATALOG_CHARS = 90_000;
+
+    private const MAX_CATALOG_ELEMENT_CHARS = 240;
 
     /** Selects this operation's profile in config('ai_capacity.operations'). */
     private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_maintainer_decision';
+
+    /**
+     * The bounded delta-repair profile. Deliberately its own operation rather than a reuse of the
+     * decision profile: a repair's output is a handful of corrected objects, so sizing it from the
+     * source document's length (as the decision profile does) would reproduce the exact mistake
+     * that made the old whole-decision repair unrunnable.
+     */
+    private const DELTA_REPAIR_CAPACITY_OPERATION_TYPE = 'enterprise_wiki_maintainer_decision_repair';
 
     // source_article + source_summary are always attempted. Existing page candidates are known
     // before the call and may each require a patch-target decision, so they add bounded output
@@ -180,37 +212,41 @@ class EnterpriseWikiMaintainerDecisionAiClient
     }
 
     /**
-     * Ask the AI to correct a decision that EnterpriseWikiMaintainerDecisionConsistencyValidator
-     * found logically inconsistent — a single bounded pass, not a general re-decision. Preferred
-     * over deterministically inventing a fix in PHP because resolving an issue (e.g. deciding
-     * whether a missing concept genuinely needs its own page) requires reading the source text
-     * again, which only the model can do; preferred over silently rejecting the decision because a
-     * self-healing correction keeps the ingest run moving instead of failing outright for a
-     * mistake this same model can usually fix when the specific problem is pointed out.
+     * Ask the AI to correct ONE bounded group of objects the deterministic validators rejected —
+     * a delta, never a re-decision.
      *
-     * This is a consistency repair, not a capacity retry: it can itself still hit
-     * status=incomplete/max_output_tokens (it echoes the full previous decision back to the
-     * model, so its prompt is larger than decide()'s), and gets its own independent capacity-retry
-     * budget for that — entirely separate from the consistency-repair semantics described above.
+     * This replaces the previous whole-decision repair pass. That pass echoed the full previous
+     * decision back to the model and required the complete corrected decision in return, so its
+     * output size was the size of the DECISION rather than the size of the FAULT: run 51's 31 599-
+     * character decision needed ~9 500 output tokens against a 9 000 ceiling and could not be
+     * repaired at all, no matter how small its actual faults were (21 issues, all of them local to
+     * individual concept candidates). A delta scales with the faults, which is what keeps
+     * max_output_tokens a safety bound instead of a ceiling on document complexity.
+     *
+     * Preferred over deterministically inventing a fix in PHP for the same reason as before:
+     * resolving an issue (e.g. whether a concept genuinely needs its own page) requires reading the
+     * source text again, which only the model can do. What is NOT left to the model is which
+     * objects may change — see EnterpriseWikiMaintainerDecisionDeltaMerger.
      *
      * @param  array{title: string, filename: string}  $sourceMeta
      * @param  array<int, array<string, mixed>>  $indexContext
-     * @param  array<string, mixed>  $decision  The previous, inconsistent decision.
-     * @param  string[]  $issues  Human-readable issues from the consistency validator.
+     * @param  array<string, mixed>  $decision  The pre-repair decision snapshot.
+     * @param  array{object_ids: list<string>, issues: list<string>}  $group  One attributed repair group
+     *                                                                        (EnterpriseWikiMaintainerDecisionIssueAttributor).
      * @param  list<array<string, mixed>>  $figureCandidates  Same shape as decide()'s parameter.
-     * @return array<string, mixed> Validated, corrected maintainer decision.
+     * @return array{operations: list<array<string, mixed>>, notes: ?string} Structurally valid delta.
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is invalid.
      * @throws EnterpriseWikiAiOutputCapacityExceededException when the response is still
      *                                                         incomplete/max_output_tokens after one capacity retry.
      */
-    public function repair(
+    public function repairGroup(
         array $sourceMeta,
         string $sourceText,
         array $indexContext,
         string $languageCode,
         array $decision,
-        array $issues,
+        array $group,
         array $figureCandidates = [],
         ?AiCallContext $context = null,
         array $sourceElements = [],
@@ -223,32 +259,71 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
-        $repairPromptText = $this->repairUserPrompt($sourceMeta, $sourceText, $indexContext, $decision, $issues, $figureCandidates, $sourceElements);
+        $repairPromptText = EnterpriseWikiMaintainerDecisionDeltaPrompt::userPrompt(
+            $sourceMeta,
+            self::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
+            $indexContext,
+            $decision,
+            $group,
+            $figureCandidates,
+        );
         $inputSizeChars = mb_strlen($repairPromptText);
+        // The delta's output is driven by how many objects this group repairs, not by the size of
+        // the decision they came from — that is the whole point of the bounded contract.
+        $repairedObjects = max(1, count($group['object_ids']));
 
         $decoded = $this->capacityRetryExecutor->execute(
-            'EnterpriseWikiMaintainerDecisionAiClient:repair',
+            'EnterpriseWikiMaintainerDecisionAiClient:repair_delta',
             $inputSizeChars,
-            fn (int $retryAttempt): AiCapacityPlan => $this->planCapacity($inputSizeChars, self::EXPECTED_RESULT_OBJECTS, $retryAttempt),
+            fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planBatchCall(
+                self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE,
+                self::MODEL,
+                $repairedObjects,
+                $inputSizeChars,
+                $retryAttempt,
+            ),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
-            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolve(new AiTimeoutRequest(
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForBatch(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
                 inputSizeChars: $inputSizeChars,
                 chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
-            )),
+            ), $repairedObjects),
             $context,
         );
 
         try {
-            return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
+            return EnterpriseWikiMaintainerDecisionDeltaPrompt::parse($decoded);
         } catch (\InvalidArgumentException $e) {
             throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: repaired decision failed schema validation: '.$e->getMessage(),
+                'EnterpriseWikiMaintainerDecisionAiClient: repair delta failed schema validation: '.$e->getMessage(),
                 0,
                 $e,
             );
         }
+    }
+
+    /**
+     * Whether a repair group is small enough to be answered inside this operation's output ceiling.
+     * A group that is not must fail closed rather than burn a call that cannot fit its own answer —
+     * the same principle EnterpriseWikiAiCapacityRetryExecutor applies to a pointless retry.
+     *
+     * @param  array{object_ids: list<string>, issues: list<string>}  $group
+     */
+    public function repairGroupFitsOneCall(array $group): bool
+    {
+        return $this->capacityPlanner->planBatchCall(
+            self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE,
+            self::MODEL,
+            max(1, count($group['object_ids'])),
+            0,
+        )->strategy !== AiCapacityPlan::STRATEGY_SPLIT_REQUIRED;
+    }
+
+    /** How many objects one bounded repair call may take on. */
+    public function maxObjectsPerRepairCall(): int
+    {
+        return $this->capacityPlanner->maxItemsPerBatch(self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE, self::MODEL);
     }
 
     private function planCapacity(int $inputSizeChars, int $expectedResultObjects, int $retryAttempt): AiCapacityPlan
@@ -284,7 +359,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
     private function buildRepairPayload(string $languageName, string $repairPromptText, int $maxOutputTokens): array
     {
-        $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::jsonSchema();
+        $schemaBlock = EnterpriseWikiMaintainerDecisionDeltaPrompt::jsonSchema();
 
         return [
             'model' => self::MODEL,
@@ -294,7 +369,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->repairDeveloperPrompt($languageName),
+                            'text' => EnterpriseWikiMaintainerDecisionDeltaPrompt::developerPrompt($languageName),
                         ],
                     ],
                 ],
@@ -322,16 +397,18 @@ class EnterpriseWikiMaintainerDecisionAiClient
         ];
     }
 
-    private function repairDeveloperPrompt(string $languageName): string
+    /**
+     * How to resolve each class of validation issue — the domain half of the repair instructions,
+     * unchanged in substance from the whole-decision repair pass it outlives. Kept here, next to
+     * the decision rules these corrections have to stay consistent with, and consumed by
+     * EnterpriseWikiMaintainerDecisionDeltaPrompt::developerPrompt(), which adds the delta-output
+     * mechanics on top.
+     *
+     * @return string[]
+     */
+    public static function repairResolutionRules(): array
     {
-        return implode("\n", [
-            "You are an enterprise wiki maintainer correcting a previous planning decision. Output language: {$languageName}.",
-            'You already produced a decision for this source document. A deterministic check found',
-            'specific logical inconsistencies in it, listed below as ISSUES TO FIX.',
-            '',
-            'Fix ONLY the listed issues. Do not change anything else in the decision that the issues do',
-            'not require you to change — keep the same pages, actions, slugs, and wording otherwise.',
-            '',
+        return [
             'For an issue about a missing owning page (a page_title referenced in',
             'related_page_guidance, or a concept candidate decided "reference_only"/"exclude", that',
             'matches no existing or planned page): "reference_only" means the article mentions the topic',
@@ -416,50 +493,21 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'PAGE CANDIDATES and SOURCE ELEMENTS, and add the missing target. Never resolve such an',
             'issue by deleting the patch target and moving the finding into warnings.',
             '',
+            'For an issue about an owned topic with no source element behind it, or citing a key that is',
+            'not in this document\'s catalog: either bind the topic to the real SOURCE ELEMENTS keys that',
+            'carry it, or stop owning it — move it to reference_only_topics/excluded_topics, or drop it.',
+            'Do NOT cite a loosely related key to make the issue disappear: the section will be written',
+            'from exactly those elements, so an unrelated key produces an ungrounded section. A page with',
+            'fewer, genuinely supported topics is the correct outcome.',
+            '',
+            ...self::ownedTopicEvidenceRules(),
+            '',
+            ...self::existingPageSlotRules(),
+            '',
             ...self::patchTargetRules(),
             '',
             self::figurePlanningRules(),
-            '',
-            'Return the complete corrected decision as JSON only, conforming to the same schema as',
-            'before. Do not include any text outside the JSON.',
-        ]);
-    }
-
-    private function repairUserPrompt(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
-        array $decision,
-        array $issues,
-        array $figureCandidates = [],
-        array $sourceElements = [],
-    ): string {
-        $title = (string) ($sourceMeta['title'] ?? '');
-
-        $indexJson = $indexContext !== []
-            ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-            : 'No pages yet.';
-
-        $decisionJson = (string) json_encode($decision, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $issuesText = implode("\n", array_map(static fn (string $issue): string => "- {$issue}", $issues));
-
-        return implode("\n", [
-            'SOURCE METADATA:',
-            "Title: {$title}",
-            '',
-            self::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
-            '',
-            'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
-            $indexJson,
-            '',
-            self::figureCandidatesBlock($figureCandidates),
-            '',
-            'PREVIOUS DECISION:',
-            $decisionJson,
-            '',
-            'ISSUES TO FIX:',
-            $issuesText,
-        ]);
+        ];
     }
 
     private function buildPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
@@ -524,6 +572,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'entity_pages — shared entity pages (organisations, clients, suppliers):',
             '  Zero or more. Same create/update logic as concept_pages.',
             '',
+            ...self::existingPageSlotRules(),
+            '',
             ...self::patchTargetRules(),
             '',
             'no_action_reason: set if the source is empty, a duplicate, or should not produce a page.',
@@ -539,6 +589,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  You see every page planned for this source document at once — this is the one point',
             '  where cross-page repetition AND unbounded page breadth can both be prevented before any',
             '  page content is written. Three tiers, not a single list:',
+            ...self::ownedTopicEvidenceRules(),
             '  owned_topics: what THIS page, and only this page, explains in depth. This defines the',
             '  page\'s FULL scope — nothing beyond it. Keep it SHORT and proportional to what the source',
             '  document itself actually supports or requires to be understood — typically 1-3 items for',
@@ -806,6 +857,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  Ask: does an existing page already cover this ground? If yes, extend that page.',
             '  existing_owner_page_id: the numeric id of the existing page that owns the topic, or',
             '  null when the topic genuinely has no existing owner.',
+            '  When the owner is a page THIS decision is creating rather than an existing one, leave',
+            '  existing_owner_page_id null and name that page in owning_page_title. That is the correct',
+            '  answer for a variant or sub-topic of a concept this same document introduces — do NOT',
+            '  relabel it "independent_new_topic" to get around the missing id, which would create a',
+            '  second canonical page for substance the new page already owns. "substance_changed" is the',
+            '  exception: superseding substance requires an existing page, and a structured patch target',
+            '  for it.',
             '',
             'DOCUMENT PAGES ARE NOT CANONICAL OWNERS:',
             '  source_article and source_summary represent THE DOCUMENT — its identity, date, decisions',
@@ -814,6 +872,67 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  But they must not become the owner of that faglige substance: keep their owned_topics on',
             '  what the document itself is and decides, put the substance change on the existing owner',
             '  as a patch target, and link between them.',
+        ];
+    }
+
+    /**
+     * The owned-topic evidence contract. Shared verbatim by the single-call developer prompt, the
+     * split-flow batch prompt and the bounded delta-repair prompt, so a planner can never be told
+     * one thing while EnterpriseWikiPlannedTopicEvidenceValidator enforces another — the failure
+     * mode that produced run 51's unrepairable owning-page issues.
+     *
+     * @return string[]
+     */
+    public static function ownedTopicEvidenceRules(): array
+    {
+        return [
+            '  EVERY owned topic is EVIDENCE-BOUND. Each owned_topics entry is an object with:',
+            '    topic: the short topic name, which becomes this page\'s section heading verbatim.',
+            '    source_element_keys: the keys from the SOURCE ELEMENTS catalog this page will explain',
+            '    the topic FROM. At least one, copied exactly, never invented — the same keys and the',
+            '    same catalog patch_targets and planned_figures already cite.',
+            '  A topic you cannot bind to a real source element is a topic this document does not',
+            '  support: do NOT own it. Put it in reference_only_topics or excluded_topics instead, or',
+            '  leave it out. Never name a plausible-sounding section (a "pros and cons", "roles and',
+            '  responsibilities" or "approval" section) that the source itself does not cover, and never',
+            '  cite an unrelated key just to satisfy the requirement — the page will be generated from',
+            '  exactly the evidence you name here and nothing else.',
+            '  Name the FEW elements that genuinely carry the topic — normally 1-6, in the order they',
+            '  should be read. Do not list every element of a document section: only the first few are',
+            '  used as the section\'s evidence, so pick the ones that actually define the topic rather',
+            '  than everything nearby.',
+            '  The same element MAY support topics on more than one page when it genuinely covers both;',
+            '  within one page, keep each topic on its own evidence so the sections do not repeat.',
+            '  A page you CREATE must own at least one evidence-bound topic. Owning nothing is not a way',
+            '  out of this rule: if no topic on this page can be bound to real source elements, the page',
+            '  itself is not warranted — decide "reference_only" or "exclude" for the candidate instead.',
+        ];
+    }
+
+    /**
+     * The slot rule for EXISTING pages, shared by the single-call prompt, both split-flow prompts
+     * and the bounded repair prompt.
+     *
+     * A typed slot is a claim about identity, and identity of an existing page belongs to the
+     * database: EnterpriseWikiMaintainerDecisionApplyService will not retype a page named by id,
+     * and EnterpriseWikiPlannedPageSlotValidator now says so at decision time. Run 55 is what it
+     * costs when the prompt leaves this implicit — an existing entity page was named through
+     * concept_pages, and the run died in the middle of applying.
+     *
+     * @return string[]
+     */
+    public static function existingPageSlotRules(): array
+    {
+        return [
+            'NAMING AN EXISTING PAGE (page_id + action "update"):',
+            '  The wiki index gives every existing page its own page_type. Name an existing page ONLY',
+            '  through the slot for the type it already has: a "concept" page in concept_pages, an',
+            '  "entity" page in entity_pages. A page never changes type because a decision put it in a',
+            '  different slot — such a decision is rejected, not applied.',
+            '  Name the same existing page in ONE slot only, once. If you also need to change what that',
+            '  page states, that is a patch target, not a second slot entry.',
+            '  An existing page of any other type (article, summary) is never named through these slots',
+            '  at all — address it with a patch target.',
         ];
     }
 
@@ -929,11 +1048,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    public static function sourceElementsBlock(array $sourceElements, int $maxChars): string
+    public static function sourceElementsBlock(array $sourceElements, int $maxChars, ?int $maxElementChars = null): string
     {
         $lines = [];
         $used = 0;
         $rendered = 0;
+        $truncatedElements = 0;
         $currentSection = null;
 
         foreach ($sourceElements as $element) {
@@ -943,6 +1063,14 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
             if ($key === '' || $type === '' || $text === '') {
                 continue;
+            }
+
+            // Per-element snippet cap: keeps EVERY element of a large document addressable within a
+            // bounded prompt, instead of showing the first few in full and hiding the rest. The key
+            // is what the maintainer cites; the full text is what generation reads.
+            if ($maxElementChars !== null && mb_strlen($text) > $maxElementChars) {
+                $text = mb_substr($text, 0, $maxElementChars).' […]';
+                $truncatedElements++;
             }
 
             $section = trim(implode(' ', array_filter([
@@ -986,6 +1114,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 'under the "# " section they belong to. Keys are stable identifiers for this document',
                 'version — refer to them when reasoning about which parts of the source a page rests on,',
                 'and never invent one.',
+                ...($truncatedElements > 0
+                    ? ['A "[…]" marks an element whose text is shown shortened here; the key still refers to the whole element.']
+                    : []),
             ],
             $lines,
         ));
@@ -1002,7 +1133,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
      */
     public static function sourceContentBlock(string $sourceText, array $sourceElements, int $maxChars): string
     {
-        $catalog = self::sourceElementsBlock(self::sourceCatalogElements($sourceElements), $maxChars);
+        // The catalog gets its own, much larger budget with a per-element snippet cap: every element
+        // has to be citable for the owned-topic evidence contract, and $maxChars sizes flat text.
+        $catalog = self::sourceElementsBlock(
+            self::sourceCatalogElements($sourceElements),
+            max($maxChars, self::MAX_CATALOG_CHARS),
+            self::MAX_CATALOG_ELEMENT_CHARS,
+        );
 
         if ($catalog !== '') {
             return $catalog;

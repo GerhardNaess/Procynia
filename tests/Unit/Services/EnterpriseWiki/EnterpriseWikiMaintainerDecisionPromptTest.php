@@ -999,14 +999,18 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
      * "an identified substance change must be a structured target" rule would be unsatisfiable in the
      * split flow and the finding would fall back into free-text warnings.
      */
-    public function test_candidate_batch_schema_requires_candidates_pages_and_patch_targets_only(): void
+    public function test_candidate_batch_schema_carries_only_the_slots_a_batch_decides(): void
     {
         $schema = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema()['json_schema']['schema'];
 
-        $this->assertSame(['concept_candidates', 'concept_pages', 'patch_targets'], $schema['required']);
-        $this->assertSame(['concept_candidates', 'concept_pages', 'patch_targets'], array_keys($schema['properties']));
+        // entity_pages belongs here for the same reason patch_targets does: a batch can discover
+        // that its own candidate is covered by an existing ENTITY page, a disposition phase 1 never
+        // evaluates. Without the slot, the only legal way to say "reuse it" was concept_pages —
+        // naming an entity through a concept slot, which run 55 did and apply then refused.
+        $this->assertSame(['concept_candidates', 'concept_pages', 'entity_pages', 'patch_targets'], $schema['required']);
+        $this->assertSame(['concept_candidates', 'concept_pages', 'entity_pages', 'patch_targets'], array_keys($schema['properties']));
         $this->assertArrayNotHasKey('source_article', $schema['properties'], 'a batch never redecides the document pages');
-        $this->assertArrayNotHasKey('entity_pages', $schema['properties']);
+        $this->assertArrayNotHasKey('source_summary', $schema['properties']);
     }
 
     public function test_candidate_batch_schema_reuses_the_exact_same_fragments_as_the_full_schema(): void

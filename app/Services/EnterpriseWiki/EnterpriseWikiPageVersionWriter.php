@@ -2,8 +2,10 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use Closure;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -37,19 +39,87 @@ class EnterpriseWikiPageVersionWriter
      */
     public function writeNewCurrentVersion(EnterpriseWikiPage|int $page, array $attributes): EnterpriseWikiPageVersion
     {
+        return $this->writeNewCurrentVersionRestoringBlocks($page, $attributes, null);
+    }
+
+    /**
+     * The same write, for a caller that produces MARKDOWN ONLY and reconstructs the block
+     * provenance immediately afterwards (link/semantic repair, incremental relink).
+     *
+     * The restorer runs inside this transaction, and the block invariant is checked after it: a
+     * version that still has no blocks when the superseded one had them aborts the whole write, so
+     * the page keeps its previous current version intact rather than silently losing its image
+     * figures, source provenance and claim anchors. Run 54 lost a required figure exactly this way
+     * — the reconstruction returned `skipped_ambiguous`, and the blockless version was promoted
+     * anyway.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @param  (Closure(EnterpriseWikiPageVersion): void)|null  $restoreBlocks  Reconstructs
+     *                                                                          content_blocks_json on the freshly written version. Null for an ordinary caller that
+     *                                                                          already supplies its own blocks.
+     *
+     * @throws EnterpriseWikiPageVersionBlockProvenanceLostException
+     */
+    public function writeNewCurrentVersionRestoringBlocks(
+        EnterpriseWikiPage|int $page,
+        array $attributes,
+        ?Closure $restoreBlocks,
+    ): EnterpriseWikiPageVersion {
         $pageId = $page instanceof EnterpriseWikiPage ? $page->id : $page;
 
-        return DB::transaction(function () use ($pageId, $attributes): EnterpriseWikiPageVersion {
+        return DB::transaction(function () use ($pageId, $attributes, $restoreBlocks): EnterpriseWikiPageVersion {
             $this->lockPage($pageId);
+
+            $superseded = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->where('is_current', true)
+                ->first();
 
             $this->demoteCurrentVersion($pageId);
 
-            return EnterpriseWikiPageVersion::query()->create(array_merge($attributes, [
+            $version = EnterpriseWikiPageVersion::query()->create(array_merge($attributes, [
                 'enterprise_wiki_page_id' => $pageId,
                 'version_number' => $this->nextVersionNumberLocked($pageId),
                 'is_current' => true,
             ]));
+
+            if ($restoreBlocks !== null) {
+                $restoreBlocks($version);
+                $version->refresh();
+            }
+
+            $this->assertBlockProvenanceSurvived($pageId, $superseded, $version);
+
+            return $version;
         });
+    }
+
+    /**
+     * The invariant: promoting a version must never leave a page with fewer than the blocks it
+     * already had, from nothing.
+     *
+     * Deliberately narrow — it only fires when the outgoing version HAD blocks and the incoming one
+     * has NONE. A page that never had blocks (a legacy version, a first write) is untouched, and a
+     * caller that legitimately rewrites the block set is untouched; this is about total loss, which
+     * is never a legitimate outcome of writing a new version.
+     */
+    private function assertBlockProvenanceSurvived(
+        int $pageId,
+        ?EnterpriseWikiPageVersion $superseded,
+        EnterpriseWikiPageVersion $version,
+    ): void {
+        $supersededBlocks = $superseded !== null ? (array) ($superseded->content_blocks_json ?? []) : [];
+
+        if ($supersededBlocks === [] || (array) ($version->content_blocks_json ?? []) !== []) {
+            return;
+        }
+
+        throw new EnterpriseWikiPageVersionBlockProvenanceLostException(
+            pageId: $pageId,
+            supersededVersionId: (int) $superseded->id,
+            supersededBlockCount: count($supersededBlocks),
+            reason: 'The write has been rolled back; the page keeps its previous current version.',
+        );
     }
 
     /**

@@ -51,6 +51,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     // of time, same reasoning as EnterpriseWikiMaintainerDecisionAiClient's own constant.
     private const GLOBAL_PLAN_EXPECTED_RESULT_OBJECTS = 2;
 
+    /**
+     * Attempts per batch when the response text itself comes back corrupted (run 34's control-byte
+     * fault). One retry, never more: a second corrupted response is a signal about the call, not
+     * noise to keep paying for.
+     */
+    private const MAX_CORRUPTED_RESPONSE_ATTEMPTS = 2;
+
     public function __construct(
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
@@ -114,7 +121,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $offset += $size;
 
             try {
-                $batchRaw = $this->decideCandidateBatch(
+                $batchResults[] = $this->decideAndParseCandidateBatch(
                     $sourceMeta,
                     $sourceText,
                     $indexContext,
@@ -125,7 +132,6 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                     $figureCandidates,
                     $context,
                 );
-                $batchResults[] = EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($batchRaw);
             } catch (Throwable $e) {
                 throw new EnterpriseWikiMaintainerDecisionBatchFailedException(
                     $batchIndex + 1,
@@ -223,6 +229,74 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             )),
             $context,
         );
+    }
+
+    /**
+     * One batch call plus its schema parse, with a single bounded retry for CORRUPTED RESPONSE TEXT
+     * only.
+     *
+     * The corruption guard (run 34) rejects a response whose text carries raw control bytes where
+     * characters belong — a transmission fault in the model's own output, not a planning mistake,
+     * and one no amount of re-prompting logic can reason about. Today that fault fails one batch and
+     * the batch failure aborts the entire decision: six or more good calls discarded because one
+     * response came back with a corrupted byte in a candidate name. Retrying that ONE call is both
+     * the cheapest and the only meaningful response.
+     *
+     * Deliberately narrow, and deliberately not a general "retry on invalid decision": every other
+     * schema violation is a real contract violation that a retry would only repeat, so it propagates
+     * untouched, exactly as before.
+     *
+     * @param  array<string, mixed>  $globalPlan
+     * @param  list<array<string, mixed>>  $batchMentions
+     * @return array<string, mixed>
+     */
+    private function decideAndParseCandidateBatch(
+        array $sourceMeta,
+        string $sourceText,
+        array $indexContext,
+        string $languageName,
+        array $globalPlan,
+        array $batchMentions,
+        int $batchIndex,
+        array $figureCandidates = [],
+        ?AiCallContext $context = null,
+        array $sourceElements = [],
+    ): array {
+        $lastFailure = null;
+
+        for ($attemptNumber = 1; $attemptNumber <= self::MAX_CORRUPTED_RESPONSE_ATTEMPTS; $attemptNumber++) {
+            $raw = $this->decideCandidateBatch(
+                $sourceMeta,
+                $sourceText,
+                $indexContext,
+                $languageName,
+                $globalPlan,
+                $batchMentions,
+                $batchIndex,
+                $figureCandidates,
+                $context,
+                $sourceElements,
+            );
+
+            try {
+                return EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($raw);
+            } catch (\InvalidArgumentException $e) {
+                if (! EnterpriseWikiMaintainerDecisionPrompt::isCorruptedTextFailure($e->getMessage())) {
+                    throw $e;
+                }
+
+                $lastFailure = $e;
+
+                Log::warning('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Batch response text was corrupted — retrying this batch once.', [
+                    'batch_number' => $batchIndex + 1,
+                    'candidates' => count($batchMentions),
+                    'run_id' => $context?->runId,
+                    'reason' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        throw $lastFailure ?? new \InvalidArgumentException('Invalid maintainer decision candidate batch.');
     }
 
     /**
@@ -344,6 +418,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '  Zero or more. action "create" + page_id null: entity does not exist yet.',
             '  action "update" + integer page_id: entity page exists; use its ID from the index.',
             '',
+            ...EnterpriseWikiMaintainerDecisionAiClient::existingPageSlotRules(),
+            '',
             ...EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules(),
             '',
             'no_action_reason: set if the source is empty, a duplicate, or should not produce a page.',
@@ -388,9 +464,23 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             ...$this->conceptCandidateDecisionCriteriaLines(),
             '',
+            'A candidate decided "reuse" references the EXISTING page that covers it through the slot for',
+            'that page\'s own type — concept_pages for a "concept" page, entity_pages for an "entity" page',
+            '(the wiki index shows each page\'s type). Never move an existing page into the other slot.',
+            '',
+            ...EnterpriseWikiMaintainerDecisionAiClient::existingPageSlotRules(),
+            '',
             'For each candidate decided "create", add a matching entry to concept_pages (action "create",',
-            'page_id null, proposed_slug, reason, and a short owned_topics/reference_only_topics/',
+            'page_id null, proposed_slug, reason, and owned_topics/reference_only_topics/',
             'excluded_topics/related_page_guidance — same rules as any other concept page).',
+            '',
+            // The batch is where concept pages are actually created, so it needs the WHOLE
+            // responsibility policy, not a one-line reference to it. Carrying only the evidence half
+            // here is what the first runtime verification of this contract exposed: told to bind
+            // every owned topic but never told that a page must own topics at all, the model created
+            // 14 concept pages with no owned_topics whatsoever — technically valid, and pages with no
+            // scope. Both halves, in the same prompt, always.
+            ...$this->pageResponsibilityInstructionLines(),
             '',
             ...EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules(),
             '',
@@ -418,6 +508,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         return [
             'PAGE RESPONSIBILITY (owned_topics / reference_only_topics / excluded_topics / related_page_guidance):',
             '  Three tiers, not a single list:',
+            ...EnterpriseWikiMaintainerDecisionAiClient::ownedTopicEvidenceRules(),
             '  owned_topics: what THIS page, and only this page, explains in depth. Keep it SHORT and',
             '  proportional to what the source document itself actually supports — typically 1-3 items.',
             '  reference_only_topics: topics this page may mention in passing (at most one short',
@@ -499,11 +590,14 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'When two candidates are near-duplicates or heavily overlapping, decide "create" for at most',
             'one of them and "reuse"/"reference_only" (naming the kept one as owning_page_title) for the',
             'rest — never create separate pages for both.',
-            'Consistency requirement: if a candidate is "reference_only" or "exclude" AND',
-            'necessary_for_article is true, you MUST name a page in owning_page_title that either already',
-            'exists in the wiki index, is one of the ALREADY PLANNED PAGES FROM PHASE 1 below, or is',
-            'itself created by another candidate in THIS batch — if no such page can be named, reconsider',
-            'and decide "create" instead.',
+            'Consistency requirement: a candidate decided "reference_only" MUST name a page in',
+            'owning_page_title that either already exists in the wiki index, is an entity page planned in',
+            'phase 1, or is itself created by another candidate in THIS batch. source_article and',
+            'source_summary are never valid owning pages — they describe the document, not the subject',
+            'matter. When the topic is only explained by this document and no concept/entity page owns it',
+            '(a local role, threshold, figure, log or procedure step), decide "exclude" instead: its',
+            'content belongs in the article\'s own text. If it genuinely is a reusable concept with no',
+            'owner yet, decide "create".',
             'KEEP FREE-TEXT FIELDS SHORT — this is a planning decision, not a report:',
             '  independent_reason: ONE short sentence (roughly 15 words or fewer).',
             '  mentioned_context: a short phrase naming WHERE it is mentioned — never a quote.',
@@ -567,8 +661,18 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
             '',
-            'ALREADY PLANNED PAGES FROM PHASE 1 (do not redecide these; they are valid owning pages):',
+            // The source article/summary are shown so a batch knows they exist and does not plan a
+            // duplicate — NOT as owning-page targets. Calling them "valid owning pages" here is
+            // exactly what made run 51 unrepairable: 15 of its 21 validation issues were candidates
+            // pointing owning_page_title at the source article, which
+            // EnterpriseWikiMaintainerDecisionConsistencyValidator rejects by design (an article
+            // describes the document, never owns the subject matter). The prompt and the validator
+            // now state one and the same policy.
+            'ALREADY PLANNED PAGES FROM PHASE 1 (do not redecide these):',
             (string) json_encode($plannedPages, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'Only the entity_pages above are valid owning_page_title targets, together with the pages in',
+            'the wiki index and any page created by a candidate in THIS batch. source_article and',
+            'source_summary are NEVER valid as owning_page_title.',
             '',
             'CANDIDATES TO DECIDE IN THIS BATCH ('.count($batchMentions).'):',
             (string) json_encode($batchMentions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),

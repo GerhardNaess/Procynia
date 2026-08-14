@@ -133,6 +133,56 @@ return [
         ],
 
         /*
+        |--------------------------------------------------------------------------
+        | Bounded maintainer-decision repair (delta)
+        |--------------------------------------------------------------------------
+        |
+        | Sizes one delta-repair call (EnterpriseWikiMaintainerDecisionAiClient::repairGroup()):
+        | the model returns only the corrected objects of ONE attributed repair group, never the
+        | decision. Deliberately its own operation profile rather than a reuse of the decision
+        | profile above — run 51 failed precisely because repair inherited a budget derived from
+        | the SOURCE DOCUMENT's size (its 60 000-character prompt computed a 15 985-token need,
+        | clamped to 9 000) while being asked for a 31 599-character decision. Here the estimate
+        | follows the number of repaired objects instead, and the input term is small because a
+        | longer source document does not make a two-object fix any bigger.
+        |
+        */
+        'enterprise_wiki_maintainer_decision_repair' => [
+            'base_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_REPAIR_BASE_TOKENS', 400),
+
+            // Measured, not guessed: in run 51's decision a concept candidate serialised to 545
+            // characters and a concept page to 611 (~160-180 tokens each), and a removal costs
+            // almost nothing. 260 keeps real headroom on top of that before the profile's own 35 %
+            // safety margin is applied. An inflated figure here is not "safe" — it shrinks how many
+            // objects one repair may carry and pushes ordinary consolidation faults over the cliff.
+            'tokens_per_result_object' => (int) env('AI_CAPACITY_WIKI_REPAIR_PER_OBJECT_TOKENS', 260),
+            'tokens_per_input_chars_unit' => (int) env('AI_CAPACITY_WIKI_REPAIR_INPUT_TOKENS', 10),
+            'input_chars_per_unit' => (int) env('AI_CAPACITY_WIKI_REPAIR_INPUT_CHARS_PER_UNIT', 800),
+            'reasoning_token_buffer' => (int) env('AI_CAPACITY_WIKI_REPAIR_REASONING_BUFFER', 1500),
+            'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_REPAIR_MIN_TOKENS', 1200),
+            'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_REPAIR_SAFETY_MARGIN', 0.35),
+            'retry_multiplier' => (float) env('AI_CAPACITY_WIKI_REPAIR_RETRY_MULTIPLIER', 1.6),
+            'max_output_tokens' => (int) env('AI_CAPACITY_WIKI_REPAIR_MAX_TOKENS', 9000),
+            'max_capacity_retries' => (int) env('AI_CAPACITY_WIKI_REPAIR_MAX_RETRIES', 1),
+
+            /*
+            | How repair groups are packed into calls. A repair call carries N objects, so it uses
+            | the same "N items in one call" arithmetic as the split flow's candidate batches
+            | (EnterpriseWikiAiCapacityPlanner::maxItemsPerBatch()). tokens_per_candidate is the
+            | full corrected object — a page entry with owned_topics, related_page_guidance and
+            | planned_figures is the largest of them, hence the deliberately generous figure.
+            */
+            'batch' => [
+                'batch_overhead_tokens' => (int) env('AI_CAPACITY_WIKI_REPAIR_BATCH_OVERHEAD_TOKENS', 400),
+                'tokens_per_candidate' => (int) env('AI_CAPACITY_WIKI_REPAIR_BATCH_TOKENS_PER_OBJECT', 260),
+                'safety_margin_ratio' => (float) env('AI_CAPACITY_WIKI_REPAIR_BATCH_SAFETY_MARGIN', 0.35),
+                'minimum_output_tokens' => (int) env('AI_CAPACITY_WIKI_REPAIR_BATCH_MIN_TOKENS', 1200),
+                'max_candidates_per_batch' => (int) env('AI_CAPACITY_WIKI_REPAIR_MAX_OBJECTS_PER_CALL', 12),
+                'min_candidates_per_batch' => (int) env('AI_CAPACITY_WIKI_REPAIR_MIN_OBJECTS_PER_CALL', 1),
+            ],
+        ],
+
+        /*
         |----------------------------------------------------------------
         | Wiki page content (generation, figure repair, section repair)
         |----------------------------------------------------------------
