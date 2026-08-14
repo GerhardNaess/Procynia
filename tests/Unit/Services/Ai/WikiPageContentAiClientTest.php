@@ -188,7 +188,9 @@ class WikiPageContentAiClientTest extends TestCase
         $developerPrompt = $this->developerPromptTextFromPayload($payload);
 
         $this->assertStringContainsString('target_page_id', $developerPrompt);
-        $this->assertStringContainsString('{{wiki_link:intent_id|visible anchor}}', $developerPrompt);
+        // The model names the words to link; it never writes the syntax (run 59).
+        $this->assertStringContainsString('anchor_text', $developerPrompt);
+        $this->assertStringNotContainsString('{{wiki_link:', $developerPrompt);
         $this->assertStringContainsString('never write a target slug', mb_strtolower($developerPrompt));
     }
 
@@ -387,7 +389,8 @@ class WikiPageContentAiClientTest extends TestCase
 
             $this->assertStringContainsString('INLINE WIKILINK INTENTS', $developerPrompt, "page type: {$pageType}");
             $this->assertStringContainsString('target_page_id', $developerPrompt, "page type: {$pageType}");
-            $this->assertStringContainsString('{{wiki_link:intent_id|natural visible text}}', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('anchor_text copied verbatim', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringNotContainsString('{{wiki_link:', $developerPrompt, "page type: {$pageType}");
         }
     }
 
@@ -397,7 +400,7 @@ class WikiPageContentAiClientTest extends TestCase
 
         $schema = $payload['text']['format']['schema'];
 
-        $this->assertSame(['page'], $schema['required']);
+        $this->assertSame(['page', 'best_practice_review'], $schema['required']);
         $this->assertSame(['blocks'], $schema['properties']['page']['required']);
         $blockSchema = $schema['properties']['page']['properties']['blocks']['items'];
         $this->assertSame([
@@ -424,7 +427,7 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertSame('integer', $targetPageIdSchema['type']);
         $this->assertSame([201, 202], $targetPageIdSchema['enum']);
         $intentSchema = data_get($payload, 'text.format.schema.properties.page.properties.blocks.items.properties.link_intents.items');
-        $this->assertSame(['intent_id', 'target_page_id', 'reason'], $intentSchema['required']);
+        $this->assertSame(['intent_id', 'target_page_id', 'anchor_text', 'reason'], $intentSchema['required']);
         $this->assertSame('^[A-Za-z0-9_-]+$', $intentSchema['properties']['intent_id']['pattern']);
     }
 

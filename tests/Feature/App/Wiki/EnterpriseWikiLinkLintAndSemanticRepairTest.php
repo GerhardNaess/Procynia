@@ -110,6 +110,9 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
             'artikkel',
             'Artikkel',
             EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            // The retired marker syntax. Generation can no longer produce it — the model writes no
+            // link syntax at all — but the lint remains the last line of defence for anything
+            // already persisted or written by hand.
             'See {{wiki_link:intent-1|the target}} here.',
         );
         $run = $this->createAppliedRun($customer, $document, [$article]);

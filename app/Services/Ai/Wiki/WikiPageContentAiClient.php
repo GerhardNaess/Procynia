@@ -696,7 +696,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. structural is for a pure "Se også"/cross-reference one-liner with no assertion of its own; best_practice requires a concrete obligation, control, or mechanism that goes beyond the source, never a bare heading or reference.',
-            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker where the link belongs. Never write [[...]] markup or a slug yourself.',
+            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and set anchor_text to the exact words in this block\'s markdown the link should sit on. Write no link syntax at all — no [[...]], no slug, no marker: the server inserts the link on those words.',
             'Write every block as finished agreement text, exactly as the rest of the page: a best_practice block states its clause normatively ("skal ...") and never as advice — no "Procynia anbefaler", "det anbefales", "beste praksis tilsier", or any equivalent advisory opener, and no "fordi ..." justification in the text itself. The justification belongs in best_practice_reason.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
@@ -802,7 +802,7 @@ class WikiPageContentAiClient
         $parts[] = '';
 
         if ($linkCatalog !== []) {
-            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker in markdown; do not write [[...]] markup or a slug.';
+            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and an anchor_text copied verbatim from your own markdown for this block; write no link syntax yourself.';
             $parts[] = '';
             $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
@@ -1041,7 +1041,7 @@ class WikiPageContentAiClient
             '- No mention of AI generation, confidence levels, or approval status',
             '',
             'Every ordinary content block must explicitly choose content_origin: source_based, best_practice, or structural — for source_based blocks, copy exact source_element_keys from SOURCE ELEMENTS. Keep every existing block\'s own content_origin unchanged unless you are correcting it.',
-            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker where the link belongs. Never write [[...]] markup or a slug yourself.',
+            'For a useful Wiki cross-reference, add a link_intent selecting an allowed target_page_id and set anchor_text to the exact words in this block\'s markdown the link should sit on. Write no link syntax at all — no [[...]], no slug, no marker: the server inserts the link on those words.',
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
@@ -1114,7 +1114,7 @@ class WikiPageContentAiClient
         $parts[] = '';
 
         if ($linkCatalog !== []) {
-            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and place exactly one {{wiki_link:intent_id|visible anchor}} marker in markdown; do not write [[...]] markup or a slug.';
+            $parts[] = 'Choose target_page_id only from this catalog when a visible link is useful. Give the intent an intent_id and an anchor_text copied verbatim from your own markdown for this block; write no link syntax yourself.';
             $parts[] = '';
             $parts[] = (string) json_encode($linkCatalog, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } else {
@@ -1243,7 +1243,7 @@ class WikiPageContentAiClient
             '- assessment: ONE short sentence, required in both cases. For false, say what the source already covers that makes a recommendation unnecessary. For true, say what is missing. Never a generic sentence that would fit any document.',
             '- best_practice_review is review metadata for a human reviewer. It is never rendered as page text, never part of any block, and never a substitute for writing the clause itself.',
             '',
-            'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful. For every intent, choose an intent_id and target_page_id from ALLOWED WIKILINK TARGETS, then put exactly one {{wiki_link:intent_id|visible anchor}} marker at the natural location in this block\'s markdown. Never write [[...]] Wiki markup yourself: the server materializes the link.',
+            'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful. For every intent, choose an intent_id and a target_page_id from ALLOWED WIKILINK TARGETS, and set anchor_text to the exact words in this block\'s markdown the link belongs on — copied character for character from what you wrote, and appearing there naturally as ordinary prose. Never write [[...]], a slug, or any link marker yourself: the server inserts the canonical link on those words.',
         ]);
 
         $responsibilityRules = implode("\n", [
@@ -1286,7 +1286,7 @@ class WikiPageContentAiClient
         $wikilinkRules = implode("\n", [
             'INLINE WIKILINK INTENTS:',
             '- content_markdown is wiki content — identify useful visible cross-references through link_intents, not through [[...]] markup.',
-            '- For each useful link, add one link_intent with a unique intent_id, the exact target_page_id from the "ALLOWED WIKILINK TARGETS" list, and a concise reason. Put its visible anchor and placement exactly once in markdown as {{wiki_link:intent_id|natural visible text}}.',
+            '- For each useful link, add one link_intent with a unique intent_id, the exact target_page_id from the "ALLOWED WIKILINK TARGETS" list, an anchor_text copied verbatim from this block\'s markdown, and a concise reason. The markdown itself contains no link syntax — write the sentence naturally and name the words to link in anchor_text.',
             '- Never write a target slug, [[...]] markup, or a page identifier not listed in the allowed target list. The server owns target identity, canonical slug, and link syntax.',
             '- Select the first or most natural occurrence of a concept or entity for the marker — do not repeat the same link for every mention.',
             '- Only link semantically important concepts and entities that the text is actually about — do not link generic words.',
@@ -1501,9 +1501,17 @@ class WikiPageContentAiClient
                         'properties' => [
                             'intent_id' => ['type' => 'string', 'pattern' => '^[A-Za-z0-9_-]+$'],
                             'target_page_id' => $targetPageIdSchema,
+                            // The visible words the link is placed on, quoted verbatim from this
+                            // block's own markdown. Run 59 failed because the anchor used to live in
+                            // a delimited marker the model had to write into free text
+                            // ({{wiki_link:id|anchor}}): an anchor containing a pipe or a brace, or
+                            // an intent id carrying a Norwegian letter, produced a token the backend
+                            // could not parse and the whole page — and with it the run — failed. A
+                            // structured field cannot be malformed; the backend owns the syntax.
+                            'anchor_text' => ['type' => 'string', 'minLength' => 1],
                             'reason' => ['type' => 'string'],
                         ],
-                        'required' => ['intent_id', 'target_page_id', 'reason'],
+                        'required' => ['intent_id', 'target_page_id', 'anchor_text', 'reason'],
                         'additionalProperties' => false,
                     ],
                 ],

@@ -10,15 +10,31 @@ use Illuminate\Support\Facades\Log;
 /**
  * Turns AI-selected, catalog-scoped page identities into canonical Wiki markdown.
  *
- * A link's target is selected only in structured output. Its visible anchor and placement are
- * written once as {{wiki_link:intent-id|visible anchor}} in the block markdown, so the backend
- * never has to guess whether a separately returned anchor string matches the generated prose.
+ * THE MODEL WRITES NO LINK SYNTAX. It returns prose, and a structured intent naming the target page
+ * and the exact words in that prose the link belongs on. Everything with a delimiter in it — the
+ * brackets, the pipe, the canonical slug — is written here.
+ *
+ * That division is the fix for run 59. The anchor and its placement used to be expressed by a
+ * {{wiki_link:intent-id|visible anchor}} marker the model had to construct inside free text, where
+ * no schema reaches: an anchor containing a pipe or a brace, or an intent id carrying a Norwegian
+ * letter (the page was "Hendelseshåndtering (Incident Management)"), produced a token this class
+ * could not parse, and an unparseable token failed the page and the whole run. The same value had
+ * to be written twice — once in a schema-validated field and once as free text — and only one copy
+ * was validated. A structured field cannot be malformed, so that failure class is gone rather than
+ * guarded against.
+ *
+ * What is unchanged, deliberately: page identity is server-authoritative (target_page_id must be in
+ * the run's catalog), the slug is always the stored canonical one, and unknown/self/cross-customer
+ * targets are hard rejections that fail the page. An intent whose anchor cannot be found is DROPPED
+ * with a log, never guessed at — the same treatment a valid intent with no marker already had.
  */
 class EnterpriseWikiLinkIntentMaterializer
 {
-    private const MARKER_PREFIX = '{{wiki_link:';
-
-    private const MARKER_PATTERN = '/\{\{wiki_link:([A-Za-z0-9_-]+)\|([^{}|]+)\}\}/u';
+    /**
+     * The retired marker syntax. Kept only as something to REJECT: raw internal syntax must never
+     * reach a persisted page, whatever a model decides to write.
+     */
+    private const RETIRED_MARKER_PREFIX = '{{wiki_link:';
 
     public function __construct(
         private readonly EnterpriseWikiLinkParser $linkParser,
@@ -46,83 +62,127 @@ class EnterpriseWikiLinkIntentMaterializer
                 $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'link_intents was not an array');
             }
 
-            if ($intents === []) {
-                if (str_contains($markdown, self::MARKER_PREFIX)) {
-                    $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'wikilink marker had no structured link intent');
-                }
+            // No model may emit the retired marker syntax, with or without intents behind it.
+            if (str_contains($markdown, self::RETIRED_MARKER_PREFIX)) {
+                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'markdown contained retired internal wikilink marker syntax');
+            }
 
+            if ($intents === []) {
                 continue;
             }
 
             $resolvedIntents = $this->validateIntents($run, $sourcePage, $intents, $catalogByPageId);
+
+            // Model-authored [[...]] markup is neutralised BEFORE anchors are placed: its target is
+            // discarded (only this class may choose a slug) and its visible text becomes ordinary
+            // prose, which an intent may then legitimately anchor on.
             [$markdown, $legacyAnchors] = $this->replaceModelAuthoredWikilinksWithTokens($markdown, $blockIndex);
-            $markerCount = preg_match_all(self::MARKER_PATTERN, $markdown, $markerMatches, PREG_SET_ORDER);
+            $markdown = strtr($markdown, $legacyAnchors);
 
-            if ($markerCount === false || substr_count($markdown, self::MARKER_PREFIX) !== $markerCount) {
-                $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'wikilink marker syntax was malformed');
-            }
-
-            $usedIntentIds = [];
-            $replacements = [];
             $materializedIntents = [];
 
-            foreach ($markerMatches as $marker) {
-                $intentId = $marker[1];
-                $anchorText = trim($marker[2]);
+            foreach ($resolvedIntents as $intentId => $resolvedIntent) {
+                $anchorText = trim((string) ($resolvedIntent['intent']['anchor_text'] ?? ''));
 
-                if ($anchorText === '' || ! isset($resolvedIntents[$intentId])) {
-                    $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'wikilink marker did not match a structured link intent');
+                if ($anchorText === '') {
+                    $this->reject($run, $sourcePage, $resolvedIntent['target_page']->id, $resolvedIntent['target_page']->slug, 'rejected_invalid_intent', 'link intent had no anchor_text');
                 }
 
-                if (isset($usedIntentIds[$intentId])) {
-                    $this->reject($run, $sourcePage, null, null, 'rejected_invalid_intent', 'structured link intent appeared in more than one marker');
-                }
+                $offset = $this->firstPlaceableOccurrence($markdown, $anchorText);
 
-                $resolvedIntent = $resolvedIntents[$intentId];
-                $replacements[$marker[0]] = "[[{$resolvedIntent['target_page']->slug}|{$anchorText}]]";
-                $usedIntentIds[$intentId] = true;
-                $materializedIntents[] = $resolvedIntent['intent'];
-                $this->logMaterialized($run, $sourcePage, $resolvedIntent['target_page']);
-            }
+                if ($offset === null) {
+                    // Not a safety failure: the target was valid, the words to carry it were not
+                    // found in the prose. Dropping the link keeps the page truthful; inventing a
+                    // position for it would not.
+                    Log::info('[WIKI_LINK_MATERIALIZATION] Valid AI link intent was not materialized.', [
+                        'run_id' => $run->id,
+                        'source_page_id' => $sourcePage->id,
+                        'selected_target_page_id' => $resolvedIntent['target_page']->id,
+                        'canonical_target_slug' => $resolvedIntent['target_page']->slug,
+                        'outcome' => 'skipped_anchor_not_found',
+                    ]);
 
-            // One legacy free Markdown link remains a narrowly compatible anchor source for one
-            // otherwise valid intent. Its target slug is discarded completely; only the visible
-            // anchor is reused, so the structured target_page_id remains authoritative.
-            $unmaterializedIntentIds = array_values(array_diff(array_keys($resolvedIntents), array_keys($usedIntentIds)));
-            if (count($unmaterializedIntentIds) === 1 && count($legacyAnchors) === 1) {
-                $intentId = $unmaterializedIntentIds[0];
-                $resolvedIntent = $resolvedIntents[$intentId];
-                $legacyToken = array_key_first($legacyAnchors);
-                $anchorText = $legacyAnchors[$legacyToken];
-                $replacements[$legacyToken] = "[[{$resolvedIntent['target_page']->slug}|{$anchorText}]]";
-                $usedIntentIds[$intentId] = true;
-                $materializedIntents[] = $resolvedIntent['intent'];
-                $this->logMaterialized($run, $sourcePage, $resolvedIntent['target_page']);
-            }
-
-            foreach ($legacyAnchors as $legacyToken => $anchorText) {
-                $replacements[$legacyToken] ??= $anchorText;
-            }
-
-            foreach (array_keys($resolvedIntents) as $intentId) {
-                if (isset($usedIntentIds[$intentId])) {
                     continue;
                 }
 
-                Log::info('[WIKI_LINK_MATERIALIZATION] Valid AI link intent was not materialized.', [
-                    'run_id' => $run->id,
-                    'source_page_id' => $sourcePage->id,
-                    'selected_target_page_id' => $resolvedIntents[$intentId]['target_page']->id,
-                    'canonical_target_slug' => $resolvedIntents[$intentId]['target_page']->slug,
-                    'outcome' => 'skipped_missing_marker',
-                ]);
+                $canonical = "[[{$resolvedIntent['target_page']->slug}|{$anchorText}]]";
+                $markdown = substr_replace($markdown, $canonical, $offset, strlen($anchorText));
+
+                $materializedIntents[] = $resolvedIntent['intent'];
+                $this->logMaterialized($run, $sourcePage, $resolvedIntent['target_page']);
             }
 
-            $blocks[$blockIndex]['markdown'] = strtr($markdown, $replacements);
+            $blocks[$blockIndex]['markdown'] = $markdown;
             $blocks[$blockIndex]['link_intents'] = array_values($materializedIntents);
         }
 
         return $blocks;
+    }
+
+    /**
+     * The first byte offset where $anchorText can be wrapped in a link without nesting it inside an
+     * existing one.
+     *
+     * Existing link spans are recomputed from the CURRENT markdown on every call, so a link this
+     * loop just inserted protects itself with no offset bookkeeping — and so does a plain Markdown
+     * link the model wrote on its own. Without that, an anchor occurring inside `[Servicedesk](…)`
+     * would be wrapped in place and produce `[[[slug|Servicedesk]](…)`: syntactically broken output
+     * from a perfectly valid intent, which is the same class of failure this whole change removes.
+     *
+     * First occurrence, not "the only occurrence": which mention of a phrase carries the link is a
+     * matter of convention (the first one), never of correctness — the target is authoritative
+     * either way. Exact substring only; nothing here normalises case, whitespace or accents, so
+     * "Hendelseshåndtering" never silently matches "hendelseshandtering".
+     */
+    private function firstPlaceableOccurrence(string $markdown, string $anchorText): ?int
+    {
+        $protected = $this->linkRanges($markdown);
+        $offset = 0;
+
+        while (($found = strpos($markdown, $anchorText, $offset)) !== false) {
+            $end = $found + strlen($anchorText);
+            $overlaps = false;
+
+            foreach ($protected as [$start, $stop]) {
+                if ($found < $stop && $end > $start) {
+                    $overlaps = true;
+
+                    break;
+                }
+            }
+
+            if (! $overlaps) {
+                return $found;
+            }
+
+            $offset = $found + 1;
+        }
+
+        return null;
+    }
+
+    /**
+     * Byte ranges of every link construct in the markdown — canonical wikilinks and the ordinary
+     * Markdown links a model sometimes writes anyway. Structural, not semantic: this only says
+     * "these characters are already part of a link".
+     *
+     * @return list<array{0: int, 1: int}>
+     */
+    private function linkRanges(string $markdown): array
+    {
+        $ranges = [];
+
+        foreach (['/\[\[[^\]]*\]\]/u', '/\[[^\]]*\]\([^)]*\)/u'] as $pattern) {
+            if (preg_match_all($pattern, $markdown, $matches, PREG_OFFSET_CAPTURE) === false) {
+                continue;
+            }
+
+            foreach ($matches[0] as [$text, $offset]) {
+                $ranges[] = [$offset, $offset + strlen($text)];
+            }
+        }
+
+        return $ranges;
     }
 
     /**

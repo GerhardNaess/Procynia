@@ -125,9 +125,10 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
 
         $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
-        $this->mockAiResponse("# {$concept->title}\n\n{{wiki_link:improvement-link|Operational Improvement}} is relevant.", [[
+        $this->mockAiResponse("# {$concept->title}\n\nOperational Improvement is relevant.", [[
             'intent_id' => 'improvement-link',
             'target_page_id' => $article->id,
+            'anchor_text' => 'Operational Improvement',
             'reason' => 'Points to the page that owns the operational improvement process.',
         ]]);
 
@@ -146,9 +147,12 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $target = $this->createPage($customer, 'service-improvement-f93a12', 'Service Improvement');
         $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
 
+        // The model wrote its own [[...]] markup with a guessed slug. Its target is discarded and
+        // only the visible words survive, which the structured intent then anchors on.
         $this->mockAiResponse("# {$generated->title}\n\nSee [[service-improvement|Service Improvement]].", [[
             'intent_id' => 'service-improvement-link',
             'target_page_id' => $target->id,
+            'anchor_text' => 'Service Improvement',
             'reason' => 'References the owning page.',
         ]]);
 
@@ -171,6 +175,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->mockAiResponse("# {$generated->title}\n\nUnknown target.", [[
             'intent_id' => 'unknown-target',
             'target_page_id' => 999999,
+            'anchor_text' => 'Unknown target',
             'reason' => 'Invalid target identity.',
         ]]);
 
@@ -216,7 +221,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->assertGenerationFails($run, $generated);
     }
 
-    public function test_valid_intent_without_a_marker_is_dropped_without_changing_prose(): void
+    public function test_valid_intent_whose_anchor_is_absent_is_dropped_without_changing_prose(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -227,7 +232,8 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->mockAiResponse("# {$generated->title}\n\nThe service improvement process is reviewed monthly.", [[
             'intent_id' => 'service-improvement-link',
             'target_page_id' => $target->id,
-            'reason' => 'The link could not be placed by the model.',
+            'anchor_text' => 'a phrase that is not in the prose',
+            'reason' => 'The anchor does not occur in the block.',
         ]]);
 
         Queue::fake();
@@ -239,7 +245,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->assertSame([], $version->content_blocks_json[0]['link_intents']);
     }
 
-    public function test_unknown_wikilink_marker_is_rejected_before_persistence(): void
+    public function test_retired_marker_syntax_is_rejected_before_persistence(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -247,10 +253,12 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $target = $this->createPage($customer, 'target-page', 'Target Page');
         $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
 
+        // Run 59's shape: the retired marker never reaches a page, whatever the model writes.
         $this->mockAiResponse("# {$generated->title}\n\n{{wiki_link:not-listed|Target Page}} is relevant.", [[
             'intent_id' => 'listed-link',
             'target_page_id' => $target->id,
-            'reason' => 'Marker identity is invalid.',
+            'anchor_text' => 'Target Page',
+            'reason' => 'Internal syntax must never be persisted.',
         ]]);
 
         Queue::fake();
