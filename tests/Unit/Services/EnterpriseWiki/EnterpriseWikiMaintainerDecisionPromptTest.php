@@ -915,9 +915,14 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $props = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['properties'];
         $mentionSchema = $props['concept_candidate_mentions']['items'];
 
-        $this->assertSame(['name', 'concept_type', 'mentioned_context'], $mentionSchema['required']);
+        // section_keys is ROUTING metadata (which sections phase 2 needs in full text), not a
+        // disposition — phase 1 stays an orientation step. The dispositional fields are what must
+        // never appear here.
+        $this->assertSame(['name', 'concept_type', 'mentioned_context', 'section_keys'], $mentionSchema['required']);
         $this->assertArrayNotHasKey('decision', $mentionSchema['properties']);
         $this->assertArrayNotHasKey('justification', $mentionSchema['properties']);
+        $this->assertArrayNotHasKey('owning_page_title', $mentionSchema['properties']);
+        $this->assertArrayNotHasKey('source_element_keys', $mentionSchema['properties'], 'evidence binding stays in phase 2');
     }
 
     public function test_global_plan_schema_reuses_the_same_source_page_shape_as_the_full_schema(): void

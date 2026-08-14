@@ -212,8 +212,16 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'name' => ['type' => 'string'],
                 'concept_type' => ['type' => 'string'],
                 'mentioned_context' => ['type' => 'string'],
+                // CONTEXT ROUTING, and nothing more (see EnterpriseWikiDocumentSectionMap): the
+                // section keys where this candidate appears, so the backend can give phase 2 those
+                // sections in full text instead of the whole document. Phase A stays an orientation
+                // step — it says WHERE it saw the candidate, never what the candidate's evidence is
+                // or what page should own it. A candidate legitimately spans several sections, so
+                // this is a list; an empty list means "could not be placed", and the backend then
+                // falls back to the complete catalog rather than guessing.
+                'section_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
             ],
-            'required' => ['name', 'concept_type', 'mentioned_context'],
+            'required' => ['name', 'concept_type', 'mentioned_context', 'section_keys'],
             'additionalProperties' => false,
         ];
 
@@ -1044,7 +1052,30 @@ class EnterpriseWikiMaintainerDecisionPrompt
             $errors = array_merge($errors, self::validateNoControlCharacters($entry[$field], "{$ctx}.{$field}"));
         }
 
+        // section_keys is routing metadata, not a decision: absent (a stored plan predating it) or
+        // empty means "not routable", which the backend answers with the full catalog. Only a
+        // malformed shape is an error.
+        if (array_key_exists('section_keys', $entry) && ! is_array($entry['section_keys'])) {
+            $errors[] = "{$ctx}.section_keys must be an array of section keys.";
+        }
+
         return $errors;
+    }
+
+    /**
+     * The section keys a mention routes to, normalised. Unknown or malformed values are dropped
+     * here; EnterpriseWikiMaintainerDecisionSplitCoordinator treats "no resolvable section" as
+     * "send the whole catalog", so a bad key can never silently shrink a batch's context.
+     *
+     * @param  array<string, mixed>  $mention
+     * @return list<string>
+     */
+    public static function mentionSectionKeys(array $mention): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            static fn (mixed $key): string => is_string($key) ? trim($key) : '',
+            (array) ($mention['section_keys'] ?? []),
+        ), static fn (string $key): bool => $key !== '')));
     }
 
     /** @return string[] */

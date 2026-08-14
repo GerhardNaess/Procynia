@@ -12,6 +12,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPlanningContext;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -289,7 +290,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')
             ->once()
-            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $group) use ($inconsistent): bool {
+            ->withArgs(function (EnterpriseWikiPlanningContext $planning, string $languageCode, array $decision, array $group) use ($inconsistent): bool {
                 return $decision === $inconsistent
                     && $group['object_ids'] === ['source_article']
                     && str_contains(implode(' ', $group['issues']), 'ITIL Incident Management');
@@ -352,7 +353,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('repairGroup')
             ->once()
             ->andReturnUsing(function (...$args) use (&$captured): array {
-                $captured = $args[5];
+                $captured = $args[3];
 
                 // The correct resolution: the entity page keeps its own slot, the concept claim goes.
                 return $this->delta([[
@@ -400,7 +401,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('repairGroup')
             ->once()
             ->andReturnUsing(function (...$args) use (&$captured, $ungrounded): array {
-                $captured = $args[5];
+                $captured = $args[3];
                 $page = $ungrounded['concept_pages'][0];
                 // The correct resolution: stop owning what the document does not cover.
                 $page['owned_topics'] = [$page['owned_topics'][0]];
@@ -452,7 +453,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('repairGroup')
             ->twice()
             ->andReturnUsing(function (...$args) use (&$rounds, $decision): array {
-                $group = $args[5];
+                $group = $args[3];
                 $rounds[] = $group['object_ids'];
 
                 // Round 1: demote the candidate and drop its page — correct for the reported issue,
@@ -600,7 +601,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('repairGroup')
             ->twice()
             ->andReturnUsing(function (...$args) use (&$seenGroups, $inconsistent): array {
-                $group = $args[5];
+                $group = $args[3];
                 $seenGroups[] = $group['object_ids'];
                 $index = (int) str_replace(['concept_candidates[', ']'], '', $group['object_ids'][0]);
 
@@ -663,7 +664,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('repairGroup')
             ->once()
             ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
-                $captured = $args[5]['issues'] ?? [];
+                $captured = $args[3]['issues'] ?? [];
 
                 return $this->delta([[
                     'collection' => 'patch_targets',
@@ -722,7 +723,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')
             ->once()
-            ->withArgs(function (array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $decision, array $group) use ($overfragmented): bool {
+            ->withArgs(function (EnterpriseWikiPlanningContext $planning, string $languageCode, array $decision, array $group) use ($overfragmented): bool {
                 // The candidate AND the page created for it: demoting one without dropping the
                 // other is not a valid fix, so both must be in the same bounded group.
                 return $decision === $overfragmented
@@ -901,13 +902,15 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $mock->shouldReceive('decide')
             ->once()
             ->andReturnUsing(
-                function (
-                    array $sourceMeta,
-                    string $sourceText,
-                    array $indexContext,
-                    string $languageCode,
-                ) use (&$captured): array {
-                    $captured = compact('sourceMeta', 'sourceText', 'indexContext', 'languageCode');
+                function (EnterpriseWikiPlanningContext $planning, string $languageCode) use (&$captured): array {
+                    // Every fact now arrives as one authoritative context object — the point of the
+                    // consolidation is that there is no separate argument left to forget.
+                    $captured = [
+                        'sourceMeta' => $planning->sourceMeta,
+                        'sourceText' => $planning->sourceText,
+                        'indexContext' => $planning->wikiIndex,
+                        'languageCode' => $languageCode,
+                    ];
 
                     return $this->validDecision();
                 }
@@ -946,7 +949,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $repaired): array {
-                $captured = $args[5]['issues'] ?? [];
+                $captured = $args[3]['issues'] ?? [];
 
                 return $this->patchTargetDelta($repaired);
             });
@@ -1010,7 +1013,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $page): array {
-                $captured = $args[5]['issues'] ?? [];
+                $captured = $args[3]['issues'] ?? [];
 
                 // A repair pass that can actually READ the clause copies an exact substring of it.
                 return $this->patchTargetDelta($this->decisionWithReplaceTarget($page->id, self::REAL_CLAUSE));
@@ -1091,7 +1094,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured): array {
-                $captured = $args[5]['issues'] ?? [];
+                $captured = $args[3]['issues'] ?? [];
 
                 throw new \RuntimeException('stop-after-capture');
             });
@@ -1139,7 +1142,7 @@ class EnterpriseWikiMaintainerDecisionServiceTest extends TestCase
         $this->allowRepairPacking($mock);
         $mock->shouldReceive('repairGroup')->once()
             ->andReturnUsing(function (...$args) use (&$captured, $page, $needed): array {
-                $captured = $args[5]['issues'] ?? [];
+                $captured = $args[3]['issues'] ?? [];
                 $repaired = $this->decisionWithReplaceTarget($page->id, $needed);
                 $repaired['patch_targets'][0]['target_page_type'] = EnterpriseWikiPage::PAGE_TYPE_SUMMARY;
                 $repaired['patch_targets'][0]['target_page_title'] = $page->title;

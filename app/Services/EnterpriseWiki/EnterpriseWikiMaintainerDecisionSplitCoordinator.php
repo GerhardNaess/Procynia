@@ -79,19 +79,14 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
      * @throws EnterpriseWikiMaintainerDecisionBatchFailedException
      */
     public function decide(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageCode,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
-        array $existingPageCandidates = [],
     ): array {
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $languageName, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
+        $globalPlanRaw = $this->decideGlobalPlan($planning, $languageName, $context);
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
 
         $mentions = $globalPlan['concept_candidate_mentions'];
@@ -122,14 +117,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
 
             try {
                 $batchResults[] = $this->decideAndParseCandidateBatch(
-                    $sourceMeta,
-                    $sourceText,
-                    $indexContext,
+                    $planning,
                     $languageName,
                     $globalPlan,
                     $batchMentions,
                     $batchIndex,
-                    $figureCandidates,
                     $context,
                 );
             } catch (Throwable $e) {
@@ -166,16 +158,15 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
      * @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>}
      */
     public function preparePersistedCandidateBatches(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageCode,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
     ): array {
         $context ??= AiCallContext::none();
+        // Identical phase-1 call to the in-process split flow above: same context object, same
+        // view. Passing fewer facts here is exactly the divergence this consolidation removes.
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(
-            $this->decideGlobalPlan($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $figureCandidates, $context),
+            $this->decideGlobalPlan($planning, $this->languageName($languageCode), $context),
         );
         $mentions = $globalPlan['concept_candidate_mentions'];
         $sizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::MODEL, count($mentions));
@@ -198,16 +189,21 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
 
     /** @return array<string, mixed> */
     private function decideGlobalPlan(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageName,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
-        array $existingPageCandidates = [],
     ): array {
-        $userPromptText = $this->globalPlanUserPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements, $existingPageCandidates);
+        // Phase A's view: the COMPLETE addressable catalog (it has to place every candidate and
+        // cite section keys), the section overview, the Wiki index and the figure candidates.
+        // Existing page candidates are deliberately not part of this view — see the class docblock.
+        $userPromptText = $this->globalPlanUserPrompt(
+            $planning->sourceMeta,
+            $planning->sourceText,
+            $planning->wikiIndex,
+            $planning->figureCandidates,
+            $planning->catalogElements,
+            [],
+        );
         $inputSizeChars = mb_strlen($userPromptText);
 
         return $this->capacityRetryExecutor->execute(
@@ -251,31 +247,23 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
      * @return array<string, mixed>
      */
     private function decideAndParseCandidateBatch(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageName,
         array $globalPlan,
         array $batchMentions,
         int $batchIndex,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
     ): array {
         $lastFailure = null;
 
         for ($attemptNumber = 1; $attemptNumber <= self::MAX_CORRUPTED_RESPONSE_ATTEMPTS; $attemptNumber++) {
             $raw = $this->decideCandidateBatch(
-                $sourceMeta,
-                $sourceText,
-                $indexContext,
+                $planning,
                 $languageName,
                 $globalPlan,
                 $batchMentions,
                 $batchIndex,
-                $figureCandidates,
                 $context,
-                $sourceElements,
             );
 
             try {
@@ -305,18 +293,25 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
      * @return array<string, mixed>
      */
     private function decideCandidateBatch(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageName,
         array $globalPlan,
         array $batchMentions,
         int $batchIndex,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
     ): array {
-        $userPromptText = $this->candidateBatchUserPrompt($sourceMeta, $sourceText, $indexContext, $globalPlan, $batchMentions, $figureCandidates, $sourceElements);
+        // Phase B's view: the sections THIS batch's own candidates were placed in, the section
+        // overview, the section-less elements, the index, phase 1's planned pages, its own mentions
+        // and the figure candidates. Never the whole catalog unless routing is not possible.
+        $userPromptText = $this->candidateBatchUserPrompt(
+            $planning->sourceMeta,
+            $planning->sourceText,
+            $planning->wikiIndex,
+            $globalPlan,
+            $batchMentions,
+            $planning->figureCandidates,
+            $planning->catalogElements,
+        );
         $inputSizeChars = mb_strlen($userPromptText);
         $candidateCount = count($batchMentions);
 
@@ -342,9 +337,17 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /** @return array<string,mixed> */
-    public function decidePersistedCandidateBatch(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $globalPlan, array $mentions, int $batchNumber, array $figureCandidates = [], ?AiCallContext $context = null, array $sourceElements = []): array
-    {
-        return $this->decideCandidateBatch($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $figureCandidates, $context, $sourceElements);
+    public function decidePersistedCandidateBatch(
+        EnterpriseWikiPlanningContext $planning,
+        string $languageCode,
+        array $globalPlan,
+        array $mentions,
+        int $batchNumber,
+        ?AiCallContext $context = null,
+    ): array {
+        // The queued batch and the in-process batch are still two implementations, but they are no
+        // longer two contexts: both go through decideCandidateBatch() with the same facts.
+        return $this->decideCandidateBatch($planning, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $context);
     }
 
     private function buildGlobalPlanPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
@@ -442,7 +445,15 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '  local label used only inside this document.',
             '  Each concept_candidate_mentions entry has ONLY: name, concept_type, mentioned_context (a',
             '  short phrase naming WHERE it is mentioned, e.g. "document title", "section 2" — never a',
-            '  quote or paraphrase of what the document says).',
+            '  quote or paraphrase of what the document says), and section_keys.',
+            '  section_keys: copy the [sec-N] keys shown on the SOURCE ELEMENTS section headings for',
+            '  every section this candidate actually appears in — one key when it belongs to a single',
+            '  section, several when the document genuinely treats it in more than one place. Copy them',
+            '  exactly and never invent one. This is ONLY used to decide which sections the next phase',
+            '  is shown in full text; it is not a decision about the candidate, and phase 2 still reads',
+            '  and judges the text itself. Leaving it empty is allowed and means "cannot place it" —',
+            '  that phase then simply receives the whole document, so an empty list costs context, it',
+            '  never loses it.',
             '  Do NOT decide create/reuse/reference_only/exclude here, and do NOT write',
             '  independent_reason, justification, existing_page_title, owning_page_title, or',
             '  necessary_for_article — those belong to the next phase. List a candidate whenever it is',
@@ -461,6 +472,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'candidates. This is PHASE 2: decide the full disposition for ONLY the candidates listed below',
             'under CANDIDATES TO DECIDE IN THIS BATCH — do not invent additional candidates, and do not',
             'redecide source_article/source_summary/entity_pages.',
+            '',
+            'YOU MAY NOT BE SEEING THE WHOLE DOCUMENT. SOURCE ELEMENTS carries the sections your own',
+            'candidates were placed in, in full text, plus every element that belongs to no section.',
+            'DOCUMENT SECTION OVERVIEW lists every section that exists and marks which ones you were',
+            'given. Judge your candidates on the text you have; when a judgement would depend on a',
+            'section you were not given, say so in the candidate\'s justification and choose the more',
+            'conservative disposition rather than assuming the document is silent.',
             '',
             ...$this->conceptCandidateDecisionCriteriaLines(),
             '',
@@ -656,7 +674,16 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'SOURCE METADATA:',
             "Title: {$title}",
             '',
-            EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
+            // Context routing: this batch gets full text for the sections its OWN candidates were
+            // placed in (plus every section-less element), and the overview block lists every other
+            // section by name so nothing is silently invisible. A batch whose candidates carry no
+            // resolvable section falls back to the complete catalog — see sectionKeysForMentions().
+            EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock(
+                $sourceText,
+                $sourceElements,
+                self::MAX_SOURCE_TEXT_CHARS,
+                $this->sectionKeysForMentions($batchMentions, $sourceElements),
+            ),
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
@@ -679,6 +706,51 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
         ]);
+    }
+
+    /**
+     * The sections this batch receives in full text: the union of every section its own candidates
+     * were placed in by phase 1.
+     *
+     * Returns null — meaning "no routing, send the whole catalog" — whenever nothing resolves: a
+     * stored plan predating section keys, a phase-1 response that placed nothing, or keys that do
+     * not exist in this document version. Routing may narrow a batch's view only when the routing
+     * information is actually there; it must never narrow it by accident.
+     *
+     * @param  list<array<string, mixed>>  $batchMentions
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return list<string>|null
+     */
+    private function sectionKeysForMentions(array $batchMentions, array $sourceElements): ?array
+    {
+        $map = EnterpriseWikiDocumentSectionMap::build(
+            EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($sourceElements)
+        );
+        $known = array_flip(EnterpriseWikiDocumentSectionMap::sectionKeys($map));
+        $keys = [];
+
+        foreach ($batchMentions as $mention) {
+            if (! is_array($mention)) {
+                continue;
+            }
+
+            foreach (EnterpriseWikiMaintainerDecisionPrompt::mentionSectionKeys($mention) as $key) {
+                if (isset($known[$key])) {
+                    $keys[$key] = true;
+                }
+            }
+        }
+
+        if ($keys === []) {
+            Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Batch context not routable — sending the complete catalog.', [
+                'candidates' => count($batchMentions),
+                'document_sections' => count($map['sections']),
+            ]);
+
+            return null;
+        }
+
+        return array_keys($keys);
     }
 
     private function indexContextJson(array $indexContext): string

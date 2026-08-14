@@ -4,10 +4,13 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
 use App\Services\EnterpriseWiki\EnterpriseWikiCanonicalOwnershipValidator;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSectionMap;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionConsistencyValidator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionHierarchyValidator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
+use App\Services\EnterpriseWiki\EnterpriseWikiPlanningContext;
 use App\Services\OpenAi\OpenAiClient;
 use Mockery\MockInterface;
 use Tests\TestCase;
@@ -48,12 +51,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             ], [])),
         ]);
 
-        $decision = $this->coordinator()->decide(
-            ['title' => 'Masterdata ITIL', 'filename' => 'Masterdata ITIL.docx'],
-            str_repeat('ITIL prosessbeskrivelse. ', 50),
-            [],
-            'no',
-        );
+        $decision = $this->coordinator()->decide($this->planning(str_repeat('ITIL prosessbeskrivelse. ', 50), [], [], []), 'no');
 
         $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
 
@@ -71,12 +69,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             $this->completedResponse($this->globalPlan([])),
         ]);
 
-        $decision = $this->coordinator()->decide(
-            ['title' => 'T', 'filename' => 'T.docx'],
-            'text',
-            [],
-            'no',
-        );
+        $decision = $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
 
         $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
 
@@ -104,7 +97,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
 
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
 
-        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
     }
 
     public function test_batch_failed_exception_carries_batch_metadata(): void
@@ -121,7 +114,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             ->andReturn(['status' => 'failed', 'error' => ['type' => 'server_error', 'code' => 'boom']]);
 
         try {
-            $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+            $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
             $this->fail('Expected EnterpriseWikiMaintainerDecisionBatchFailedException.');
         } catch (EnterpriseWikiMaintainerDecisionBatchFailedException $e) {
             $this->assertSame(1, $e->batchNumber);
@@ -161,7 +154,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             $this->completedResponse($this->batch([$this->candidate('Incident Management', 'create')], [$this->page('Incident Management')])),
         );
 
-        $decision = $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $decision = $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
         $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
 
         $this->assertCount(1, $parsed['concept_candidates']);
@@ -183,7 +176,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
 
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
 
-        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
     }
 
     // 22/23. A larger synthetic ITIL-like document with many candidates splits into several
@@ -225,12 +218,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
                 return $this->completedResponse($this->batch($candidates, $pages));
             });
 
-        $decision = $this->coordinator()->decide(
-            ['title' => 'Masterdata ITIL', 'filename' => 'Masterdata ITIL.docx'],
-            str_repeat('ITIL prosessbeskrivelse med mange rammeverk. ', 300),
-            [],
-            'no',
-        );
+        $decision = $this->coordinator()->decide($this->planning(str_repeat('ITIL prosessbeskrivelse med mange rammeverk. ', 300), [], [], []), 'no');
 
         $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
 
@@ -255,10 +243,10 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
 
         $this->forceSingleCandidatePerBatch();
         $this->mockSequentialResponses($buildResponses());
-        $first = $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $first = $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
 
         $this->mockSequentialResponses($buildResponses());
-        $second = $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $second = $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
 
         $this->assertSame($first, $second);
     }
@@ -310,12 +298,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             ], [])),
         ]);
 
-        $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($this->coordinator()->decide(
-            ['title' => 'Masterdata Prosjekt', 'filename' => 'Masterdata Prosjekt.docx'],
-            str_repeat('Prosjektdokumentasjon med migrering og testing. ', 60),
-            [], // EMPTY Wiki — no existing page can ever be named as an owner.
-            'no',
-        ));
+        $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($this->coordinator()->decide($this->planning(str_repeat('Prosjektdokumentasjon med migrering og testing. ', 60), [], [], []), // EMPTY Wiki — no existing page can ever be named as an owner.
+            'no'));
 
         $issues = array_merge(
             app(EnterpriseWikiMaintainerDecisionConsistencyValidator::class)->findIssues($decision, []),
@@ -352,7 +336,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
                     : $this->completedResponse($this->batch([$this->candidate('Prosjektleder', 'exclude')], []));
             });
 
-        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'tekst', [], 'no');
+        $this->coordinator()->decide($this->planning('tekst', [], [], []), 'no');
 
         $batchPrompt = $capturedPrompts[1];
 
@@ -370,6 +354,31 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $this->assertNotEmpty(
             app(EnterpriseWikiMaintainerDecisionConsistencyValidator::class)->findIssues($decision, []),
             'the validator must still refuse the source article as an owning page',
+        );
+    }
+
+    /**
+     * The authoritative planning facts for a coordinator test — same assembly as
+     * EnterpriseWikiPlanningContext::forDocument(), so a test can never hand the split flow a
+     * context shape production could not produce.
+     */
+    private function planning(string $sourceText, array $indexContext = [], array $elements = [], array $figures = []): EnterpriseWikiPlanningContext
+    {
+        $catalog = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
+
+        return new EnterpriseWikiPlanningContext(
+            customerId: 1,
+            documentId: 1,
+            sourceMeta: ['title' => 'Masterdata ITIL', 'filename' => 'Masterdata ITIL.docx'],
+            sourceText: $sourceText,
+            elements: $elements,
+            catalogElements: $catalog,
+            figureCandidates: $figures,
+            sectionMap: EnterpriseWikiDocumentSectionMap::build($catalog),
+            wikiIndex: $indexContext,
+            validSourceElementKeys: array_column($catalog, 'source_element_key'),
+            validFigureKeys: array_column($figures, 'source_element_key'),
+            existingPageCandidatesResolver: static fn (): array => [],
         );
     }
 
@@ -467,7 +476,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         ]);
 
         $decision = EnterpriseWikiMaintainerDecisionPrompt::parse(
-            $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no')
+            $this->coordinator()->decide($this->planning('text', [], [], []), 'no')
         );
 
         $this->assertCount(1, $decision['concept_candidates']);
@@ -488,7 +497,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
 
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
 
-        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
     }
 
     public function test_an_ordinary_schema_violation_is_never_retried(): void
@@ -503,6 +512,6 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
 
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
 
-        $this->coordinator()->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
     }
 }

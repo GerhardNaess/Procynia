@@ -119,14 +119,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *                                                         incomplete/max_output_tokens after one capacity retry.
      */
     public function decide(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageCode,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
-        array $existingPageCandidates = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -136,6 +131,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
+        $sourceText = $planning->sourceText;
 
         // The split-vs-single-call DECISION must reflect the document's genuine size, not the
         // prompt text actually sent to OpenAI — userPrompt() truncates source text at
@@ -151,9 +147,19 @@ class EnterpriseWikiMaintainerDecisionAiClient
         // exceeds that ceiling, a retry is mathematically guaranteed to help — route through the
         // split flow instead of attempting (and predictably truncating) a single oversized call.
         if ($sourcePlan->strategy === AiCapacityPlan::STRATEGY_SPLIT_REQUIRED) {
-            $decoded = $this->splitCoordinator->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
+            $decoded = $this->splitCoordinator->decide($planning, $languageCode, $context);
         } else {
-            $userPromptText = $this->userPrompt($sourceMeta, $sourceText, $indexContext, $figureCandidates, $sourceElements, $existingPageCandidates);
+            // The single-call path plans the whole document in one go, so it gets the complete
+            // addressable catalog and the existing pages it may need to patch.
+            $existingPageCandidates = $planning->existingPageCandidates();
+            $userPromptText = $this->userPrompt(
+                $planning->sourceMeta,
+                $sourceText,
+                $planning->wikiIndex,
+                $planning->figureCandidates,
+                $planning->catalogElements,
+                $existingPageCandidates,
+            );
             $capacityContext = $this->capacityContextForDecision($rawSourceSizeChars, $userPromptText, $existingPageCandidates);
 
             // This emits only lengths/counts, never source or Wiki content. It makes a slow run
@@ -196,13 +202,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
     }
 
     /** @return array{global_plan: array<string,mixed>, batches: list<array<string,mixed>>} */
-    public function preparePersistedCandidateBatches(array $sourceMeta, string $sourceText, array $indexContext, string $languageCode, array $figureCandidates = [], ?AiCallContext $context = null): array
+    public function preparePersistedCandidateBatches(EnterpriseWikiPlanningContext $planning, string $languageCode, ?AiCallContext $context = null): array
     {
         if (! self::isAvailable()) {
             throw new RuntimeException('EnterpriseWikiMaintainerDecisionAiClient: wiki AI is not enabled.');
         }
 
-        return $this->splitCoordinator->preparePersistedCandidateBatches($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context);
+        return $this->splitCoordinator->preparePersistedCandidateBatches($planning, $languageCode, $context);
     }
 
     /** @param list<array<string,mixed>> $batchResults @return array<string,mixed> */
@@ -241,15 +247,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *                                                         incomplete/max_output_tokens after one capacity retry.
      */
     public function repairGroup(
-        array $sourceMeta,
-        string $sourceText,
-        array $indexContext,
+        EnterpriseWikiPlanningContext $planning,
         string $languageCode,
         array $decision,
         array $group,
-        array $figureCandidates = [],
         ?AiCallContext $context = null,
-        array $sourceElements = [],
     ): array {
         if (! self::isAvailable()) {
             throw new RuntimeException(
@@ -260,12 +262,23 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $context ??= AiCallContext::none();
         $languageName = $this->languageName($languageCode);
         $repairPromptText = EnterpriseWikiMaintainerDecisionDeltaPrompt::userPrompt(
-            $sourceMeta,
-            self::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
-            $indexContext,
+            $planning->sourceMeta,
+            // Same context routing as a phase-2 batch: a bounded repair reads the sections its own
+            // objects already cite (their evidence keys, patch-target keys and figure keys), plus
+            // every section-less element, plus the overview of everything else. An object that
+            // cites nothing yet — which is exactly the "this topic has no evidence" fault — routes
+            // to nothing, and the whole catalog is sent instead, because that repair has to be able
+            // to go looking.
+            self::sourceContentBlock(
+                $planning->sourceText,
+                $planning->catalogElements,
+                self::MAX_SOURCE_TEXT_CHARS,
+                self::repairSectionKeys($decision, $group, $planning->catalogElements),
+            ),
+            $planning->wikiIndex,
             $decision,
             $group,
-            $figureCandidates,
+            $planning->figureCandidates,
         );
         $inputSizeChars = mb_strlen($repairPromptText);
         // The delta's output is driven by how many objects this group repairs, not by the size of
@@ -1048,7 +1061,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    public static function sourceElementsBlock(array $sourceElements, int $maxChars, ?int $maxElementChars = null): string
+    public static function sourceElementsBlock(array $sourceElements, int $maxChars, ?int $maxElementChars = null, array $sectionKeysByLabel = []): string
     {
         $lines = [];
         $used = 0;
@@ -1073,15 +1086,17 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 $truncatedElements++;
             }
 
-            $section = trim(implode(' ', array_filter([
-                trim((string) ($element['section_number'] ?? '')),
-                trim((string) ($element['section_title'] ?? '')),
-            ], static fn (string $part): bool => $part !== '')));
+            $section = EnterpriseWikiDocumentSectionMap::sectionLabel($element);
 
             // Elements arrive in document order, so the section is printed once per run of
             // elements that share it rather than repeated on every line — measured on a real
-            // document, repeating it cost about a third of the flat text's own size.
-            $sectionLine = $section !== '' && $section !== $currentSection ? "\n# {$section}" : null;
+            // document, repeating it cost about a third of the flat text's own size. The section's
+            // routable key is printed with it (see EnterpriseWikiDocumentSectionMap): a planning
+            // call cites sections the same deterministic way it cites element keys.
+            $sectionKey = $section !== '' ? ($sectionKeysByLabel[$section] ?? null) : null;
+            $sectionLine = $section !== '' && $section !== $currentSection
+                ? "\n# ".($sectionKey !== null ? "[{$sectionKey}] " : '').$section
+                : null;
             $entry = "[{$key}] ({$type}) ".$text;
             $cost = mb_strlen($entry) + 1 + ($sectionLine !== null ? mb_strlen($sectionLine) + 1 : 0);
 
@@ -1131,15 +1146,41 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    public static function sourceContentBlock(string $sourceText, array $sourceElements, int $maxChars): string
+    public static function sourceContentBlock(string $sourceText, array $sourceElements, int $maxChars, ?array $sectionKeys = null): string
     {
+        $catalogElements = self::sourceCatalogElements($sourceElements);
+        $map = EnterpriseWikiDocumentSectionMap::build($catalogElements);
+        $sectionKeysByLabel = [];
+
+        foreach ($map['sections'] as $section) {
+            $sectionKeysByLabel[$section['label']] = $section['key'];
+        }
+
+        // Context routing: when the caller names the sections this call actually needs, the catalog
+        // carries those sections in full text plus every section-less element — and the overview
+        // block below still lists every section that exists, so nothing becomes silently invisible.
+        // A caller that names nothing (Phase A, or any call that cannot route) keeps the whole
+        // catalog exactly as before.
+        $routed = $sectionKeys !== null;
+        $renderedElements = $routed
+            ? EnterpriseWikiDocumentSectionMap::elementsForSections($catalogElements, $sectionKeys, $map)
+            : $catalogElements;
+
         // The catalog gets its own, much larger budget with a per-element snippet cap: every element
         // has to be citable for the owned-topic evidence contract, and $maxChars sizes flat text.
         $catalog = self::sourceElementsBlock(
-            self::sourceCatalogElements($sourceElements),
+            $renderedElements,
             max($maxChars, self::MAX_CATALOG_CHARS),
             self::MAX_CATALOG_ELEMENT_CHARS,
+            $sectionKeysByLabel,
         );
+
+        if ($catalog !== '' && $map['sections'] !== []) {
+            $catalog = EnterpriseWikiDocumentSectionMap::overviewBlock(
+                $map,
+                $routed ? $sectionKeys : EnterpriseWikiDocumentSectionMap::sectionKeys($map),
+            )."\n\n".$catalog;
+        }
 
         if ($catalog !== '') {
             return $catalog;
@@ -1254,6 +1295,44 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * The sections a bounded repair receives in full text — derived from the source elements the
+     * group's own objects already cite, never from their wording.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  array{object_ids: list<string>, issues: list<string>, context_object_ids?: list<string>}  $group
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return list<string>|null Null means "not routable — send the whole catalog".
+     */
+    private static function repairSectionKeys(array $decision, array $group, array $sourceElements): ?array
+    {
+        $map = EnterpriseWikiDocumentSectionMap::build(self::sourceCatalogElements($sourceElements));
+        $elementKeys = [];
+
+        foreach (array_unique(array_merge($group['object_ids'], $group['context_object_ids'] ?? [])) as $objectId) {
+            $object = EnterpriseWikiMaintainerDecisionObjectIndex::object($decision, $objectId) ?? [];
+
+            foreach (EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries($object['owned_topics'] ?? []) as $topic) {
+                $elementKeys = array_merge($elementKeys, $topic['source_element_keys']);
+            }
+
+            foreach ((array) ($object['planned_figures'] ?? []) as $figure) {
+                if (is_array($figure) && ($figure['source_element_key'] ?? '') !== '') {
+                    $elementKeys[] = (string) $figure['source_element_key'];
+                }
+            }
+
+            $elementKeys = array_merge($elementKeys, array_values(array_filter(
+                (array) ($object['source_element_keys'] ?? []),
+                static fn (mixed $key): bool => is_string($key) && trim($key) !== '',
+            )));
+        }
+
+        $sectionKeys = EnterpriseWikiDocumentSectionMap::sectionsForElementKeys($elementKeys, $map);
+
+        return $sectionKeys === [] ? null : $sectionKeys;
     }
 
     private function languageName(string $code): string

@@ -5,8 +5,6 @@ namespace App\Services\EnterpriseWiki;
 use App\Data\Ai\AiCallContext;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionInconsistentException;
 use App\Models\EnterpriseWikiDocument;
-use App\Models\EnterpriseWikiSourceReference;
-use App\Services\Ai\Wiki\EnterpriseWikiIndexContextService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -47,12 +45,9 @@ class EnterpriseWikiMaintainerDecisionService
     private const MAX_REPAIR_ROUNDS = 2;
 
     public function __construct(
-        private readonly EnterpriseWikiIndexContextService $indexContextService,
-        private readonly EnterpriseWikiPatchCandidateService $patchCandidateService,
         private readonly EnterpriseWikiMaintainerDecisionAiClient $aiClient,
         private readonly EnterpriseWikiMaintainerDecisionConsistencyValidator $consistencyValidator,
         private readonly EnterpriseWikiMaintainerDecisionHierarchyValidator $hierarchyValidator,
-        private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
         private readonly EnterpriseWikiCanonicalOwnershipValidator $canonicalOwnershipValidator,
         private readonly EnterpriseWikiPatchTargetResolver $patchTargetResolver,
         private readonly EnterpriseWikiPlannedTopicEvidenceValidator $plannedTopicEvidenceValidator,
@@ -91,33 +86,14 @@ class EnterpriseWikiMaintainerDecisionService
             );
         }
 
-        $sourceMeta = [
-            'title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown',
-            'filename' => (string) $document->original_filename,
-        ];
+        // One authoritative context per planning path — see EnterpriseWikiPlanningContext. The
+        // document is parsed once, the Wiki index built once, and every downstream call receives
+        // the same facts instead of assembling its own subset.
+        $planning = EnterpriseWikiPlanningContext::forDocument($customerId, $document);
 
-        $sourceText = (string) ($document->extracted_text ?? '');
-        $indexContext = $this->indexContextService->buildForCustomer($customerId);
+        $decision = $this->aiClient->decide($planning, $languageCode, $context);
 
-        // ONE inspect() per decision — the document is parsed once and split into the two
-        // contracts the maintainer prompt needs (Fase 8J-1B): images stay their own
-        // FIGURE CANDIDATES block, prose/table elements become the addressable SOURCE ELEMENTS
-        // catalog. Previously this same call was made and everything except the images was
-        // discarded, which is exactly why the maintainer never saw addressable source provenance.
-        $elements = $this->sourceElementService->inspect($document)['elements'];
-        $figureCandidates = $this->figureCandidatesFromElements($elements);
-        $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
-        $validFigureKeys = array_column($figureCandidates, 'source_element_key');
-
-        // Fase 8K-1: the few existing pages this document plausibly revises, with their real
-        // current content. The Wiki index above only carries a 200-character excerpt per page, so
-        // a concrete threshold or deadline already recorded in the Wiki is invisible to the
-        // decision without this. Read-only — nothing here patches anything (that is 8K-3).
-        $existingPageCandidates = $this->patchCandidateService->findForDocument($document);
-
-        $decision = $this->aiClient->decide($sourceMeta, $sourceText, $indexContext, $languageCode, $figureCandidates, $context, $sourceElements, $existingPageCandidates);
-
-        return $this->validateAndRepairForDocument($customerId, $document, $languageCode, $decision, $context);
+        return $this->validateAndRepairForDocument($customerId, $document, $languageCode, $decision, $context, $planning);
     }
 
     /**
@@ -133,28 +109,16 @@ class EnterpriseWikiMaintainerDecisionService
         string $languageCode,
         array $decision,
         ?AiCallContext $context = null,
+        ?EnterpriseWikiPlanningContext $planning = null,
     ): array {
         $context ??= AiCallContext::none();
-        $sourceMeta = [
-            'title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown',
-            'filename' => (string) $document->original_filename,
-        ];
-        $sourceText = (string) ($document->extracted_text ?? '');
-        $indexContext = $this->indexContextService->buildForCustomer($customerId);
-
-        // Same one-parse split as runForDocument(): the repair pass must see the same addressable
-        // source elements the original decision was made against, or it would reason about the
-        // document less precisely than the call it is correcting.
-        $elements = $this->sourceElementService->inspect($document)['elements'];
-        $figureCandidates = $this->figureCandidatesFromElements($elements);
-        $sourceElements = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
-        $validFigureKeys = array_column($figureCandidates, 'source_element_key');
-        // Every addressable element of this document, not just its images: a patch target's
-        // source_element_keys authorise a substance change, which is normally prose or a table row.
-        $validSourceElementKeys = array_values(array_filter(array_map(
-            static fn (array $element): string => (string) ($element['source_element_key'] ?? ''),
-            $sourceElements,
-        ), static fn (string $key): bool => $key !== ''));
+        // Validation and repair see the SAME facts the decision was made against: the caller passes
+        // its context when it has one, and an entrypoint that starts here (the batch finaliser)
+        // builds an identical one.
+        $planning ??= EnterpriseWikiPlanningContext::forDocument($customerId, $document);
+        $indexContext = $planning->wikiIndex;
+        $validFigureKeys = $planning->validFigureKeys;
+        $validSourceElementKeys = $planning->validSourceElementKeys;
         $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
 
         if ($issues === []) {
@@ -241,15 +205,11 @@ class EnterpriseWikiMaintainerDecisionService
                 $repairs[] = [
                     'group' => $group,
                     'delta' => $this->aiClient->repairGroup(
-                        $sourceMeta,
-                        $sourceText,
-                        $indexContext,
+                        $planning,
                         $languageCode,
                         $decision,
                         $group,
-                        $figureCandidates,
                         $context,
-                        $sourceElements,
                     ),
                 ];
 
@@ -662,11 +622,8 @@ class EnterpriseWikiMaintainerDecisionService
         }
 
         return $this->aiClient->preparePersistedCandidateBatches(
-            ['title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown', 'filename' => (string) $document->original_filename],
-            $sourceText,
-            $this->indexContextService->buildForCustomer($customerId),
+            EnterpriseWikiPlanningContext::forDocument($customerId, $document),
             $languageCode,
-            $this->figureCandidatesForDocument($document),
             $context,
         );
     }
@@ -675,31 +632,5 @@ class EnterpriseWikiMaintainerDecisionService
     public function mergePersistedCandidateBatchResults(array $globalPlan, array $batchResults): array
     {
         return $this->aiClient->mergePersistedBatchResults($globalPlan, $batchResults);
-    }
-
-    /**
-     * Every showable (non-decorative/logo) figure already extracted and classified from this
-     * document — EnterpriseWikiDocumentSourceElementService::inspect() has already excluded
-     * decorative/logo images (isShowable()) before this ever sees them, so every candidate here is
-     * a genuine planning candidate. Shape matches what
-     * EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock() renders into the prompt.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function figureCandidatesForDocument(EnterpriseWikiDocument $document): array
-    {
-        return $this->figureCandidatesFromElements($this->sourceElementService->inspect($document)['elements']);
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $elements
-     * @return list<array<string, mixed>>
-     */
-    private function figureCandidatesFromElements(array $elements): array
-    {
-        return array_values(array_filter(
-            $elements,
-            fn (array $element): bool => ($element['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE,
-        ));
     }
 }
