@@ -1739,6 +1739,12 @@ class WikiController extends Controller
                 'content_markdown' => $currentVersion->content_markdown,
                 'rendered_markdown' => $renderedMarkdown,
                 'content_blocks_json' => $this->renderedContentBlocks($currentVersion, $page, $customerId),
+                // The best-practice assessment recorded for THIS version: one entry per planned
+                // topic, whether a gap was found, and the one-sentence justification. Shown as an
+                // audit trail for QA — "assessed, nothing to add" is a result a reviewer can judge,
+                // and it is deliberately not a finding. Null for a version generated before the
+                // contract existed, which is not the same as an empty assessment.
+                'best_practice_review' => $currentVersion->best_practice_review_json,
             ] : null,
             'review_reference' => $reviewReference,
             'structure_finding' => $structureFinding,

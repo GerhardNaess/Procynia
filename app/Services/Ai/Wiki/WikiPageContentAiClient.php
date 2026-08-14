@@ -8,6 +8,7 @@ use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiPlannedSectionRepairShapeException;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
@@ -37,6 +38,12 @@ class WikiPageContentAiClient
     private const REASONING_EFFORT = 'low';
 
     private const PROMPT_NAME = 'wiki_page_content_generation';
+
+    /**
+     * The review key for a page that has no sections to review per topic: a summary page, or a page
+     * generated without a planned-section contract. One entry, covering the page as a whole.
+     */
+    public const REVIEW_TOPIC_WHOLE_PAGE = '__page__';
 
     private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_page_content';
 
@@ -148,7 +155,7 @@ class WikiPageContentAiClient
 
         $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
 
-        return $this->parseBlocksResponse($decoded, 'generation', $pageType);
+        return $this->parseBlocksResponse($decoded, 'generation', $pageType, $plannedSections);
     }
 
     private function planCapacity(string $pageType, int $inputSizeChars, int $retryAttempt): AiCapacityPlan
@@ -325,7 +332,7 @@ class WikiPageContentAiClient
     /**
      * @return array{markdown: string, blocks: list<array<string, mixed>>}
      */
-    private function parseBlocksResponse(array $decoded, string $operation, string $pageType): array
+    private function parseBlocksResponse(array $decoded, string $operation, string $pageType, array $plannedSections = []): array
     {
         $blocks = data_get($decoded, 'page.blocks', []);
 
@@ -378,10 +385,73 @@ class WikiPageContentAiClient
 
         $this->logParsedBlockOrigins($operation, $pageType, $blocks);
 
+        $review = $this->parseBestPracticeReview($decoded, $pageType, $plannedSections);
+
+        Log::info('[WIKI_BEST_PRACTICE_REVIEW] Parsed best-practice assessment.', [
+            'operation' => $operation,
+            'page_type' => $pageType,
+            'reviewed' => count($review),
+            'gap_found' => count(array_filter($review, static fn (array $entry): bool => $entry['gap_found'])),
+        ]);
+
         return [
             'markdown' => $markdown,
             'blocks' => array_values($blocks),
+            'best_practice_review' => $review,
         ];
+    }
+
+    /**
+     * One entry per topic the page was asked to assess, normalised and ordered by the REQUESTED
+     * topics rather than by the response — so a caller reads the same shape whatever order the
+     * model answered in.
+     *
+     * The response cannot be missing an entry (strict cardinality + enum, see
+     * bestPracticeReviewSchema()), so this never invents one; a legacy/stored response without the
+     * field at all yields an empty list, which the reconciler treats as "not assessed" rather than
+     * as "assessed, no gap".
+     *
+     * @param  list<array<string, mixed>>  $plannedSections
+     * @return list<array{planned_topic: string, gap_found: bool, assessment: string}>
+     */
+    private function parseBestPracticeReview(array $decoded, string $pageType, array $plannedSections): array
+    {
+        $raw = data_get($decoded, 'best_practice_review', []);
+
+        if (! is_array($raw) || $raw === []) {
+            return [];
+        }
+
+        $byTopic = [];
+
+        foreach ($raw as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+
+            $topic = trim((string) ($entry['planned_topic'] ?? ''));
+
+            if ($topic === '' || array_key_exists($topic, $byTopic)) {
+                continue;
+            }
+
+            $byTopic[$topic] = [
+                'planned_topic' => $topic,
+                'gap_found' => (bool) ($entry['gap_found'] ?? false),
+                'assessment' => trim((string) ($entry['assessment'] ?? '')),
+            ];
+        }
+
+        $ordered = [];
+
+        foreach (self::reviewTopics($plannedSections, $pageType) as $topic) {
+            if (isset($byTopic[$topic])) {
+                $ordered[] = $byTopic[$topic];
+                unset($byTopic[$topic]);
+            }
+        }
+
+        return array_values(array_merge($ordered, array_values($byTopic)));
     }
 
     /**
@@ -940,7 +1010,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::schema($linkCatalog),
+                    'schema' => self::schema($linkCatalog, $plannedSections, $pageType),
                 ],
             ],
             'reasoning' => [
@@ -1093,7 +1163,7 @@ class WikiPageContentAiClient
                     'type' => 'json_schema',
                     'name' => self::PROMPT_NAME,
                     'strict' => true,
-                    'schema' => self::schema($linkCatalog),
+                    'schema' => self::schema($linkCatalog, $plannedSections, $pageType),
                 ],
             ],
             'reasoning' => [
@@ -1166,6 +1236,12 @@ class WikiPageContentAiClient
             '- Keep every recommendation concrete and anchored in what this page actually deals with: name the specific control, target, responsibility or mechanism rather than restating the check in the abstract. A well-founded recommendation may of course also apply to other documents in the same discipline — that is normal for established practice and is never a reason to withhold it. What matters is that it genuinely closes a gap for THIS page.',
             '- Being absent from the source is never a reason to withhold a relevant recommendation — that absence is precisely what makes it a Procynia contribution rather than source_based content. Procynia is expected to add professional value here, and every best_practice block is routed to a human reviewer who approves or rejects it before it counts as accepted, so a well-founded recommendation is safe to put forward.',
             '- No quota, no minimum, no padding: propose only what the comparison in step 3 genuinely supports, and never manufacture a recommendation to fill space or reach a number. Zero best_practice blocks is the correct outcome when the source already treats its subject well — but reach that conclusion by actually performing the comparison, not by defaulting to it.',
+            'BEST-PRACTICE REVIEW (best_practice_review — the output that records the comparison above):',
+            '- Return exactly one entry per topic listed in the review contract, with planned_topic copied verbatim from the allowed values. The entry IS the assessment; there is no separate "reviewed" flag and no way to leave one out.',
+            '- gap_found=false is a legitimate, expected and complete answer. It costs you nothing and is the right one whenever the source already treats that topic adequately. Do not set it true to look thorough.',
+            '- gap_found=true means you also wrote at least one concrete best_practice block for that topic in this same response. A gap you cannot state as a concrete clause is not a gap you should report — the backend records the claim as unfounded and reads it back as false.',
+            '- assessment: ONE short sentence, required in both cases. For false, say what the source already covers that makes a recommendation unnecessary. For true, say what is missing. Never a generic sentence that would fit any document.',
+            '- best_practice_review is review metadata for a human reviewer. It is never rendered as page text, never part of any block, and never a substitute for writing the clause itself.',
             '',
             'link_intents must list only useful visible Wiki links the block should contain; use an empty list when no visible link is useful. For every intent, choose an intent_id and target_page_id from ALLOWED WIKILINK TARGETS, then put exactly one {{wiki_link:intent_id|visible anchor}} marker at the natural location in this block\'s markdown. Never write [[...]] Wiki markup yourself: the server materializes the link.',
         ]);
@@ -1188,6 +1264,14 @@ class WikiPageContentAiClient
                 .'- Every required body must_contain_grounded_prose = true. Wikilinks may be used as inline references, but links_must_not_be_the_only_content and do_not_output_link_only_sections.\n'
                 .'- Do not omit, merge, replace with a wikilink, or leave any required section empty. Runtime validation rejects every one of those outcomes.';
         }
+
+        $reviewTopics = self::reviewTopics($plannedSections, $pageType);
+        $responsibilityRules .= "\n\nBEST-PRACTICE REVIEW CONTRACT:\n"
+            .($reviewTopics === [self::REVIEW_TOPIC_WHOLE_PAGE]
+                ? '- This page is not section-mapped, so return exactly ONE best_practice_review entry with planned_topic "'
+                    .self::REVIEW_TOPIC_WHOLE_PAGE.'", assessing the page as a whole.'
+                : "- Return one best_practice_review entry for each of these topics, planned_topic copied verbatim:\n"
+                    .implode("\n", array_map(static fn (string $topic): string => '  - '.$topic, $reviewTopics)));
 
         $figureRules = implode("\n", [
             'PLANNED FIGURES:',
@@ -1436,8 +1520,10 @@ class WikiPageContentAiClient
         ];
     }
 
-    private static function schema(array $linkCatalog = []): array
+    private static function schema(array $linkCatalog = [], array $plannedSections = [], string $pageType = ''): array
     {
+        $reviewTopics = self::reviewTopics($plannedSections, $pageType);
+
         return [
             'type' => 'object',
             'properties' => [
@@ -1453,9 +1539,81 @@ class WikiPageContentAiClient
                     'required' => ['blocks'],
                     'additionalProperties' => false,
                 ],
+                'best_practice_review' => self::bestPracticeReviewSchema($reviewTopics),
             ],
-            'required' => ['page'],
+            'required' => ['page', 'best_practice_review'],
             'additionalProperties' => false,
+        ];
+    }
+
+    /**
+     * The topics this page must report a best-practice assessment for.
+     *
+     * article/concept/entity map owned topics onto `## ` sections, so the unit is the section.
+     * A summary page is explicitly instructed to have no headings at all
+     * (EnterpriseWikiPlannedSectionCoverageValidator::CHECKED_PAGE_TYPES leaves it out), so it
+     * reports once for the page. A page generated without a planned-section contract at all — the
+     * legacy path — reports once for the page too, under the same key.
+     *
+     * @param  list<array<string, mixed>>  $plannedSections
+     * @return list<string>
+     */
+    public static function reviewTopics(array $plannedSections, string $pageType): array
+    {
+        if ($pageType === EnterpriseWikiPage::PAGE_TYPE_SUMMARY) {
+            return [self::REVIEW_TOPIC_WHOLE_PAGE];
+        }
+
+        $topics = [];
+
+        foreach ($plannedSections as $section) {
+            $topic = trim((string) ($section['planned_topic'] ?? ''));
+
+            if ($topic !== '' && ! in_array($topic, $topics, true)) {
+                $topics[] = $topic;
+            }
+        }
+
+        return $topics !== [] ? $topics : [self::REVIEW_TOPIC_WHOLE_PAGE];
+    }
+
+    /**
+     * The observable best-practice contract (Wiki runs 56–58: 0, 0 and 1 best_practice blocks
+     * across 21 generated pages, with the AI-side counters proving the model returned none and
+     * nothing downstream dropped any).
+     *
+     * Everything else in this response is structurally required and deterministically verified —
+     * sections against planned topics, grounding against element keys, figures against figure keys,
+     * links against the catalog. The best-practice synthesis was the one part that was instructed
+     * and nothing more, so "assessed, nothing to add" and "never assessed" were indistinguishable
+     * in the data. This makes the assessment itself an output.
+     *
+     * Deliberately NOT a "reviewed" flag: the entry's existence is the assessment, and strict
+     * cardinality (one entry per topic, enum-constrained) makes a missing one impossible at the API
+     * boundary rather than something a validator has to catch after the fact.
+     *
+     * Deliberately NOT a reason to find something: gap_found=false with a real one-sentence
+     * assessment is a complete, expected answer. The threshold for what qualifies as best practice
+     * is unchanged.
+     *
+     * @param  list<string>  $reviewTopics
+     */
+    private static function bestPracticeReviewSchema(array $reviewTopics): array
+    {
+        return [
+            'type' => 'array',
+            'minItems' => count($reviewTopics),
+            'maxItems' => count($reviewTopics),
+            'items' => [
+                'type' => 'object',
+                'properties' => [
+                    'planned_topic' => ['type' => 'string', 'enum' => array_values($reviewTopics)],
+                    'gap_found' => ['type' => 'boolean'],
+                    'assessment' => ['type' => 'string'],
+                ],
+                'required' => ['planned_topic', 'gap_found', 'assessment'],
+                'additionalProperties' => false,
+            ],
         ];
     }
 

@@ -160,7 +160,10 @@ class EnterpriseWikiRunFindingsService
 
         return [
             'findings' => array_values($items),
-            'summary' => $this->buildSummary($items, $run),
+            'summary' => array_merge(
+                $this->buildSummary($items, $run),
+                ['best_practice_review' => $this->bestPracticeReviewSummary($currentVersionIdByPageId)],
+            ),
         ];
     }
 
@@ -717,6 +720,69 @@ class EnterpriseWikiRunFindingsService
     /**
      * @param  list<array<string, mixed>>  $items
      */
+    /**
+     * What the generation calls CONCLUDED about best practice for this run's pages — reviewed
+     * topics, how many turned into a recommendation, and how many are waiting for a human.
+     *
+     * Summary only, never a finding: "assessed, nothing to add" is a result, not something anyone
+     * has to act on, and turning it into a case would bury the real ones. It belongs here because
+     * an empty Funn tab must be readable as "12 topics assessed, 0 gaps" rather than as silence —
+     * which is exactly what it meant before this contract existed.
+     *
+     * The two inconsistency signals (EnterpriseWikiBestPracticeReviewReconciler) are deliberately
+     * NOT surfaced: they are technical facts about the generation call, in the same sense
+     * EnterpriseWikiClaimFindingExplainer::isUserFacingAddition() keeps mechanism-level noise out.
+     *
+     * @param  Collection<int, int>  $currentVersionIdByPageId
+     * @return array{reviewed: int, gaps_found: int, pages_assessed: int, pages_without_assessment: int}
+     */
+    private function bestPracticeReviewSummary(Collection $currentVersionIdByPageId): array
+    {
+        $reviewed = 0;
+        $gapsFound = 0;
+        $pagesAssessed = 0;
+        $pagesWithout = 0;
+
+        if ($currentVersionIdByPageId->isEmpty()) {
+            return ['reviewed' => 0, 'gaps_found' => 0, 'pages_assessed' => 0, 'pages_without_assessment' => 0];
+        }
+
+        $versions = EnterpriseWikiPageVersion::query()
+            ->whereIn('id', $currentVersionIdByPageId->values())
+            ->get(['id', 'best_practice_review_json']);
+
+        foreach ($versions as $version) {
+            $review = (array) ($version->best_practice_review_json ?? []);
+
+            if ($review === []) {
+                $pagesWithout++;
+
+                continue;
+            }
+
+            $pagesAssessed++;
+
+            foreach ($review as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+
+                $reviewed++;
+
+                if (($entry['gap_found'] ?? false) === true) {
+                    $gapsFound++;
+                }
+            }
+        }
+
+        return [
+            'reviewed' => $reviewed,
+            'gaps_found' => $gapsFound,
+            'pages_assessed' => $pagesAssessed,
+            'pages_without_assessment' => $pagesWithout,
+        ];
+    }
+
     private function buildSummary(array $items, EnterpriseWikiIngestRun $run): array
     {
         $total = count($items);

@@ -83,6 +83,7 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiPlannedSectionEvidenceResolver $plannedSectionEvidenceResolver,
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiBestPracticeReviewReconciler $reviewReconciler,
     ) {}
 
     /**
@@ -557,7 +558,11 @@ class EnterpriseWikiGenerateAppliedPagesService
             [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $markdown, $contentBlocks);
             [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-            $this->writeVersion($run->id, $page->id, $markdown, $contentBlocks);
+            $this->writeVersion($run->id, $page->id, $markdown, $contentBlocks, $this->reviewReconciler->reconcile(
+                $generated['best_practice_review'] ?? [],
+                $contentBlocks,
+                (string) $page->page_type,
+            ));
             $counts[$page->page_type]++;
         }
 
@@ -631,10 +636,16 @@ class EnterpriseWikiGenerateAppliedPagesService
                 );
             }
 
-            $this->writeVersion($run->id, $page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
+            $conceptBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
                 $generated['blocks'],
                 $sourceElements,
+            );
+
+            $this->writeVersion($run->id, $page->id, $generated['markdown'], $conceptBlocks, $this->reviewReconciler->reconcile(
+                $generated['best_practice_review'] ?? [],
+                $conceptBlocks,
+                (string) $page->page_type,
             ));
             $counts[$page->page_type]++;
         }
@@ -849,7 +860,13 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks): void {
+        $bestPracticeReview = $this->reviewReconciler->reconcile(
+            $generated['best_practice_review'] ?? [],
+            $contentBlocks,
+            (string) $page->page_type,
+        );
+
+        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks, $bestPracticeReview): void {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -872,7 +889,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 return;
             }
 
-            $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks);
+            $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks, $bestPracticeReview);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
 
             $pivot->update([
@@ -1878,11 +1895,16 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->value('content_markdown') ?? '');
     }
 
-    private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = []): EnterpriseWikiPageVersion
+    /**
+     * @param  list<array<string, mixed>>  $bestPracticeReview  Reconciled review, see
+     *                                                          EnterpriseWikiBestPracticeReviewReconciler. Stored with the version it assessed.
+     */
+    private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = [], array $bestPracticeReview = []): EnterpriseWikiPageVersion
     {
         return $this->versionWriter->writeNewCurrentVersion($pageId, [
             'content_markdown' => $markdown,
             'content_blocks_json' => $contentBlocks,
+            'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
             'generated_by_model' => WikiPageContentAiClient::MODEL,
         ]);
     }
@@ -1948,9 +1970,10 @@ class EnterpriseWikiGenerateAppliedPagesService
         throw new EnterpriseWikiPatchTargetRegenerationBlockedException((int) $run->id, (int) $page->id);
     }
 
-    private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = []): void
+    /** @param list<array<string, mixed>> $bestPracticeReview */
+    private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = [], array $bestPracticeReview = []): void
     {
-        DB::transaction(function () use ($runId, $pageId, $markdown, $contentBlocks): void {
+        DB::transaction(function () use ($runId, $pageId, $markdown, $contentBlocks, $bestPracticeReview): void {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
@@ -1960,6 +1983,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $this->versionWriter->writeNewCurrentVersion($pageId, [
                 'content_markdown' => $markdown,
                 'content_blocks_json' => $contentBlocks,
+                'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
                 'generated_by_model' => WikiPageContentAiClient::MODEL,
             ]);
         });

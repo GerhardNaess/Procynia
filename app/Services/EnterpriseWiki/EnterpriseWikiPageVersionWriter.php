@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiPageVersionBestPracticeReviewLostException;
 use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
@@ -77,11 +78,14 @@ class EnterpriseWikiPageVersionWriter
 
             $this->demoteCurrentVersion($pageId);
 
-            $version = EnterpriseWikiPageVersion::query()->create(array_merge($attributes, [
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $this->nextVersionNumberLocked($pageId),
-                'is_current' => true,
-            ]));
+            $version = EnterpriseWikiPageVersion::query()->create(array_merge(
+                $this->carryForwardBestPracticeReview($attributes, $superseded),
+                [
+                    'enterprise_wiki_page_id' => $pageId,
+                    'version_number' => $this->nextVersionNumberLocked($pageId),
+                    'is_current' => true,
+                ],
+            ));
 
             if ($restoreBlocks !== null) {
                 $restoreBlocks($version);
@@ -89,6 +93,7 @@ class EnterpriseWikiPageVersionWriter
             }
 
             $this->assertBlockProvenanceSurvived($pageId, $superseded, $version);
+            $this->assertBestPracticeReviewSurvived($pageId, $superseded, $version);
 
             return $version;
         });
@@ -119,6 +124,62 @@ class EnterpriseWikiPageVersionWriter
             supersededVersionId: (int) $superseded->id,
             supersededBlockCount: count($supersededBlocks),
             reason: 'The write has been rolled back; the page keeps its previous current version.',
+        );
+    }
+
+    /**
+     * A new current version inherits the superseded one's best-practice assessment unless the caller
+     * brings its own.
+     *
+     * Every path that writes a version WITHOUT regenerating the page — link/semantic repair,
+     * incremental relink, claim repair — supplies markdown only. Those rewrites do not re-assess
+     * anything, so dropping the assessment there would silently turn "assessed, nothing to add"
+     * back into "never assessed", which is precisely the distinction the contract exists to make.
+     * Carrying it forward here rather than in each caller is the same choice
+     * writeNewCurrentVersionRestoringBlocks() makes for block provenance: one choke point, so a
+     * future write path cannot forget.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function carryForwardBestPracticeReview(array $attributes, ?EnterpriseWikiPageVersion $superseded): array
+    {
+        $incoming = $attributes['best_practice_review_json'] ?? null;
+
+        if (is_array($incoming) && $incoming !== []) {
+            return $attributes;
+        }
+
+        $inherited = $superseded !== null ? $superseded->best_practice_review_json : null;
+
+        if (is_array($inherited) && $inherited !== []) {
+            $attributes['best_practice_review_json'] = $inherited;
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * The invariant, mirroring assertBlockProvenanceSurvived(): a page that HAD a recorded
+     * best-practice assessment must never end up with a current version that has none. Narrow by
+     * design — it says nothing about a page that never had one, and nothing about a caller that
+     * legitimately replaces the assessment with a new one.
+     */
+    private function assertBestPracticeReviewSurvived(
+        int $pageId,
+        ?EnterpriseWikiPageVersion $superseded,
+        EnterpriseWikiPageVersion $version,
+    ): void {
+        $supersededReview = $superseded !== null ? (array) ($superseded->best_practice_review_json ?? []) : [];
+
+        if ($supersededReview === [] || (array) ($version->best_practice_review_json ?? []) !== []) {
+            return;
+        }
+
+        throw new EnterpriseWikiPageVersionBestPracticeReviewLostException(
+            pageId: $pageId,
+            supersededVersionId: (int) $superseded->id,
+            supersededReviewCount: count($supersededReview),
         );
     }
 

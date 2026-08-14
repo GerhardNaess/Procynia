@@ -25,6 +25,7 @@ class EnterpriseWikiPageVersion extends Model
         'is_staged',
         'content_markdown',
         'content_blocks_json',
+        'best_practice_review_json',
         'generated_by_model',
         'generation_prompt_hash',
         'created_by_user_id',
@@ -37,6 +38,7 @@ class EnterpriseWikiPageVersion extends Model
             'is_current' => 'boolean',
             'is_staged' => 'boolean',
             'content_blocks_json' => 'array',
+            'best_practice_review_json' => 'array',
             'created_by_user_id' => 'integer',
         ];
     }

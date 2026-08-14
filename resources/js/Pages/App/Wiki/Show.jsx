@@ -715,6 +715,13 @@ export default function WikiShow({
 }) {
     const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    // The best-practice assessment recorded for the current version: one entry per planned topic.
+    // An audit trail, never a finding — "no improvement found" is a conclusion a reviewer can judge,
+    // and its absence (a page generated before the contract) is deliberately different from an
+    // empty list.
+    const bestPracticeReview = Array.isArray(current_version?.best_practice_review)
+        ? current_version.best_practice_review
+        : [];
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
     // Backend-validated (WikiController::show()/buildReviewReference()) — never trust the raw
@@ -2464,6 +2471,50 @@ export default function WikiShow({
                         </p>
                     )}
                 </section>
+
+                {bestPracticeReview.length > 0 && (
+                    <section className="space-y-3">
+                        <div className="flex flex-wrap items-baseline gap-3">
+                            <h2 className="text-base font-semibold text-slate-700">
+                                {tw.best_practice_review_heading ?? 'Beste praksis — vurdering'}
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                {(tw.best_practice_review_summary ?? ':reviewed vurdert · :gaps forbedring(er) foreslått')
+                                    .replace(':reviewed', String(bestPracticeReview.length))
+                                    .replace(':gaps', String(bestPracticeReview.filter((entry) => entry.gap_found).length))}
+                            </p>
+                        </div>
+                        <p className="text-sm text-slate-500">
+                            {tw.best_practice_review_intro
+                                ?? 'Hva vurderingen konkluderte for hvert tema på denne siden. «Ingen forbedring funnet» er et resultat, ikke et avvik.'}
+                        </p>
+                        <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">
+                            {bestPracticeReview.map((entry, index) => (
+                                <li key={`${entry.planned_topic}-${index}`} className="flex flex-col gap-1 p-4 sm:flex-row sm:items-start sm:gap-4">
+                                    <span
+                                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                            entry.gap_found ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                    >
+                                        {entry.gap_found
+                                            ? (tw.best_practice_review_gap_found ?? 'Forbedring foreslått')
+                                            : (tw.best_practice_review_no_gap ?? 'Ingen forbedring funnet')}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-slate-700">
+                                            {entry.planned_topic === '__page__'
+                                                ? (tw.best_practice_review_whole_page ?? 'Siden som helhet')
+                                                : entry.planned_topic}
+                                        </p>
+                                        {entry.assessment && (
+                                            <p className="mt-0.5 text-sm text-slate-500">{entry.assessment}</p>
+                                        )}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
 
                 {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'qa_review_open' && (
                     <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
