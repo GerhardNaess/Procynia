@@ -268,7 +268,8 @@ class EnterpriseWikiSectionContextRoutingTest extends TestCase
 
         // img0 belongs to section 1. Alfa, which this batch was NOT routed to — the figure contract
         // is a separate, whole-document contract and must not become a casualty of prompt routing.
-        $this->assertStringContainsString('"source_element_key": "img0"', $prompt);
+        // Compact JSON — representation only; the figure contract itself is unchanged.
+        $this->assertStringContainsString('"source_element_key":"img0"', $prompt);
     }
 
     // =========================================================================

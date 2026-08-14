@@ -169,7 +169,7 @@ class EnterpriseWikiPlanningContextConsolidationTest extends TestCase
     // Per-phase views — intentionally different, identically derived
     // =========================================================================
 
-    public function test_phase_one_sees_the_complete_catalog_and_the_overview(): void
+    public function test_phase_one_sees_the_complete_catalog(): void
     {
         $planning = $this->planningWithSections();
         $prompt = $this->phaseOnePrompt($planning);
@@ -178,8 +178,13 @@ class EnterpriseWikiPlanningContextConsolidationTest extends TestCase
             $this->assertStringContainsString($text, $prompt, 'phase 1 places every candidate, so it needs the whole document');
         }
 
-        $this->assertStringContainsString('DOCUMENT SECTION OVERVIEW', $prompt);
+        // The overview discloses what a call was NOT given, and phase 1 is given everything: each of
+        // its lines would say "full text below" and restate a "# [sec-N]" header three lines down.
+        // Every section is still named, in document order, by the catalog itself.
+        $this->assertStringNotContainsString('DOCUMENT SECTION OVERVIEW', $prompt);
         $this->assertStringContainsString('# [sec-0] 1. Alfa', $prompt);
+        $this->assertStringContainsString('# [sec-1] 2. Beta', $prompt);
+        $this->assertStringContainsString('# [sec-2] 3. Gamma', $prompt);
         // Deliberately NOT in this view (see the class docblock): the call that already runs longest
         // does not also get the existing-page bodies in this change.
         $this->assertStringNotContainsString('EXISTING PAGE CANDIDATES', $prompt);
@@ -245,15 +250,7 @@ class EnterpriseWikiPlanningContextConsolidationTest extends TestCase
     {
         $coordinator = app(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
 
-        return (new ReflectionClass($coordinator))->getMethod('globalPlanUserPrompt')->invoke(
-            $coordinator,
-            $planning->sourceMeta,
-            $planning->sourceText,
-            $planning->wikiIndex,
-            $planning->figureCandidates,
-            $planning->catalogElements,
-            [],
-        );
+        return (new ReflectionClass($coordinator))->getMethod('documentPlanUserPrompt')->invoke($coordinator, $planning);
     }
 
     /** @param list<array<string, mixed>> $mentions */

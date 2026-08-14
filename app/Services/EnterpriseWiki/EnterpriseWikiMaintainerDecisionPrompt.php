@@ -204,9 +204,262 @@ class EnterpriseWikiMaintainerDecisionPrompt
      * batch in Phase B (see candidateBatchSchema()) so this call's own output stays small
      * regardless of how many candidates the source document turns out to have.
      */
+    /**
+     * PHASE 1A — the document's own two pages, and nothing else.
+     *
+     * Phase 1 used to be one call that produced all seven top-level fields. Measured on the
+     * reference document that call generated ~6 400 tokens and took 126–152 s against a per-CALL
+     * timeout of 180 s: a margin of 16–30 %, on a duration whose spread is provider-side (two
+     * identical prompts differed by 20 %). Splitting the OUTPUT halves what each call has to
+     * generate, and the timeout is per call, so the margin roughly doubles without touching the
+     * timeout, the model or the contracts.
+     *
+     * The split is legitimate because the fields are genuinely independent: validateGlobalPlan()
+     * contains no cross-field check, and phase 2 is shown only the TITLES of the pages phase 1
+     * planned — never their owned topics — so nothing downstream ever joined these two halves.
+     *
+     * Figures belong here, exclusively. planned_figures is a whole-document contract, and two calls
+     * that could each place the same figure would create a conflict
+     * (EnterpriseWikiMaintainerDecisionConsistencyValidator::findUnplaceablePlannedFigures()) that
+     * no merge could resolve honestly. The candidate call is not given the figure candidates at all.
+     */
+    public static function documentPlanSchema(): array
+    {
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision_document_plan',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_article' => self::sourcePageSchema(),
+                        'source_summary' => self::sourcePageSchema(),
+                        'no_action_reason' => ['type' => ['string', 'null']],
+                    ],
+                    'required' => ['source_article', 'source_summary', 'no_action_reason'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * PHASE 1B — everything about candidates and shared/existing pages: the mentions phase 2 will
+     * batch, the entity pages, the patch targets, and the run's warnings.
+     *
+     * Deliberately WITHOUT planned_figures on its entity pages, even though sharedPageSchema()
+     * carries that field elsewhere: see documentPlanSchema(). The merger sets it to the empty list,
+     * so the merged plan still satisfies the shared page contract exactly.
+     *
+     * Deliberately WITHOUT patch_targets, for a harder reason. A patch target is an instruction to
+     * REWRITE AN EXISTING PAGE: EnterpriseWikiPatchApplicationService applies it and promotes a new
+     * current version. patchTargetRules() therefore requires the EXISTING PAGE CANDIDATES block —
+     * valid_target_headings, page_has_subsections, and an exact substring of the page's current text
+     * for superseded_substance. This call is not given that block (it sees the wiki INDEX: title,
+     * type, status and a 200-character excerpt), so any target it names is planned blind.
+     *
+     * That was harmless while phase 1 had five other things to do: all six stored decisions for the
+     * reference document contain zero patch targets. Isolating the candidate work changed it — one
+     * probe returned nine, every single one operation "amend" with target_heading null, which is
+     * precisely the one operation/heading combination producible WITHOUT the page in front of you
+     * ("amend" needs no superseded substring, and it cannot know whether a page has subsections).
+     * Two of the nine were duplicates. "amend" is also the one operation apply does not verify
+     * against the page's own text — planReplace() rejects a superseded substring it cannot find
+     * exactly once, planAmend() simply writes the replacement in.
+     *
+     * So the field is gone from this call rather than discouraged in its prompt. Phase 2 batches keep
+     * patch_targets in their own schema, so a candidate a batch classifies as "substance_changed" can
+     * still carry the matching target and findUntargetedSubstanceChanges() stays satisfiable; the
+     * single-call path for small documents keeps the whole contract, EXISTING PAGE CANDIDATES
+     * included. What is removed is only the blind bulk-generation this phase had started doing.
+     */
+    public static function candidatePlanSchema(): array
+    {
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision_candidate_plan',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchemaWithoutFigures()],
+                        'concept_candidate_mentions' => ['type' => 'array', 'items' => self::mentionSchema()],
+                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => ['entity_pages', 'concept_candidate_mentions', 'warnings'],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The shared page contract minus planned_figures — structural figure exclusivity for phase 1B.
+     * A rule the model cannot express is stronger than a rule it is told to follow.
+     */
+    private static function sharedPageSchemaWithoutFigures(): array
+    {
+        $schema = self::sharedPageSchema();
+        unset($schema['properties']['planned_figures']);
+        $schema['required'] = array_values(array_filter(
+            $schema['required'],
+            static fn (string $field): bool => $field !== 'planned_figures',
+        ));
+
+        return $schema;
+    }
+
+    /** @return string[] */
+    public static function validateDocumentPlan(array $raw): array
+    {
+        $errors = [];
+
+        foreach (['source_article', 'source_summary'] as $key) {
+            if (! isset($raw[$key]) || ! is_array($raw[$key])) {
+                $errors[] = "{$key} is required and must be an object.";
+
+                continue;
+            }
+
+            $errors = array_merge($errors, self::validateSourceEntry($raw[$key], $key));
+        }
+
+        if (
+            array_key_exists('no_action_reason', $raw)
+            && $raw['no_action_reason'] !== null
+            && ! is_string($raw['no_action_reason'])
+        ) {
+            $errors[] = 'no_action_reason must be a string or null.';
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    public static function validateCandidatePlan(array $raw): array
+    {
+        $errors = [];
+
+        if (array_key_exists('entity_pages', $raw)) {
+            if (! is_array($raw['entity_pages'])) {
+                $errors[] = 'entity_pages must be an array.';
+            } else {
+                foreach ($raw['entity_pages'] as $i => $entry) {
+                    // planned_figures is absent by contract here, so validate against the shared
+                    // entry rules with an empty figure list rather than reporting it missing.
+                    $errors = array_merge(
+                        $errors,
+                        self::validateSharedEntry(
+                            is_array($entry) ? array_merge(['planned_figures' => []], $entry) : $entry,
+                            "entity_pages[{$i}]",
+                        ),
+                    );
+                }
+            }
+        }
+
+        if (array_key_exists('concept_candidate_mentions', $raw)) {
+            if (! is_array($raw['concept_candidate_mentions'])) {
+                $errors[] = 'concept_candidate_mentions must be an array.';
+            } else {
+                foreach ($raw['concept_candidate_mentions'] as $i => $entry) {
+                    $errors = array_merge($errors, self::validateMentionEntry($entry, "concept_candidate_mentions[{$i}]"));
+                }
+            }
+        }
+
+        // patch_targets is not part of this phase's contract at all — see candidatePlanSchema(). A
+        // response that invents the field anyway is a contract violation, not something to validate.
+        if (array_key_exists('patch_targets', $raw)) {
+            $errors[] = 'patch_targets is not part of the candidate plan — this phase cannot see the existing pages a patch target would rewrite.';
+        }
+
+        if (array_key_exists('warnings', $raw) && ! is_array($raw['warnings'])) {
+            $errors[] = 'warnings must be an array of strings.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @return array{source_article: array<string,mixed>, source_summary: array<string,mixed>, no_action_reason: string|null}
+     */
+    public static function parseDocumentPlan(array $raw): array
+    {
+        $errors = self::validateDocumentPlan($raw);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(
+                'Invalid maintainer decision document plan: '.implode(' | ', $errors)
+            );
+        }
+
+        return [
+            'source_article' => $raw['source_article'],
+            'source_summary' => $raw['source_summary'],
+            'no_action_reason' => $raw['no_action_reason'] ?? null,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    public static function parseCandidatePlan(array $raw): array
+    {
+        $errors = self::validateCandidatePlan($raw);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(
+                'Invalid maintainer decision candidate plan: '.implode(' | ', $errors)
+            );
+        }
+
+        return [
+            'entity_pages' => $raw['entity_pages'] ?? [],
+            'concept_candidate_mentions' => $raw['concept_candidate_mentions'] ?? [],
+            'warnings' => $raw['warnings'] ?? [],
+        ];
+    }
+
     public static function globalPlanSchema(): array
     {
-        $mentionSchema = [
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name' => 'maintainer_decision_global_plan',
+                'strict' => true,
+                'schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_article' => self::sourcePageSchema(),
+                        'source_summary' => self::sourcePageSchema(),
+                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
+                        'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
+                        'concept_candidate_mentions' => ['type' => 'array', 'items' => self::mentionSchema()],
+                        'no_action_reason' => ['type' => ['string', 'null']],
+                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required' => [
+                        'source_article',
+                        'source_summary',
+                        'entity_pages',
+                        'patch_targets',
+                        'concept_candidate_mentions',
+                        'no_action_reason',
+                        'warnings',
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The candidate MENTION contract, shared by the merged global-plan shape and phase 1B.
+     */
+    private static function mentionSchema(): array
+    {
+        return [
             'type' => 'object',
             'properties' => [
                 'name' => ['type' => 'string'],
@@ -223,36 +476,6 @@ class EnterpriseWikiMaintainerDecisionPrompt
             ],
             'required' => ['name', 'concept_type', 'mentioned_context', 'section_keys'],
             'additionalProperties' => false,
-        ];
-
-        return [
-            'type' => 'json_schema',
-            'json_schema' => [
-                'name' => 'maintainer_decision_global_plan',
-                'strict' => true,
-                'schema' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'source_article' => self::sourcePageSchema(),
-                        'source_summary' => self::sourcePageSchema(),
-                        'entity_pages' => ['type' => 'array', 'items' => self::sharedPageSchema()],
-                        'patch_targets' => ['type' => 'array', 'items' => self::patchTargetSchema()],
-                        'concept_candidate_mentions' => ['type' => 'array', 'items' => $mentionSchema],
-                        'no_action_reason' => ['type' => ['string', 'null']],
-                        'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
-                    ],
-                    'required' => [
-                        'source_article',
-                        'source_summary',
-                        'entity_pages',
-                        'patch_targets',
-                        'concept_candidate_mentions',
-                        'no_action_reason',
-                        'warnings',
-                    ],
-                    'additionalProperties' => false,
-                ],
-            ],
         ];
     }
 
@@ -1240,6 +1463,21 @@ class EnterpriseWikiMaintainerDecisionPrompt
     }
 
     /**
+     * The most evidence keys ONE owned topic can contribute. Deliberately the same number as
+     * EnterpriseWikiPlannedSectionEvidenceResolver::MAX_ELEMENTS_PER_SECTION, because that is how
+     * many the generated section is actually built from: a seventh key is output the planner paid
+     * for and nothing downstream ever reads. Measured on the reference document, one summary topic
+     * alone named 24 keys and 54 were emitted across five topics, against 30 usable.
+     *
+     * Enforced here by truncation rather than by a validation error on purpose. Naming too much
+     * evidence is not a wrong decision — it is a verbose one — and turning it into an issue would
+     * spend a bounded repair round, and its AI call, on something the backend can settle for free.
+     * The prompt states the cap so the tokens are not generated in the first place; this is what
+     * makes the contract true regardless of whether the model honours it.
+     */
+    public const MAX_OWNED_TOPIC_EVIDENCE_KEYS = EnterpriseWikiPlannedSectionEvidenceResolver::MAX_ELEMENTS_PER_SECTION;
+
+    /**
      * Normalises either owned_topics shape into the bound one. The single place the rest of the
      * codebase reads owned topics through, so no consumer has to know that two shapes exist.
      *
@@ -1268,12 +1506,17 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 continue;
             }
 
+            $keys = array_values(array_unique(array_filter(array_map(
+                static fn (mixed $key): string => is_string($key) ? trim($key) : '',
+                (array) ($item['source_element_keys'] ?? []),
+            ), static fn (string $key): bool => $key !== '')));
+
             $entries[] = [
                 'topic' => $topic,
-                'source_element_keys' => array_values(array_unique(array_filter(array_map(
-                    static fn (mixed $key): string => is_string($key) ? trim($key) : '',
-                    (array) ($item['source_element_keys'] ?? []),
-                ), static fn (string $key): bool => $key !== ''))),
+                // Order is meaning here — the planner is told to name the keys in reading order, and
+                // the resolver takes the first ones — so the cap keeps the head of the list, never a
+                // sample of it.
+                'source_element_keys' => array_slice($keys, 0, self::MAX_OWNED_TOPIC_EVIDENCE_KEYS),
             ];
         }
 

@@ -181,7 +181,8 @@ class EnterpriseWikiMaintainerDecisionDeltaPrompt
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexContext !== []
-                ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                // Compact: representation only, see EnterpriseWikiMaintainerDecisionAiClient.
+                ? (string) json_encode($indexContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                 : 'No pages yet.',
             '',
             self::plannedPagesBlock($decision),

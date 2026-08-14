@@ -61,7 +61,23 @@ class EnterpriseWikiMaintainerDecisionAiClient
      */
     private const MAX_CATALOG_CHARS = 90_000;
 
+    /**
+     * Per-element snippet budget for a call that READS the elements it was given — a routed phase-2
+     * batch, or a bounded repair. Those calls see a few sections and have to judge their actual
+     * substance, so they get real text.
+     */
     private const MAX_CATALOG_ELEMENT_CHARS = 240;
+
+    /**
+     * Per-element snippet budget for the ORIENTATION view — the one call that sees the whole document
+     * at once (phase 1). It has to place every candidate in a section and cite element keys for the
+     * two document pages; it does not have to read every paragraph in full, because the routed
+     * phase-2 batch that judges a section's substance still receives that section at the full
+     * MAX_CATALOG_ELEMENT_CHARS. The reference document's median element is 76 characters, so more
+     * than half are still shown complete at this budget, and every one of its 515 keys stays
+     * addressable.
+     */
+    private const MAX_ORIENTATION_ELEMENT_CHARS = 90;
 
     /** Selects this operation's profile in config('ai_capacity.operations'). */
     private const CAPACITY_OPERATION_TYPE = 'enterprise_wiki_maintainer_decision';
@@ -910,10 +926,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  responsibilities" or "approval" section) that the source itself does not cover, and never',
             '  cite an unrelated key just to satisfy the requirement — the page will be generated from',
             '  exactly the evidence you name here and nothing else.',
-            '  Name the FEW elements that genuinely carry the topic — normally 1-6, in the order they',
-            '  should be read. Do not list every element of a document section: only the first few are',
-            '  used as the section\'s evidence, so pick the ones that actually define the topic rather',
-            '  than everything nearby.',
+            '  HARD LIMIT: at most '.EnterpriseWikiMaintainerDecisionPrompt::MAX_OWNED_TOPIC_EVIDENCE_KEYS
+                .' keys per topic, in the order they should be read. The',
+            '  section is built from exactly those; every later key is discarded and never reaches the',
+            '  page. Name the few elements that DEFINE the topic, not everything near it — a topic that',
+            '  truly needs more is two topics: split it.',
             '  The same element MAY support topics on more than one page when it genuinely covers both;',
             '  within one page, keep each topic on its own evidence so the sections do not repeat.',
             '  A page you CREATE must own at least one evidence-bound topic. Owning nothing is not a way',
@@ -992,8 +1009,10 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
 
+        // Compact JSON: same facts, ~19 % fewer characters than pretty-printed. Representation
+        // only — no field is added, removed or reinterpreted.
         $indexJson = $indexContext !== []
-            ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            ? (string) json_encode($indexContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             : 'No pages yet.';
 
         return implode("\n", [
@@ -1061,8 +1080,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    public static function sourceElementsBlock(array $sourceElements, int $maxChars, ?int $maxElementChars = null, array $sectionKeysByLabel = []): string
-    {
+    public static function sourceElementsBlock(
+        array $sourceElements,
+        int $maxChars,
+        ?int $maxElementChars = null,
+        array $sectionKeysByLabel = [],
+        bool $includeTypeLabels = true,
+    ): string {
         $lines = [];
         $used = 0;
         $rendered = 0;
@@ -1097,7 +1121,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             $sectionLine = $section !== '' && $section !== $currentSection
                 ? "\n# ".($sectionKey !== null ? "[{$sectionKey}] " : '').$section
                 : null;
-            $entry = "[{$key}] ({$type}) ".$text;
+            $entry = $includeTypeLabels ? "[{$key}] ({$type}) ".$text : "[{$key}] ".$text;
             $cost = mb_strlen($entry) + 1 + ($sectionLine !== null ? mb_strlen($sectionLine) + 1 : 0);
 
             // Truncate on whole-element boundaries only: a half-rendered element would give the
@@ -1125,7 +1149,8 @@ class EnterpriseWikiMaintainerDecisionAiClient
         return implode("\n", array_merge(
             [
                 'SOURCE ELEMENTS ('.$rendered.' of '.count($sourceElements).'):',
-                'The source document, split into its addressable elements: [key] (type) text, grouped',
+                'The source document, split into its addressable elements: '
+                    .($includeTypeLabels ? '[key] (type) text' : '[key] text').', grouped',
                 'under the "# " section they belong to. Keys are stable identifiers for this document',
                 'version — refer to them when reasoning about which parts of the source a page rests on,',
                 'and never invent one.',
@@ -1146,8 +1171,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
      *
      * @param  list<array<string, mixed>>  $sourceElements
      */
-    public static function sourceContentBlock(string $sourceText, array $sourceElements, int $maxChars, ?array $sectionKeys = null): string
-    {
+    public static function sourceContentBlock(
+        string $sourceText,
+        array $sourceElements,
+        int $maxChars,
+        ?array $sectionKeys = null,
+        bool $orientationView = false,
+    ): string {
         $catalogElements = self::sourceCatalogElements($sourceElements);
         $map = EnterpriseWikiDocumentSectionMap::build($catalogElements);
         $sectionKeysByLabel = [];
@@ -1171,11 +1201,19 @@ class EnterpriseWikiMaintainerDecisionAiClient
         $catalog = self::sourceElementsBlock(
             $renderedElements,
             max($maxChars, self::MAX_CATALOG_CHARS),
-            self::MAX_CATALOG_ELEMENT_CHARS,
+            $orientationView ? self::MAX_ORIENTATION_ELEMENT_CHARS : self::MAX_CATALOG_ELEMENT_CHARS,
             $sectionKeysByLabel,
+            // The type label is dropped from the orientation view only, and only because it is
+            // already there: element keys are minted per type (paragraph-0, listitem-0, tbl0-row0),
+            // so "(paragraph)" after "[paragraph-12]" restates the key. A call that READS elements
+            // keeps it — there the redundancy is cheap and the reader is judging substance.
+            includeTypeLabels: ! $orientationView,
         );
 
-        if ($catalog !== '' && $map['sections'] !== []) {
+        // The overview exists to disclose what a call was NOT given. When every section is included
+        // — which is exactly the orientation view — each of its lines would read "full text below",
+        // restating the "# [sec-N] label" headers the catalog already prints in document order.
+        if ($catalog !== '' && $map['sections'] !== [] && ($routed || ! $orientationView)) {
             $catalog = EnterpriseWikiDocumentSectionMap::overviewBlock(
                 $map,
                 $routed ? $sectionKeys : EnterpriseWikiDocumentSectionMap::sectionKeys($map),
@@ -1291,7 +1329,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
         ];
 
         foreach ($figureCandidates as $figure) {
-            $parts[] = (string) json_encode($figure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $parts[] = (string) json_encode($figure, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
 
         return implode("\n", $parts);

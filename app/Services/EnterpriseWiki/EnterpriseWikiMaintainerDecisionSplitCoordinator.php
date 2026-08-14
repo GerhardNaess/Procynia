@@ -6,6 +6,7 @@ use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
+use App\Exceptions\EnterpriseWikiMaintainerDecisionPhaseFailedException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -51,6 +52,16 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     // of time, same reasoning as EnterpriseWikiMaintainerDecisionAiClient's own constant.
     private const GLOBAL_PLAN_EXPECTED_RESULT_OBJECTS = 2;
 
+    /** Phase 1A returns exactly two pages. */
+    private const DOCUMENT_PLAN_EXPECTED_RESULT_OBJECTS = 2;
+
+    /**
+     * Phase 1B returns the mentions, the entity pages and the patch targets. Sized like the old
+     * whole-phase call rather than smaller: the mention list is the one unbounded part of phase 1,
+     * and the ceiling is a safety bound, never a target.
+     */
+    private const CANDIDATE_PLAN_EXPECTED_RESULT_OBJECTS = 2;
+
     /**
      * Attempts per batch when the response text itself comes back corrupted (run 34's control-byte
      * fault). One retry, never more: a second corrupted response is a signal about the call, not
@@ -63,6 +74,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         private readonly EnterpriseWikiAiCapacityRetryExecutor $capacityRetryExecutor,
         private readonly EnterpriseWikiMaintainerDecisionMerger $merger,
         private readonly EnterpriseWikiAiRequestTimeoutPolicy $timeoutPolicy,
+        private readonly EnterpriseWikiMaintainerDecisionGlobalPlanMerger $globalPlanMerger,
     ) {}
 
     /**
@@ -188,35 +200,135 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /** @return array<string, mixed> */
+    /**
+     * PHASE 1, as two sequential calls.
+     *
+     * One call generated ~6 400 tokens and took 126–152 s against a per-CALL timeout of 180 s. The
+     * duration is generation-bound and its spread is provider-side: two identical prompts differed
+     * by 20 %. Halving what each call must GENERATE is therefore the only lever that moves the
+     * margin, and because the timeout is per call, sequential execution captures all of it — no
+     * concurrency needed, and none introduced here.
+     *
+     * 1A decides the document's two pages and the figures. 1B decides the candidates, entity pages
+     * and patch targets. The halves are field-disjoint (their schemas partition the global plan
+     * exactly), and nothing downstream ever joined them: phase 2 is shown only the TITLES of the
+     * pages phase 1 planned, never their owned topics.
+     *
+     * Sequencing buys one extra thing worth having: 1B can be told what 1A actually named, so an
+     * entity page colliding with the article or summary is prevented rather than repaired. That is
+     * passed as ordinary context, not as a dependency — pass null and 1B still produces a valid
+     * half, which is what a future parallel version would do.
+     *
+     * @throws EnterpriseWikiMaintainerDecisionPhaseFailedException
+     */
     private function decideGlobalPlan(
         EnterpriseWikiPlanningContext $planning,
         string $languageName,
         ?AiCallContext $context = null,
     ): array {
-        // Phase A's view: the COMPLETE addressable catalog (it has to place every candidate and
-        // cite section keys), the section overview, the Wiki index and the figure candidates.
-        // Existing page candidates are deliberately not part of this view — see the class docblock.
-        $userPromptText = $this->globalPlanUserPrompt(
-            $planning->sourceMeta,
-            $planning->sourceText,
-            $planning->wikiIndex,
-            $planning->figureCandidates,
-            $planning->catalogElements,
-            [],
-        );
+        $context ??= AiCallContext::none();
+        $startedAt = microtime(true);
+
+        try {
+            $documentPlan = EnterpriseWikiMaintainerDecisionPrompt::parseDocumentPlan(
+                $this->decideDocumentPlan($planning, $languageName, $context),
+            );
+        } catch (Throwable $e) {
+            throw EnterpriseWikiMaintainerDecisionPhaseFailedException::documentPlan($e);
+        }
+
+        // The second call sees a truthful, shrinking job budget — the first one has already spent
+        // part of it. EnterpriseWikiAiRequestTimeoutPolicy is what decides whether that still leaves
+        // room for a full-length call; this only stops it from being lied to.
+        $candidateContext = $context->withElapsedSeconds(microtime(true) - $startedAt);
+
+        try {
+            $candidatePlan = EnterpriseWikiMaintainerDecisionPrompt::parseCandidatePlan(
+                $this->decideCandidatePlan($planning, $languageName, $documentPlan, $candidateContext),
+            );
+        } catch (Throwable $e) {
+            throw EnterpriseWikiMaintainerDecisionPhaseFailedException::candidatePlan($e);
+        }
+
+        $globalPlan = $this->globalPlanMerger->merge($documentPlan, $candidatePlan);
+
+        Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Phase 1 assembled from two calls.', [
+            'entity_pages' => count($globalPlan['entity_pages']),
+            'concept_candidate_mentions' => count($globalPlan['concept_candidate_mentions']),
+            'patch_targets' => count($globalPlan['patch_targets']),
+            'phase_1_seconds' => round(microtime(true) - $startedAt, 1),
+        ]);
+
+        return $globalPlan;
+    }
+
+    /** PHASE 1A — the document's own two pages and their figures. */
+    private function decideDocumentPlan(
+        EnterpriseWikiPlanningContext $planning,
+        string $languageName,
+        AiCallContext $context,
+    ): array {
+        // Both halves work from the same PlanningContext and the same compact orientation view of
+        // the catalog — the split changes what each call OUTPUTS, never what it may know.
+        $userPromptText = $this->documentPlanUserPrompt($planning);
         $inputSizeChars = mb_strlen($userPromptText);
 
         return $this->capacityRetryExecutor->execute(
-            'EnterpriseWikiMaintainerDecisionAiClient:global_plan',
+            'EnterpriseWikiMaintainerDecisionAiClient:document_plan',
             $inputSizeChars,
             fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planGlobalPlanCall(
                 self::CAPACITY_OPERATION_TYPE,
                 self::MODEL,
-                self::GLOBAL_PLAN_EXPECTED_RESULT_OBJECTS,
+                self::DOCUMENT_PLAN_EXPECTED_RESULT_OBJECTS,
                 $inputSizeChars,
                 $retryAttempt,
             ),
-            fn (int $maxOutputTokens): array => $this->buildGlobalPlanPayload($languageName, $userPromptText, $maxOutputTokens),
+            fn (int $maxOutputTokens): array => $this->buildPhasePayload(
+                EnterpriseWikiMaintainerDecisionPrompt::documentPlanSchema(),
+                $this->documentPlanDeveloperPrompt($languageName),
+                $userPromptText,
+                $maxOutputTokens,
+            ),
+            fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForGlobalPlan(new AiTimeoutRequest(
+                operationType: self::CAPACITY_OPERATION_TYPE,
+                inputSizeChars: $inputSizeChars,
+                chosenMaxOutputTokens: $plan->chosenMaxOutputTokens,
+                remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            )),
+            $context,
+        );
+    }
+
+    /**
+     * PHASE 1B — candidates, entity pages, patch targets, warnings.
+     *
+     * @param  array<string, mixed>|null  $documentPlan  What 1A named, so 1B does not duplicate it.
+     */
+    private function decideCandidatePlan(
+        EnterpriseWikiPlanningContext $planning,
+        string $languageName,
+        ?array $documentPlan,
+        AiCallContext $context,
+    ): array {
+        $userPromptText = $this->candidatePlanUserPrompt($planning, $documentPlan);
+        $inputSizeChars = mb_strlen($userPromptText);
+
+        return $this->capacityRetryExecutor->execute(
+            'EnterpriseWikiMaintainerDecisionAiClient:candidate_plan',
+            $inputSizeChars,
+            fn (int $retryAttempt): AiCapacityPlan => $this->capacityPlanner->planGlobalPlanCall(
+                self::CAPACITY_OPERATION_TYPE,
+                self::MODEL,
+                self::CANDIDATE_PLAN_EXPECTED_RESULT_OBJECTS,
+                $inputSizeChars,
+                $retryAttempt,
+            ),
+            fn (int $maxOutputTokens): array => $this->buildPhasePayload(
+                EnterpriseWikiMaintainerDecisionPrompt::candidatePlanSchema(),
+                $this->candidatePlanDeveloperPrompt($languageName),
+                $userPromptText,
+                $maxOutputTokens,
+            ),
             fn (AiCapacityPlan $plan, ?int $remainingJobBudgetSeconds) => $this->timeoutPolicy->resolveForGlobalPlan(new AiTimeoutRequest(
                 operationType: self::CAPACITY_OPERATION_TYPE,
                 inputSizeChars: $inputSizeChars,
@@ -350,16 +462,17 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         return $this->decideCandidateBatch($planning, $this->languageName($languageCode), $globalPlan, $mentions, $batchNumber - 1, $context);
     }
 
-    private function buildGlobalPlanPayload(string $languageName, string $userPromptText, int $maxOutputTokens): array
+    /**
+     * @param  array<string, mixed>  $schemaBlock
+     */
+    private function buildPhasePayload(array $schemaBlock, string $developerPrompt, string $userPromptText, int $maxOutputTokens): array
     {
-        $schemaBlock = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema();
-
         return [
             'model' => self::MODEL,
             'input' => [
                 [
                     'role' => 'developer',
-                    'content' => [['type' => 'input_text', 'text' => $this->globalPlanDeveloperPrompt($languageName)]],
+                    'content' => [['type' => 'input_text', 'text' => $developerPrompt]],
                 ],
                 [
                     'role' => 'user',
@@ -400,14 +513,22 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ];
     }
 
-    private function globalPlanDeveloperPrompt(string $languageName): string
+    /**
+     * PHASE 1A developer prompt — the document's own two pages, and the figures.
+     *
+     * Carries every rule that governs those fields and nothing that governs the other half: no
+     * candidate criteria, no entity rules, no patch-target contract. The page-responsibility and
+     * owned-topic-evidence rules DO appear in both halves, because both halves plan pages that own
+     * topics — that is one contract stated to two calls, not duplication that could be removed.
+     */
+    private function documentPlanDeveloperPrompt(string $languageName): string
     {
         return implode("\n", [
             "You are an enterprise wiki maintainer making a planning decision. Output language: {$languageName}.",
-            'This source document is large enough that the decision is split into two phases. This is',
-            'PHASE 1: decide source_article, source_summary, and entity_pages, and IDENTIFY (but do not',
-            'yet fully evaluate) concept candidates. A second phase will decide each candidate\'s full',
-            'disposition in smaller batches — do not try to do that work here.',
+            'This source document is large enough that the decision is split into several phases. This',
+            'is PHASE 1A, and it decides exactly one thing: the two pages that represent THIS DOCUMENT.',
+            'Concept candidates, entity pages and patch targets are decided by other phases — do not',
+            'plan them, do not list them, and do not let them influence what these two pages own.',
             '',
             'DECISION RULES:',
             'source_article — one article page per source document:',
@@ -417,26 +538,58 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             'source_summary — one summary page per source document:',
             '  Same create/update logic as source_article.',
             '',
+            'no_action_reason: set if the source is empty, a duplicate, or should not produce a page.',
+            '',
+            'SLUG AND TITLE RULES:',
+            '  proposed_slug: lowercase, hyphens only. No dots, spaces, or file extensions.',
+            '  title: must not be a raw filename. Never include .pdf, .docx, etc.',
+            '  source_article and source_summary slugs: append a short unique suffix (e.g. "tittel-ab1c2d").',
+            '',
+            ...$this->pageResponsibilityInstructionLines(),
+            '',
+            EnterpriseWikiMaintainerDecisionAiClient::figurePlanningRules(),
+            '',
+            'Return JSON only. No text outside JSON.',
+        ]);
+    }
+
+    /**
+     * PHASE 1B developer prompt — candidates, entity pages, patch targets, warnings.
+     *
+     * Figures are absent on purpose, in the schema as well as here: phase 1A owns the whole-document
+     * figure contract, and a figure planned by two phases onto two pages is a conflict no merge can
+     * resolve honestly.
+     */
+    private function candidatePlanDeveloperPrompt(string $languageName): string
+    {
+        return implode("\n", [
+            "You are an enterprise wiki maintainer making a planning decision. Output language: {$languageName}.",
+            'This source document is large enough that the decision is split into several phases. This',
+            'is PHASE 1B: decide the shared ENTITY pages, and IDENTIFY (but do not yet fully evaluate)',
+            'the concept candidates. A later phase decides each candidate\'s full',
+            'disposition in smaller batches — do not try to do that work here.',
+            'The pages representing THIS DOCUMENT — its article and its summary — were decided by an',
+            'earlier phase and are listed below. Never plan them again under any slot.',
+            'Do not plan figures. Figures belong to the document pages and are already decided.',
+            'Do not plan changes to existing pages. Judging what an existing page states requires its',
+            'current content, which this call is not given — the index below shows only that a page',
+            'exists. A change to existing substance is decided later, by the phase that reads it.',
+            '',
+            'DECISION RULES:',
             'entity_pages — shared entity pages (organisations, clients, suppliers):',
             '  Zero or more. action "create" + page_id null: entity does not exist yet.',
             '  action "update" + integer page_id: entity page exists; use its ID from the index.',
             '',
             ...EnterpriseWikiMaintainerDecisionAiClient::existingPageSlotRules(),
             '',
-            ...EnterpriseWikiMaintainerDecisionAiClient::patchTargetRules(),
-            '',
-            'no_action_reason: set if the source is empty, a duplicate, or should not produce a page.',
             'warnings: non-blocking concerns (empty text, language mismatch, ambiguous title, etc.).',
             '',
             'SLUG AND TITLE RULES:',
             '  proposed_slug: lowercase, hyphens only. No dots, spaces, or file extensions.',
             '  title: must not be a raw filename. Never include .pdf, .docx, etc.',
-            '  source_article and source_summary slugs: append a short unique suffix (e.g. "tittel-ab1c2d").',
             '  entity slugs: stable, no suffix — same page matched across sources.',
             '',
             ...$this->pageResponsibilityInstructionLines(),
-            '',
-            EnterpriseWikiMaintainerDecisionAiClient::figurePlanningRules(),
             '',
             'CONCEPT CANDIDATE MENTIONS (identification only — do not decide anything about them yet):',
             '  List every central concept candidate this source document points to: an independent',
@@ -450,10 +603,10 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '  every section this candidate actually appears in — one key when it belongs to a single',
             '  section, several when the document genuinely treats it in more than one place. Copy them',
             '  exactly and never invent one. This is ONLY used to decide which sections the next phase',
-            '  is shown in full text; it is not a decision about the candidate, and phase 2 still reads',
-            '  and judges the text itself. Leaving it empty is allowed and means "cannot place it" —',
-            '  that phase then simply receives the whole document, so an empty list costs context, it',
-            '  never loses it.',
+            '  is shown in full text; it is not a decision about the candidate, and that phase still',
+            '  reads and judges the text itself. Leaving it empty is allowed and means "cannot place',
+            '  it" — that phase then simply receives the whole document, so an empty list costs',
+            '  context, it never loses it.',
             '  Do NOT decide create/reuse/reference_only/exclude here, and do NOT write',
             '  independent_reason, justification, existing_page_title, owning_page_title, or',
             '  necessary_for_article — those belong to the next phase. List a candidate whenever it is',
@@ -623,26 +776,82 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ];
     }
 
-    private function globalPlanUserPrompt(array $sourceMeta, string $sourceText, array $indexContext, array $figureCandidates = [], array $sourceElements = [], array $existingPageCandidates = []): string
+    /**
+     * PHASE 1A's view: the compact orientation catalog, the Wiki index (to tell create from update)
+     * and the figure candidates it alone may plan.
+     */
+    private function documentPlanUserPrompt(EnterpriseWikiPlanningContext $planning): string
     {
-        $title = (string) ($sourceMeta['title'] ?? '');
-        $filename = (string) ($sourceMeta['filename'] ?? '');
-
         return implode("\n", [
-            'SOURCE METADATA:',
-            "Title: {$title}",
-            "Original file: {$filename}",
+            ...$this->sourceHeaderLines($planning),
+            $this->orientationCatalog($planning),
             '',
-            EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock($sourceText, $sourceElements, self::MAX_SOURCE_TEXT_CHARS),
+            'EXISTING WIKI INDEX ('.count($planning->wikiIndex).' pages):',
+            $this->indexContextJson($planning->wikiIndex),
             '',
-            'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
-            $this->indexContextJson($indexContext),
+            EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($planning->figureCandidates),
+        ]);
+    }
+
+    /**
+     * PHASE 1B's view: the same orientation catalog and Wiki index, no figure candidates at all, and
+     * — when phase 1A has already run — the two page identities it must not claim.
+     *
+     * That last block is why the split is sequential rather than parallel: it PREVENTS the one real
+     * collision between the halves instead of repairing it afterwards. Passing null is supported and
+     * falls back to the merger's deterministic guard, which is what a parallel version would rely on.
+     *
+     * @param  array<string, mixed>|null  $documentPlan
+     */
+    private function candidatePlanUserPrompt(EnterpriseWikiPlanningContext $planning, ?array $documentPlan): string
+    {
+        return implode("\n", [
+            ...$this->sourceHeaderLines($planning),
+            $this->orientationCatalog($planning),
             '',
-            EnterpriseWikiMaintainerDecisionAiClient::figureCandidatesBlock($figureCandidates),
-            ...($existingPageCandidates !== []
-                ? ['', EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($existingPageCandidates)]
+            'EXISTING WIKI INDEX ('.count($planning->wikiIndex).' pages):',
+            $this->indexContextJson($planning->wikiIndex),
+            ...($documentPlan !== null
+                ? [
+                    '',
+                    'ALREADY DECIDED DOCUMENT PAGES (phase 1A — do not plan these again):',
+                    (string) json_encode([
+                        'source_article' => $documentPlan['source_article']['title'] ?? null,
+                        'source_summary' => $documentPlan['source_summary']['title'] ?? null,
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'An entity page may never carry either of those titles, slugs or page ids.',
+                ]
                 : []),
         ]);
+    }
+
+    /** @return list<string> */
+    private function sourceHeaderLines(EnterpriseWikiPlanningContext $planning): array
+    {
+        return [
+            'SOURCE METADATA:',
+            'Title: '.(string) ($planning->sourceMeta['title'] ?? ''),
+            'Original file: '.(string) ($planning->sourceMeta['filename'] ?? ''),
+            '',
+        ];
+    }
+
+    /**
+     * Both phase-1 calls get EVERY element key — each has to place or cite anything in the document
+     * — but as an ORIENTATION view: shorter snippets, no type label the key already carries, no
+     * section overview of sections it was all given anyway. The routed phase-2 batch that actually
+     * judges a section's substance still receives that section in full. Measured on the reference
+     * document: 79 726 -> 42 600 catalog characters, zero elements dropped, all 515 keys addressable.
+     */
+    private function orientationCatalog(EnterpriseWikiPlanningContext $planning): string
+    {
+        return EnterpriseWikiMaintainerDecisionAiClient::sourceContentBlock(
+            $planning->sourceText,
+            $planning->catalogElements,
+            self::MAX_SOURCE_TEXT_CHARS,
+            null,
+            orientationView: true,
+        );
     }
 
     /**
@@ -753,10 +962,15 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         return array_keys($keys);
     }
 
+    /**
+     * Compact rather than pretty-printed: identical facts, ~19 % fewer characters. The wiki index is
+     * consumed as data, not read as prose, so indentation buys nothing here. Representation only —
+     * every field, value and ordering is unchanged.
+     */
     private function indexContextJson(array $indexContext): string
     {
         return $indexContext !== []
-            ? (string) json_encode($indexContext, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            ? (string) json_encode($indexContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
             : 'No pages yet.';
     }
 

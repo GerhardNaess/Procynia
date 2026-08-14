@@ -378,11 +378,14 @@ class EnterpriseWikiPlannedTopicEvidenceContractTest extends TestCase
 
         $coordinator = app(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
         $coordinatorReflection = new \ReflectionClass($coordinator);
-        $globalPlan = $coordinatorReflection->getMethod('globalPlanDeveloperPrompt')->invoke($coordinator, 'Norwegian');
-        $batch = $coordinatorReflection->getMethod('candidateBatchDeveloperPrompt')->invoke($coordinator, 'Norwegian');
-
-        $this->assertStringContainsString('EVERY owned topic is EVIDENCE-BOUND', $globalPlan);
-        $this->assertStringContainsString('EVERY owned topic is EVIDENCE-BOUND', $batch);
+        // Both halves of phase 1 plan pages that own topics, so both carry the binding.
+        foreach (['documentPlanDeveloperPrompt', 'candidatePlanDeveloperPrompt', 'candidateBatchDeveloperPrompt'] as $method) {
+            $this->assertStringContainsString(
+                'EVERY owned topic is EVIDENCE-BOUND',
+                $coordinatorReflection->getMethod($method)->invoke($coordinator, 'Norwegian'),
+                $method,
+            );
+        }
 
         $this->assertStringContainsString(
             'EVERY owned topic is EVIDENCE-BOUND',
@@ -540,7 +543,13 @@ class EnterpriseWikiPlannedTopicEvidenceContractTest extends TestCase
 
         $this->assertStringContainsString('must own at least one evidence-bound topic', $rules);
         $this->assertStringContainsString('Owning nothing is not a way', $rules);
-        $this->assertStringContainsString('normally 1-6', $rules, 'the planner must name the few carrying elements, not a whole section');
+        // The soft "normally 1-6" is now a hard, enforced limit — the planner named 24 keys for a
+        // single topic on the reference document, of which 6 were ever used.
+        $this->assertStringContainsString(
+            'at most '.EnterpriseWikiMaintainerDecisionPrompt::MAX_OWNED_TOPIC_EVIDENCE_KEYS.' keys per topic',
+            $rules,
+            'the planner must name the few carrying elements, not a whole section',
+        );
     }
 
     /**

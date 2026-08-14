@@ -34,11 +34,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         config(['ai_capacity.operations.enterprise_wiki_maintainer_decision.batch.max_candidates_per_batch' => 2]);
 
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([
+            ...$this->phaseOneResponses([
                 $this->mention('Incident Management'),
                 $this->mention('Problem Management'),
                 $this->mention('Change Management'),
-            ])),
+            ]),
             $this->completedResponse($this->batch([
                 $this->candidate('Incident Management', 'create'),
                 $this->candidate('Problem Management', 'create'),
@@ -66,7 +66,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
     public function test_global_plan_with_no_candidate_mentions_produces_an_empty_but_valid_decision(): void
     {
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([])),
+            ...$this->phaseOneResponses([]),
         ]);
 
         $decision = $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
@@ -85,11 +85,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
-            ->once()
-            ->andReturn($this->completedResponse($this->globalPlan([
+            ->twice()
+            ->andReturn(...$this->phaseOneResponses([
                 $this->mention('Incident Management'),
                 $this->mention('Problem Management'),
-            ])));
+            ]));
         // Batch 1 fails outright (malformed envelope); batch 2 must never be attempted.
         $mock->shouldReceive('createResponse')
             ->once()
@@ -107,8 +107,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
-            ->once()
-            ->andReturn($this->completedResponse($this->globalPlan([$this->mention('Incident Management')])));
+            ->twice()
+            ->andReturn(...$this->phaseOneResponses([$this->mention('Incident Management')]));
         $mock->shouldReceive('createResponse')
             ->once()
             ->andReturn(['status' => 'failed', 'error' => ['type' => 'server_error', 'code' => 'boom']]);
@@ -134,15 +134,16 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
-            ->times(2)
+            ->times(3)
             ->andReturnUsing(function () use (&$calls): array {
                 $calls++;
 
-                if ($calls === 1) {
-                    return $this->completedResponse($this->globalPlan([$this->mention('Incident Management')]));
+                // Calls 1 and 2 are phase 1A and 1B.
+                if ($calls <= 2) {
+                    return $this->phaseOneResponses([$this->mention('Incident Management')])[$calls - 1];
                 }
 
-                if ($calls === 2) {
+                if ($calls === 3) {
                     return ['status' => 'incomplete', 'incomplete_details' => ['reason' => 'max_output_tokens'], 'output_text' => '', 'output' => []];
                 }
 
@@ -170,8 +171,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
-            ->once()
-            ->andReturn($this->completedResponse($this->globalPlan([$this->mention('Incident Management')])));
+            ->twice()
+            ->andReturn(...$this->phaseOneResponses([$this->mention('Incident Management')]));
         $mock->shouldReceive('createResponse')->twice()->andReturn($incomplete);
 
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
@@ -202,8 +203,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayloads, $mentions): array {
                 $capturedPayloads[] = $payload;
 
-                if (count($capturedPayloads) === 1) {
-                    return $this->completedResponse($this->globalPlan($mentions));
+                if (count($capturedPayloads) <= 2) {
+                    return $this->phaseOneResponses($mentions)[count($capturedPayloads) - 1];
                 }
 
                 // Decode which candidates this batch was asked to decide, from the captured
@@ -225,8 +226,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $this->assertCount(8, $parsed['concept_candidates']);
         $this->assertCount(8, $parsed['concept_pages']);
 
-        // Global plan call + at least 2 batch calls (8 candidates, max 3 per batch => >=3 batches).
-        $this->assertGreaterThanOrEqual(4, count($capturedPayloads));
+        // Two phase-1 calls + at least 3 batch calls (8 candidates, max 3 per batch).
+        $this->assertGreaterThanOrEqual(5, count($capturedPayloads));
 
         foreach ($capturedPayloads as $payload) {
             $this->assertLessThanOrEqual(9000, $payload['max_output_tokens']);
@@ -237,7 +238,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
     public function test_same_input_produces_the_same_structural_result_when_run_twice(): void
     {
         $buildResponses = fn () => [
-            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            ...$this->phaseOneResponses([$this->mention('Incident Management')]),
             $this->completedResponse($this->batch([$this->candidate('Incident Management', 'create')], [$this->page('Incident Management')])),
         ];
 
@@ -275,11 +276,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         config(['ai_capacity.operations.enterprise_wiki_maintainer_decision.batch.max_candidates_per_batch' => 2]);
 
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([
+            ...$this->phaseOneResponses([
                 $this->mention('Migreringsstrategi'),
                 $this->mention('Cutover (Big Bang)'),
                 $this->mention('Prosjektleder'),
-            ])),
+            ]),
             // Batch 1 creates the owner page and specialises one candidate under it — the owner
             // exists only in THIS decision, so existing_owner_page_id is legitimately null.
             $this->completedResponse($this->batch([
@@ -324,21 +325,22 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
-            ->twice()
+            ->times(3)
             ->andReturnUsing(function (array $payload) use (&$capturedPrompts): array {
                 $capturedPrompts[] = implode("\n", [
                     $payload['input'][0]['content'][0]['text'],
                     $payload['input'][1]['content'][0]['text'],
                 ]);
 
-                return count($capturedPrompts) === 1
-                    ? $this->completedResponse($this->globalPlan([$this->mention('Prosjektleder')]))
+                // Two phase-1 calls, then the batch whose prompt this test is about.
+                return count($capturedPrompts) <= 2
+                    ? $this->phaseOneResponses([$this->mention('Prosjektleder')])[count($capturedPrompts) - 1]
                     : $this->completedResponse($this->batch([$this->candidate('Prosjektleder', 'exclude')], []));
             });
 
         $this->coordinator()->decide($this->planning('tekst', [], [], []), 'no');
 
-        $batchPrompt = $capturedPrompts[1];
+        $batchPrompt = $capturedPrompts[2];
 
         $this->assertStringContainsString('NEVER valid as owning_page_title', $batchPrompt);
         $this->assertStringNotContainsString('they are valid owning pages', $batchPrompt);
@@ -399,7 +401,16 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         return ['status' => 'completed', 'output_text' => json_encode($decodedBody)];
     }
 
+    /**
+     * The merged phase-1 shape — still the contract everything downstream sees, and still what these
+     * tests assert against. Phase 1 now PRODUCES it from two calls; see phaseOneResponses().
+     */
     private function globalPlan(array $mentions): array
+    {
+        return $this->documentPlan() + $this->candidatePlan($mentions) + ['patch_targets' => []];
+    }
+
+    private function documentPlan(): array
     {
         return [
             'source_article' => [
@@ -414,10 +425,34 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
                 'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d',
                 'reason' => 'Companion.',
             ],
+            'no_action_reason' => null,
+        ];
+    }
+
+    /**
+     * Phase 1B's own contract — no patch_targets: this phase cannot see the existing pages a patch
+     * would rewrite. The merged plan still carries the key, empty.
+     */
+    private function candidatePlan(array $mentions): array
+    {
+        return [
             'entity_pages' => [],
             'concept_candidate_mentions' => $mentions,
-            'no_action_reason' => null,
             'warnings' => [],
+        ];
+    }
+
+    /**
+     * Phase 1 is two sequential calls: 1A returns the document's pages, 1B the candidates. Every
+     * test that used to stub "the global plan response" stubs these two instead.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function phaseOneResponses(array $mentions): array
+    {
+        return [
+            $this->completedResponse($this->documentPlan()),
+            $this->completedResponse($this->candidatePlan($mentions)),
         ];
     }
 
@@ -470,7 +505,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $corrupted = $this->batch([$this->candidate("Incident\x0BManagement", 'reference_only')], []);
 
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            ...$this->phaseOneResponses([$this->mention('Incident Management')]),
             $this->completedResponse($corrupted),
             $this->completedResponse($this->batch([$this->candidate('Incident Management', 'reference_only')], [])),
         ]);
@@ -490,7 +525,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $corrupted = $this->batch([$this->candidate("Incident\x0BManagement", 'reference_only')], []);
 
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            ...$this->phaseOneResponses([$this->mention('Incident Management')]),
             $this->completedResponse($corrupted),
             $this->completedResponse($corrupted),
         ]);
@@ -506,7 +541,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $this->forceSingleCandidatePerBatch();
 
         $this->mockSequentialResponses([
-            $this->completedResponse($this->globalPlan([$this->mention('Incident Management')])),
+            ...$this->phaseOneResponses([$this->mention('Incident Management')]),
             $this->completedResponse(['concept_candidates' => [['name' => 'Incident Management']], 'concept_pages' => []]),
         ]);
 

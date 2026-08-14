@@ -204,7 +204,9 @@ class EnterpriseWikiPlannedPageSlotContractTest extends TestCase
         $coordinator = app(EnterpriseWikiMaintainerDecisionSplitCoordinator::class);
         $reflection = new \ReflectionClass($coordinator);
 
-        foreach (['globalPlanDeveloperPrompt', 'candidateBatchDeveloperPrompt'] as $method) {
+        // Phase 1A owns only source_article/source_summary, and those are never named through the
+        // concept/entity slots this rule governs — so the rule lives where the slots do.
+        foreach (['candidatePlanDeveloperPrompt', 'candidateBatchDeveloperPrompt'] as $method) {
             $prompt = $reflection->getMethod($method)->invoke($coordinator, 'Norwegian');
             $this->assertStringContainsString('through the slot for the type it already has', $prompt, $method);
         }

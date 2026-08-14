@@ -29,7 +29,13 @@ class EnterpriseWikiPlannedSectionEvidenceResolver
 
     public const BINDING_LEGACY_KEYWORD = 'legacy_keyword';
 
-    private const MAX_ELEMENTS_PER_SECTION = 6;
+    /**
+     * How many source elements a generated section is ever built from. Public because it is also the
+     * cap the planner is held to: a decision that names more evidence keys for one owned topic than
+     * this is naming keys nothing downstream can use — see
+     * EnterpriseWikiMaintainerDecisionPrompt::MAX_OWNED_TOPIC_EVIDENCE_KEYS.
+     */
+    public const MAX_ELEMENTS_PER_SECTION = 6;
 
     private const MAX_EVIDENCE_CHARS_PER_SECTION = 3600;
 
