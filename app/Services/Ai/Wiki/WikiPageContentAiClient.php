@@ -151,11 +151,18 @@ class WikiPageContentAiClient
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             )),
             $context,
+            // Validated and parsed INSIDE the executor: an unusable response — invalid UTF-8,
+            // control bytes, non-JSON — is retried once by the one shared corrupt-response policy
+            // (EnterpriseWikiCorruptResponseClassifier) instead of by a guard private to this
+            // class. A readable-but-invalid page still fails immediately, exactly as before.
+            function (array $body) use ($pageType, $plannedSections): array {
+                $this->utf8Guard->assertValid($body, 'enterprise_wiki_ai_response');
+
+                return $this->parseBlocksResponse($body, 'generation', $pageType, $plannedSections);
+            },
         );
 
-        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
-
-        return $this->parseBlocksResponse($decoded, 'generation', $pageType, $plannedSections);
+        return $decoded;
     }
 
     private function planCapacity(string $pageType, int $inputSizeChars, int $retryAttempt): AiCapacityPlan
@@ -243,11 +250,14 @@ class WikiPageContentAiClient
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             ), $sectionsToRepair),
             $context,
+            function (array $body) use ($requestedPlannedTopics, $pageType, $plannedSections): array {
+                $this->utf8Guard->assertValid($body, 'enterprise_wiki_ai_response');
+
+                return $this->parseSectionRepairResponse($body, $requestedPlannedTopics, $pageType, $plannedSections);
+            },
         );
 
-        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
-
-        return $this->parseSectionRepairResponse($decoded, $requestedPlannedTopics, $pageType, $plannedSections);
+        return $decoded;
     }
 
     private function planSectionRepairCapacity(int $inputSizeChars, int $sectionsToRepair, int $retryAttempt): AiCapacityPlan
@@ -322,11 +332,14 @@ class WikiPageContentAiClient
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             )),
             $context,
+            function (array $body) use ($pageType): array {
+                $this->utf8Guard->assertValid($body, 'enterprise_wiki_ai_response');
+
+                return $this->parseBlocksResponse($body, 'figure_repair', $pageType);
+            },
         );
 
-        $this->utf8Guard->assertValid($decoded, 'enterprise_wiki_ai_response');
-
-        return $this->parseBlocksResponse($decoded, 'figure_repair', $pageType);
+        return $decoded;
     }
 
     /**

@@ -50,7 +50,6 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
 
     // source_article + source_summary are always attempted; entity_pages count is unknown ahead
     // of time, same reasoning as EnterpriseWikiMaintainerDecisionAiClient's own constant.
-    private const GLOBAL_PLAN_EXPECTED_RESULT_OBJECTS = 2;
 
     /** Phase 1A returns exactly two pages. */
     private const DOCUMENT_PLAN_EXPECTED_RESULT_OBJECTS = 2;
@@ -61,13 +60,6 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
      * and the ceiling is a safety bound, never a target.
      */
     private const CANDIDATE_PLAN_EXPECTED_RESULT_OBJECTS = 2;
-
-    /**
-     * Attempts per batch when the response text itself comes back corrupted (run 34's control-byte
-     * fault). One retry, never more: a second corrupted response is a signal about the call, not
-     * noise to keep paying for.
-     */
-    private const MAX_CORRUPTED_RESPONSE_ATTEMPTS = 2;
 
     public function __construct(
         private readonly EnterpriseWikiAiCapacityPlanner $capacityPlanner,
@@ -96,51 +88,33 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ?AiCallContext $context = null,
     ): array {
         $context ??= AiCallContext::none();
-        $languageName = $this->languageName($languageCode);
 
-        $globalPlanRaw = $this->decideGlobalPlan($planning, $languageName, $context);
-        $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan($globalPlanRaw);
+        $prepared = $this->preparePersistedCandidateBatches($planning, $languageCode, $context);
+        $globalPlan = $prepared['global_plan'];
 
-        $mentions = $globalPlan['concept_candidate_mentions'];
-
-        Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Global plan produced.', [
-            'entity_pages' => count($globalPlan['entity_pages']),
-            'concept_candidate_mentions' => count($mentions),
-        ]);
-
-        if ($mentions === []) {
+        if ($prepared['batches'] === []) {
             return $this->merger->merge($globalPlan, []);
         }
 
-        $batchSizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::MODEL, count($mentions));
-
-        Log::info('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Batch plan computed.', [
-            'total_candidates' => count($mentions),
-            'batch_count' => count($batchSizes),
-            'batch_sizes' => $batchSizes,
-        ]);
-
         $batchResults = [];
-        $offset = 0;
 
-        foreach ($batchSizes as $batchIndex => $size) {
-            $batchMentions = array_slice($mentions, $offset, $size);
-            $offset += $size;
-
+        foreach ($prepared['batches'] as $batch) {
             try {
-                $batchResults[] = $this->decideAndParseCandidateBatch(
+                // The SAME entrypoint the queued worker calls. There is one phase-2 implementation;
+                // this loop only decides that the batches run here instead of on the queue.
+                $batchResults[] = $this->decidePersistedCandidateBatch(
                     $planning,
-                    $languageName,
+                    $languageCode,
                     $globalPlan,
-                    $batchMentions,
-                    $batchIndex,
+                    $batch['mentions'],
+                    $batch['batch_number'],
                     $context,
                 );
             } catch (Throwable $e) {
                 throw new EnterpriseWikiMaintainerDecisionBatchFailedException(
-                    $batchIndex + 1,
-                    count($batchSizes),
-                    count($batchMentions),
+                    $batch['batch_number'],
+                    $batch['total_batches'],
+                    count($batch['mentions']),
                     $e,
                 );
             }
@@ -230,9 +204,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         $startedAt = microtime(true);
 
         try {
-            $documentPlan = EnterpriseWikiMaintainerDecisionPrompt::parseDocumentPlan(
-                $this->decideDocumentPlan($planning, $languageName, $context),
-            );
+            $documentPlan = $this->decideDocumentPlan($planning, $languageName, $context);
         } catch (Throwable $e) {
             throw EnterpriseWikiMaintainerDecisionPhaseFailedException::documentPlan($e);
         }
@@ -243,9 +215,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         $candidateContext = $context->withElapsedSeconds(microtime(true) - $startedAt);
 
         try {
-            $candidatePlan = EnterpriseWikiMaintainerDecisionPrompt::parseCandidatePlan(
-                $this->decideCandidatePlan($planning, $languageName, $documentPlan, $candidateContext),
-            );
+            $candidatePlan = $this->decideCandidatePlan($planning, $languageName, $documentPlan, $candidateContext);
         } catch (Throwable $e) {
             throw EnterpriseWikiMaintainerDecisionPhaseFailedException::candidatePlan($e);
         }
@@ -296,6 +266,10 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             )),
             $context,
+            // Parsed inside the executor, so an UNUSABLE response (control bytes, invalid
+            // JSON) meets the one shared corrupt-response policy — one retry, then hard
+            // fail — while a readable-but-wrong plan still propagates to the validators.
+            fn (array $decoded): array => EnterpriseWikiMaintainerDecisionPrompt::parseDocumentPlan($decoded),
         );
     }
 
@@ -336,67 +310,11 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             )),
             $context,
+            // Parsed inside the executor, so an UNUSABLE response (control bytes, invalid
+            // JSON) meets the one shared corrupt-response policy — one retry, then hard
+            // fail — while a readable-but-wrong plan still propagates to the validators.
+            fn (array $decoded): array => EnterpriseWikiMaintainerDecisionPrompt::parseCandidatePlan($decoded),
         );
-    }
-
-    /**
-     * One batch call plus its schema parse, with a single bounded retry for CORRUPTED RESPONSE TEXT
-     * only.
-     *
-     * The corruption guard (run 34) rejects a response whose text carries raw control bytes where
-     * characters belong — a transmission fault in the model's own output, not a planning mistake,
-     * and one no amount of re-prompting logic can reason about. Today that fault fails one batch and
-     * the batch failure aborts the entire decision: six or more good calls discarded because one
-     * response came back with a corrupted byte in a candidate name. Retrying that ONE call is both
-     * the cheapest and the only meaningful response.
-     *
-     * Deliberately narrow, and deliberately not a general "retry on invalid decision": every other
-     * schema violation is a real contract violation that a retry would only repeat, so it propagates
-     * untouched, exactly as before.
-     *
-     * @param  array<string, mixed>  $globalPlan
-     * @param  list<array<string, mixed>>  $batchMentions
-     * @return array<string, mixed>
-     */
-    private function decideAndParseCandidateBatch(
-        EnterpriseWikiPlanningContext $planning,
-        string $languageName,
-        array $globalPlan,
-        array $batchMentions,
-        int $batchIndex,
-        ?AiCallContext $context = null,
-    ): array {
-        $lastFailure = null;
-
-        for ($attemptNumber = 1; $attemptNumber <= self::MAX_CORRUPTED_RESPONSE_ATTEMPTS; $attemptNumber++) {
-            $raw = $this->decideCandidateBatch(
-                $planning,
-                $languageName,
-                $globalPlan,
-                $batchMentions,
-                $batchIndex,
-                $context,
-            );
-
-            try {
-                return EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($raw);
-            } catch (\InvalidArgumentException $e) {
-                if (! EnterpriseWikiMaintainerDecisionPrompt::isCorruptedTextFailure($e->getMessage())) {
-                    throw $e;
-                }
-
-                $lastFailure = $e;
-
-                Log::warning('[PROCYNIA][WIKI_MAINTAINER_DECISION_SPLIT] Batch response text was corrupted — retrying this batch once.', [
-                    'batch_number' => $batchIndex + 1,
-                    'candidates' => count($batchMentions),
-                    'run_id' => $context?->runId,
-                    'reason' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        throw $lastFailure ?? new \InvalidArgumentException('Invalid maintainer decision candidate batch.');
     }
 
     /**
@@ -445,10 +363,19 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             ), $candidateCount),
             $context,
+            // Parsed inside the executor, so an UNUSABLE response (control bytes, invalid
+            // JSON) meets the one shared corrupt-response policy — one retry, then hard
+            // fail — while a readable-but-wrong plan still propagates to the validators.
+            fn (array $decoded): array => EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($decoded),
         );
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * THE phase-2 entrypoint — the queued worker and the in-process loop both come through here,
+     * so there is one implementation, one retry policy and one set of failure semantics.
+     *
+     * @return array<string,mixed> A PARSED candidate batch.
+     */
     public function decidePersistedCandidateBatch(
         EnterpriseWikiPlanningContext $planning,
         string $languageCode,

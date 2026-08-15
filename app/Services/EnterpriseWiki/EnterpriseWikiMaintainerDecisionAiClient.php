@@ -8,6 +8,7 @@ use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Models\EnterpriseWikiSourceReference;
+use Closure;
 use RuntimeException;
 
 /**
@@ -198,14 +199,34 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
                 )),
                 $context,
+                // Parsed inside the executor: the one corrupt-response policy retries an unusable
+                // response once, while a readable-but-invalid decision propagates as before.
+                fn (array $body): array => $this->parseOrFail(
+                    fn (): array => EnterpriseWikiMaintainerDecisionPrompt::parse($body),
+                    'decision failed schema validation',
+                ),
             );
         }
 
+        return $decoded;
+    }
+
+    /**
+     * Keeps the caller-facing failure message these two paths have always produced, now that the
+     * parse itself happens inside the capacity executor. Deliberately preserves the ORIGINAL
+     * exception as $previous: EnterpriseWikiCorruptResponseClassifier reads the message chain to
+     * tell an unusable response from a wrong one, and a rewrapped message must not hide it.
+     *
+     * @param  Closure(): array<string, mixed>  $parse
+     * @return array<string, mixed>
+     */
+    private function parseOrFail(Closure $parse, string $context): array
+    {
         try {
-            return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
+            return $parse();
         } catch (\InvalidArgumentException $e) {
             throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: decision failed schema validation: '.$e->getMessage(),
+                'EnterpriseWikiMaintainerDecisionAiClient: '.$context.': '.$e->getMessage(),
                 0,
                 $e,
             );
@@ -319,17 +340,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
             ), $repairedObjects),
             $context,
+            fn (array $body): array => $this->parseOrFail(
+                fn (): array => EnterpriseWikiMaintainerDecisionDeltaPrompt::parse($body),
+                'repair delta failed schema validation',
+            ),
         );
 
-        try {
-            return EnterpriseWikiMaintainerDecisionDeltaPrompt::parse($decoded);
-        } catch (\InvalidArgumentException $e) {
-            throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: repair delta failed schema validation: '.$e->getMessage(),
-                0,
-                $e,
-            );
-        }
+        return $decoded;
     }
 
     /**

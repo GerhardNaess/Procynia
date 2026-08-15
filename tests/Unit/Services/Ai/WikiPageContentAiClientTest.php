@@ -913,7 +913,7 @@ class WikiPageContentAiClientTest extends TestCase
         $client = $this->clientWithRawResponse([
             'id' => 'resp_invalid_json',
             'output_text' => 'dette er ikke json',
-        ]);
+        ], expectedCalls: 2);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not valid JSON/');
@@ -1677,11 +1677,17 @@ class WikiPageContentAiClientTest extends TestCase
         ]);
     }
 
-    private function clientWithRawResponse(array $responseBody): WikiPageContentAiClient
+    /**
+     * @param  int  $expectedCalls  An UNUSABLE response (non-JSON, control bytes, invalid UTF-8) is
+     *                              retried exactly once by the shared corrupt-response policy in
+     *                              EnterpriseWikiAiCapacityRetryExecutor, so a fixture that stays
+     *                              broken is called twice before failing.
+     */
+    private function clientWithRawResponse(array $responseBody, int $expectedCalls = 1): WikiPageContentAiClient
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+        $mock->shouldReceive('createResponse')->times($expectedCalls)->andReturn(array_replace_recursive([
             'id' => 'resp_test',
             'status' => 'completed',
             'output_text' => '',

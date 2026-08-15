@@ -144,17 +144,14 @@ class EnterpriseWikiMaintainerDecisionPrompt
     /**
      * Marks the one validation failure that says nothing about the DECISION and everything about
      * the response text carrying it: the model emitted a raw control byte where a character
-     * belonged (see validateNoControlCharacters() and the run-34 incident). Callers use it to tell
-     * a corrupted transmission apart from a genuinely invalid decision — the first is worth one
-     * bounded retry of that call, the second never is.
+     * belonged (see validateNoControlCharacters() and the run-34 incident).
+     *
+     * Detecting it stays here, because only this class knows what a valid decision looks like.
+     * Deciding what to DO about it no longer does: EnterpriseWikiCorruptResponseClassifier owns
+     * that question for every Wiki AI call, and the local isCorruptedTextFailure() helper that used
+     * to answer it for one path only is gone with the retry loop that used it.
      */
-    public const CORRUPTED_TEXT_MARKER = 'contains an invalid control character — the AI response text is corrupted';
-
-    /** Whether a validation failure is the corrupted-text kind rather than a real contract violation. */
-    public static function isCorruptedTextFailure(string $message): bool
-    {
-        return str_contains($message, self::CORRUPTED_TEXT_MARKER);
-    }
+    public const CORRUPTED_TEXT_MARKER = EnterpriseWikiCorruptResponseClassifier::CONTROL_CHARACTER_MARKER;
 
     /**
      * Returns the OpenAI Responses API text.format block for strict JSON output.

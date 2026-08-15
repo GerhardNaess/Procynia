@@ -41,8 +41,9 @@ class EnterpriseWikiMaintainerDecisionBatchEvaluator
         // a deterministic function of (customer, document), so a batch job cannot end up planning
         // from a different, thinner view of the document than the run that dispatched it.
         $planning = EnterpriseWikiPlanningContext::forDocument($run->customer_id, $document);
-        $raw = $this->coordinator->decidePersistedCandidateBatch($planning, $language, $input['global_plan'], $input['mentions'], $batch->batch_number);
 
-        return EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($raw);
+        // Parsed by the coordinator inside the capacity executor, which is also where the one
+        // corrupt-response policy lives — this path gets the same bounded retry as every other.
+        return $this->coordinator->decidePersistedCandidateBatch($planning, $language, $input['global_plan'], $input['mentions'], $batch->batch_number);
     }
 }

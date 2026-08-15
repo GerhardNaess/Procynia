@@ -560,9 +560,11 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         });
     }
 
-    public function test_decide_throws_on_non_json_response(): void
+    public function test_decide_retries_a_non_json_response_once_and_then_fails(): void
     {
-        $client = $this->clientWithRawResponse(['output_text' => 'dette er ikke json']);
+        // Output that is not JSON says nothing about the decision — it says the response is unusable.
+        // One fresh attempt, then hard fail: the shared policy, not a retry local to this client.
+        $client = $this->clientWithRawResponse(['output_text' => 'dette er ikke json'], expectedCalls: 2);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not valid JSON/');
@@ -1380,11 +1382,18 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         return $this->clientWithRawResponse(['status' => 'completed', 'output_text' => json_encode($decision)]);
     }
 
-    private function clientWithRawResponse(array $responseBody): EnterpriseWikiMaintainerDecisionAiClient
+    /**
+     * @param  int  $expectedCalls  An UNUSABLE response (not JSON, control bytes, invalid UTF-8) is
+     *                              retried exactly once by the shared corrupt-response policy in
+     *                              EnterpriseWikiAiCapacityRetryExecutor, so a fixture that stays
+     *                              broken is called twice before failing. A readable-but-invalid
+     *                              response is never retried and is called once.
+     */
+    private function clientWithRawResponse(array $responseBody, int $expectedCalls = 1): EnterpriseWikiMaintainerDecisionAiClient
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+        $mock->shouldReceive('createResponse')->times($expectedCalls)->andReturn(array_replace_recursive([
             'id' => 'resp_test',
             'status' => 'completed',
             'output_text' => '',
