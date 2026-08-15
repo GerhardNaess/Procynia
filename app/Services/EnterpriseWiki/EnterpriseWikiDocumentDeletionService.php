@@ -64,6 +64,7 @@ class EnterpriseWikiDocumentDeletionService
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
+        private readonly EnterpriseWikiDocumentWithdrawalService $withdrawalService,
     ) {}
 
     /**
@@ -190,9 +191,11 @@ class EnterpriseWikiDocumentDeletionService
 
         $blockedByRace = false;
         $pendingApprovalRunsCancelled = 0;
+        $withdrawal = ['pages_rewritten' => 0, 'blocks_removed' => 0, 'links_dematerialized' => 0];
 
         DB::transaction(function () use (
-            $document, $runIds, $soleSourcePageIds, $impactedClaimIds, $actor, &$blockedByRace, &$pendingApprovalRunsCancelled,
+            $document, $runIds, $soleSourcePageIds, $sharedPageIds, $impactedClaimIds, $actor,
+            &$blockedByRace, &$pendingApprovalRunsCancelled, &$withdrawal,
         ): void {
             $lockedRuns = $runIds->isEmpty()
                 ? collect()
@@ -212,6 +215,22 @@ class EnterpriseWikiDocumentDeletionService
             }
 
             $this->stalenessService->markAnswersStaleForDeletedDocument($document, $runIds, $soleSourcePageIds);
+
+            // WITHDRAWAL, before anything is torn down — both steps need the state that is about to
+            // disappear: the shared pages' blocks still carry this document's source_id, and the
+            // links still have both their graph edges and their target pages. Deterministic, no AI,
+            // and fail-closed: anything either step cannot represent safely throws, and the whole
+            // deletion rolls back rather than leaving the Wiki half-withdrawn.
+            $deletedPageSlugs = EnterpriseWikiPage::query()->whereIn('id', $soleSourcePageIds)->pluck('slug')->all();
+
+            $blockWithdrawal = $this->withdrawalService->withdrawBlocks($document, $sharedPageIds);
+            $linkWithdrawal = $this->withdrawalService->dematerializeIncomingLinks($soleSourcePageIds);
+
+            $withdrawal = [
+                'pages_rewritten' => $blockWithdrawal['pages_rewritten'] + $linkWithdrawal['pages_rewritten'],
+                'blocks_removed' => $blockWithdrawal['blocks_removed'],
+                'links_dematerialized' => $linkWithdrawal['links_dematerialized'],
+            ];
 
             if ($soleSourcePageIds->isNotEmpty()) {
                 EnterpriseWikiLintFinding::query()
@@ -273,6 +292,15 @@ class EnterpriseWikiDocumentDeletionService
 
             // Cascades: claim_source_reconciliation_attempts.
             $document->delete();
+
+            // The state the active Wiki must be in for this deletion to be allowed to commit. Runs
+            // last, inside the transaction, so a violation rolls everything back.
+            $this->withdrawalService->assertActiveWikiIsClean(
+                (int) $document->id,
+                (int) $document->customer_id,
+                $soleSourcePageIds,
+                $deletedPageSlugs,
+            );
         });
 
         if ($blockedByRace) {
@@ -293,6 +321,9 @@ class EnterpriseWikiDocumentDeletionService
             'pending_approval_runs_cancelled' => $pendingApprovalRunsCancelled,
             'sole_source_pages_deleted' => $soleSourcePageIds->count(),
             'shared_pages_kept' => $sharedPageIds->count(),
+            'pages_rewritten_by_withdrawal' => $withdrawal['pages_rewritten'],
+            'blocks_withdrawn' => $withdrawal['blocks_removed'],
+            'links_dematerialized' => $withdrawal['links_dematerialized'],
             'page_versions_deleted' => $pageVersionsDeleted,
             'claims_affected' => $impactedClaimIds->count(),
             'findings_deleted' => $findingsDeleted,
