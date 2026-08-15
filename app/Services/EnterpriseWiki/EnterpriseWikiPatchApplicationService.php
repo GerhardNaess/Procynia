@@ -244,7 +244,7 @@ class EnterpriseWikiPatchApplicationService
             $newElements = $this->resolveTargetSourceElements($target, $validSourceElements, $document, $context);
 
             $plan[] = match ($operation) {
-                'replace' => $this->planReplace($originalBlocks, $area, $target, $newElements, $context),
+                'replace' => $this->planReplace($originalBlocks, $area, $target, $newElements, $document, $context),
                 'amend' => $this->planAmend($originalBlocks, $area, $target, $newElements, $document, $context),
                 default => throw new EnterpriseWikiPatchApplicationException("{$context}: unsupported operation [{$operation}]."),
             };
@@ -256,9 +256,9 @@ class EnterpriseWikiPatchApplicationService
             return ['wrote_version' => false, 'targets_applied' => 0];
         }
 
-        // --- Execute the plan. Deterministic order: replacements (by block, then by offset) before
+        // --- Execute the plan. Deterministic order: replacements (by block index) before
         // insertions, so an insertion's index is never invalidated by an earlier edit. ---
-        $blocks = $this->executePlan($originalBlocks, $plan);
+        $blocks = $this->executePlan($originalBlocks, $plan, "Run [{$run->id}] page [{$pageId}]");
 
         $this->assertPreserveInvariant($originalBlocks, $blocks, $plan, "Run [{$run->id}] page [{$pageId}]");
         $this->assertNoBrokenWikilinks($plan, (int) $run->customer_id, "Run [{$run->id}] page [{$pageId}]");
@@ -343,7 +343,7 @@ class EnterpriseWikiPatchApplicationService
      * @param  list<array<string, mixed>>  $newElements
      * @return array<string, mixed>
      */
-    private function planReplace(array $blocks, array $area, array $target, array $newElements, string $context): array
+    private function planReplace(array $blocks, array $area, array $target, array $newElements, EnterpriseWikiDocument $document, string $context): array
     {
         $superseded = trim((string) ($target['superseded_substance'] ?? ''));
         $replacement = trim((string) ($target['replacement_substance'] ?? ''));
@@ -358,7 +358,7 @@ class EnterpriseWikiPatchApplicationService
             $blockMarkdown = (string) ($blocks[$i]['markdown'] ?? '');
             $inSection = $this->sectionResolver->inSectionText($area, $i, $blockMarkdown);
 
-            if ($superseded === '') {
+            if ($superseded === '' || $inSection === '') {
                 continue;
             }
 
@@ -368,7 +368,7 @@ class EnterpriseWikiPatchApplicationService
                 continue;
             }
 
-            // The offset is recorded relative to the WHOLE block, so execution rewrites the very
+            // The offset is recorded relative to the WHOLE block, so execution splits the very
             // occurrence found here. Without it, a block that shares its opening with an excluded
             // prefix — content above a shared heading, or a flat page's H1 title line — could have an
             // earlier, out-of-area occurrence rewritten instead.
@@ -385,13 +385,24 @@ class EnterpriseWikiPatchApplicationService
             throw EnterpriseWikiPatchApplicationException::supersededSubstanceAmbiguous($context, $superseded, count($hits));
         }
 
+        $blockIndex = $hits[0]['block_index'];
+        $origin = (string) ($blocks[$blockIndex]['content_origin'] ?? '');
+
+        // Only prose carrying document substance can be superseded, and only such a block can be
+        // split into provenance atoms. A heading, a figure or a Procynia recommendation is not
+        // source content — replacing one is a decision error, not something to execute.
+        if ($origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+            throw EnterpriseWikiPatchApplicationException::supersededBlockNotSourceBased($context, $origin !== '' ? $origin : 'unknown');
+        }
+
         return [
             'operation' => 'replace',
-            'block_index' => $hits[0]['block_index'],
+            'block_index' => $blockIndex,
             'offset' => $hits[0]['offset'],
             'superseded' => $superseded,
             'replacement' => $replacement,
             'new_elements' => $newElements,
+            'document' => $document,
             'area' => $area,
         ];
     }
@@ -450,38 +461,38 @@ class EnterpriseWikiPatchApplicationService
      * @param  list<array<string, mixed>>  $plan
      * @return list<array<string, mixed>>
      */
-    private function executePlan(array $blocks, array $plan): array
+    private function executePlan(array $blocks, array $plan, string $context): array
     {
-        // Replacements first, in place. Within one block apply from the end backwards: each offset
-        // was planned against the original text, so a length-changing replacement must not shift an
-        // earlier target's offset.
+        // Replacements first. Each one SPLITS its block into up to three provenance atoms — the
+        // untouched text before it (document A), the new substance (document B), the untouched text
+        // after it (document A) — so no block ever holds substance from two documents. Applied from
+        // the highest block index down, so an earlier split never shifts a later target's index.
         $replacements = array_values(array_filter(
             $plan,
             static fn (array $step): bool => $step['operation'] === 'replace',
         ));
 
-        usort($replacements, static fn (array $a, array $b): int => [
-            $a['block_index'], -$a['offset'],
-        ] <=> [
-            $b['block_index'], -$b['offset'],
-        ]);
+        // More than one replace inside the SAME original block would have to be planned as one
+        // multi-way split, with every offset re-based after each cut. That is real complexity for a
+        // case the maintainer can always express as two targets on two paragraphs, so it fails
+        // closed instead. Overlapping targets are rejected by the same rule.
+        $byBlock = array_count_values(array_map(
+            static fn (array $step): int => (int) $step['block_index'],
+            $replacements,
+        ));
+
+        foreach ($byBlock as $blockIndex => $count) {
+            if ($count > 1) {
+                throw EnterpriseWikiPatchApplicationException::severalReplacesInOneBlock($context, (int) $blockIndex, (int) $count);
+            }
+        }
+
+        usort($replacements, static fn (array $a, array $b): int => $b['block_index'] <=> $a['block_index']);
 
         foreach ($replacements as $step) {
-
             $index = (int) $step['block_index'];
-            $original = (string) ($blocks[$index]['markdown'] ?? '');
-            $position = (int) $step['offset'];
 
-            // Exactly one occurrence, at the offset planning found INSIDE the target area, and only
-            // the superseded substring — never the whole block.
-            $blocks[$index]['markdown'] = mb_substr($original, 0, $position)
-                .$step['replacement']
-                .mb_substr($original, $position + mb_strlen($step['superseded']));
-
-            $blocks[$index]['source_elements'] = $this->mergeSourceElements(
-                (array) ($blocks[$index]['source_elements'] ?? []),
-                $step['new_elements'],
-            );
+            array_splice($blocks, $index, 1, $this->splitBlockForReplacement($blocks[$index], $step));
         }
 
         // Insertions after, from the highest index down, so each insertion leaves lower indexes intact.
@@ -499,6 +510,131 @@ class EnterpriseWikiPatchApplicationService
         }
 
         return $this->renumber($blocks);
+    }
+
+    /**
+     * One replace, as up to three provenance atoms.
+     *
+     * The untouched text before and after the superseded substance stays with the document that
+     * authored it — byte for byte, taken by offset out of the original markdown, never rewritten and
+     * never handed to a model to retype. The new substance becomes its own block owned by the patch
+     * document alone. That is the point: knowledge is preserved MECHANICALLY while provenance stays
+     * atomic, and neither has to be traded for the other.
+     *
+     * The visible cost is accepted deliberately: one corrected paragraph renders as up to three,
+     * because blocks serialize with a blank line between them. Correct provenance is worth more than
+     * paragraph grouping — a wrong citation cannot be recovered later, presentation can.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  array<string, mixed>  $step
+     * @return list<array<string, mixed>>
+     */
+    private function splitBlockForReplacement(array $block, array $step): array
+    {
+        $markdown = (string) ($block['markdown'] ?? '');
+        $offset = (int) $step['offset'];
+        $supersededLength = mb_strlen((string) $step['superseded']);
+
+        $prefix = trim(mb_substr($markdown, 0, $offset));
+        $suffix = trim(mb_substr($markdown, $offset + $supersededLength));
+
+        $segments = [];
+
+        if ($prefix !== '') {
+            $segments[] = $this->carriedSegment($block, $prefix);
+        }
+
+        $replacement = $this->buildPatchBlock((string) $step['replacement'], $step['new_elements'], $step['document']);
+        $replacement['_patch_split'] = true;
+        $segments[] = $replacement;
+
+        if ($suffix !== '') {
+            $segments[] = $this->carriedSegment($block, $suffix);
+        }
+
+        return $this->distributeLinkIntents($block, $segments);
+    }
+
+    /**
+     * A surviving fragment of the original block: its own text, everything else about it unchanged —
+     * same document, same source elements, same hashes. Provenance is inherited wholesale because it
+     * is still true of this fragment; what changed is only how much of the block the fragment is.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>
+     */
+    private function carriedSegment(array $block, string $markdown): array
+    {
+        $block['markdown'] = $markdown;
+        // renumber() assigns these over the final list; a segment must not claim the original's slot.
+        // The marker distinguishes a SPLIT segment from an amend's inserted block: both arrive without
+        // a key, but only the latter is new substance on the page.
+        $block['block_key'] = null;
+        $block['position'] = null;
+        $block['_patch_split'] = true;
+
+        return $block;
+    }
+
+    /**
+     * Sends every materialized link intent to the segment that actually contains its link.
+     *
+     * Matched on the canonical slug the backend itself wrote into the markdown ([[slug|anchor]]),
+     * never on anchor text and never on similarity: the slug is the one identifier present both in
+     * the structured intent (via target_page_id) and in the text. An intent whose link ends up in no
+     * segment is dropped with a log — the same treatment an unplaceable intent already gets in
+     * EnterpriseWikiLinkIntentMaterializer, and the honest one, since the link it described is no
+     * longer on the page.
+     *
+     * @param  array<string, mixed>  $block
+     * @param  list<array<string, mixed>>  $segments
+     * @return list<array<string, mixed>>
+     */
+    private function distributeLinkIntents(array $block, array $segments): array
+    {
+        $intents = array_values(array_filter((array) ($block['link_intents'] ?? []), 'is_array'));
+
+        foreach (array_keys($segments) as $index) {
+            $segments[$index]['link_intents'] = [];
+        }
+
+        if ($intents === []) {
+            return $segments;
+        }
+
+        $slugsByPageId = EnterpriseWikiPage::query()
+            ->whereIn('id', array_values(array_filter(array_map(
+                static fn (array $intent): mixed => $intent['target_page_id'] ?? null,
+                $intents,
+            ), 'is_int')))
+            ->pluck('slug', 'id');
+
+        foreach ($intents as $intent) {
+            $slug = $slugsByPageId[$intent['target_page_id'] ?? null] ?? null;
+            $placed = false;
+
+            if (is_string($slug) && $slug !== '') {
+                foreach ($segments as $index => $segment) {
+                    $segmentMarkdown = (string) ($segment['markdown'] ?? '');
+
+                    if (str_contains($segmentMarkdown, '[['.$slug.'|') || str_contains($segmentMarkdown, '[['.$slug.']]')) {
+                        $segments[$index]['link_intents'][] = $intent;
+                        $placed = true;
+
+                        break;
+                    }
+                }
+            }
+
+            if (! $placed) {
+                Log::info('[WIKI_PATCH] Link intent dropped — its link is not in any segment of the split block.', [
+                    'target_page_id' => $intent['target_page_id'] ?? null,
+                    'intent_id' => $intent['intent_id'] ?? null,
+                ]);
+            }
+        }
+
+        return $segments;
     }
 
     /**
@@ -532,46 +668,6 @@ class EnterpriseWikiPatchApplicationService
             'best_practice_reason' => null,
             'link_intents' => [],
         ];
-    }
-
-    /**
-     * Existing provenance FIRST, then the patch's own elements — and existing entries are never
-     * removed or rewritten.
-     *
-     * This is the provenance rule 8K-3 owes: a patched block still carries substance from its
-     * original document (the surrounding sentences the replace did not touch), so that document must
-     * remain cited. Only the new authorising elements are added. Run 26 did the opposite — it
-     * reallocated a whole page's provenance to the change note — and that is what this prevents.
-     *
-     * Multi-element semantics are preserved: no one-element-one-owner assumption, and duplicates are
-     * collapsed on the element identity ordinary generation uses.
-     *
-     * @param  list<array<string, mixed>>  $existing
-     * @param  list<array<string, mixed>>  $added
-     * @return list<array<string, mixed>>
-     */
-    private function mergeSourceElements(array $existing, array $added): array
-    {
-        $merged = [];
-        $seen = [];
-
-        foreach ([...array_values($existing), ...array_values($added)] as $element) {
-            if (! is_array($element)) {
-                continue;
-            }
-
-            $key = ($element['source_type'] ?? '').'|'.($element['source_id'] ?? '').'|'
-                .($element['source_element_key'] ?? '').'|'.($element['source_row_key'] ?? '');
-
-            if (array_key_exists($key, $seen)) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $merged[] = $element;
-        }
-
-        return $merged;
     }
 
     /**
@@ -644,9 +740,21 @@ class EnterpriseWikiPatchApplicationService
         $authorized = [];
 
         foreach ($plan as $step) {
-            if ($step['operation'] === 'replace') {
-                $authorized[(int) $step['block_index']] = true;
+            if ($step['operation'] !== 'replace') {
+                continue;
             }
+
+            $blockMarkdown = (string) ($before[(int) $step['block_index']]['markdown'] ?? '');
+            $offset = (int) $step['offset'];
+            $hasPrefix = trim(mb_substr($blockMarkdown, 0, $offset)) !== '';
+            $hasSuffix = trim(mb_substr($blockMarkdown, $offset + mb_strlen((string) $step['superseded']))) !== '';
+
+            $authorized[(int) $step['block_index']] = [
+                'offset' => $offset,
+                'superseded' => (string) $step['superseded'],
+                'replacement' => (string) $step['replacement'],
+                'segments' => 1 + ($hasPrefix ? 1 : 0) + ($hasSuffix ? 1 : 0),
+            ];
         }
 
         $insertedCount = count(array_filter(
@@ -654,21 +762,39 @@ class EnterpriseWikiPatchApplicationService
             static fn (array $step): bool => $step['operation'] === 'amend' && ! ($step['no_op'] ?? false),
         ));
 
-        if (count($after) !== count($before) + $insertedCount) {
+        $splitGrowth = array_sum(array_map(
+            static fn (array $authorization): int => $authorization['segments'] - 1,
+            $authorized,
+        ));
+
+        if (count($after) !== count($before) + $insertedCount + $splitGrowth) {
             throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
                 $context,
-                'block count changed by '.(count($after) - count($before)).", expected +{$insertedCount}.",
+                'block count changed by '.(count($after) - count($before)).', expected +'.($insertedCount + $splitGrowth).'.',
             );
         }
 
-        // Every original block must still be present, and unauthorized ones byte-identical. Compared
-        // by walking the original order and skipping inserted blocks, which carry the patch marker.
-        $afterByOriginal = array_values(array_filter(
-            $after,
-            static fn (array $block): bool => ($block['_patch_inserted'] ?? false) !== true,
-        ));
+        // Every original block must still be present. An unauthorised one byte-identical; an
+        // authorised one as its own segments, whose untouched fragments must match the original text
+        // exactly.
+        $segmentsByOrigin = [];
+        $originIndex = 0;
 
-        if (count($afterByOriginal) !== count($before)) {
+        foreach ($after as $block) {
+            if (($block['_patch_inserted'] ?? false) === true) {
+                continue;
+            }
+
+            $segmentsByOrigin[$originIndex][] = $block;
+
+            // A split block contributes several consecutive segments; they are grouped by counting
+            // how many the plan authorised for this original, in the order executePlan produced them.
+            if (count($segmentsByOrigin[$originIndex]) >= ($authorized[$originIndex]['segments'] ?? 1)) {
+                $originIndex++;
+            }
+        }
+
+        if (count($segmentsByOrigin) !== count($before)) {
             throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
                 $context,
                 'the number of carried-over blocks does not match the original.',
@@ -676,112 +802,73 @@ class EnterpriseWikiPatchApplicationService
         }
 
         foreach ($before as $index => $originalBlock) {
-            $carried = $afterByOriginal[$index];
+            $segments = $segmentsByOrigin[$index] ?? [];
 
-            if (isset($authorized[$index])) {
-                if (! $this->untouchedRemaindersSurvive($originalBlock, $carried, $plan, $index)) {
+            if (! isset($authorized[$index])) {
+                if (count($segments) !== 1 || $this->comparableBlock($originalBlock) !== $this->comparableBlock($segments[0])) {
                     throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
                         $context,
-                        "block {$index} lost content the patch did not authorize changing.",
+                        "block {$index} changed but was not authorized by any patch target.",
                     );
                 }
 
                 continue;
             }
 
-            if ($this->comparableBlock($originalBlock) !== $this->comparableBlock($carried)) {
-                throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
-                    $context,
-                    "block {$index} changed but was not authorized by any patch target.",
-                );
-            }
+            $this->assertSplitPreservedOriginalText($originalBlock, $segments, $authorized[$index], $index, $context);
         }
     }
 
     /**
-     * Prove every untouched fragment of an authorised block remains in order. A block may carry
-     * several independent replace targets; checking only the remainder around the first one made
-     * the second authorised replacement look like data loss (run 46).
+     * The preserve proof for a split: the fragments the patch did NOT authorise changing must still
+     * be there, byte for byte, in order.
+     *
+     * Deterministic and total — it recomputes the prefix and suffix from the original markdown by
+     * offset and compares them to what was written. No normalisation, no similarity, no tolerance for
+     * "close enough": the fragments were never rewritten, so anything but an exact match means the
+     * split lost or altered text it had no authority to touch. Trimming is the one allowance, because
+     * a block's markdown is always stored trimmed and a cut lands mid-whitespace.
      *
      * @param  array<string, mixed>  $originalBlock
-     * @param  list<array<string, mixed>>  $plan
+     * @param  list<array<string, mixed>>  $segments
+     * @param  array{offset: int, superseded: string, replacement: string, segments: int}  $authorization
      */
-    private function untouchedRemaindersSurvive(array $originalBlock, array $carriedBlock, array $plan, int $index): bool
-    {
+    private function assertSplitPreservedOriginalText(
+        array $originalBlock,
+        array $segments,
+        array $authorization,
+        int $index,
+        string $context,
+    ): void {
         $markdown = (string) ($originalBlock['markdown'] ?? '');
-        $replacements = [];
+        $expectedPrefix = trim(mb_substr($markdown, 0, $authorization['offset']));
+        $expectedSuffix = trim(mb_substr($markdown, $authorization['offset'] + mb_strlen($authorization['superseded'])));
 
-        foreach ($plan as $step) {
-            if ($step['operation'] !== 'replace' || (int) $step['block_index'] !== $index) {
-                continue;
-            }
+        $expected = [];
 
-            $replacements[] = [
-                'offset' => (int) $step['offset'],
-                'length' => mb_strlen((string) $step['superseded']),
-            ];
+        if ($expectedPrefix !== '') {
+            $expected[] = $expectedPrefix;
         }
 
-        usort($replacements, static fn (array $a, array $b): int => $a['offset'] <=> $b['offset']);
+        $expected[] = trim($authorization['replacement']);
 
-        $cursor = 0;
-        $carriedMarkdown = (string) ($carriedBlock['markdown'] ?? '');
-        $carriedCursor = 0;
-
-        foreach ($replacements as $replacement) {
-            $offset = $replacement['offset'];
-
-            // Overlapping mutations cannot be independently preservation-safe.
-            if ($offset < $cursor) {
-                return false;
-            }
-
-            if (! $this->fragmentSurvivesInOrder(
-                mb_substr($markdown, $cursor, $offset - $cursor),
-                $carriedMarkdown,
-                $carriedCursor,
-            )) {
-                return false;
-            }
-
-            $cursor = $offset + $replacement['length'];
+        if ($expectedSuffix !== '') {
+            $expected[] = $expectedSuffix;
         }
 
-        return $this->fragmentSurvivesInOrder(
-            mb_substr($markdown, $cursor),
-            $carriedMarkdown,
-            $carriedCursor,
-        );
+        $actual = array_map(static fn (array $segment): string => trim((string) ($segment['markdown'] ?? '')), $segments);
+
+        if ($actual !== $expected) {
+            throw EnterpriseWikiPatchApplicationException::preserveInvariantViolated(
+                $context,
+                "block {$index} lost or altered content the patch did not authorize changing.",
+            );
+        }
     }
 
-    private function fragmentSurvivesInOrder(string $fragment, string $markdown, int &$cursor): bool
-    {
-        $fragment = trim($fragment);
-
-        if ($fragment === '') {
-            return true;
-        }
-
-        $position = mb_strpos($markdown, $fragment, $cursor);
-
-        if ($position === false) {
-            return false;
-        }
-
-        $cursor = $position + mb_strlen($fragment);
-
-        return true;
-    }
-
-    /**
-     * Block-comparison payload: everything except the positional identity fields renumber() assigns,
-     * which are bookkeeping rather than content. Provenance IS included, deliberately.
-     *
-     * @param  array<string, mixed>  $block
-     */
     private function comparableBlock(array $block): string
     {
-        unset($block['block_key'], $block['position'], $block['_patch_inserted']);
+        unset($block['block_key'], $block['position'], $block['_patch_inserted'], $block['_patch_split']);
         ksort($block);
 
         return (string) json_encode($block, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -864,7 +951,7 @@ class EnterpriseWikiPatchApplicationService
         $out = [];
 
         foreach (array_values($blocks) as $index => $block) {
-            $wasInserted = ($block['block_key'] ?? null) === null;
+            $wasInserted = ($block['block_key'] ?? null) === null && ($block['_patch_split'] ?? false) !== true;
             $block['block_key'] = 'block-'.str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT);
             $block['position'] = $index;
 
@@ -891,7 +978,7 @@ class EnterpriseWikiPatchApplicationService
 
         foreach ((array) ($version->content_blocks_json ?? []) as $block) {
             if (is_array($block) && trim((string) ($block['markdown'] ?? '')) !== '') {
-                unset($block['_patch_inserted']);
+                unset($block['_patch_inserted'], $block['_patch_split']);
                 $blocks[] = $block;
             }
         }

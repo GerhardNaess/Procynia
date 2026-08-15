@@ -58,6 +58,25 @@ class EnterpriseWikiPatchApplicationException extends RuntimeException
         );
     }
 
+    public static function severalReplacesInOneBlock(string $context, int $blockIndex, int $count): self
+    {
+        return new self(
+            "{$context}: [{$count}] replace targets address the same content block [{$blockIndex}]. A replace splits "
+            .'its block into provenance atoms, so two of them in one block would have to be planned as a single '
+            .'multi-way split with every offset re-based after each cut. Express them as separate targets on '
+            .'separate paragraphs instead — this is refused rather than guessed at.'
+        );
+    }
+
+    public static function supersededBlockNotSourceBased(string $context, string $origin): self
+    {
+        return new self(
+            "{$context}: superseded_substance names a [{$origin}] block. Only a source_based block "
+            .'carries document substance that can be superseded; a heading or a Procynia recommendation '
+            .'is not source content and is never replaced by a patch.'
+        );
+    }
+
     public static function missingReplacementSubstance(string $context, string $operation): self
     {
         return new self("{$context}: operation [{$operation}] requires replacement_substance, which is empty.");

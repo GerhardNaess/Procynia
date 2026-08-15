@@ -2,8 +2,10 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiBlockProvenanceAmbiguousException;
 use App\Exceptions\EnterpriseWikiPageVersionBestPracticeReviewLostException;
 use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use Closure;
@@ -93,10 +95,84 @@ class EnterpriseWikiPageVersionWriter
             }
 
             $this->assertBlockProvenanceSurvived($pageId, $superseded, $version);
+            $this->assertAtomicBlockProvenance($pageId, $version);
             $this->assertBestPracticeReviewSurvived($pageId, $superseded, $version);
 
             return $version;
         });
+    }
+
+    /**
+     * ATOMIC PROVENANCE — the invariant every later withdrawal depends on.
+     *
+     * A source-based block represents substance from exactly one source document: all the document
+     * elements it cites share one (source_type, source_id), and the block's own source_id is that
+     * same document. A page may aggregate as many documents as it likes; one BLOCK may not.
+     *
+     * Enforced here because this is the single choke point every current version passes through —
+     * ordinary generation, section repair, figure repair, patch application, link and semantic
+     * repair, incremental relink. A guard in any one of those would leave the others free to write
+     * what this one rejects, which is exactly how the old sub-block replace produced blocks holding
+     * substance from two documents while their source_id still named only the first.
+     *
+     * Structural and best-practice blocks are untouched by this: they carry no document substance,
+     * and the source element keys a best-practice block may cite are the MOTIVATION for a Procynia
+     * recommendation, never its origin. A block with no document provenance at all is likewise not
+     * this guard's business — a source-based block that cites nothing is a grounding question, and
+     * EnterpriseWikiPageContentBlockService already refuses to build one.
+     */
+    private function assertAtomicBlockProvenance(int $pageId, EnterpriseWikiPageVersion $version): void
+    {
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (! is_array($block) || ($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                continue;
+            }
+
+            $blockKey = trim((string) ($block['block_key'] ?? ''));
+            $documents = [];
+
+            foreach ((array) ($block['source_elements'] ?? []) as $element) {
+                if (! is_array($element)) {
+                    continue;
+                }
+
+                $type = trim((string) ($element['source_type'] ?? ''));
+                $id = $element['source_id'] ?? null;
+
+                if ($type === '' || $id === null) {
+                    continue;
+                }
+
+                $documents[$type.'#'.$id] = true;
+            }
+
+            if (count($documents) > 1) {
+                throw new EnterpriseWikiBlockProvenanceAmbiguousException(
+                    $pageId,
+                    $blockKey,
+                    array_keys($documents),
+                    'its source elements name '.count($documents).' different documents ('.implode(', ', array_keys($documents)).').',
+                );
+            }
+
+            $ownType = trim((string) ($block['source_type'] ?? ''));
+            $ownId = $block['source_id'] ?? null;
+
+            if ($documents === [] || $ownType === '' || $ownId === null) {
+                continue;
+            }
+
+            $own = $ownType.'#'.$ownId;
+
+            if (! array_key_exists($own, $documents)) {
+                throw new EnterpriseWikiBlockProvenanceAmbiguousException(
+                    $pageId,
+                    $blockKey,
+                    array_keys($documents),
+                    "it declares source [{$own}] while citing elements from [".implode(', ', array_keys($documents)).'].',
+                );
+            }
+        }
     }
 
     /**

@@ -76,6 +76,16 @@ For alt arbeid som berører Enterprise Wiki, retrieval, Q&A, requirement researc
 - Når en oppgave berører Enterprise Wiki ingest, page generation, patching, knowledge ownership, retrieval, semantic navigation, graph, Q&A, requirement research eller answer generation, skal agenten lese den autoritative Wiki-arkitekturen før implementasjon.
 - Hvis en foreslått løsning bryter disse prinsippene, stopp før kodeendring og rapporter konflikten eksplisitt.
 
+### Provenance i Wiki-innhold
+
+- En Wiki-side kan aggregere kunnskap fra mange kildedokumenter.
+- Én `source_based` innholdsblokk representerer substans fra nøyaktig ett dokument. Alle dens `source_elements[]` deler samme `(source_type, source_id)`, og blokkens egen `source_id` er det samme dokumentet.
+- Provenance slås aldri sammen mellom dokumenter. En operasjon som ellers ville gitt én blokk substans fra to dokumenter, må dele innholdet i separate blokker.
+- `replace` som bare berører deler av en blokk representeres derfor som separate, provenance-atomiske blokker: uendret tekst før og etter beholder sitt opprinnelige dokument, ny substans får patch-dokumentets. Uendret tekst bevares mekanisk av backend — modellen skal aldri gjengi nabotekst for å beskytte den.
+- Dette kan gjøre ett opprinnelig avsnitt til flere visuelle avsnitt. Korrekt provenance prioriteres over å bevare opprinnelig avsnittsgruppering.
+- `structural`- og `best_practice`-blokker har ingen dokumentprovenance; kildenøkler på en best-practice-blokk er motivasjon, ikke opphav.
+- Tvetydig provenance persisteres aldri. `EnterpriseWikiPageVersionWriter` avviser skrivingen og siden beholder forrige current version.
+
 Autoritativ arkitekturdetalj: [docs/enterprise-wiki-architecture.md](/Applications/XAMPP/xamppfiles/htdocs/procynia/docs/enterprise-wiki-architecture.md)
 
 # Autonomous programming workflow

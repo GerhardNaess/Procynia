@@ -891,7 +891,10 @@ class EnterpriseWikiPatchDecisionContractTest extends TestCase
         $this->assertStringContainsString('COPY AN EXACT SUBSTRING', $rules);
         $this->assertStringContainsString('Do NOT', $rules);
         $this->assertStringContainsString('paraphrase', $rules);
-        $this->assertStringContainsString('does not have to be a whole sentence', $rules);
+        // Only the superseded substance — the backend preserves the surrounding text itself and
+        // keeps it attributed to the document that wrote it (the A/B/A split).
+        $this->assertStringContainsString('Copy ONLY the substance this document actually supersedes', $rules);
+        $this->assertStringContainsString('never retype neighbouring text', $rules);
         $this->assertStringContainsString('occurs exactly once', $rules);
         $this->assertStringContainsString('CLAUSE that continues', $rules, 'the observed failure mode must be named');
     }

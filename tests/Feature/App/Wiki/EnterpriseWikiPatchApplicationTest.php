@@ -200,21 +200,24 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $this->assertStringNotContainsString(self::OLD_B, $markdown);
     }
 
-    public function test_two_length_changing_replacements_in_the_same_block_preserve_every_other_fragment(): void
+    /**
+     * Two replaces inside ONE paragraph would have to be planned as a single multi-way split, with
+     * every offset re-based after each cut. That is real complexity for a case the maintainer can
+     * always express as two targets on two paragraphs — so it fails closed, and the page is left
+     * exactly as it was rather than half-patched.
+     */
+    public function test_two_replacements_in_the_same_block_are_refused_without_writing(): void
     {
         [$run, $page] = $this->sameBlockReplacementScenario();
+        $before = $page->currentVersion->content_markdown;
 
         $result = $this->service()->applyForRun($run);
-        $markdown = $page->fresh()->currentVersion->content_markdown;
 
-        $this->assertSame([], $result['failures']);
-        $this->assertSame(1, $result['pages_patched']);
-        $this->assertSame(2, $result['targets_applied']);
-        $this->assertStringContainsString(self::NEW_A, $markdown);
-        $this->assertStringContainsString(self::NEW_B, $markdown);
-        $this->assertStringContainsString(self::UNRELATED_IN_SECTION, $markdown);
-        $this->assertStringNotContainsString(self::OLD_A, $markdown);
-        $this->assertStringNotContainsString(self::OLD_B, $markdown);
+        $this->assertSame(0, $result['targets_applied']);
+        $this->assertSame(0, $result['pages_patched']);
+        $this->assertStringContainsString('address the same content block', implode("\n", $result['failures']));
+        $this->assertSame($before, $page->fresh()->currentVersion->content_markdown);
+        $this->assertStringContainsString(self::OLD_A, $page->fresh()->currentVersion->content_markdown);
     }
 
     /**
@@ -392,16 +395,28 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
 
         $after = $pages['article']->fresh()->currentVersion->content_blocks_json;
 
-        $this->assertCount(count($before), $after, 'a replace changes no block count');
+        // A replace SPLITS its block into provenance atoms, so the count grows. Every block the patch
+        // did not authorise must still be there, byte-identical — matched by content rather than by
+        // index, since a split shifts every later index.
+        $this->assertGreaterThan(count($before), count($after), 'a sub-block replace splits its block');
+
+        $afterByMarkdown = [];
+
+        foreach ($after as $block) {
+            $afterByMarkdown[trim((string) $block['markdown'])] = $block;
+        }
 
         foreach ($before as $index => $originalBlock) {
             if (str_contains((string) $originalBlock['markdown'], self::OLD_A)) {
                 continue; // the one authorized block
             }
 
+            $carried = $afterByMarkdown[trim((string) $originalBlock['markdown'])] ?? null;
+
+            $this->assertNotNull($carried, "block {$index} was not authorized to change but disappeared");
             $this->assertSame(
                 $this->comparable($originalBlock),
-                $this->comparable($after[$index]),
+                $this->comparable($carried),
                 "block {$index} was not authorized to change",
             );
         }
@@ -427,25 +442,40 @@ class EnterpriseWikiPatchApplicationTest extends TestCase
         $this->assertNotEmpty($unrelated['source_elements']);
     }
 
-    public function test_a_patched_block_keeps_old_provenance_and_gains_the_new_source_elements(): void
+    public function test_a_replace_splits_the_block_into_single_document_provenance_atoms(): void
     {
+        // The old behaviour merged the patch document's elements INTO the original block, leaving one
+        // block citing two documents while its own source_id still named only the first. Now the
+        // block is split: the untouched text keeps its document, the new substance gets its own.
         [$run, $pages, $documents] = $this->scenario([$this->replaceTargetA()], returnDocuments: true);
         $original = $this->blockContaining($pages['article']->currentVersion->content_blocks_json, self::OLD_A);
         $originalKeys = array_column($original['source_elements'], 'source_element_key');
 
         $this->service()->applyForRun($run);
 
-        $patched = $this->blockContaining($pages['article']->fresh()->currentVersion->content_blocks_json, self::NEW_A);
-        $keys = array_column($patched['source_elements'], 'source_element_key');
-        $sourceIds = array_unique(array_column($patched['source_elements'], 'source_id'));
+        $blocks = $pages['article']->fresh()->currentVersion->content_blocks_json;
+        $replacement = $this->blockContaining($blocks, self::NEW_A);
+        $survivor = $this->blockContaining($blocks, self::UNRELATED_IN_SECTION);
 
-        foreach ($originalKeys as $originalKey) {
-            $this->assertContains($originalKey, $keys, 'existing provenance survives on a patched block');
-        }
+        $this->assertSame(
+            [$documents['patch']->id],
+            array_values(array_unique(array_column($replacement['source_elements'], 'source_id'))),
+            'the new substance cites the patch document and nothing else',
+        );
+        $this->assertSame($documents['patch']->id, $replacement['source_id']);
+        $this->assertContains('paragraph-1', array_column($replacement['source_elements'], 'source_element_key'));
 
-        $this->assertContains('paragraph-1', $keys, 'the authorising source element is added');
-        $this->assertContains($documents['old']->id, $sourceIds, 'the original document is still cited');
-        $this->assertContains($documents['patch']->id, $sourceIds, 'the patch document is cited too');
+        $this->assertSame(
+            [$documents['old']->id],
+            array_values(array_unique(array_column($survivor['source_elements'], 'source_id'))),
+            'the untouched neighbouring sentence still belongs to the document that wrote it',
+        );
+        $this->assertSame($documents['old']->id, $survivor['source_id']);
+        $this->assertSame(
+            $originalKeys,
+            array_column($survivor['source_elements'], 'source_element_key'),
+            'the surviving fragment inherits the original provenance exactly',
+        );
     }
 
     public function test_multi_element_provenance_is_preserved_on_new_substance(): void

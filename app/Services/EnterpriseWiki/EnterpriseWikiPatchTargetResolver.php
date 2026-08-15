@@ -354,10 +354,11 @@ class EnterpriseWikiPatchTargetResolver
             ."The relevant target area currently states: [{$this->areaContext($areaText, $superseded)}]. "
             .'Correct superseded_substance by copying an EXACT substring out of that text — character for character, '
             .'including its punctuation. It does not have to be a whole sentence; it has to be text that occurs there '
-            .'exactly, and be specific enough to identify the substance being replaced. Do not paraphrase, do not '
-            .'shorten a clause into a sentence, and do not use wording from a different page or a different target. '
-            .'Do not drop the patch target, do not move the finding to warnings, do not change the relationship, and '
-            .'do not turn the replace into a create.';
+            .'exactly, and be specific enough to identify the substance being replaced. Copy only what this document '
+            .'supersedes: the server preserves the surrounding text itself and keeps it attributed to its original '
+            .'source. Do not paraphrase, do not shorten a clause into a sentence, and do not use wording from a '
+            .'different page or a different target. Do not drop the patch target, do not move the finding to '
+            .'warnings, do not change the relationship, and do not turn the replace into a create.';
     }
 
     /**
