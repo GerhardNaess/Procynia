@@ -13,6 +13,7 @@
         "laravel/cashier": "^16.5",
         "laravel/framework": "^13.0",
         "laravel/tinker": "^3.0",
+        "openspout/openspout": "^4.32",
         "phpoffice/phpword": "^1.4"
     },
     "require-dev": {
