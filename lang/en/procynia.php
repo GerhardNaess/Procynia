@@ -860,6 +860,8 @@ return [
         'wiki_answer_select_requirement_description' => 'Click a requirement card to open its Wiki answer here.',
         'wiki_answer_expert_draft_title' => 'Expert draft',
         'wiki_answer_copy_answer' => 'Copy answer',
+        'wiki_answer_edit' => 'Edit',
+        'wiki_answer_edit_markdown_hint' => 'The text is edited as Markdown. Tables are written with | and render as a table once you save.',
         'wiki_answer_generated_at_prefix' => 'Generated:',
         'wiki_answer_coverage_full' => 'Full coverage',
         'wiki_answer_coverage_partial' => 'Partial coverage',
