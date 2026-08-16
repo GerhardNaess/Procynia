@@ -289,24 +289,85 @@ class EnterpriseWikiDocumentWithdrawalTest extends TestCase
     // Fail closed
     // =========================================================================
 
-    public function test_a_shared_page_that_would_be_left_empty_stops_the_whole_deletion(): void
+    public function test_a_shared_page_left_without_substance_is_deleted_with_the_document(): void
+    {
+        // Page 206's shape: an earlier document created the page, a later one regenerated it, and now
+        // that later document is being withdrawn. Current state is what decides — the page is held up
+        // by this document alone today, so it goes with it. The deletion is never blocked.
+        $world = $this->world(sharedPageOnlyHasDocumentB: true);
+        $shared = $world['shared_page'];
+
+        $result = $this->deleteDocument($world['document_b']);
+
+        $this->assertFalse($result['blocked']);
+        $this->assertSame(1, $result['pages_deleted_without_substance']);
+        $this->assertSame(0, $result['shared_pages_kept']);
+        $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $shared->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $world['document_b_id']]);
+    }
+
+    public function test_an_earlier_version_from_a_surviving_document_is_never_restored(): void
+    {
+        // The page's history contains a version built from document A, which still exists. It is NOT
+        // brought back: withdrawal decides on current state and never revives old versions — that
+        // version's links and metadata belong to a Wiki that has moved on.
+        $world = $this->world(sharedPageOnlyHasDocumentB: true, withEarlierVersionFromA: true);
+
+        $this->deleteDocument($world['document_b']);
+
+        $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $world['shared_page']->id]);
+        $this->assertSame(
+            0,
+            EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $world['shared_page']->id)->count(),
+            'the page and its history go together; nothing is resurrected as current',
+        );
+    }
+
+    public function test_links_into_an_auto_deleted_page_are_dematerialized_like_any_other(): void
+    {
+        $world = $this->world(sharedPageOnlyHasDocumentB: true, withLinkToSharedPage: true);
+        $sharedSlug = $world['shared_page']->slug;
+
+        $result = $this->deleteDocument($world['document_b']);
+
+        $version = $this->currentVersion($world['linking_page']);
+
+        $this->assertStringNotContainsString('[['.$sharedSlug, $version->content_markdown);
+        $this->assertSame(
+            'Se hendelseshåndtering og kravsiden for detaljer.',
+            $version->content_markdown,
+            'both doomed links become their own visible words; nothing else moves',
+        );
+        $this->assertDatabaseMissing('enterprise_wiki_page_links', ['to_page_id' => $world['shared_page']->id]);
+        $this->assertGreaterThanOrEqual(2, $result['links_dematerialized'], 'both doomed targets are cleaned');
+    }
+
+    public function test_other_current_pages_are_untouched_by_the_auto_deletion(): void
     {
         $world = $this->world(sharedPageOnlyHasDocumentB: true);
+        $keptBefore = $this->currentVersion(EnterpriseWikiPage::query()->findOrFail($world['kept_page_id']))->content_markdown;
 
-        try {
-            $this->deleteDocument($world['document_b']);
-            $this->fail('a page left with no substance must stop the deletion');
-        } catch (EnterpriseWikiWithdrawalNotRepresentableException $e) {
-            $this->assertStringContainsString('no substance of its own', $e->getMessage());
-            $this->assertStringContainsString((string) $world['shared_page']->id, $e->getMessage());
-        }
+        $this->deleteDocument($world['document_b']);
 
-        // Nothing at all happened: this is one transaction.
-        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $world['document_b_id']]);
-        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $world['sole_source_page']->id]);
-        $this->assertStringContainsString(
-            'Substans fra dokument B.',
-            $this->currentVersion($world['shared_page'])->content_markdown,
+        $this->assertSame(
+            $keptBefore,
+            $this->currentVersion(EnterpriseWikiPage::query()->findOrFail($world['kept_page_id']))->content_markdown,
+        );
+    }
+
+    public function test_a_page_keeping_only_a_best_practice_clause_survives(): void
+    {
+        // Best practice carries no document provenance — it is Procynia's own contribution, routed to
+        // human approval. A page still holding one is still saying something of its own.
+        $world = $this->world(sharedPageKeepsOnlyBestPractice: true);
+
+        $result = $this->deleteDocument($world['document_b']);
+
+        $this->assertSame(0, $result['pages_deleted_without_substance']);
+        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $world['shared_page']->id]);
+        $this->assertSame(
+            ['## Krav', 'Anbefaling fra Procynia.'],
+            array_column((array) $this->currentVersion($world['shared_page'])->content_blocks_json, 'markdown'),
         );
     }
 
@@ -365,6 +426,9 @@ class EnterpriseWikiDocumentWithdrawalTest extends TestCase
         bool $withSplitPage = false,
         bool $withSecondLink = false,
         bool $sharedPageOnlyHasDocumentB = false,
+        bool $withEarlierVersionFromA = false,
+        bool $withLinkToSharedPage = false,
+        bool $sharedPageKeepsOnlyBestPractice = false,
     ): array {
         $customer = $this->customer();
         $documentA = $this->document($customer, 'dokument-a.docx');
@@ -374,17 +438,36 @@ class EnterpriseWikiDocumentWithdrawalTest extends TestCase
 
         // Shared: touched by both runs, so deletion must keep it and filter it.
         $shared = $this->page($customer, 'Krav', 'krav');
-        $sharedBlocks = $sharedPageOnlyHasDocumentB
-            ? [
+        $sharedBlocks = match (true) {
+            $sharedPageOnlyHasDocumentB => [
                 $this->block('## Krav', 'structural', null),
                 $this->block('Substans fra dokument B.', 'source_based', $documentB->id),
-            ]
-            : [
+            ],
+            $sharedPageKeepsOnlyBestPractice => [
+                $this->block('## Krav', 'structural', null),
+                $this->block('Substans fra dokument B.', 'source_based', $documentB->id),
+                $this->block('Anbefaling fra Procynia.', 'best_practice', null),
+            ],
+            default => [
                 $this->block('## Krav', 'structural', null),
                 $this->block('Substans fra dokument A.', 'source_based', $documentA->id),
                 $this->block('Substans fra dokument B.', 'source_based', $documentB->id),
                 $this->block('Anbefaling fra Procynia.', 'best_practice', null),
-            ];
+            ],
+        };
+
+        if ($withEarlierVersionFromA) {
+            // History: the page once carried document A's substance, before B regenerated it.
+            EnterpriseWikiPageVersion::query()->create([
+                'enterprise_wiki_page_id' => $shared->id,
+                'version_number' => 0,
+                'is_current' => false,
+                'content_markdown' => 'Eldre substans fra dokument A.',
+                'content_blocks_json' => [$this->block('Eldre substans fra dokument A.', 'source_based', $documentA->id)],
+                'generated_by_model' => 'gpt-5',
+            ]);
+        }
+
         $sharedVersion = $this->version($shared, $sharedBlocks);
         $this->pivot($runA, $shared);
         $this->pivot($runB, $shared);
@@ -416,9 +499,11 @@ class EnterpriseWikiDocumentWithdrawalTest extends TestCase
         $this->pivot($runA, $kept);
 
         // Linking: survives, but points at the sole-source page.
-        $linkMarkdown = $withSecondLink
-            ? 'Se [[hendelseshandtering-drift|hendelseshåndtering]] for detaljer og [[beholdt-side|beholdt side]].'
-            : 'Se [[hendelseshandtering-drift|hendelseshåndtering]] for detaljer.';
+        $linkMarkdown = match (true) {
+            $withSecondLink => 'Se [[hendelseshandtering-drift|hendelseshåndtering]] for detaljer og [[beholdt-side|beholdt side]].',
+            $withLinkToSharedPage => 'Se [[hendelseshandtering-drift|hendelseshåndtering]] og [[krav|kravsiden]] for detaljer.',
+            default => 'Se [[hendelseshandtering-drift|hendelseshåndtering]] for detaljer.',
+        };
         $linkIntents = $withSecondLink
             ? [
                 ['intent_id' => 'l1', 'target_page_id' => $soleSource->id, 'anchor_text' => 'hendelseshåndtering', 'reason' => 'Peker til prosessen.'],

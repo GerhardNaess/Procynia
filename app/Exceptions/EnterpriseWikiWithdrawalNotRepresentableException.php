@@ -9,26 +9,15 @@ use Throwable;
  * A document deletion could not withdraw the document's substance from the active Wiki safely.
  *
  * Always fail-closed: the whole deletion is rolled back and the document stays. A half-withdrawn
- * Wiki — a page emptied of substance, or one still asserting knowledge from a document that no
- * longer exists — is worse than a document that is still there and can be deleted once the affected
- * page has been dealt with deliberately.
+ * Wiki — one still asserting knowledge from a document that no longer exists, or carrying a version
+ * its own invariants reject — is worse than a document that is still there.
  *
- * V1 does not repair these cases automatically. It names them, so we can see how often they actually
- * occur before deciding whether bounded regeneration is worth building.
+ * Reserved for genuine integrity failures. A page left with no substance of its own is NOT one of
+ * them: that page is deleted with the document, because current state is what decides what the Wiki
+ * holds.
  */
 class EnterpriseWikiWithdrawalNotRepresentableException extends RuntimeException
 {
-    public static function pageWouldBeEmpty(int $pageId, int $documentId): self
-    {
-        return new self(sprintf(
-            'Deleting document [%d] would leave page [%d] with no substance of its own — only headings or '
-            .'cross-references would remain. The deletion has been rolled back: decide what should happen to that '
-            .'page first, rather than leaving an empty page behind.',
-            $documentId,
-            $pageId,
-        ));
-    }
-
     public static function writerRejectedVersion(int $pageId, string $operation, Throwable $previous): self
     {
         return new self(

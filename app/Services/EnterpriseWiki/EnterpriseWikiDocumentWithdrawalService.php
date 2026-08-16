@@ -43,17 +43,31 @@ class EnterpriseWikiDocumentWithdrawalService
     ) {}
 
     /**
-     * Removes the document's own blocks from every current page that keeps other documents' work.
+     * Removes the document's own blocks from every current page that keeps other documents' work,
+     * and reports the pages that keep nothing.
+     *
+     * A shared page with no surviving substance is not kept as an empty shell and does not block the
+     * deletion: it is returned as DOOMED, and the caller deletes it with the sole-source pages
+     * through the same path. The decision is made on CURRENT state alone — a page that once carried
+     * another document's substance but no longer does is, today, a page this document alone holds up.
+     * History is audit, not a reason to keep an empty page alive, and it is never restored.
+     *
+     * "Substance" is source-based prose OR a best-practice clause. Best practice carries no document
+     * provenance — it is Procynia's own contribution, routed to human approval — so a page that still
+     * holds one is still saying something of its own and survives. Headings and cross-references are
+     * not substance: a page reduced to them asserts nothing.
      *
      * @param  Collection<int, int>  $sharedPageIds
-     * @return array{pages_rewritten: int, blocks_removed: int}
+     * @return array{pages_rewritten: int, blocks_removed: int, doomed_page_ids: Collection<int, int>}
      *
      * @throws EnterpriseWikiWithdrawalNotRepresentableException
      */
     public function withdrawBlocks(EnterpriseWikiDocument $document, Collection $sharedPageIds): array
     {
+        $doomed = collect();
+
         if ($sharedPageIds->isEmpty()) {
-            return ['pages_rewritten' => 0, 'blocks_removed' => 0];
+            return ['pages_rewritten' => 0, 'blocks_removed' => 0, 'doomed_page_ids' => $doomed];
         }
 
         $pagesRewritten = 0;
@@ -72,13 +86,17 @@ class EnterpriseWikiDocumentWithdrawalService
             }
 
             if ($this->hasNoSubstanceLeft($kept)) {
-                // A shared page that is empty once this document's paragraphs are gone is not a page
-                // this service can represent honestly: deleting it would exceed what the caller asked
-                // for, and keeping it would leave a page asserting nothing. The whole deletion stops.
-                throw EnterpriseWikiWithdrawalNotRepresentableException::pageWouldBeEmpty(
-                    (int) $version->enterprise_wiki_page_id,
-                    (int) $document->id,
-                );
+                // Nothing of its own left: the page goes with the document rather than being written
+                // as an empty shell. No version is written for it — it is about to be deleted.
+                $doomed->push((int) $version->enterprise_wiki_page_id);
+
+                Log::info('[WIKI_WITHDRAWAL] Page has no substance left without this document — deleting it with the document.', [
+                    'page_id' => $version->enterprise_wiki_page_id,
+                    'document_id' => $document->id,
+                    'blocks_before' => count($blocks),
+                ]);
+
+                continue;
             }
 
             $blocksRemoved += count($blocks) - count($kept);
@@ -87,7 +105,7 @@ class EnterpriseWikiDocumentWithdrawalService
             $this->writeVersion($version, $kept, 'block withdrawal');
         }
 
-        return ['pages_rewritten' => $pagesRewritten, 'blocks_removed' => $blocksRemoved];
+        return ['pages_rewritten' => $pagesRewritten, 'blocks_removed' => $blocksRemoved, 'doomed_page_ids' => $doomed->unique()->values()];
     }
 
     /**
