@@ -124,6 +124,16 @@ class WikiController extends Controller
         $sort = in_array($request->query('sort'), $allowedSorts, true)
             ? $request->query('sort') : 'updated_at_desc';
 
+        // Only owners that actually appear on a visible page's current version are offerable, and
+        // a requested owner must be one of them — the list is customer-scoped, so an id from
+        // elsewhere simply does not match and the filter falls back to "all".
+        $documentOwnerOptions = $this->pageDocumentOwnerFilterOptions($customerId, $this->visibleStatuses($user));
+        $requestedDocumentOwner = $request->query('document_owner');
+        $documentOwner = is_numeric($requestedDocumentOwner)
+            && in_array((int) $requestedDocumentOwner, array_column($documentOwnerOptions, 'id'), true)
+                ? (int) $requestedDocumentOwner
+                : null;
+
         $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('status', $this->visibleStatuses($user))
@@ -146,6 +156,16 @@ class WikiController extends Controller
 
         if ($filterStatus !== null) {
             $query->where('status', $filterStatus);
+        }
+
+        if ($documentOwner !== null) {
+            // Identity, never approval status: a page matches when this owner is responsible for
+            // its current version, whether they have approved, rejected or not yet decided. A page
+            // whose owner is unresolved has document_owner_user_id = null and matches no owner.
+            $query->whereHas(
+                'currentVersion.documentOwnerApprovals',
+                fn ($q) => $q->where('document_owner_user_id', $documentOwner),
+            );
         }
 
         if ($lint === 'errors') {
@@ -205,9 +225,48 @@ class WikiController extends Controller
                 'page_type' => $pageType,
                 'status' => $filterStatus,
                 'lint' => $lint,
+                'document_owner' => $documentOwner,
                 'sort' => $sort,
             ],
+            'pages_document_owner_options' => $documentOwnerOptions,
         ];
+    }
+
+    /**
+     * Purpose: The document owners the Wiki list can actually be filtered by.
+     * Inputs: The customer id and the page statuses this user may see.
+     * Returns: [{id, label}] — distinct, alphabetical, one entry per owner.
+     * Side effects: None (read-only; never syncs approval rows).
+     *
+     * Built from the approvals materialized on pages' CURRENT versions, which is the same data the
+     * filter matches against, so the dropdown can never offer an owner that returns nothing.
+     * Deliberately not User-based like documentOwnerOptionsForCustomer(): that lists everyone who
+     * COULD be an owner, while this lists who actually is one in the Wiki. Rows with no resolved
+     * owner (the "Avventer synkronisering" case) carry a null owner id and are excluded, so that
+     * state never becomes a name in the dropdown.
+     *
+     * @param  list<string>  $visibleStatuses
+     * @return list<array{id: int, label: string}>
+     */
+    private function pageDocumentOwnerFilterOptions(int $customerId, array $visibleStatuses): array
+    {
+        if ($visibleStatuses === []) {
+            return [];
+        }
+
+        return EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->join('enterprise_wiki_page_versions', 'enterprise_wiki_page_versions.id', '=', 'enterprise_wiki_page_version_document_owner_approvals.enterprise_wiki_page_version_id')
+            ->join('enterprise_wiki_pages', 'enterprise_wiki_pages.id', '=', 'enterprise_wiki_page_versions.enterprise_wiki_page_id')
+            ->join('users', 'users.id', '=', 'enterprise_wiki_page_version_document_owner_approvals.document_owner_user_id')
+            ->where('enterprise_wiki_pages.customer_id', $customerId)
+            ->whereIn('enterprise_wiki_pages.status', $visibleStatuses)
+            ->where('enterprise_wiki_page_versions.is_current', true)
+            ->distinct()
+            ->orderBy('users.name')
+            ->orderBy('users.id')
+            ->get(['users.id', 'users.name'])
+            ->map(static fn ($row): array => ['id' => (int) $row->id, 'label' => (string) $row->name])
+            ->all();
     }
 
     /**

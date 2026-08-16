@@ -1663,7 +1663,7 @@ function LintHealthBar({ health, tw }) {
 
 const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
 
-function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
+function PagesTab({ pages, pagesMeta, pagesFilters, pagesDocumentOwnerOptions = [], tw, locale }) {
     const filters = pagesFilters ?? {};
     const meta = pagesMeta ?? { current_page: 1, last_page: 1, total: 0, per_page: 25 };
 
@@ -1676,6 +1676,8 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
             page_type: filters.page_type ?? '',
             status: filters.status ?? '',
             lint: filters.lint ?? '',
+            // Carried on every navigation so changing type/status/sort keeps the chosen owner.
+            document_owner: filters.document_owner ?? '',
             sort: filters.sort ?? 'updated_at_desc',
             ...overrides,
         }, { preserveState: true, preserveScroll: true });
@@ -1701,7 +1703,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
         entity: tw.page_type_entity ?? 'Entitet',
     }[type] ?? type);
 
-    const hasActiveFilters = !!(filters.search || filters.page_type || filters.status || filters.lint);
+    const hasActiveFilters = !!(filters.search || filters.page_type || filters.status || filters.lint || filters.document_owner);
 
     return (
         <div className="space-y-4">
@@ -1749,6 +1751,19 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                     <option value="rejected">{tw.status_rejected ?? 'Avvist'}</option>
                 </select>
 
+                {pagesDocumentOwnerOptions.length > 0 && (
+                    <select
+                        value={filters.document_owner ?? ''}
+                        onChange={(e) => navigate({ document_owner: e.target.value, page: 1 })}
+                        className={SELECT_CLS}
+                    >
+                        <option value="">{tw.filter_document_owner_all ?? 'Alle dokumenteiere'}</option>
+                        {pagesDocumentOwnerOptions.map((owner) => (
+                            <option key={owner.id} value={owner.id}>{owner.label}</option>
+                        ))}
+                    </select>
+                )}
+
                 <select
                     value={filters.lint ?? ''}
                     onChange={(e) => navigate({ lint: e.target.value, page: 1 })}
@@ -1773,7 +1788,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
                 {hasActiveFilters && (
                     <button
                         type="button"
-                        onClick={() => { setSearchInput(''); navigate({ search: '', page_type: '', status: '', lint: '', sort: 'updated_at_desc', page: 1 }); }}
+                        onClick={() => { setSearchInput(''); navigate({ search: '', page_type: '', status: '', lint: '', document_owner: '', sort: 'updated_at_desc', page: 1 }); }}
                         className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
                     >
                         <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -3639,6 +3654,7 @@ export default function WikiIndex({
     pages = [],
     pages_meta: pagesMeta = null,
     pages_filters: pagesFilters = null,
+    pages_document_owner_options: pagesDocumentOwnerOptions = [],
     sources = [],
     sources_filters: sourcesFilters = null,
     document_owner_options: documentOwnerOptions = [],
@@ -3739,6 +3755,7 @@ export default function WikiIndex({
                         pages={pages}
                         pagesMeta={pagesMeta}
                         pagesFilters={pagesFilters}
+                        pagesDocumentOwnerOptions={pagesDocumentOwnerOptions}
                         tw={tw}
                         locale={locale}
                     />

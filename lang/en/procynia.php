@@ -4076,6 +4076,7 @@ return [
         'filter_search_placeholder' => 'Search...',
         'filter_page_type_all' => 'All types',
         'filter_status_all' => 'All statuses',
+        'filter_document_owner_all' => 'All document owners',
         'filter_lint_all' => 'All',
         'filter_lint_errors' => 'Has errors',
         'filter_lint_warnings' => 'Has warnings',

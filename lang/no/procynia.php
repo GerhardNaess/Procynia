@@ -4076,6 +4076,7 @@ return [
         'filter_search_placeholder' => 'Søk...',
         'filter_page_type_all' => 'Alle typer',
         'filter_status_all' => 'Alle statuser',
+        'filter_document_owner_all' => 'Alle dokumenteiere',
         'filter_lint_all' => 'Alle',
         'filter_lint_errors' => 'Har feil',
         'filter_lint_warnings' => 'Har advarsler',
