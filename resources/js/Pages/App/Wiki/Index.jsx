@@ -1798,7 +1798,7 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
             ) : (
                 <>
                     {/* Mobile cards */}
-                    <section className="grid gap-3 md:hidden">
+                    <section className="grid max-h-[min(60vh,44rem)] gap-3 overflow-y-auto pr-1 md:hidden">
                         {pages.map((page) => (
                             <article
                                 key={page.id}
@@ -1837,9 +1837,9 @@ function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
 
                     {/* Desktop table */}
                     <section className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
-                        <div className="overflow-x-auto">
+                        <div className="max-h-[min(60vh,44rem)] overflow-auto">
                             <table className="min-w-full divide-y divide-slate-200">
-                                <thead className="bg-slate-50">
+                                <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_rgba(226,232,240,1)]">
                                     <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                                         <th className="px-6 py-4">Tittel</th>
                                         <th className="px-6 py-4">Type</th>
