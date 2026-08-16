@@ -10,7 +10,9 @@ use App\Models\RequirementExtractionRun;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\User;
+use App\Services\Ai\Requirements\Excel\WorkbookDeterministicCandidateResolver;
 use App\Services\Ai\Requirements\Excel\WorkbookStructureDiscoveryAiClient;
+use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -370,6 +372,88 @@ class XlsxRequirementImportTest extends TestCase
         $this->assertSame('Kravspesifikasjon!A2:E2', $resolved->sourceReference['source_metadata']['source_label']);
         $this->assertSame('Skal', $resolved->sourceReference['source_metadata']['source_qualification']);
         $this->assertSame('30', $resolved->sourceReference['source_metadata']['source_weighting']);
+    }
+
+    public function test_excel_requirements_bypass_the_shared_discovery_ai_entirely(): void
+    {
+        $context = $this->context();
+        $this->mockDiscovery($this->matrixDiscovery());
+        // The regression this guards: the shared extractor dropped non-mandatory requirements and
+        // reworded others. Excel must never reach it.
+        $this->mock(RequirementCandidateExtractor::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('extractFullDocument')->never());
+
+        $this->upload($context, $this->matrixWorkbook());
+
+        $document = SavedNoticeAiDocument::query()->where('saved_notice_id', $context['saved_notice']->id)->firstOrFail();
+        $candidates = app(WorkbookDeterministicCandidateResolver::class)->resolve($document);
+
+        $this->assertNotNull($candidates, 'An Excel document must carry finished requirement units.');
+        $this->assertCount(2, $candidates);
+        $this->assertTrue($candidates[0]->isRequirement);
+        $this->assertSame('sheet_range', $candidates[0]->sourceReference['source_element_type']);
+    }
+
+    public function test_a_word_document_still_carries_no_deterministic_units_and_falls_back_to_extraction(): void
+    {
+        $context = $this->context();
+        // A DOCX document has paragraph/list_item elements, never sheet_range, so the resolver
+        // declines and the shared extraction path stays in charge for Word and PDF.
+        $document = SavedNoticeAiDocument::query()->create([
+            'saved_notice_id' => $context['saved_notice']->id,
+            'original_filename' => 'Kravspesifikasjon.docx',
+            'stored_path' => 'tmp/none.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 10,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+            'extracted_text' => 'Leverandøren skal levere rapport.',
+            'structured_text_elements' => [[
+                'element_key' => 'doc1-p1', 'element_type' => 'paragraph',
+                'text' => 'Leverandøren skal levere rapport.', 'char_start' => 0,
+            ]],
+        ]);
+
+        $this->assertNull(app(WorkbookDeterministicCandidateResolver::class)->resolve($document));
+    }
+
+    public function test_a_document_with_no_structured_elements_falls_back_to_extraction(): void
+    {
+        $context = $this->context();
+        $document = SavedNoticeAiDocument::query()->create([
+            'saved_notice_id' => $context['saved_notice']->id,
+            'original_filename' => 'Kravspesifikasjon.pdf',
+            'stored_path' => 'tmp/none.pdf', 'mime_type' => 'application/pdf', 'file_size_bytes' => 10,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+            'extracted_text' => 'Leverandøren skal levere rapport.',
+        ]);
+
+        $this->assertNull(app(WorkbookDeterministicCandidateResolver::class)->resolve($document));
+    }
+
+    public function test_a_non_mandatory_excel_requirement_reaches_the_candidate_stage(): void
+    {
+        $context = $this->context();
+        $path = $this->fixtures->build([
+            'Kravspesifikasjon' => [
+                ['ID', 'Krav', 'Skal/Bør', 'Vekt', 'Svar', 'Kommentar'],
+                ['K-1', 'Leverandøren bør tilby selvbetjent rapporttilgang.', 'Bør', '4', null, null],
+                ['K-2', 'Kravet er ikke obligatorisk, men ønskes.', 'Nei', '2', null, null],
+            ],
+        ]);
+        $this->mockDiscovery($this->matrixDiscovery());
+        $this->spyExtractionRun();
+
+        $this->upload($context, $path);
+
+        $document = SavedNoticeAiDocument::query()->where('saved_notice_id', $context['saved_notice']->id)->firstOrFail();
+        $candidates = app(WorkbookDeterministicCandidateResolver::class)->resolve($document);
+
+        $this->assertCount(2, $candidates);
+        foreach ($candidates as $candidate) {
+            $this->assertTrue($candidate->isRequirement);
+        }
+        $this->assertSame('Bør', $candidates[0]->sourceReference['source_metadata']['source_qualification']);
+        $this->assertSame('Nei', $candidates[1]->sourceReference['source_metadata']['source_qualification']);
     }
 
     // ── fail closed ──────────────────────────────────────────────────────────

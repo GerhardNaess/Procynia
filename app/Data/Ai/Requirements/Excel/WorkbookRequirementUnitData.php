@@ -64,8 +64,13 @@ final readonly class WorkbookRequirementUnitData implements JsonSerializable
             'source_start_row' => $this->startRow,
             'source_end_row' => $this->endRow,
             'source_section_title' => $this->sectionContext,
+            'source_section_row' => $this->sectionRowNumber,
             'source_qualification' => $this->qualification,
             'source_weighting' => $this->weighting,
+            // Carried so the unit can be rebuilt verbatim from the persisted document when the
+            // extraction run picks it up on the queue, without a second parse of the workbook.
+            'source_comment' => $this->comment,
+            'source_requirement_id' => $this->requirementId,
         ], static fn (mixed $value): bool => $value !== null && $value !== '');
     }
 

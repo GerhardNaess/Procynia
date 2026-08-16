@@ -22,6 +22,7 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Requirements\Excel\WorkbookDeterministicCandidateResolver;
 use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementEditorService;
@@ -771,19 +772,21 @@ class RequirementExtractionRunServiceTest extends TestCase
         $realService = new RequirementExtractionRunService(
             app(RequirementCandidateExtractor::class),
             app(RequirementEditorService::class),
+            app(WorkbookDeterministicCandidateResolver::class),
         );
 
-        $spyService = new class(app(RequirementCandidateExtractor::class), app(RequirementEditorService::class), $realService, $this) extends RequirementExtractionRunService
+        $spyService = new class(app(RequirementCandidateExtractor::class), app(RequirementEditorService::class), app(WorkbookDeterministicCandidateResolver::class), $realService, $this) extends RequirementExtractionRunService
         {
             public ?Closure $promoteAssertion = null;
 
             public function __construct(
                 RequirementCandidateExtractor $candidateExtractor,
                 RequirementEditorService $requirementEditorService,
+                WorkbookDeterministicCandidateResolver $deterministicCandidateResolver,
                 private readonly RequirementExtractionRunService $realService,
                 private readonly RequirementExtractionRunServiceTest $testCase,
             ) {
-                parent::__construct($candidateExtractor, $requirementEditorService);
+                parent::__construct($candidateExtractor, $requirementEditorService, $deterministicCandidateResolver);
             }
 
             public function promoteRun(RequirementExtractionRun $run, SavedNoticeAiDocument $document): int
