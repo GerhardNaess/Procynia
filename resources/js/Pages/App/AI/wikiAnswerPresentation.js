@@ -74,3 +74,91 @@ export async function buildWikiAnswerCopyHtml(renderedElement, fetchImageAsDataU
 
     return clone.innerHTML;
 }
+
+/**
+ * Purpose: Write the rich (HTML + plain text) clipboard flavours.
+ * Inputs: A PROMISE of the HTML (not the HTML itself) and the plain text.
+ * Returns: true when the browser accepted the write, false for ANY reason it did not. Never throws.
+ *
+ * The promise is the whole point. Every clipboard write requires transient user activation, and
+ * that activation is spent by the time the answer's figures have been fetched and base64-encoded —
+ * roughly half a megabyte of image data. Awaiting that work first and writing afterwards is what
+ * made "Kopier svar" fail outright: clipboard.write, clipboard.writeText and execCommand all
+ * refuse once the gesture has expired, so the button reported "Kunne ikke kopiere" even though
+ * nothing was wrong with the answer or the figures.
+ *
+ * ClipboardItem accepts Promise<Blob> values, so navigator.clipboard.write() is CALLED
+ * synchronously inside the click and the image work resolves under the still-valid gesture. Callers
+ * must therefore hand this function a promise and must not await anything before it.
+ */
+export async function writeRichClipboardPayload(htmlPromise, plainText) {
+    if (typeof window === 'undefined' || typeof window.ClipboardItem === 'undefined') {
+        return false;
+    }
+
+    if (typeof navigator === 'undefined' || typeof navigator.clipboard?.write !== 'function') {
+        return false;
+    }
+
+    try {
+        await navigator.clipboard.write([
+            new window.ClipboardItem({
+                'text/html': Promise.resolve(htmlPromise)
+                    .then((html) => new Blob([html], { type: 'text/html' })),
+                'text/plain': new Blob([plainText], { type: 'text/plain' }),
+            }),
+        ]);
+
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+/**
+ * Purpose: Write the answer as plain text — the flavour that must always be available.
+ * Returns: true when the text reached the clipboard, false otherwise. Never throws.
+ */
+export async function writePlainClipboardPayload(plainText) {
+    if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') {
+        return false;
+    }
+
+    try {
+        await navigator.clipboard.writeText(plainText);
+
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * Purpose: Put one answer on the clipboard, as richly as the browser allows.
+ * Inputs: A promise of the rendered HTML (null when nothing is rendered — the Markdown editor is
+ *         open), the plain text, and the writers (injectable for testing).
+ * Returns: {copied, reason} — reason names the flavour that succeeded, or why none did, so the UI
+ *          can tell the user something more useful than "it failed".
+ *
+ * Order matters and is not negotiable: the rich write goes first because it is the only one that
+ * can be started synchronously with work still pending. Plain text is tried next; it needs no
+ * pending work, so it is cheap, but it still needs the gesture. Callers must not await before
+ * calling this.
+ */
+export async function copyWikiAnswerToClipboard({
+    htmlPromise = null,
+    plainText,
+    writeRich = writeRichClipboardPayload,
+    writePlain = writePlainClipboardPayload,
+}) {
+    if (htmlPromise !== null && await writeRich(htmlPromise, plainText)) {
+        return { copied: true, reason: 'rich' };
+    }
+
+    if (await writePlain(plainText)) {
+        return { copied: true, reason: 'plain' };
+    }
+
+    const hasAsyncClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard);
+
+    return { copied: false, reason: hasAsyncClipboard ? 'denied' : 'unavailable' };
+}
