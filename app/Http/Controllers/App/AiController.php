@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
+use App\Exceptions\Ai\XlsxRequirementImportException;
 use App\Http\Controllers\Controller;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
@@ -19,6 +20,7 @@ use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\DocumentPreviewService;
+use App\Services\Ai\Requirements\Excel\XlsxRequirementImportPreparer;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementEditorService;
@@ -107,6 +109,7 @@ class AiController extends Controller
         private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
         private readonly RequirementWikiAssessmentService $requirementWikiAssessmentService,
         private readonly RequirementWikiAnswerFigureResolver $wikiAnswerFigureResolver,
+        private readonly XlsxRequirementImportPreparer $xlsxRequirementImportPreparer,
     ) {}
 
     /**
@@ -389,11 +392,44 @@ class AiController extends Controller
                 $extractedText = $docxResult['text'];
                 $parsedTables = $docxResult['tables'];
                 $parsedTextElements = $docxResult['text_elements'];
+            } elseif ($extension === 'xlsx') {
+                // Excel goes through structure discovery instead of flat text: a workbook has no
+                // reading order to flatten, and the old fallback produced requirements with no
+                // reliable link to any cell. Prepared BEFORE the document row is created, so a
+                // workbook we cannot read safely leaves nothing half-imported behind — the file on
+                // disk is removed and the user is told why.
+                try {
+                    $excelInput = $this->xlsxRequirementImportPreparer->prepare(
+                        $absolutePath,
+                        $originalFilename,
+                        $this->customerContext->resolveLanguageCode($request->user()),
+                    );
+                } catch (XlsxRequirementImportException $exception) {
+                    Storage::disk('local')->delete($storedPath);
+
+                    Log::warning('[EXCEL_REQUIREMENT_IMPORT] Upload refused.', [
+                        'saved_notice_id' => $record->id,
+                        'document_filename' => $originalFilename,
+                        'reason' => $exception->translationKey,
+                        'details' => $exception->details,
+                    ]);
+
+                    return back()->with('error', __($exception->translationKey, ['file' => $originalFilename]));
+                }
+
+                $extractedText = $excelInput['extracted_text'];
+                $parsedTextElements = $excelInput['text_elements'];
             } else {
                 $extractedText = $this->documentTextExtractor->extractText($absolutePath);
             }
 
-            $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
+            $structuredBlocks = $extension === 'xlsx'
+                // One block per logical requirement, so a chunk never splits a requirement in half.
+                ? array_map(
+                    static fn (array $element): array => ['text' => $element['text'], 'style' => null, 'level' => null],
+                    $parsedTextElements,
+                )
+                : $this->documentTextExtractor->extractStructuredText($absolutePath);
 
             $documentRecord = $record->aiDocuments()->create([
                 'uploaded_by_user_id' => $request->user()?->id,

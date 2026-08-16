@@ -336,6 +336,11 @@ final readonly class RequirementExtractionCandidateData implements JsonSerializa
                 'source_element_number' => $identifierOverride,
                 'source_section_number' => $element['section_number'] ?? null,
                 'source_section_title' => $element['section_title'] ?? null,
+                // Extra provenance an element carries for its own source kind, kept nested under
+                // one key rather than spread across the reference: a spreadsheet range needs its
+                // sheet, its A1 reference and the human label a reader recognises, none of which a
+                // paragraph has. DOCX elements simply never set it.
+                'source_metadata' => is_array($element['source_metadata'] ?? null) ? $element['source_metadata'] : null,
             ], static fn (mixed $value): bool => $value !== null)),
             interpretationRisk: $this->interpretationRisk,
             isRequirement: $this->isRequirement,
