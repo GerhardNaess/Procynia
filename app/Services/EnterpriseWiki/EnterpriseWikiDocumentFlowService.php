@@ -89,6 +89,9 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
         private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiPatchApplicationService $patchApplicationService,
+        private readonly EnterpriseWikiCrossPageConsistencyService $crossPageConsistencyService,
+        private readonly EnterpriseWikiCrossPageReconciliationService $crossPageReconciliationService,
     ) {}
 
     /**
@@ -337,6 +340,24 @@ class EnterpriseWikiDocumentFlowService
         $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
 
         try {
+            // Fase 8K-3: existing pages the decision patches are handled HERE, after the run's own
+            // new pages are generated and before wikilinks are materialized — so a patched page's
+            // links and claims are picked up by the same steps that follow for generated pages.
+            // Deliberately not a queued job: the patch engine is fully deterministic with no AI call
+            // (see EnterpriseWikiPatchApplicationService), so it belongs with the other synchronous
+            // steps in this continuation rather than needing its own lease/fan-in machinery.
+            $this->performApplyPatchTargets($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
+            // A maintainer prompt is intentionally bounded. Reconcile any additional, high-confidence
+            // current assertions it could not see before materializing links and running QA.
+            $this->performCrossPageReconciliation($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
             $this->performMaterializeWikilinks($run);
             if (($run->fresh() ?? $run)->isTerminal()) {
                 return;
@@ -439,6 +460,15 @@ class EnterpriseWikiDocumentFlowService
             }
 
             $this->performLinkSemanticRepair($run);
+            if (($run->fresh() ?? $run)->isTerminal()) {
+                return;
+            }
+
+            // Fase 8K-4: runs LAST of the content passes, deliberately after semantic repair — that
+            // step can write a new current version, and this check must read the content the run
+            // actually finished with. Placed before QA so its findings reach the existing
+            // aggregation with no QA special-casing.
+            $this->performCrossPageConsistencyCheck($run);
             if (($run->fresh() ?? $run)->isTerminal()) {
                 return;
             }
@@ -725,6 +755,9 @@ class EnterpriseWikiDocumentFlowService
             'run_id' => $run->id,
             'created_pages' => $result['created'] ?? null,
             'updated_pages' => $result['updated'] ?? null,
+            // Fase 8K-2: existing pages this decision patches. They intentionally get no pivot row
+            // and no generation — patch application is 8K-3.
+            'patch_targets_deferred' => $result['patch_targets_deferred'] ?? 0,
         ]);
     }
 
@@ -842,7 +875,7 @@ class EnterpriseWikiDocumentFlowService
 
         $entry = $this->conceptDecisionEntry($page, $decisionJson);
 
-        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+        return $entry !== null && EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []) !== [];
     }
 
     /**
@@ -877,6 +910,72 @@ class EnterpriseWikiDocumentFlowService
             array_map(fn ($item): string => trim((string) $item), $value),
             fn (string $item): bool => $item !== '',
         ));
+    }
+
+    /**
+     * Fase 8K-3: apply this run's validated patch_targets to the existing pages they name.
+     *
+     * A patch failure is reported but does NOT fail the run: each patch target is independent of the
+     * run's own generated pages, and of the other targets. Failing the whole run because one section
+     * could not be located would throw away correctly generated pages, while silently retrying it as
+     * a full regeneration is exactly the destructive behaviour Fase 8K removes. The failure is logged
+     * per page with its concrete reason, the page keeps its existing current version untouched, and
+     * detecting the resulting still-stale substance is 8K-4's job.
+     */
+    private function performApplyPatchTargets(EnterpriseWikiIngestRun $run): void
+    {
+        $result = $this->patchApplicationService->applyForRun($run->fresh() ?? $run);
+
+        if ($result['pages_patched'] === 0 && $result['pages_skipped'] === 0 && $result['failures'] === []) {
+            return;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Patch targets applied.', [
+            'run_id' => $run->id,
+            'pages_patched' => $result['pages_patched'],
+            'pages_skipped' => $result['pages_skipped'],
+            'targets_applied' => $result['targets_applied'],
+            'failures' => count($result['failures']),
+        ]);
+
+        if ($result['failures'] !== []) {
+            Log::error('[WIKI_DOCUMENT_FLOW] Some patch targets could not be applied — existing versions left untouched.', [
+                'run_id' => $run->id,
+                'failures' => $result['failures'],
+            ]);
+        }
+    }
+
+    /**
+     * Reconcile high-confidence dependent current assertions before the normal content passes and
+     * final detection-only consistency check. The reconciler can only emit targets seeded by this
+     * run's already-authorised replacements and still uses the normal resolver/patch engine.
+     */
+    private function performCrossPageReconciliation(EnterpriseWikiIngestRun $run): void
+    {
+        $result = $this->crossPageReconciliationService->reconcileForRun($run->fresh() ?? $run);
+
+        if ($result['discovered'] === 0 && $result['unresolved'] === 0) {
+            return;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Cross-page current-state reconciliation completed.', [
+            'run_id' => $run->id,
+            'discovered' => $result['discovered'],
+            'validated' => $result['validated'],
+            'rejected' => $result['rejected'],
+            'unresolved' => $result['unresolved'],
+            'pages_patched' => $result['pages_patched'],
+            'targets_applied' => $result['targets_applied'],
+            'failures' => count($result['failures']),
+        ]);
+
+        if ($result['failures'] !== []) {
+            Log::error('[WIKI_DOCUMENT_FLOW] Some derived cross-page targets could not be applied — final QA remains strict.', [
+                'run_id' => $run->id,
+                'failures' => $result['failures'],
+            ]);
+        }
     }
 
     /**
@@ -1054,6 +1153,35 @@ class EnterpriseWikiDocumentFlowService
             'warnings' => $result['warnings'] ?? null,
             'info' => $result['info'] ?? null,
             'findings_created' => $result['findings_created'] ?? null,
+        ]);
+    }
+
+    /**
+     * Fase 8K-4 — post-patch cross-page current-state consistency. Detection only: it writes lint
+     * findings and never mutates a page, so a failure here must not fail an otherwise sound run.
+     * The findings themselves are what QA acts on.
+     */
+    private function performCrossPageConsistencyCheck(EnterpriseWikiIngestRun $run): void
+    {
+        try {
+            $result = $this->crossPageConsistencyService->checkForRun($run->fresh() ?? $run);
+        } catch (Throwable $e) {
+            Log::error('[WIKI_DOCUMENT_FLOW] Cross-page consistency check failed — run continues.', [
+                'run_id' => $run->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Cross-page consistency check completed.', [
+            'run_id' => $run->id,
+            'assertions' => $result['assertions'],
+            'pages_considered' => $result['pages_considered'],
+            'occurrences' => $result['occurrences'],
+            'findings_created' => $result['findings_created'],
+            'errors' => $result['errors'],
+            'warnings' => $result['warnings'],
         ]);
     }
 

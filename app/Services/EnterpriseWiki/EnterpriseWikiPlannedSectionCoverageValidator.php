@@ -38,8 +38,15 @@ class EnterpriseWikiPlannedSectionCoverageValidator
 
     public const TYPE_BELOW_MINIMUM_SUBSTANCE = 'planned_section_below_minimum_substance';
 
-    /** Page types whose prompt maps owned_topics onto `## ` sections. */
-    private const CHECKED_PAGE_TYPES = ['article', 'concept', 'entity'];
+    /**
+     * Page types whose prompt maps owned_topics onto `## ` sections.
+     *
+     * Public because it is the single authority on "does this page type HAVE sections at all",
+     * which the planned-figure contract needs too: a figure planned into a named section of a page
+     * type that never renders sections can only ever end up somewhere else (run 54, page 188 — a
+     * summary, whose markdown has no `## ` headings at all).
+     */
+    public const CHECKED_PAGE_TYPES = ['article', 'concept', 'entity'];
 
     /**
      * Secondary signal only (per the task's own instruction: minimum length is never the sole
@@ -74,26 +81,9 @@ class EnterpriseWikiPlannedSectionCoverageValidator
                 continue;
             }
 
-            $normalizedTopic = self::normalize($topic);
-            $matchedHeading = null;
-            $matchedBody = null;
+            $matchedSection = $this->matchingSection($sections, $topic);
 
-            foreach ($sections as $section) {
-                $normalizedHeading = self::normalize($section['heading']);
-
-                if ($normalizedHeading === ''
-                    || ! str_contains($normalizedTopic, $normalizedHeading) && ! str_contains($normalizedHeading, $normalizedTopic)
-                ) {
-                    continue;
-                }
-
-                $matchedHeading = $section['heading'];
-                $matchedBody = $section['body'];
-
-                break;
-            }
-
-            if ($matchedHeading === null) {
+            if ($matchedSection === null) {
                 $issues[] = [
                     'type' => self::TYPE_MISSING,
                     'planned_topic' => $topic,
@@ -104,19 +94,31 @@ class EnterpriseWikiPlannedSectionCoverageValidator
                 continue;
             }
 
-            $issueType = $this->classifyBody($matchedBody);
+            $issueType = $this->classifyBody($matchedSection['body']);
 
             if ($issueType !== null) {
                 $issues[] = [
                     'type' => $issueType,
                     'planned_topic' => $topic,
-                    'heading' => $matchedHeading,
+                    'heading' => $matchedSection['heading'],
                     'source_grounded' => true,
                 ];
             }
         }
 
         return $issues;
+    }
+
+    /**
+     * Returns the current body for the same deterministic topic/heading match used by validate().
+     * Repair context uses this so the model sees the exact invalid body without maintaining a
+     * divergent markdown parser or matching rule.
+     */
+    public function sectionBodyForPlannedTopic(string $contentMarkdown, string $plannedTopic): ?string
+    {
+        $matchedSection = $this->matchingSection($this->parseSections($contentMarkdown), trim($plannedTopic));
+
+        return $matchedSection['body'] ?? null;
     }
 
     /**
@@ -135,7 +137,11 @@ class EnterpriseWikiPlannedSectionCoverageValidator
      */
     private function parseSections(string $contentMarkdown): array
     {
-        $lines = preg_split('/\R/', $contentMarkdown) ?: [];
+        // \R includes NEL (U+0085). Without the Unicode modifier PCRE can mistake the trailing
+        // byte 0x85 of the valid UTF-8 character Å (C3 85) for that line break, leaving a lone
+        // C3 byte in the preceding section body. This parser feeds repair context, so line
+        // splitting must remain character-aware.
+        $lines = preg_split('/\R/u', $contentMarkdown) ?: [];
         $sections = [];
         $currentHeading = null;
         $currentBody = [];
@@ -171,6 +177,24 @@ class EnterpriseWikiPlannedSectionCoverageValidator
         }
 
         return $sections;
+    }
+
+    /** @param list<array{heading: string, body: string}> $sections @return array{heading: string, body: string}|null */
+    private function matchingSection(array $sections, string $plannedTopic): ?array
+    {
+        $normalizedTopic = self::normalize($plannedTopic);
+
+        foreach ($sections as $section) {
+            $normalizedHeading = self::normalize($section['heading']);
+
+            if ($normalizedHeading !== ''
+                && (str_contains($normalizedTopic, $normalizedHeading) || str_contains($normalizedHeading, $normalizedTopic))
+            ) {
+                return $section;
+            }
+        }
+
+        return null;
     }
 
     private function classifyBody(string $body): ?string

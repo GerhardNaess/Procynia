@@ -25,6 +25,14 @@ class EnterpriseWikiPageLinkQaAttempt extends Model
 
     public const REASON_AI_UNAVAILABLE = 'ai_unavailable';
 
+    /**
+     * The revision was valid but could not be promoted without losing the page's content blocks
+     * (image figures, source provenance, claim anchors) — see
+     * EnterpriseWikiPageVersionWriter::writeNewCurrentVersionRestoringBlocks(). The page keeps its
+     * previous current version; nothing is broken, the improvement is simply declined.
+     */
+    public const REASON_BLOCK_PROVENANCE_AT_RISK = 'block_provenance_at_risk';
+
     protected $fillable = [
         'customer_id',
         'enterprise_wiki_ingest_run_id',

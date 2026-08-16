@@ -56,6 +56,7 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
             $this->findDanglingRelatedPageGuidance($decision, $knownTitles, $localSourcePageTitles),
             $this->findConceptCandidateContradictions($decision, $knownTitles),
             $this->findDanglingPlannedFigures($decision, $validFigureSourceElementKeys),
+            $this->findUnplaceablePlannedFigures($decision),
         );
     }
 
@@ -190,7 +191,11 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
                 continue;
             }
 
-            if ($candidateDecision === 'create' && ! $this->titleIsKnown($name, $knownTitles)) {
+            // A page created FOR this candidate may legitimately carry a specialising suffix the
+            // candidate name does not ("Avvikshåndtering" -> "Avvikshåndtering i prosjekter"), so
+            // this directed check uses titleCoversConcept() rather than the symmetric identity
+            // rule — see EnterpriseWikiConceptIdentityMatcher for why the two differ.
+            if ($candidateDecision === 'create' && ! $this->candidateHasPage($name, $decision, $knownTitles)) {
                 $issues[] = "Concept candidate \"{$name}\" was decided \"create\" but no matching ".
                     'concept_pages entry exists.';
             }
@@ -221,6 +226,29 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         }
 
         return $issues;
+    }
+
+    /**
+     * Whether a "create" candidate actually got a page — either an existing page/planned page that
+     * matches it outright, or a page planned in this decision whose title specialises the
+     * candidate name.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  string[]  $knownTitles
+     */
+    private function candidateHasPage(string $name, array $decision, array $knownTitles): bool
+    {
+        if ($this->titleIsKnown($name, $knownTitles)) {
+            return true;
+        }
+
+        foreach ($this->plannedTitles($decision) as $plannedTitle) {
+            if (EnterpriseWikiConceptIdentityMatcher::titleCoversConcept($name, $plannedTitle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -272,6 +300,97 @@ class EnterpriseWikiMaintainerDecisionConsistencyValidator
         }
 
         return $issues;
+    }
+
+    /**
+     * A figure's `section_placement` must name a section this page will actually have.
+     *
+     * Placement is only meaningful against a real `## ` heading, and those headings come from one
+     * place: the page's own owned_topics, on the page types whose prompt renders them as sections
+     * (EnterpriseWikiPlannedSectionCoverageValidator::CHECKED_PAGE_TYPES). Run 54 shows both ways
+     * this breaks with nothing checking it: a figure was planned into
+     * "Hovedstruktur og faser i etableringsprosjektet" on a SUMMARY page, a page type that renders
+     * no sections at all, so the deterministic placement had no heading to insert under, fell back
+     * to appending at the end, and QA reported it as wrong_section at the very end of the run.
+     *
+     * Deterministic and domain-free: exact normalized comparison against the page's own topics —
+     * no fuzzy heading matching, no synonyms, no per-document rules. `null` placement stays valid
+     * everywhere; it means "right after the page introduction".
+     *
+     * @param  array<string, mixed>  $decision
+     * @return string[]
+     */
+    private function findUnplaceablePlannedFigures(array $decision): array
+    {
+        $issues = [];
+
+        foreach ($this->pageEntriesWithType($decision) as [$label, $pageType, $entry]) {
+            $topics = array_map(
+                fn (string $topic): string => $this->normalizeExactTitle($topic),
+                EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []),
+            );
+            $rendersSections = in_array($pageType, EnterpriseWikiPlannedSectionCoverageValidator::CHECKED_PAGE_TYPES, true);
+
+            foreach ((array) ($entry['planned_figures'] ?? []) as $figure) {
+                if (! is_array($figure)) {
+                    continue;
+                }
+
+                $placement = trim((string) ($figure['section_placement'] ?? ''));
+                $key = (string) ($figure['source_element_key'] ?? '');
+
+                if ($placement === '' || $key === '') {
+                    continue;
+                }
+
+                if (! $rendersSections) {
+                    $issues[] = "{$label} plans figure \"{$key}\" under section \"{$placement}\", but a ".
+                        "{$pageType} page has no sections — set section_placement to null so the figure is ".
+                        'placed after the page introduction.';
+
+                    continue;
+                }
+
+                if (! in_array($this->normalizeExactTitle($placement), $topics, true)) {
+                    $issues[] = "{$label} plans figure \"{$key}\" under section \"{$placement}\", which is not ".
+                        "one of this page's owned topics — a figure can only be placed under a section the page ".
+                        'actually has. Use one of its owned topics verbatim, or set section_placement to null.';
+                }
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Every page slot with the page TYPE it becomes — the same mapping
+     * EnterpriseWikiMaintainerDecisionApplyService uses when it creates the pages.
+     *
+     * @param  array<string, mixed>  $decision
+     * @return list<array{0: string, 1: string, 2: array<string, mixed>}>
+     */
+    private function pageEntriesWithType(array $decision): array
+    {
+        $entries = [];
+
+        foreach (['source_article' => 'article', 'source_summary' => 'summary'] as $key => $pageType) {
+            $entry = $decision[$key] ?? null;
+
+            if (is_array($entry) && $entry !== []) {
+                $entries[] = [$key, $pageType, $entry];
+            }
+        }
+
+        foreach (['concept_pages' => 'concept', 'entity_pages' => 'entity'] as $key => $pageType) {
+            foreach ((array) ($decision[$key] ?? []) as $i => $entry) {
+                if (is_array($entry)) {
+                    $title = (string) ($entry['title'] ?? '?');
+                    $entries[] = ["{$key}[{$i}] (\"{$title}\")", $pageType, $entry];
+                }
+            }
+        }
+
+        return $entries;
     }
 
     /** @param  string[]  $knownTitles */

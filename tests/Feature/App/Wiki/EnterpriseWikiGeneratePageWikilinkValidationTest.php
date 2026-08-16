@@ -116,6 +116,155 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
     }
 
+    public function test_structured_link_intent_materializes_a_same_run_target_without_a_version(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'operational-improvement-a1b2c3', 'Operational Improvement');
+        $concept = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+        $this->mockAiResponse("# {$concept->title}\n\nOperational Improvement is relevant.", [[
+            'intent_id' => 'improvement-link',
+            'target_page_id' => $article->id,
+            'anchor_text' => 'Operational Improvement',
+            'reason' => 'Points to the page that owns the operational improvement process.',
+        ]]);
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->where('is_current', true)->firstOrFail();
+        $this->assertStringContainsString('[[operational-improvement-a1b2c3|Operational Improvement]]', $version->content_markdown);
+    }
+
+    public function test_structured_intent_overrides_a_model_authored_base_slug(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'service-improvement-f93a12', 'Service Improvement');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        // The model wrote its own [[...]] markup with a guessed slug. Its target is discarded and
+        // only the visible words survive, which the structured intent then anchors on.
+        $this->mockAiResponse("# {$generated->title}\n\nSee [[service-improvement|Service Improvement]].", [[
+            'intent_id' => 'service-improvement-link',
+            'target_page_id' => $target->id,
+            'anchor_text' => 'Service Improvement',
+            'reason' => 'References the owning page.',
+        ]]);
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->where('is_current', true)->firstOrFail();
+        $this->assertStringContainsString('[[service-improvement-f93a12|Service Improvement]]', $version->content_markdown);
+        $this->assertStringNotContainsString('[[service-improvement|Service Improvement]]', $version->content_markdown);
+    }
+
+    public function test_unknown_structured_target_is_rejected_before_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nUnknown target.", [[
+            'intent_id' => 'unknown-target',
+            'target_page_id' => 999999,
+            'anchor_text' => 'Unknown target',
+            'reason' => 'Invalid target identity.',
+        ]]);
+
+        Queue::fake();
+        $this->assertGenerationFails($run, $generated);
+    }
+
+    public function test_structured_self_link_is_rejected_before_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nConcept is self-referential.", [[
+            'intent_id' => 'self-link',
+            'target_page_id' => $generated->id,
+            'reason' => 'Invalid self identity.',
+        ]]);
+
+        Queue::fake();
+        $this->assertGenerationFails($run, $generated);
+    }
+
+    public function test_cross_customer_structured_target_is_rejected_before_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        $otherCustomer = $this->createCustomer('Other Customer');
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $foreign = $this->createPage($otherCustomer, 'foreign-page', 'Foreign Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nForeign Page is mentioned.", [[
+            'intent_id' => 'foreign-link',
+            'target_page_id' => $foreign->id,
+            'reason' => 'Invalid cross-customer identity.',
+        ]]);
+
+        Queue::fake();
+        $this->assertGenerationFails($run, $generated);
+    }
+
+    public function test_valid_intent_whose_anchor_is_absent_is_dropped_without_changing_prose(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'service-improvement-f93a12', 'Service Improvement');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nThe service improvement process is reviewed monthly.", [[
+            'intent_id' => 'service-improvement-link',
+            'target_page_id' => $target->id,
+            'anchor_text' => 'a phrase that is not in the prose',
+            'reason' => 'The anchor does not occur in the block.',
+        ]]);
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+
+        $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->where('is_current', true)->firstOrFail();
+        $this->assertStringContainsString('The service improvement process is reviewed monthly.', $version->content_markdown);
+        $this->assertStringNotContainsString('[[service-improvement-f93a12|', $version->content_markdown);
+        $this->assertSame([], $version->content_blocks_json[0]['link_intents']);
+    }
+
+    public function test_retired_marker_syntax_is_rejected_before_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'concept', 'Concept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $target = $this->createPage($customer, 'target-page', 'Target Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $target]);
+
+        // Run 59's shape: the retired marker never reaches a page, whatever the model writes.
+        $this->mockAiResponse("# {$generated->title}\n\n{{wiki_link:not-listed|Target Page}} is relevant.", [[
+            'intent_id' => 'listed-link',
+            'target_page_id' => $target->id,
+            'anchor_text' => 'Target Page',
+            'reason' => 'Internal syntax must never be persisted.',
+        ]]);
+
+        Queue::fake();
+        $this->assertGenerationFails($run, $generated);
+    }
+
     private function assertGenerationRejected(\Closure $markdownFor): void
     {
         $customer = $this->createCustomer();
@@ -146,10 +295,10 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
     }
 
     // =========================================================================
-    // Minimum-wikilinks domain rule
+    // Links are optional semantic enrichment
     // =========================================================================
 
-    public function test_zero_link_article_is_rejected_when_the_run_has_relevant_targets(): void
+    public function test_zero_link_article_is_accepted_when_the_run_has_relevant_targets(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -161,17 +310,12 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
 
         Queue::fake();
 
-        try {
-            (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($this->service());
-            $this->fail('Expected generation to be rejected.');
-        } catch (RuntimeException) {
-            // expected
-        }
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($this->service());
 
-        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
     }
 
-    public function test_zero_link_summary_is_rejected_when_the_run_has_relevant_targets(): void
+    public function test_zero_link_summary_is_accepted_when_the_run_has_relevant_targets(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -183,17 +327,12 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
 
         Queue::fake();
 
-        try {
-            (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle($this->service());
-            $this->fail('Expected generation to be rejected.');
-        } catch (RuntimeException) {
-            // expected
-        }
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle($this->service());
 
-        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $summary->id)->exists());
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $summary->id)->exists());
     }
 
-    public function test_concept_without_wikilinks_gets_one_catalog_scoped_repair_and_is_accepted_when_repaired(): void
+    public function test_concept_without_wikilinks_is_accepted_without_a_forced_repair(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -202,24 +341,16 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $run = $this->createAppliedRun($customer, $document, [$concept, $target]);
 
         $this->mockAiResponse("# {$concept->title}\n\nTarget Page is important.");
-        $this->mock(WikiLinkRevisionAiClient::class)
-            ->shouldReceive('reviseLinks')
-            ->once()
-            ->withArgs(function (string $content, string $pageType, array $catalog): bool {
-                return $content === "# Concept\n\nTarget Page is important."
-                    && $pageType === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-                    && $catalog === [['slug' => 'target-page', 'title' => 'Target Page', 'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE]];
-            })
-            ->andReturn(['changed' => true, 'markdown' => "# {$concept->title}\n\n[[target-page|Target Page]] is important."]);
+        $this->mock(WikiLinkRevisionAiClient::class)->shouldNotReceive('reviseLinks');
 
         Queue::fake();
         (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
 
         $version = EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->where('is_current', true)->firstOrFail();
-        $this->assertStringContainsString('[[target-page|Target Page]]', $version->content_markdown);
+        $this->assertStringNotContainsString('[[target-page|Target Page]]', $version->content_markdown);
     }
 
-    public function test_concept_repair_that_still_has_no_wikilink_keeps_the_existing_exception(): void
+    public function test_concept_without_a_relevant_link_is_not_rejected(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -228,18 +359,13 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         $run = $this->createAppliedRun($customer, $document, [$concept, $target]);
 
         $this->mockAiResponse("# {$concept->title}\n\nNo links yet.");
-        $this->mock(WikiLinkRevisionAiClient::class)
-            ->shouldReceive('reviseLinks')->once()
-            ->andReturn(['changed' => true, 'markdown' => "# {$concept->title}\n\nNo links yet."]);
+        $this->mock(WikiLinkRevisionAiClient::class)->shouldNotReceive('reviseLinks');
 
         Queue::fake();
 
-        try {
-            (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
-            $this->fail('Expected generation to be rejected.');
-        } catch (RuntimeException $e) {
-            $this->assertStringContainsString('no valid inline wikilinks', $e->getMessage());
-        }
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $concept->id))->handle($this->service());
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $concept->id)->exists());
     }
 
     public function test_concept_with_valid_wikilink_is_not_repaired(): void
@@ -414,7 +540,19 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
         return app(EnterpriseWikiGenerateAppliedPagesService::class);
     }
 
-    private function mockAiResponse(string $markdown): void
+    private function assertGenerationFails(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
+    {
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $page->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // The job records the failed generation before rethrowing.
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->exists());
+    }
+
+    private function mockAiResponse(string $markdown, array $linkIntents = []): void
     {
         $this->mock(WikiPageContentAiClient::class)
             ->shouldReceive('generatePageFromSource')
@@ -427,7 +565,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
                 string $additionalContext = '',
                 array $linkCatalog = [],
                 array $sourceElements = [],
-            ): array => $this->structuredPageResult($markdown, $sourceElements));
+            ): array => $this->structuredPageResult($markdown, $sourceElements, $linkIntents));
     }
 
     private function createCustomer(string $name = 'Test AS'): Customer
@@ -509,7 +647,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
      * @param  list<array<string, mixed>>  $sourceElements
      * @return array{markdown: string, blocks: list<array<string, mixed>>}
      */
-    private function structuredPageResult(string $markdown, array $sourceElements): array
+    private function structuredPageResult(string $markdown, array $sourceElements, array $linkIntents = []): array
     {
         $sourceElement = $sourceElements[0] ?? [
             'source_element_key' => 'document-1-full-text',
@@ -525,7 +663,7 @@ class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
                     'source_element_keys' => [(string) $sourceElement['source_element_key']],
                     'source_element_types' => [(string) $sourceElement['source_element_type']],
                     'best_practice_reason' => null,
-                    'link_intents' => [],
+                    'link_intents' => $linkIntents,
                 ],
             ],
         ];

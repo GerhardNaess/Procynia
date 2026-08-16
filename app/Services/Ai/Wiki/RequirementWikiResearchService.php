@@ -5,6 +5,7 @@ namespace App\Services\Ai\Wiki;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\SavedNoticeAiRequirement;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -42,6 +43,7 @@ class RequirementWikiResearchService
         private readonly RequirementWikiLinkNavigator $linkNavigator,
         private readonly RequirementWikiPageReader $pageReader,
         private readonly RequirementWikiResearchAiClient $researchAiClient,
+        private readonly EnterpriseWikiSemanticRetrievalService $semanticRetrieval,
     ) {}
 
     /**
@@ -63,21 +65,24 @@ class RequirementWikiResearchService
      */
     public function research(SavedNoticeAiRequirement $requirement, int $customerId, string $languageCode): array
     {
-        $catalog = $this->catalogBuilder->build($customerId);
+        $researchInput = trim(($requirement->requirement_identifier ?? '').' '.$requirement->requirement_text);
+        $semanticRetrieval = $this->semanticRetrieval->retrieve($researchInput, $customerId, $languageCode);
+        $catalog = $semanticRetrieval['catalog'];
         $catalogByPageId = [];
 
         foreach ($catalog as $entry) {
             $catalogByPageId[$entry['page_id']] = $entry;
         }
 
-        $requirementTokens = RequirementWikiTermNormalizer::tokenize(trim(
-            ($requirement->requirement_identifier ?? '').' '.$requirement->requirement_text,
-        ));
+        $requirementTokens = RequirementWikiTermNormalizer::tokenize($researchInput);
 
-        $initialCandidates = $catalog === [] ? [] : $this->ranker->rank($catalog, $requirementTokens, $customerId, []);
+        $initialCandidates = $semanticRetrieval['candidate_pool'];
 
         if ($initialCandidates === []) {
-            return $this->buildContext($requirement, [], [], [], [], 'no_relevant_candidates', 0);
+            $context = $this->buildContext($requirement, [], [], [], [], 'no_relevant_candidates', 0);
+            $this->logRetrieval($customerId, $semanticRetrieval['telemetry'], $context);
+
+            return $context;
         }
 
         if (! RequirementWikiResearchAiClient::isAvailable()) {
@@ -278,7 +283,10 @@ class RequirementWikiResearchService
             $currentCandidates = array_values($merged);
         }
 
-        return $this->buildContext($requirement, $initialCandidates, $rounds, $readPages, $catalog, $stopReason, $contextSize);
+        $context = $this->buildContext($requirement, $initialCandidates, $rounds, $readPages, $catalog, $stopReason, $contextSize);
+        $this->logRetrieval($customerId, $semanticRetrieval['telemetry'], $context);
+
+        return $context;
     }
 
     /**
@@ -425,5 +433,23 @@ class RequirementWikiResearchService
                 'max_context_size' => self::MAX_CONTEXT_SIZE,
             ],
         ];
+    }
+
+    /** @param array<string, mixed> $semanticTelemetry @param array<string, mixed> $context */
+    private function logRetrieval(int $customerId, array $semanticTelemetry, array $context): void
+    {
+        Log::info('[WIKI_REQUIREMENT_RESEARCH] Retrieval completed.', [
+            'customer_id' => $customerId,
+            'semantic_navigation' => $semanticTelemetry,
+            'initial_candidate_ids' => array_column($context['initial_candidates'], 'page_id'),
+            'selected_page_ids_by_round' => array_map(static fn (array $round): array => [
+                'round' => $round['round'],
+                'action' => $round['action'],
+                'page_ids' => $round['selected_page_ids'],
+            ], $context['research_rounds']),
+            'final_evidence_page_ids' => array_column($context['pages'], 'page_id'),
+            'stop_reason' => $context['limits']['stop_reason'],
+            'context_chars' => $context['limits']['context_size'],
+        ]);
     }
 }

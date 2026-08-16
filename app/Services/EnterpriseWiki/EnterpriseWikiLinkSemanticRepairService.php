@@ -3,6 +3,7 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -32,6 +33,8 @@ use Throwable;
  */
 class EnterpriseWikiLinkSemanticRepairService
 {
+    private const STRUCTURE_MUTATION_CODE = 'semantic_link_repair_mutated_structure';
+
     /**
      * Ingest run ids collected during the current repairForRun() call whose claims need
      * re-syncing (EnterpriseWikiPageVersionClaimSyncService::syncRuns()) because one of their
@@ -222,7 +225,7 @@ class EnterpriseWikiLinkSemanticRepairService
                 return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, EnterpriseWikiPageLinkQaAttempt::REASON_NO_CHANGE_RECOMMENDED);
             }
 
-            $this->validateRevision($run, $page, $markdown, $revision['markdown'], $diagnosis);
+            $this->validateRevision($run, $page, $currentVersion, $markdown, $revision['markdown'], $diagnosis);
 
             $newVersion = DB::transaction(function () use ($run, $page, $revision): ?EnterpriseWikiPageVersion {
                 $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
@@ -247,6 +250,16 @@ class EnterpriseWikiLinkSemanticRepairService
             }
 
             return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_APPLIED, null, $newVersion->id);
+        } catch (EnterpriseWikiPageVersionBlockProvenanceLostException $e) {
+            // Declining a link-wording improvement is cheap; promoting a version that has lost the
+            // page's figures and claim anchors is not (run 54, page 191).
+            Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Revision not promoted — it would have dropped the page\'s content blocks.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return $this->finalize($run, $page, EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, EnterpriseWikiPageLinkQaAttempt::REASON_BLOCK_PROVENANCE_AT_RISK);
         } catch (EnterpriseWikiInvalidWikilinksException $e) {
             Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Revision rejected.', [
                 'run_id' => $run->id,
@@ -276,10 +289,13 @@ class EnterpriseWikiLinkSemanticRepairService
     private function validateRevision(
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $originalVersion,
         string $originalMarkdown,
         string $revisedMarkdown,
         array $diagnosis,
     ): void {
+        $this->assertStructuralHeadingsUnchanged($run, $page, $originalVersion, $originalMarkdown, $revisedMarkdown);
+
         $parsed = $this->linkParser->parse($revisedMarkdown);
         $rawOccurrences = $this->linkParser->countRawOccurrences($revisedMarkdown);
 
@@ -349,6 +365,86 @@ class EnterpriseWikiLinkSemanticRepairService
         }
     }
 
+    /**
+     * Link repair is an enrichment operation, never a structural page editor. Every ATX heading
+     * is protected because the patch resolver uses heading levels through H6 as section bounds.
+     * Compare raw heading text and sequence; rendered-text or fuzzy equivalence is not enough.
+     *
+     * @throws EnterpriseWikiInvalidWikilinksException
+     */
+    private function assertStructuralHeadingsUnchanged(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $originalVersion,
+        string $originalMarkdown,
+        string $revisedMarkdown,
+    ): void {
+        $originalHeadings = $this->structuralHeadings($originalMarkdown);
+        $revisedHeadings = $this->structuralHeadings($revisedMarkdown);
+
+        if ($originalHeadings === $revisedHeadings) {
+            return;
+        }
+
+        $firstDifference = $this->firstHeadingDifference($originalHeadings, $revisedHeadings);
+
+        Log::warning('[WIKI_LINK_SEMANTIC_REPAIR] Revision rejected: structural headings changed.', [
+            'issue_code' => self::STRUCTURE_MUTATION_CODE,
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'original_version_id' => $originalVersion->id,
+            'original_heading_count' => count($originalHeadings),
+            'revised_heading_count' => count($revisedHeadings),
+            'first_differing_heading_index' => $firstDifference,
+            'original_heading_level' => $originalHeadings[$firstDifference]['level'] ?? null,
+            'revised_heading_level' => $revisedHeadings[$firstDifference]['level'] ?? null,
+        ]);
+
+        throw new EnterpriseWikiInvalidWikilinksException(sprintf(
+            '%s: Run [%d] page [%d] changed structural heading sequence at index %d.',
+            self::STRUCTURE_MUTATION_CODE,
+            $run->id,
+            $page->id,
+            $firstDifference,
+        ));
+    }
+
+    /** @return list<array{level: int, raw_text: string}> */
+    private function structuralHeadings(string $markdown): array
+    {
+        $headings = [];
+
+        foreach (preg_split('/\R/', $markdown) ?: [] as $line) {
+            if (preg_match('/^\s{0,3}(#{1,6})\s+(.*)$/u', $line, $matches) !== 1) {
+                continue;
+            }
+
+            $headings[] = [
+                'level' => strlen($matches[1]),
+                'raw_text' => $matches[2],
+            ];
+        }
+
+        return $headings;
+    }
+
+    /**
+     * @param  list<array{level: int, raw_text: string}>  $originalHeadings
+     * @param  list<array{level: int, raw_text: string}>  $revisedHeadings
+     */
+    private function firstHeadingDifference(array $originalHeadings, array $revisedHeadings): int
+    {
+        $limit = max(count($originalHeadings), count($revisedHeadings));
+
+        for ($index = 0; $index < $limit; $index++) {
+            if (($originalHeadings[$index] ?? null) !== ($revisedHeadings[$index] ?? null)) {
+                return $index;
+            }
+        }
+
+        return 0;
+    }
+
     private function buildInstructions(array $diagnosis, array $catalog): string
     {
         $bySlug = collect($catalog)->keyBy('slug');
@@ -391,14 +487,17 @@ class EnterpriseWikiLinkSemanticRepairService
                 return null;
             }
 
-            $version = $this->versionWriter->writeNewCurrentVersion($pageId, [
-                'content_markdown' => $markdown,
-                'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
-            ]);
-
-            $this->restoreBlockProvenance($pageId, $version);
-
-            return $version;
+            // Write and restore are ONE unit: if the block provenance cannot be reconstructed the
+            // whole promotion is rolled back, and the page keeps the version that still has its
+            // image figures, source provenance and claim anchors (run 54, page 191).
+            return $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+                $pageId,
+                [
+                    'content_markdown' => $markdown,
+                    'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/link-semantic-repair',
+                ],
+                fn (EnterpriseWikiPageVersion $version) => $this->restoreBlockProvenance($pageId, $version),
+            );
         });
     }
 

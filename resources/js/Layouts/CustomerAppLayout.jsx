@@ -146,6 +146,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'environment';
         }
 
+        // Checked before the general Wiki area: "Spør Wiki" is its own main-menu action, not a tab
+        // inside the Wiki area, so it must not light up the Wiki nav item or render Wiki sub-tabs.
+        if (pathname.startsWith('/app/wiki/ask')) {
+            return 'wiki-ask';
+        }
+
         if (pathname.startsWith('/app/wiki')) {
             return 'wiki';
         }
@@ -168,6 +174,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
         { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
+        // Icon-only main-menu action, same level as the other central functions. The magnifying
+        // glass is the whole affordance, so the label is carried by title/aria-label instead.
+        {
+            key: 'wiki-ask',
+            label: translations.wiki?.ask_nav ?? 'Spør Wiki',
+            href: '/app/wiki/ask',
+            iconOnly: true,
+        },
         { key: 'ai', label: navigation.ai, href: '/app/ai' },
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
@@ -433,14 +447,42 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                             <Link
                                                 key={item.key}
                                                 href={item.href}
+                                                title={item.iconOnly ? item.label : undefined}
+                                                aria-label={item.iconOnly ? item.label : undefined}
                                                 className={classNames(
-                                                    'rounded-xl px-3 py-2 text-base font-medium transition',
+                                                    'rounded-xl text-base font-medium transition',
+                                                    item.iconOnly
+                                                        ? 'flex h-10 w-10 items-center justify-center'
+                                                        : 'px-3 py-2',
                                                     isActive
                                                         ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                                         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                                                 )}
                                             >
-                                                {item.label}
+                                                {item.iconOnly ? (
+                                                    <svg
+                                                        className="h-5 w-5"
+                                                        viewBox="0 0 20 20"
+                                                        fill="none"
+                                                        aria-hidden="true"
+                                                    >
+                                                        <circle
+                                                            cx="9"
+                                                            cy="9"
+                                                            r="5.25"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.75"
+                                                        />
+                                                        <path
+                                                            d="M13 13L17 17"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.75"
+                                                            strokeLinecap="round"
+                                                        />
+                                                    </svg>
+                                                ) : (
+                                                    item.label
+                                                )}
                                             </Link>
                                         );
                                     })}

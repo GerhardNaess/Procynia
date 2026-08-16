@@ -5,8 +5,6 @@ namespace App\Services\EnterpriseWiki;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiMaintainerDecisionBatch;
-use App\Models\EnterpriseWikiSourceReference;
-use App\Services\Ai\Wiki\EnterpriseWikiIndexContextService;
 use RuntimeException;
 
 /**
@@ -16,7 +14,7 @@ use RuntimeException;
  */
 class EnterpriseWikiMaintainerDecisionBatchEvaluator
 {
-    public function __construct(private readonly EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator, private readonly EnterpriseWikiIndexContextService $indexContextService, private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService) {}
+    public function __construct(private readonly EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator) {}
 
     /** @return array<string,mixed> */
     public function evaluate(int $runId, EnterpriseWikiMaintainerDecisionBatch $batch): array
@@ -39,9 +37,13 @@ class EnterpriseWikiMaintainerDecisionBatchEvaluator
             throw new RuntimeException("Document [{$run->source_id}] not found for run [{$runId}].");
         }
         $language = Customer::query()->with('language')->find($run->customer_id)?->language?->code ?? 'no';
-        $figures = array_values(array_filter($this->sourceElementService->inspect($document)['elements'], fn (array $item): bool => ($item['source_element_type'] ?? null) === EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_IMAGE));
-        $raw = $this->coordinator->decidePersistedCandidateBatch(['title' => pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Unknown', 'filename' => (string) $document->original_filename], (string) $document->extracted_text, $this->indexContextService->buildForCustomer($run->customer_id), $language, $input['global_plan'], $input['mentions'], $batch->batch_number, $figures);
+        // The queued batch rebuilds the SAME authoritative context the in-process paths use — it is
+        // a deterministic function of (customer, document), so a batch job cannot end up planning
+        // from a different, thinner view of the document than the run that dispatched it.
+        $planning = EnterpriseWikiPlanningContext::forDocument($run->customer_id, $document);
 
-        return EnterpriseWikiMaintainerDecisionPrompt::parseCandidateBatch($raw);
+        // Parsed by the coordinator inside the capacity executor, which is also where the one
+        // corrupt-response policy lives — this path gets the same bounded retry as every other.
+        return $this->coordinator->decidePersistedCandidateBatch($planning, $language, $input['global_plan'], $input['mentions'], $batch->batch_number);
     }
 }

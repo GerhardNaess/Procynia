@@ -5,6 +5,9 @@ namespace App\Services\EnterpriseWiki;
 use App\Exceptions\EnterpriseWikiFigureMaterializationException;
 use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
 use App\Exceptions\EnterpriseWikiPageGenerationIncompleteException;
+use App\Exceptions\EnterpriseWikiPatchTargetRegenerationBlockedException;
+use App\Exceptions\EnterpriseWikiPlannedSectionEvidenceMissingException;
+use App\Exceptions\EnterpriseWikiPlannedSectionRepairShapeException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -12,7 +15,6 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Services\Ai\Wiki\WikiLinkRevisionAiClient;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -65,8 +67,8 @@ class EnterpriseWikiGenerateAppliedPagesService
 
     public function __construct(
         private readonly WikiPageContentAiClient $aiClient,
-        private readonly WikiLinkRevisionAiClient $wikilinkRevisionClient,
         private readonly EnterpriseWikiLinkCatalogService $linkCatalogService,
+        private readonly EnterpriseWikiLinkIntentMaterializer $linkIntentMaterializer,
         private readonly EnterpriseWikiLinkParser $linkParser,
         private readonly EnterpriseWikiLinkResolver $linkResolver,
         private readonly EnterpriseWikiWikilinkCanonicalizer $wikilinkCanonicalizer,
@@ -78,8 +80,10 @@ class EnterpriseWikiGenerateAppliedPagesService
         private readonly EnterpriseWikiImageBlockBuilder $imageBlockBuilder,
         private readonly EnterpriseWikiDuplicateContentRemover $duplicateContentRemover,
         private readonly EnterpriseWikiPlannedSectionCoverageValidator $sectionCoverageValidator,
+        private readonly EnterpriseWikiPlannedSectionEvidenceResolver $plannedSectionEvidenceResolver,
         private readonly EnterpriseWikiPlannedFigureCoverageValidator $figureCoverageValidator,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiBestPracticeReviewReconciler $reviewReconciler,
     ) {}
 
     /**
@@ -162,6 +166,18 @@ class EnterpriseWikiGenerateAppliedPagesService
             ));
         }
 
+        // A PLANNED figure is materialized whether or not the model happened to cite it. The plan
+        // is a backend decision about a real, extracted source element (validated at decision time),
+        // so making its materialization depend on the model mentioning it in prose means an
+        // ordinary omission silently drops a figure the plan promised — run 54, page 193: img1 was
+        // planned onto the page, never cited, never materialized, and only QA at the end of the run
+        // noticed. Citation still governs UNPLANNED images exactly as before.
+        $imageIndexes = array_values(array_unique(array_merge(
+            $imageIndexes,
+            $this->plannedImageIndexes($plannedFigures),
+        )));
+        sort($imageIndexes);
+
         $imageBlocks = [];
 
         if ($imageIndexes !== []) {
@@ -179,6 +195,30 @@ class EnterpriseWikiGenerateAppliedPagesService
         }
 
         return [$markdown, $contentBlocks];
+    }
+
+    /**
+     * The image indexes this page's own planned_figures name — `img{N}` is the extraction's own
+     * stable key shape (EnterpriseWikiDocumentSourceElementService), so the mapping is exact and
+     * never guessed. A key that is not of that shape is left to the decision-time validators, which
+     * already reject a planned figure that no extracted figure matches.
+     *
+     * @param  list<array<string, mixed>>  $plannedFigures
+     * @return list<int>
+     */
+    private function plannedImageIndexes(array $plannedFigures): array
+    {
+        $indexes = [];
+
+        foreach ($plannedFigures as $figure) {
+            $key = trim((string) ($figure['source_element_key'] ?? ''));
+
+            if (preg_match('/^img(\d+)$/', $key, $matches) === 1) {
+                $indexes[] = (int) $matches[1];
+            }
+        }
+
+        return array_values(array_unique($indexes));
     }
 
     /**
@@ -465,6 +505,8 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $document,
                 $this->sourceElementService->inspect($document)['elements'],
             );
+            $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+            $plannedSections = $this->plannedSectionContractForGeneration($run, $page, $sourceElements);
 
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
                 break;
@@ -476,11 +518,35 @@ class EnterpriseWikiGenerateAppliedPagesService
                 sourceText: $sourceText,
                 languageCode: $languageCode,
                 additionalContext: $this->buildArticleSummaryContextForRun($run, $page),
+                linkCatalog: $catalogResult['catalog'],
                 sourceElements: $sourceElements,
+                plannedSections: $plannedSections,
             );
 
+            $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
+            $generated['blocks'] = array_map(function (array $block) use ($catalogResult): array {
+                $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+                return $block;
+            }, $generated['blocks']);
             $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
             $generated['markdown'] = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
+            $this->validateWikilinks($run, $page, $generated['markdown'], $catalogResult['run_page_count']);
+
+            if (in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
+                [$generated['markdown'], $generated['blocks']] = $this->ensurePlannedSectionCoverage(
+                    $run,
+                    $page,
+                    $generated['markdown'],
+                    $generated['blocks'],
+                    $sourceText,
+                    $languageCode,
+                    $this->buildArticleSummaryContextForRun($run, $page),
+                    $catalogResult,
+                    $sourceElements,
+                    $plannedSections,
+                );
+            }
 
             $contentBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
@@ -492,7 +558,11 @@ class EnterpriseWikiGenerateAppliedPagesService
             [$markdown, $contentBlocks] = $this->appendImageBlocksIfRelevant($run, $document, $page, $markdown, $contentBlocks);
             [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-            $this->writeVersion($run->id, $page->id, $markdown, $contentBlocks);
+            $this->writeVersion($run->id, $page->id, $markdown, $contentBlocks, $this->reviewReconciler->reconcile(
+                $generated['best_practice_review'] ?? [],
+                $contentBlocks,
+                (string) $page->page_type,
+            ));
             $counts[$page->page_type]++;
         }
 
@@ -523,6 +593,8 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $document,
                 $this->sourceElementService->inspect($document)['elements'],
             );
+            $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+            $plannedSections = $this->plannedSectionContractForGeneration($run, $page, $sourceElements);
 
             if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
                 break;
@@ -534,16 +606,46 @@ class EnterpriseWikiGenerateAppliedPagesService
                 sourceText: $sourceText,
                 languageCode: $languageCode,
                 additionalContext: $additionalContext,
+                linkCatalog: $catalogResult['catalog'],
                 sourceElements: $sourceElements,
+                plannedSections: $plannedSections,
             );
 
+            $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
+            $generated['blocks'] = array_map(function (array $block) use ($catalogResult): array {
+                $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
+
+                return $block;
+            }, $generated['blocks']);
             $generated['blocks'] = $this->duplicateContentRemover->removeVerbatimDuplicates($generated['blocks']);
             $generated['markdown'] = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
+            $this->validateWikilinks($run, $page, $generated['markdown'], $catalogResult['run_page_count']);
 
-            $this->writeVersion($run->id, $page->id, $generated['markdown'], $this->contentBlockService->buildBlocksFromStructuredResult(
+            if (in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
+                [$generated['markdown'], $generated['blocks']] = $this->ensurePlannedSectionCoverage(
+                    $run,
+                    $page,
+                    $generated['markdown'],
+                    $generated['blocks'],
+                    $sourceText,
+                    $languageCode,
+                    $additionalContext,
+                    $catalogResult,
+                    $sourceElements,
+                    $plannedSections,
+                );
+            }
+
+            $conceptBlocks = $this->contentBlockService->buildBlocksFromStructuredResult(
                 $document,
                 $generated['blocks'],
                 $sourceElements,
+            );
+
+            $this->writeVersion($run->id, $page->id, $generated['markdown'], $conceptBlocks, $this->reviewReconciler->reconcile(
+                $generated['best_practice_review'] ?? [],
+                $conceptBlocks,
+                (string) $page->page_type,
             ));
             $counts[$page->page_type]++;
         }
@@ -589,6 +691,14 @@ class EnterpriseWikiGenerateAppliedPagesService
                 "Run [{$run->id}] source_type is not enterprise_wiki_document."
             );
         }
+
+        // Fase 8K-2 destructive-update guard — BEFORE the lease is claimed and before any AI call,
+        // so a blocked page is never marked running and no content is ever produced for it. This
+        // method regenerates a page from the new source document alone; for a page the decision
+        // patches, that is a full-page rewrite that discards exactly what the patch preserves.
+        // Structurally unreachable in the normal flow (a patch target gets no pivot row, so no job
+        // is dispatched) — this is the backstop for a pivot that exists anyway.
+        $this->guardAgainstPatchTargetRegeneration($run, $page);
 
         $token = (string) Str::uuid();
 
@@ -673,6 +783,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $document,
             $this->sourceElementService->inspect($document)['elements'],
         );
+        $plannedSections = $this->plannedSectionContractForGeneration($run, $page, $sourceElements);
 
         if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
             return;
@@ -686,7 +797,10 @@ class EnterpriseWikiGenerateAppliedPagesService
             additionalContext: $additionalContext,
             linkCatalog: $catalogResult['catalog'],
             sourceElements: $sourceElements,
+            plannedSections: $plannedSections,
         );
+
+        $generated['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $generated['blocks'], $catalogResult['catalog']);
 
         // Deterministically rewrite unambiguous near-miss wikilinks (e.g. the model writing a
         // page's title instead of its differently-cased slug) to their canonical form before
@@ -705,15 +819,6 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $markdown = trim(implode("\n\n", array_column($generated['blocks'], 'markdown')));
 
-        [$markdown, $generated['blocks']] = $this->repairMissingConceptWikilinks(
-            $run,
-            $page,
-            $markdown,
-            $generated['blocks'],
-            $catalogResult,
-            $languageCode,
-        );
-
         $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
         if (in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
@@ -727,6 +832,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 $additionalContext,
                 $catalogResult,
                 $sourceElements,
+                $plannedSections,
             );
         }
 
@@ -754,7 +860,13 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         [$markdown, $contentBlocks] = $this->appendMutualLinkIfPaired($run, $page, $markdown, $contentBlocks, $languageCode);
 
-        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks): void {
+        $bestPracticeReview = $this->reviewReconciler->reconcile(
+            $generated['best_practice_review'] ?? [],
+            $contentBlocks,
+            (string) $page->page_type,
+        );
+
+        DB::transaction(function () use ($run, $page, $token, $markdown, $contentBlocks, $bestPracticeReview): void {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -777,7 +889,7 @@ class EnterpriseWikiGenerateAppliedPagesService
                 return;
             }
 
-            $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks);
+            $version = $this->writeNewCurrentVersion($page->id, $markdown, $contentBlocks, $bestPracticeReview);
             $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($page->id);
 
             $pivot->update([
@@ -904,8 +1016,16 @@ class EnterpriseWikiGenerateAppliedPagesService
         string $additionalContext,
         array $catalogResult,
         array $sourceElements,
+        array $plannedSections,
     ): array {
-        $plannedTopics = $this->plannedOwnedTopicsForPage($run, $page);
+        $plannedTopics = array_values(array_map(
+            static fn (array $section): string => trim((string) ($section['planned_topic'] ?? '')),
+            $plannedSections,
+        ));
+
+        if ($plannedTopics !== $this->plannedOwnedTopicNamesForPage($run, $page)) {
+            throw new \RuntimeException('Enterprise Wiki planned section contract drifted from the maintainer decision.');
+        }
 
         if ($plannedTopics === []) {
             return [$markdown, $blocks];
@@ -966,32 +1086,59 @@ class EnterpriseWikiGenerateAppliedPagesService
             'coverage_result' => 'ai_repair_required',
             'normalized_planned_topics' => $normalizedTopics,
             'issues' => array_map(fn (array $i): array => ['type' => $i['type'], 'planned_topic' => $i['planned_topic']], $blocking),
+            'sections' => $this->plannedSectionObservability($plannedSections),
         ]);
 
         if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
             return [$markdown, $blocks];
         }
 
-        $repairedSections = $this->aiClient->repairPlannedSections(
-            pageTitle: $page->title,
-            pageType: $page->page_type,
-            existingMarkdown: $markdown,
-            issues: $blocking,
-            sourceText: $sourceText,
-            languageCode: $languageCode,
-            additionalContext: $additionalContext,
-            linkCatalog: $catalogResult['catalog'],
-            sourceElements: $sourceElements,
-        );
+        $repairIssues = $this->repairIssuesWithContext($blocking, $plannedSections, $markdown);
+
+        try {
+            $repairedSections = $this->aiClient->repairPlannedSections(
+                pageTitle: $page->title,
+                pageType: $page->page_type,
+                existingMarkdown: $markdown,
+                issues: $repairIssues,
+                sourceText: $sourceText,
+                languageCode: $languageCode,
+                additionalContext: $additionalContext,
+                linkCatalog: $catalogResult['catalog'],
+                sourceElements: $sourceElements,
+                plannedSections: $plannedSections,
+                sectionStatuses: $this->sectionStatuses($plannedTopics, $issues, $blocking),
+            );
+        } catch (EnterpriseWikiPlannedSectionRepairShapeException $e) {
+            Log::warning('[WIKI_PAGE_GENERATION] Planned section repair shape rejected.', [
+                'issue_code' => 'repair_section_count_mismatch',
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'page_type' => $page->page_type,
+                'expected_section_count' => $e->expectedSectionCount,
+                'returned_section_count' => $e->returnedSectionCount,
+            ]);
+
+            throw $e;
+        }
 
         $repairedBlocks = $blocks;
+        $blockingTopics = array_column($blocking, 'planned_topic');
 
         foreach ($repairedSections as $section) {
+            // The repair response contains the complete plan so it can prove it understood every
+            // required identity. Valid sections are nevertheless preserved deterministically from
+            // the first output; only a section that failed validation may replace its own span.
+            if (! in_array($section['planned_topic'], $blockingTopics, true)) {
+                continue;
+            }
+
+            $sectionBlocks = $this->linkIntentMaterializer->materializeBlocks($run, $page, $section['blocks'], $catalogResult['catalog']);
             $sectionBlocks = array_map(function (array $block) use ($catalogResult): array {
                 $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
                 return $block;
-            }, $section['blocks']);
+            }, $sectionBlocks);
 
             // The model was never asked for a heading — prepend the EXACT planned_topic text onto
             // the first returned block's own markdown, so the persisted heading can never drift
@@ -1008,6 +1155,8 @@ class EnterpriseWikiGenerateAppliedPagesService
         $issuesAfterRepair = $this->sectionCoverageValidator->validate($plannedTopics, $repairedMarkdown, $page->page_type, $sourceText);
         $blockingAfterRepair = array_values(array_filter($issuesAfterRepair, [EnterpriseWikiPlannedSectionCoverageValidator::class, 'isBlocking']));
 
+        $this->logOnlyLinksRepairObservability($run, $page, $plannedSections, $repairIssues, $repairedMarkdown, $blockingAfterRepair);
+
         Log::info('[WIKI_PAGE_GENERATION] Planned section coverage repair attempted.', [
             'run_id' => $run->id,
             'page_id' => $page->id,
@@ -1015,6 +1164,19 @@ class EnterpriseWikiGenerateAppliedPagesService
             'issues_before' => count($blocking),
             'issues_resolved' => count($blocking) - count($blockingAfterRepair),
             'issues_remaining' => count($blockingAfterRepair),
+            'issues_remaining_by_type' => array_count_values(array_column($blockingAfterRepair, 'type')),
+            'expected_section_count' => count($plannedTopics),
+            'returned_section_count' => count($repairedSections),
+            'invalid_section_indices' => array_values(array_keys(array_filter(
+                $this->sectionStatuses($plannedTopics, $issues, $blocking),
+                static fn (array $status): bool => $status['status'] !== 'valid',
+            ))),
+            'repaired_section_indices' => array_values(array_filter(
+                array_keys($plannedTopics),
+                fn (int $index): bool => in_array($plannedTopics[$index], $blockingTopics, true),
+            )),
+            'final_valid_count' => count($plannedTopics) - count($blockingAfterRepair),
+            'sections' => $this->plannedSectionObservability($plannedSections),
         ]);
 
         if ($blockingAfterRepair !== []) {
@@ -1024,10 +1186,83 @@ class EnterpriseWikiGenerateAppliedPagesService
                 pageType: $page->page_type,
                 missingOrEmptySections: array_map(fn (array $i): string => $i['planned_topic'], $blockingAfterRepair),
                 repairAttempted: true,
+                issues: $blockingAfterRepair,
             );
         }
 
         return [$repairedMarkdown, $repairedBlocks];
+    }
+
+    /**
+     * Adds repair-only context without placing generated page bodies into logs or exceptions.
+     * The validator supplies the body using its own matching rule, keeping detection and repair
+     * context on one contract.
+     *
+     * @param  list<array<string, mixed>>  $issues
+     * @param  list<array<string, mixed>>  $plannedSections
+     * @return list<array<string, mixed>>
+     */
+    private function repairIssuesWithContext(array $issues, array $plannedSections, string $markdown): array
+    {
+        $sectionByTopic = [];
+
+        foreach ($plannedSections as $section) {
+            $sectionByTopic[(string) ($section['planned_topic'] ?? '')] = $section;
+        }
+
+        return array_map(function (array $issue) use ($sectionByTopic, $markdown): array {
+            $plannedTopic = (string) ($issue['planned_topic'] ?? '');
+            $section = $sectionByTopic[$plannedTopic] ?? [];
+
+            return [
+                ...$issue,
+                'issue_code' => (string) ($issue['type'] ?? 'planned_section_invalid'),
+                'section_index' => (int) ($section['section_index'] ?? -1),
+                'current_invalid_body' => $this->sectionCoverageValidator->sectionBodyForPlannedTopic($markdown, $plannedTopic),
+                'assigned_source_element_keys' => array_values((array) ($section['source_element_keys'] ?? [])),
+                'assigned_source_evidence' => array_values((array) ($section['source_evidence'] ?? [])),
+            ];
+        }, $issues);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $plannedSections
+     * @param  list<array<string, mixed>>  $repairIssues
+     * @param  list<array<string, mixed>>  $finalIssues
+     */
+    private function logOnlyLinksRepairObservability(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $plannedSections,
+        array $repairIssues,
+        string $repairedMarkdown,
+        array $finalIssues,
+    ): void {
+        $evidenceCharsByTopic = [];
+        foreach ($plannedSections as $section) {
+            $evidenceCharsByTopic[(string) ($section['planned_topic'] ?? '')] = (int) ($section['evidence_char_count'] ?? 0);
+        }
+
+        foreach ($repairIssues as $issue) {
+            if (($issue['issue_code'] ?? $issue['type'] ?? null) !== EnterpriseWikiPlannedSectionCoverageValidator::TYPE_ONLY_LINKS) {
+                continue;
+            }
+
+            $plannedTopic = (string) ($issue['planned_topic'] ?? '');
+            $finalIssue = collect($finalIssues)->firstWhere('planned_topic', $plannedTopic);
+
+            Log::info('[WIKI_PAGE_GENERATION] Planned section only-links repair observability.', [
+                'run_id' => $run->id,
+                'page_id' => $page->id,
+                'page_type' => $page->page_type,
+                'section_index' => (int) ($issue['section_index'] ?? -1),
+                'planned_topic' => $plannedTopic,
+                'evidence_char_count' => $evidenceCharsByTopic[$plannedTopic] ?? 0,
+                'first_body_char_count' => mb_strlen((string) ($issue['current_invalid_body'] ?? '')),
+                'repair_body_char_count' => mb_strlen((string) ($this->sectionCoverageValidator->sectionBodyForPlannedTopic($repairedMarkdown, $plannedTopic) ?? '')),
+                'final_issue_code' => $finalIssue['type'] ?? 'resolved',
+            ]);
+        }
     }
 
     /**
@@ -1280,6 +1515,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             sourceElements: $sourceElements,
         );
 
+        $repaired['blocks'] = $this->linkIntentMaterializer->materializeBlocks($run, $page, $repaired['blocks'], $catalogResult['catalog']);
         $repaired['blocks'] = array_map(function (array $block) use ($catalogResult): array {
             $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
 
@@ -1328,13 +1564,14 @@ class EnterpriseWikiGenerateAppliedPagesService
     }
 
     /**
-     * Raw owned_topics list for a page from maintainer_decision_json — the same lookup
-     * responsibilityGuidance()'s callers already perform, but returning the plain topic strings
-     * rather than formatted prompt text, for EnterpriseWikiPlannedSectionCoverageValidator.
+     * Owned topics for a page from maintainer_decision_json, as evidence-bound entries
+     * (topic + the source_element_keys the planner assigned to it). The same lookup
+     * responsibilityGuidance()'s callers already perform, but returning the planning contract
+     * rather than formatted prompt text.
      *
-     * @return list<string>
+     * @return list<array{topic: string, source_element_keys: list<string>}>
      */
-    private function plannedOwnedTopicsForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    private function plannedOwnedTopicEntriesForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
     {
         $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
@@ -1346,7 +1583,7 @@ class EnterpriseWikiGenerateAppliedPagesService
 
             $match = collect($entries)->firstWhere('title', $page->title);
 
-            return $match !== null ? $this->nonEmptyStringList($match['owned_topics'] ?? []) : [];
+            return $match !== null ? EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries($match['owned_topics'] ?? []) : [];
         }
 
         $decisionKey = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE ? 'source_article' : null;
@@ -1357,17 +1594,109 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $entry = (array) data_get($decisionJson, $decisionKey, []);
 
-        return $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+        return EnterpriseWikiMaintainerDecisionPrompt::ownedTopicEntries($entry['owned_topics'] ?? []);
+    }
+
+    /**
+     * Just the topic names, in planning order — what the section-coverage validator and the
+     * plan-to-markdown drift guard compare against.
+     *
+     * @return list<string>
+     */
+    private function plannedOwnedTopicNamesForPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): array
+    {
+        return array_values(array_map(
+            static fn (array $entry): string => $entry['topic'],
+            $this->plannedOwnedTopicEntriesForPage($run, $page),
+        ));
+    }
+
+    /**
+     * Builds and validates the authoritative plan-to-evidence contract immediately before the
+     * first generation call. A planner may name the section, but generation is not allowed to
+     * pretend it is grounded until a real extracted source element is bound to it.
+     *
+     * @param  list<array<string, mixed>>  $sourceElements
+     * @return list<array<string, mixed>>
+     */
+    private function plannedSectionContractForGeneration(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, array $sourceElements): array
+    {
+        if (! in_array($page->page_type, self::SECTION_COVERAGE_CHECKED_TYPES, true)) {
+            return [];
+        }
+
+        $plannedTopicEntries = $this->plannedOwnedTopicEntriesForPage($run, $page);
+
+        if ($plannedTopicEntries === []) {
+            return [];
+        }
+
+        $sections = $this->plannedSectionEvidenceResolver->resolve($plannedTopicEntries, $sourceElements);
+        $withoutEvidence = $this->plannedSectionEvidenceResolver->topicsWithoutEvidence($sections);
+
+        Log::info('[WIKI_PAGE_GENERATION] Planned section evidence contract.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'planned_section_count' => count($sections),
+            'total_evidence_chars' => array_sum(array_column($sections, 'evidence_char_count')),
+            'evidence_binding' => array_values(array_unique(array_column($sections, 'evidence_binding'))),
+            'sections' => $this->plannedSectionObservability($sections),
+            'result' => $withoutEvidence === [] ? 'valid' : 'planned_section_no_evidence',
+        ]);
+
+        if ($withoutEvidence !== []) {
+            throw new EnterpriseWikiPlannedSectionEvidenceMissingException(
+                runId: $run->id,
+                pageId: $page->id,
+                pageType: $page->page_type,
+                plannedTopics: $withoutEvidence,
+            );
+        }
+
+        return $sections;
+    }
+
+    /** @param list<array<string, mixed>> $sections @return list<array<string, mixed>> */
+    private function plannedSectionObservability(array $sections): array
+    {
+        return array_map(static fn (array $section): array => [
+            'section_index' => $section['section_index'] ?? null,
+            'planned_topic' => $section['planned_topic'] ?? '',
+            'source_element_count' => (int) ($section['source_element_count'] ?? 0),
+            'evidence_chars' => (int) ($section['evidence_char_count'] ?? 0),
+            'evidence_binding' => (string) ($section['evidence_binding'] ?? ''),
+        ], $sections);
+    }
+
+    /**
+     * @param  list<string>  $plannedTopics
+     * @param  list<array<string, mixed>>  $allIssues
+     * @param  list<array<string, mixed>>  $blockingIssues
+     * @return list<array<string, mixed>>
+     */
+    private function sectionStatuses(array $plannedTopics, array $allIssues, array $blockingIssues): array
+    {
+        return array_map(static function (string $topic, int $index) use ($allIssues, $blockingIssues): array {
+            $issue = collect($allIssues)->firstWhere('planned_topic', $topic);
+            $blocking = collect($blockingIssues)->firstWhere('planned_topic', $topic);
+
+            return [
+                'section_index' => $index,
+                'planned_topic' => $topic,
+                'status' => $blocking !== null ? (string) $blocking['type'] : ($issue !== null ? (string) $issue['type'] : 'valid'),
+            ];
+        }, $plannedTopics, array_keys($plannedTopics));
     }
 
     /**
      * This page's own planned_figures list from maintainer_decision_json — same page-entry lookup
-     * pattern as plannedOwnedTopicsForPage(), but returning the raw planned_figures entries (each
+     * pattern as plannedOwnedTopicEntriesForPage(), but returning the raw planned_figures entries (each
      * with source_element_key/classification/section_placement/purpose/required/caption_hint)
      * rather than formatted prompt text, for appendImageBlocksIfRelevant()'s per-page materialization
      * gate/placement and ensurePlannedFigureCoverage()'s validator input.
      *
-     * Unlike plannedOwnedTopicsForPage() (article-only for the source_* branch, since only article
+     * Unlike plannedOwnedTopicEntriesForPage() (article-only for the source_* branch, since only article
      * is in SECTION_COVERAGE_CHECKED_TYPES), this covers BOTH source_article and source_summary —
      * a figure can be planned onto either.
      *
@@ -1446,11 +1775,8 @@ class EnterpriseWikiGenerateAppliedPagesService
      * Never repairs anything — an invalid generation is rejected outright and surfaces as
      * a generation failure for this page (see GenerateEnterpriseWikiAppliedPage).
      *
-     * Minimum-links domain rule: if this run has other applied pages available to link to
-     * (run_page_count > 0), the generated page must contain at least one valid inline
-     * wikilink — a run must not complete with a page left completely isolated from
-     * everything else the maintainer decision created. A page whose run has no other pages
-     * (run_page_count === 0) is never required to contain a link.
+     * A page may legitimately have no useful link. Links are semantic navigation enrichment,
+     * not a quota; every link that is present remains strictly validated.
      *
      * @throws EnterpriseWikiInvalidWikilinksException
      */
@@ -1472,11 +1798,9 @@ class EnterpriseWikiGenerateAppliedPagesService
         $occurrences = $this->linkResolver->resolveOccurrences($run->customer_id, $page, $parsed);
 
         $invalidSlugs = [];
-        $validCount = 0;
-
         foreach ($occurrences as $occurrence) {
             if ($occurrence['status'] === EnterpriseWikiLinkResolver::STATUS_VALID) {
-                $validCount++;
+                continue;
             } else {
                 $invalidSlugs[] = $occurrence['link']['target_slug'];
             }
@@ -1493,172 +1817,6 @@ class EnterpriseWikiGenerateAppliedPagesService
             ));
         }
 
-        if ($validCount === 0 && $runPageCount > 0) {
-            throw new EnterpriseWikiInvalidWikilinksException(sprintf(
-                'Run [%d] page [%d] (%s): generated content contains no valid inline wikilinks, but %d other applied page(s) exist in this run.',
-                $run->id,
-                $page->id,
-                $page->page_type,
-                $runPageCount,
-            ));
-        }
-    }
-
-    /**
-     * A concept page is not allowed to remain isolated when the run has linkable pages. If its
-     * first draft contains no attempted links at all, make one bounded, catalog-scoped revision
-     * before applying the unchanged deterministic validator. The strict block comparison accepts
-     * only inline-wikilink changes, preserving every block's source provenance and prose.
-     *
-     * @param  list<array<string, mixed>>  $blocks
-     * @param  array{catalog: list<array{slug: string, title: string, page_type: string}>, run_page_count: int}  $catalogResult
-     * @return array{0: string, 1: list<array<string, mixed>>}
-     */
-    private function repairMissingConceptWikilinks(
-        EnterpriseWikiIngestRun $run,
-        EnterpriseWikiPage $page,
-        string $markdown,
-        array $blocks,
-        array $catalogResult,
-        string $languageCode,
-    ): array {
-        if ($page->page_type !== EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-            || $catalogResult['run_page_count'] === 0
-            || $catalogResult['catalog'] === []
-            || ! $this->hasNoAttemptedOrValidWikilinks($run, $page, $markdown)) {
-            return [$markdown, $blocks];
-        }
-
-        Log::info('[WIKI_PAGE_GENERATION] Concept page has no inline wikilinks — attempting one bounded link repair.', [
-            'run_id' => $run->id,
-            'page_id' => $page->id,
-            'page_type' => $page->page_type,
-            'available_link_targets' => count($catalogResult['catalog']),
-        ]);
-
-        if (EnterpriseWikiIngestRun::query()->find($run->id)?->isTerminal()) {
-            return [$markdown, $blocks];
-        }
-
-        $revision = $this->wikilinkRevisionClient->reviseLinks(
-            existingContent: $markdown,
-            pageType: $page->page_type,
-            linkCatalog: $catalogResult['catalog'],
-            instructions: 'The page currently contains no inline wikilinks, but it must link naturally to at least one page from the allowed catalog. Add exactly one natural inline wikilink at the most relevant existing mention. Do not change any prose, headings, formatting, or other content.',
-            languageCode: $languageCode,
-        );
-
-        if (! $revision['changed']) {
-            return [$markdown, $blocks];
-        }
-
-        $repairedBlocks = $this->replaceBlocksWithWikilinkOnlyRevision($blocks, $revision['markdown']);
-        $repairedBlocks = array_map(function (array $block) use ($catalogResult): array {
-            $block['markdown'] = $this->wikilinkCanonicalizer->canonicalize((string) $block['markdown'], $catalogResult['catalog']);
-
-            return $block;
-        }, $repairedBlocks);
-        $repairedMarkdown = trim(implode("\n\n", array_column($repairedBlocks, 'markdown')));
-
-        Log::info('[WIKI_PAGE_GENERATION] Concept page inline wikilink repair attempted.', [
-            'run_id' => $run->id,
-            'page_id' => $page->id,
-            'page_type' => $page->page_type,
-            'repair_changed' => true,
-        ]);
-
-        return [$repairedMarkdown, $repairedBlocks];
-    }
-
-    private function hasNoAttemptedOrValidWikilinks(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $markdown): bool
-    {
-        $parsed = $this->linkParser->parse($markdown);
-
-        if ($this->linkParser->countRawOccurrences($markdown) !== count($parsed) || $parsed === []) {
-            return $parsed === [] && $this->linkParser->countRawOccurrences($markdown) === 0;
-        }
-
-        foreach ($this->linkResolver->resolveOccurrences($run->customer_id, $page, $parsed) as $occurrence) {
-            if ($occurrence['status'] === EnterpriseWikiLinkResolver::STATUS_VALID) {
-                return false;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $blocks
-     * @return list<array<string, mixed>>
-     */
-    private function replaceBlocksWithWikilinkOnlyRevision(array $blocks, string $revisedMarkdown): array
-    {
-        $originalMarkdown = trim(implode("\n\n", array_column($blocks, 'markdown')));
-
-        if ($this->stripWikilinks($revisedMarkdown) !== $originalMarkdown) {
-            throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed generated prose instead of only adding an inline wikilink.');
-        }
-
-        $searchOffset = 0;
-        foreach ($blocks as $index => $block) {
-            $original = (string) ($block['markdown'] ?? '');
-            $start = strpos($originalMarkdown, $original, $searchOffset);
-
-            if ($start === false) {
-                throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed the generated block structure.');
-            }
-
-            $revisedBlock = substr(
-                $revisedMarkdown,
-                $this->rawOffsetForPlainOffset($revisedMarkdown, $start),
-                $this->rawOffsetForPlainOffset($revisedMarkdown, $start + strlen($original))
-                    - $this->rawOffsetForPlainOffset($revisedMarkdown, $start),
-            );
-
-            if ($this->stripWikilinks($revisedBlock) !== $original) {
-                throw new EnterpriseWikiInvalidWikilinksException('Wikilink repair changed the generated block structure.');
-            }
-
-            $blocks[$index]['markdown'] = $revisedBlock;
-            $searchOffset = $start + strlen($original);
-        }
-
-        return $blocks;
-    }
-
-    private function rawOffsetForPlainOffset(string $markdown, int $plainOffset): int
-    {
-        $rawOffset = 0;
-        $plainLength = 0;
-
-        while ($rawOffset < strlen($markdown) && $plainLength < $plainOffset) {
-            if (substr($markdown, $rawOffset, 2) === '[[') {
-                $end = strpos($markdown, ']]', $rawOffset);
-
-                if ($end !== false) {
-                    $link = substr($markdown, $rawOffset + 2, $end - $rawOffset - 2);
-                    $display = str_contains($link, '|') ? explode('|', $link, 2)[1] : $link;
-                    $plainLength += strlen($display);
-                    $rawOffset = $end + 2;
-
-                    continue;
-                }
-            }
-
-            $plainLength++;
-            $rawOffset++;
-        }
-
-        return $rawOffset;
-    }
-
-    private function stripWikilinks(string $markdown): string
-    {
-        return (string) preg_replace_callback(
-            '/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/',
-            static fn (array $match): string => $match[2] !== '' ? $match[2] : $match[1],
-            $markdown,
-        );
     }
 
     private function buildConceptEntityContextForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): string
@@ -1682,7 +1840,7 @@ class EnterpriseWikiGenerateAppliedPagesService
     private function conceptCanGenerateWithoutArticleSummaryContext(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): bool
     {
         return $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-            && $this->plannedOwnedTopicsForPage($run, $page) !== [];
+            && $this->plannedOwnedTopicEntriesForPage($run, $page) !== [];
     }
 
     /**
@@ -1737,11 +1895,16 @@ class EnterpriseWikiGenerateAppliedPagesService
             ->value('content_markdown') ?? '');
     }
 
-    private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = []): EnterpriseWikiPageVersion
+    /**
+     * @param  list<array<string, mixed>>  $bestPracticeReview  Reconciled review, see
+     *                                                          EnterpriseWikiBestPracticeReviewReconciler. Stored with the version it assessed.
+     */
+    private function writeNewCurrentVersion(int $pageId, string $markdown, array $contentBlocks = [], array $bestPracticeReview = []): EnterpriseWikiPageVersion
     {
         return $this->versionWriter->writeNewCurrentVersion($pageId, [
             'content_markdown' => $markdown,
             'content_blocks_json' => $contentBlocks,
+            'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
             'generated_by_model' => WikiPageContentAiClient::MODEL,
         ]);
     }
@@ -1782,9 +1945,35 @@ class EnterpriseWikiGenerateAppliedPagesService
         return [trim($markdown."\n\n".$linkBlock['markdown']), $contentBlocks];
     }
 
-    private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = []): void
+    /**
+     * Fase 8K-2: refuse to regenerate a page the run's maintainer decision names as a patch target.
+     *
+     * @throws EnterpriseWikiPatchTargetRegenerationBlockedException
+     */
+    private function guardAgainstPatchTargetRegeneration(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): void
     {
-        DB::transaction(function () use ($runId, $pageId, $markdown, $contentBlocks): void {
+        $targetPageIds = EnterpriseWikiPatchTargetResolver::targetPageIds(
+            (array) ($run->maintainer_decision_json ?? []),
+        );
+
+        if (! in_array((int) $page->id, $targetPageIds, true)) {
+            return;
+        }
+
+        Log::error('[WIKI_PAGE_GENERATION] Blocked full-page regeneration of a patch target.', [
+            'run_id' => $run->id,
+            'page_id' => $page->id,
+            'page_type' => $page->page_type,
+            'reason' => 'structured_patch_intent_pending_8k3',
+        ]);
+
+        throw new EnterpriseWikiPatchTargetRegenerationBlockedException((int) $run->id, (int) $page->id);
+    }
+
+    /** @param list<array<string, mixed>> $bestPracticeReview */
+    private function writeVersion(int $runId, int $pageId, string $markdown, array $contentBlocks = [], array $bestPracticeReview = []): void
+    {
+        DB::transaction(function () use ($runId, $pageId, $markdown, $contentBlocks, $bestPracticeReview): void {
             $run = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($runId);
 
             if (! $run instanceof EnterpriseWikiIngestRun || $run->isTerminal()) {
@@ -1794,6 +1983,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $this->versionWriter->writeNewCurrentVersion($pageId, [
                 'content_markdown' => $markdown,
                 'content_blocks_json' => $contentBlocks,
+                'best_practice_review_json' => $bestPracticeReview !== [] ? $bestPracticeReview : null,
                 'generated_by_model' => WikiPageContentAiClient::MODEL,
             ]);
         });
@@ -1859,7 +2049,7 @@ class EnterpriseWikiGenerateAppliedPagesService
             $lines[] = "Maintainer note for this page: {$reason}";
         }
 
-        $ownedTopics = $this->nonEmptyStringList($entry['owned_topics'] ?? []);
+        $ownedTopics = EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []);
 
         if ($ownedTopics !== []) {
             $lines[] = "This page's own content responsibility — explain ONLY these in depth, nothing beyond them:\n".implode("\n", array_map(

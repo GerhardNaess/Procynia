@@ -38,6 +38,13 @@ use Throwable;
  * incident, where a 60-second ceiling was far too short for a large global-plan call and the
  * failure left no way to tell where the time actually went.
  *
+ * Wiki run-60: it also owns the ONE corrupt-response policy. A caller that passes $parse has its
+ * response parsed inside the attempt, so a response that is unusable — control bytes, invalid
+ * UTF-8, not JSON (EnterpriseWikiCorruptResponseClassifier) — gets exactly one fresh attempt and
+ * then fails hard. That used to be a loop on the in-process candidate-batch path only, which is why
+ * run 60 died on the queued one; a policy that depends on which caller you came through is not a
+ * policy. Callers that do not pass $parse are unchanged and simply get the decoded body.
+ *
  * Extracted from EnterpriseWikiMaintainerDecisionAiClient so the exact same bounded-retry-plus-
  * logging mechanics are reusable by EnterpriseWikiMaintainerDecisionSplitCoordinator's own calls
  * (global plan + each candidate batch) without duplicating this logic — the two callers differ
@@ -71,12 +78,13 @@ class EnterpriseWikiAiCapacityRetryExecutor
         Closure $buildPayload,
         Closure $timeoutPlanFor,
         ?AiCallContext $context = null,
+        ?Closure $parse = null,
     ): array {
         $context ??= AiCallContext::none();
         $plan = $planFor(0);
 
         try {
-            return $this->attemptCall($buildPayload($plan->chosenMaxOutputTokens), $operationLabel, $plan, $inputSizeChars, $timeoutPlanFor, $context);
+            return $this->attemptCall($buildPayload($plan->chosenMaxOutputTokens), $operationLabel, $plan, $inputSizeChars, $timeoutPlanFor, $context, $parse);
         } catch (EnterpriseWikiResponseIncompleteException $e) {
             if (! $e->reachedMaxOutputTokens()) {
                 throw $e;
@@ -84,8 +92,33 @@ class EnterpriseWikiAiCapacityRetryExecutor
 
             $retryPlan = $planFor(1);
 
+            // A retry only helps when it actually buys output tokens. When the first attempt's
+            // budget was already clamped to the operation's ceiling, the retry plan clamps to the
+            // very same number — so the second call is a guaranteed repeat of the first failure at
+            // full cost and latency (run 51 spent ~95 seconds on exactly this). Fail precisely
+            // instead, and let the caller pick a bounded/split strategy.
+            if ($retryPlan->chosenMaxOutputTokens <= $plan->chosenMaxOutputTokens) {
+                Log::warning('[PROCYNIA][WIKI_AI_CAPACITY] Skipping capacity retry — a retry cannot raise this call\'s budget.', [
+                    'operation' => $operationLabel,
+                    'operation_type' => $plan->operationType,
+                    'first_attempt_max_output_tokens' => $plan->chosenMaxOutputTokens,
+                    'retry_max_output_tokens' => $retryPlan->chosenMaxOutputTokens,
+                    'strategy' => $retryPlan->strategy,
+                    'input_size_chars' => $inputSizeChars,
+                    'run_id' => $context->runId,
+                ]);
+
+                throw new EnterpriseWikiAiOutputCapacityExceededException(
+                    operationLabel: $operationLabel,
+                    lastPlan: $plan,
+                    actualOutputTokens: $e->diagnostics['output_tokens'] ?? null,
+                    responseId: $e->diagnostics['response_id'] ?? null,
+                    retrySkippedAsPointless: true,
+                );
+            }
+
             try {
-                return $this->attemptCall($buildPayload($retryPlan->chosenMaxOutputTokens), $operationLabel, $retryPlan, $inputSizeChars, $timeoutPlanFor, $context);
+                return $this->attemptCall($buildPayload($retryPlan->chosenMaxOutputTokens), $operationLabel, $retryPlan, $inputSizeChars, $timeoutPlanFor, $context, $parse);
             } catch (EnterpriseWikiResponseIncompleteException $e2) {
                 if (! $e2->reachedMaxOutputTokens()) {
                     throw $e2;
@@ -101,7 +134,16 @@ class EnterpriseWikiAiCapacityRetryExecutor
         }
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * One capacity attempt, plus the corrupt-response policy when the caller supplied a parser.
+     *
+     * The retry repeats the SAME call at the SAME budget: an unusable response says nothing about
+     * the budget or the prompt, only that these particular bytes came back broken. Exactly one, then
+     * the failure propagates untouched — a second corrupt response is a signal about the call, not
+     * noise to keep paying for.
+     *
+     * @return array<string, mixed>
+     */
     private function attemptCall(
         array $payload,
         string $operationLabel,
@@ -109,6 +151,50 @@ class EnterpriseWikiAiCapacityRetryExecutor
         int $inputSizeChars,
         Closure $timeoutPlanFor,
         AiCallContext $context,
+        ?Closure $parse = null,
+    ): array {
+        try {
+            return $this->attemptOnce($payload, $operationLabel, $plan, $inputSizeChars, $timeoutPlanFor, $context, $parse);
+        } catch (EnterpriseWikiResponseIncompleteException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            if ($parse === null || ! EnterpriseWikiCorruptResponseClassifier::isCorrupt($e)) {
+                throw $e;
+            }
+
+            Log::warning('[PROCYNIA][WIKI_AI_CORRUPT_RESPONSE] Unusable AI response — retrying once.', [
+                'operation' => $operationLabel,
+                'operation_type' => $plan->operationType,
+                'run_id' => $context->runId,
+                'document_id' => $context->documentId,
+                'exception_class' => get_class($e),
+            ]);
+
+            try {
+                return $this->attemptOnce($payload, $operationLabel, $plan, $inputSizeChars, $timeoutPlanFor, $context, $parse);
+            } catch (Throwable $retryFailure) {
+                if (EnterpriseWikiCorruptResponseClassifier::isCorrupt($retryFailure)) {
+                    Log::warning('[PROCYNIA][WIKI_AI_CORRUPT_RESPONSE] AI response was unusable twice — failing.', [
+                        'operation' => $operationLabel,
+                        'run_id' => $context->runId,
+                        'document_id' => $context->documentId,
+                    ]);
+                }
+
+                throw $retryFailure;
+            }
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function attemptOnce(
+        array $payload,
+        string $operationLabel,
+        AiCapacityPlan $plan,
+        int $inputSizeChars,
+        Closure $timeoutPlanFor,
+        AiCallContext $context,
+        ?Closure $parse,
     ): array {
         $timeoutPlan = $timeoutPlanFor($plan, $context->remainingJobBudgetSeconds);
 
@@ -116,7 +202,9 @@ class EnterpriseWikiAiCapacityRetryExecutor
 
         $this->logCapacityDecision($operationLabel, $plan, $timeoutPlan, $inputSizeChars, $response, $context);
 
-        return $this->responsesDecoder->decode($response, $operationLabel);
+        $decoded = $this->responsesDecoder->decode($response, $operationLabel);
+
+        return $parse === null ? $decoded : $parse($decoded);
     }
 
     /**

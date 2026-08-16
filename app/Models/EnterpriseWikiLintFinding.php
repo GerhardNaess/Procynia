@@ -72,6 +72,9 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_CROSS_CUSTOMER_WIKILINK = 'cross_customer_wikilink';
 
+    /** A server-side wikilink intent marker reached persisted Markdown. */
+    public const CODE_UNMATERIALIZED_WIKILINK_MARKER = 'unmaterialized_wikilink_marker';
+
     public const CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK = 'concept_without_incoming_wikilink';
 
     public const CODE_ENTITY_WITHOUT_INCOMING_WIKILINK = 'entity_without_incoming_wikilink';
@@ -104,6 +107,27 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_PLANNED_FIGURE_DUPLICATE = 'planned_figure_duplicate';
 
+    /**
+     * Fase 8K-4 — post-patch cross-page current-state consistency. Written by
+     * EnterpriseWikiCrossPageConsistencyService, NOT by EnterpriseWikiAppliedRunLintService: they are
+     * separate passes with separate lifecycles, which is why closeStaleFindings() excludes these codes.
+     */
+    public const CODE_STALE_CURRENT_ASSERTION = 'stale_current_assertion';
+
+    public const CODE_CROSS_PAGE_CURRENT_CONFLICT = 'cross_page_current_conflict';
+
+    public const CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT = 'historical_wording_in_current_canonical_content';
+
+    public const CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN = 'cross_page_consistency_unknown';
+
+    /** Every code owned by the 8K-4 cross-page pass rather than the applied-run lint pass. */
+    public const CROSS_PAGE_CONSISTENCY_CODES = [
+        self::CODE_STALE_CURRENT_ASSERTION,
+        self::CODE_CROSS_PAGE_CURRENT_CONFLICT,
+        self::CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT,
+        self::CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN,
+    ];
+
     public const CODES = [
         self::CODE_CLAIM_MISSING_SOURCE,
         self::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
@@ -129,6 +153,7 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_MALFORMED_WIKILINK,
         self::CODE_SELF_WIKILINK,
         self::CODE_CROSS_CUSTOMER_WIKILINK,
+        self::CODE_UNMATERIALIZED_WIKILINK_MARKER,
         self::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK,
         self::CODE_ENTITY_WITHOUT_INCOMING_WIKILINK,
         self::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
@@ -144,6 +169,10 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_PLANNED_FIGURE_WRONG_PAGE,
         self::CODE_PLANNED_FIGURE_SOURCE_MISSING,
         self::CODE_PLANNED_FIGURE_DUPLICATE,
+        self::CODE_STALE_CURRENT_ASSERTION,
+        self::CODE_CROSS_PAGE_CURRENT_CONFLICT,
+        self::CODE_HISTORICAL_WORDING_IN_CURRENT_CANONICAL_CONTENT,
+        self::CODE_CROSS_PAGE_CONSISTENCY_UNKNOWN,
     ];
 
     public const SEVERITY_INFO = 'info';
@@ -223,14 +252,14 @@ class EnterpriseWikiLintFinding extends Model
 
     /**
      * The single definition of "this finding, while open, prevents qa_status from reaching
-     * passed" — error severity, or a broken wikilink specifically (a structural break regardless
-     * of the severity it was logged with). EnterpriseWikiPostIngestQaService::findCriticalDefects()
+     * passed" — error severity. Wikilink integrity findings are recorded as errors at their
+     * source, so consumers never need a code-specific exception. EnterpriseWikiPostIngestQaService::findCriticalDefects()
      * and the Kjøringer "Funn" panel (EnterpriseWikiRunFindingsService) both read this same
      * definition; neither is allowed to grow its own copy of the predicate.
      */
     public function isBlocking(): bool
     {
-        return $this->severity === self::SEVERITY_ERROR || $this->code === self::CODE_BROKEN_WIKILINK;
+        return $this->severity === self::SEVERITY_ERROR;
     }
 
     /**
@@ -241,8 +270,7 @@ class EnterpriseWikiLintFinding extends Model
     public function scopeBlocking($query)
     {
         return $query->where(function ($q): void {
-            $q->where('severity', self::SEVERITY_ERROR)
-                ->orWhere('code', self::CODE_BROKEN_WIKILINK);
+            $q->where('severity', self::SEVERITY_ERROR);
         });
     }
 }

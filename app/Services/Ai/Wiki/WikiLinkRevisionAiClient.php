@@ -25,7 +25,7 @@ class WikiLinkRevisionAiClient
 {
     public const MODEL = 'gpt-5';
 
-    public const PROMPT_VERSION = '1.0';
+    public const PROMPT_VERSION = '1.1';
 
     private const MAX_OUTPUT_TOKENS = 3000;
 
@@ -46,9 +46,10 @@ class WikiLinkRevisionAiClient
     }
 
     /**
-     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog  the exact
-     *         set of pages this content is allowed to link to — the model must never invent a slug
-     *         or use one outside this list
+     * The catalog is the exact set of pages this content may link to; the model must never invent
+     * or use a slug outside it.
+     *
+     * @param  list<array{slug: string, title: string, page_type: string}>  $linkCatalog
      * @param  string  $instructions  task-specific guidance (relinking vs. lint repair)
      * @return array{changed: bool, markdown: string}
      *
@@ -169,6 +170,9 @@ class WikiLinkRevisionAiClient
             '- Do not link every occurrence of a term — link the first or most natural occurrence only.',
             '- Do not restructure, rewrite, or reformat any content beyond the specific wikilink change(s)',
             '  the task calls for. Preserve the existing markdown structure and prose exactly otherwise.',
+            '- Headings are immutable structural identifiers: do not add, remove, rename, reorder, or change',
+            '  the level of any # through ###### heading, and never add a wikilink inside a heading.',
+            '- Only add or remove wikilinks in eligible body text, never in headings.',
             '- If, after considering the task, no change is semantically justified, set changed=false and',
             '  return the original content unchanged in markdown.',
             '- If you do make a change, set changed=true and return the FULL revised content in markdown.',

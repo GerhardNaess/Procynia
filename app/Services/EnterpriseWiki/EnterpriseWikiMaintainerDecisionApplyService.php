@@ -41,7 +41,7 @@ class EnterpriseWikiMaintainerDecisionApplyService
     ) {}
 
     /**
-     * @return array{created: int, updated: int}
+     * @return array{created: int, updated: int, patch_targets_deferred: int}
      *
      * @throws \InvalidArgumentException
      */
@@ -92,7 +92,11 @@ class EnterpriseWikiMaintainerDecisionApplyService
         $created = 0;
         $updated = 0;
 
-        DB::transaction(function () use ($run, $decision, $customerId, &$created, &$updated): void {
+        // Fase 8K-2: pages this decision patches rather than generates. They deliberately get NO
+        // pivot row — see deferPatchTargets() for why that IS the safety mechanism.
+        $patchTargetPageIds = EnterpriseWikiPatchTargetResolver::targetPageIds($decision);
+
+        DB::transaction(function () use ($run, $decision, $customerId, $patchTargetPageIds, &$created, &$updated): void {
             $lockedRun = EnterpriseWikiIngestRun::query()->lockForUpdate()->find($run->id);
 
             if (! $lockedRun instanceof EnterpriseWikiIngestRun || $lockedRun->isTerminal()) {
@@ -100,7 +104,7 @@ class EnterpriseWikiMaintainerDecisionApplyService
             }
 
             foreach ($this->collectEntries($decision) as [$entry, $pageType]) {
-                $wasCreated = $this->applyEntry($lockedRun, $entry, $pageType, $customerId);
+                $wasCreated = $this->applyEntry($lockedRun, $entry, $pageType, $customerId, $patchTargetPageIds);
 
                 $wasCreated ? $created++ : $updated++;
             }
@@ -109,7 +113,61 @@ class EnterpriseWikiMaintainerDecisionApplyService
             $lockedRun->save();
         });
 
-        return ['created' => $created, 'updated' => $updated];
+        $deferred = $this->deferPatchTargets($run, $decision, $patchTargetPageIds);
+
+        return ['created' => $created, 'updated' => $updated, 'patch_targets_deferred' => $deferred];
+    }
+
+    /**
+     * Record that this run carries structured patch intent. Apply deliberately does NOT act on it.
+     *
+     * The patch targets stay where the decision put them — in `maintainer_decision_json`, already
+     * persisted, already validated. No GENERATION pivot row is created for a patch target here, and
+     * that absence is a safety mechanism rather than an omission: page generation is driven entirely
+     * by `enterprise_wiki_ingest_run_pages` (see
+     * EnterpriseWikiDocumentFlowService::beginGeneratingPages() and
+     * FinalizeEnterpriseWikiPageGeneration), so a page with no pivot is never dispatched, never
+     * reaches EnterpriseWikiGenerateAppliedPagesService::generatePageForRun(), and therefore cannot
+     * be regenerated from the new source document alone — which is exactly the destructive behaviour
+     * observed after 8K-1, where an existing page lost unrelated substance, its provenance and two
+     * wikilinks to a full-page rewrite triggered by `action=update`.
+     *
+     * It also means the run does not stall: the finalizer only ever counts pivots, so a target that is
+     * invisible here lets the flow continue exactly as before.
+     *
+     * Fase 8K-3 now consumes these targets — EnterpriseWikiPatchApplicationService::applyForRun(),
+     * called from EnterpriseWikiDocumentFlowService::performApplyPatchTargets() once the run's own
+     * pages are generated. It reads this same `maintainer_decision_json['patch_targets']`, patches the
+     * bounded area each target authorizes, and writes at most one new current version per page —
+     * creating its own pivot row with `action=patched` and the version id already set, which is why
+     * that row can never be mistaken for pending generation work.
+     *
+     * No new table, column or status is introduced by either phase.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  list<int>  $patchTargetPageIds
+     * @return int number of patch targets handed to 8K-3
+     */
+    private function deferPatchTargets(EnterpriseWikiIngestRun $run, array $decision, array $patchTargetPageIds): int
+    {
+        $targets = (array) ($decision['patch_targets'] ?? []);
+
+        if ($targets === []) {
+            return 0;
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Patch targets recorded by apply — applied later by the patch step, never by page generation.', [
+            'run_id' => $run->id,
+            'customer_id' => $run->customer_id,
+            'patch_targets' => count($targets),
+            'target_page_ids' => $patchTargetPageIds,
+            'operations' => array_count_values(array_values(array_filter(array_map(
+                static fn (mixed $target): string => is_array($target) ? (string) ($target['operation'] ?? '') : '',
+                $targets,
+            ), static fn (string $operation): bool => $operation !== ''))),
+        ]);
+
+        return count($targets);
     }
 
     /**
@@ -117,15 +175,33 @@ class EnterpriseWikiMaintainerDecisionApplyService
      *
      * @return bool true if this call created the page, false if an existing page was reused.
      */
-    private function applyEntry(EnterpriseWikiIngestRun $run, array $entry, string $pageType, int $customerId): bool
-    {
+    private function applyEntry(
+        EnterpriseWikiIngestRun $run,
+        array $entry,
+        string $pageType,
+        int $customerId,
+        array $patchTargetPageIds = [],
+    ): bool {
         $requestedAction = $entry['action'] ?? 'create';
         $pageIdHint = $entry['page_id'] ?? null;
 
         [$page, $wasCreated] = $this->resolvePage($run, $entry, $pageType, $customerId, $requestedAction, $pageIdHint);
 
+        // Fase 8K-2 destructive-update guard. A page the decision patches must never also become a
+        // generated page for this run: the pivot row created below is what dispatches full page
+        // generation from the new source document alone, which would discard the substance the patch
+        // target exists to preserve. EnterpriseWikiCanonicalOwnershipValidator already rejects this
+        // combination before apply, so reaching here means an unvalidated decision was stored —
+        // fail loudly rather than write the page and lose content.
+        if (in_array((int) $page->id, array_map('intval', $patchTargetPageIds), true)) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] plans page [{$page->id}] as a generated page while patch_targets also targets it — "
+                .'a page is either regenerated as this run\'s own page or patched as existing knowledge, never both.'
+            );
+        }
+
         if (! $wasCreated) {
-            $this->syncReusedPage($page, $pageType, $run);
+            $this->syncReusedPage($page, $pageType, $run, $pageIdHint !== null && $requestedAction === 'update');
 
             Log::info('[WIKI_DOCUMENT_FLOW] Existing page reused during maintainer apply.', [
                 'run_id' => $run->id,
@@ -229,20 +305,41 @@ class EnterpriseWikiMaintainerDecisionApplyService
     }
 
     /**
-     * Only the fields the apply contract allows on reuse: page_type (in case an earlier,
-     * partially-completed run's decision misclassified it) and last_source_hash (kept fresh
-     * for this run's source document). Title, slug, status, and current page version are
-     * never touched — no history is rewritten or deleted.
+     * Only the fields the apply contract allows on reuse: last_source_hash (kept fresh for this
+     * run's source document) and, on the slug-resolution path only, page_type. Title, slug, status,
+     * and current page version are never touched — no history is rewritten or deleted.
+     *
+     * Fase 8K-2 page_type safety. page_type is repaired ONLY when the page was resolved by canonical
+     * (customer_id, slug) — the earlier-partially-completed-run case this behaviour exists for. When
+     * the decision named the page by an explicit page_id, a page_type mismatch means the model put
+     * an existing page into the wrong typed slot, and silently retyping it would corrupt real data:
+     * an article addressed through `entity_pages` would simply become an entity. That is refused
+     * loudly instead. Patch targets are immune by construction — they name a page by id and never by
+     * slot, and never reach this method at all.
      */
-    private function syncReusedPage(EnterpriseWikiPage $page, string $pageType, EnterpriseWikiIngestRun $run): void
-    {
+    private function syncReusedPage(
+        EnterpriseWikiPage $page,
+        string $pageType,
+        EnterpriseWikiIngestRun $run,
+        bool $resolvedByExplicitPageId = false,
+    ): void {
         $expectedHash = $this->sourceHash($run);
 
+        if ($page->page_type !== $pageType && $resolvedByExplicitPageId) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] targets existing page [{$page->id}] of type [{$page->page_type}] through a [{$pageType}] slot — "
+                .'a page\'s type is never changed by the slot a decision names it in. Use patch_targets to address an existing page of any type.'
+            );
+        }
+
+        $attributes = ['last_source_hash' => $expectedHash];
+
+        if ($page->page_type !== $pageType) {
+            $attributes['page_type'] = $pageType;
+        }
+
         if ($page->page_type !== $pageType || $page->last_source_hash !== $expectedHash) {
-            $page->update([
-                'page_type' => $pageType,
-                'last_source_hash' => $expectedHash,
-            ]);
+            $page->update($attributes);
         }
     }
 

@@ -64,6 +64,7 @@ class EnterpriseWikiIncrementalRelinkService
         private readonly EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
         private readonly EnterpriseWikiPageVersionClaimSyncService $claimSyncService,
         private readonly EnterpriseWikiPageVersionWriter $versionWriter,
+        private readonly EnterpriseWikiPageVersionBlockProvenanceRepairService $blockProvenanceRepairService,
     ) {}
 
     /**
@@ -423,10 +424,18 @@ class EnterpriseWikiIncrementalRelinkService
                 return null;
             }
 
-            return $this->versionWriter->writeNewCurrentVersion($pageId, [
-                'content_markdown' => $markdown,
-                'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
-            ]);
+            // This service adds a wikilink to existing prose and produces markdown only, so it must
+            // reconstruct the block provenance it would otherwise drop — image figures, source
+            // provenance and claim anchors all live there. The writer rolls the promotion back if
+            // reconstruction is not possible, so a relink can never cost a page its blocks.
+            return $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+                $pageId,
+                [
+                    'content_markdown' => $markdown,
+                    'generated_by_model' => WikiLinkRevisionAiClient::MODEL.'/incremental-relink',
+                ],
+                fn (EnterpriseWikiPageVersion $version) => $this->blockProvenanceRepairService->repairPageVersion($pageId, $version),
+            );
         });
     }
 

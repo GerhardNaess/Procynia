@@ -25,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageContentBlockService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -53,6 +54,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
 
@@ -77,6 +79,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_MALFORMED_WIKILINK,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
@@ -93,57 +96,64 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_SELF_WIKILINK,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
 
-    public function test_orphan_concept_page_without_incoming_wikilink_is_registered(): void
+    public function test_persisted_wikilink_intent_marker_is_a_blocking_integrity_finding(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
-        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A standalone concept.');
-        $run = $this->createAppliedRun($customer, $document, [$concept]);
-
-        $this->lintService()->lint($run);
-
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
-            'enterprise_wiki_page_id' => $concept->id,
-            'code' => EnterpriseWikiLintFinding::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK,
-            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
-        ]);
-    }
-
-    public function test_orphan_entity_page_without_incoming_wikilink_is_registered(): void
-    {
-        $customer = $this->createCustomer();
-        $document = $this->createDocument($customer);
-        $entity = $this->createVersionedPage($customer, 'entitet', 'Entitet', EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'A standalone entity.');
-        $run = $this->createAppliedRun($customer, $document, [$entity]);
-
-        $this->lintService()->lint($run);
-
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
-            'enterprise_wiki_page_id' => $entity->id,
-            'code' => EnterpriseWikiLintFinding::CODE_ENTITY_WITHOUT_INCOMING_WIKILINK,
-            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
-        ]);
-    }
-
-    public function test_article_with_available_run_targets_but_no_wikilink_is_detected(): void
-    {
-        $customer = $this->createCustomer();
-        $document = $this->createDocument($customer);
-        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This article has no links at all.');
-        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
-        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $article = $this->createVersionedPage(
+            $customer,
+            'artikkel',
+            'Artikkel',
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            // The retired marker syntax. Generation can no longer produce it — the model writes no
+            // link syntax at all — but the lint remains the last line of defence for anything
+            // already persisted or written by hand.
+            'See {{wiki_link:intent-1|the target}} here.',
+        );
+        $run = $this->createAppliedRun($customer, $document, [$article]);
 
         $this->lintService()->lint($run);
 
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
-            'code' => EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
+            'code' => EnterpriseWikiLintFinding::CODE_UNMATERIALIZED_WIKILINK_MARKER,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
+    }
+
+    public function test_graph_connectivity_is_observed_without_creating_legacy_link_coverage_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $conceptA = $this->createVersionedPage($customer, 'concept-a', 'Concept A', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'See [[concept-b|Concept B]].');
+        $conceptB = $this->createVersionedPage($customer, 'concept-b', 'Concept B', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'See [[concept-a|Concept A]].');
+        $article = $this->createVersionedPage($customer, 'article', 'Article', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'See [[concept-a|Concept A]] and [[summary|Summary]].');
+        $summary = $this->createVersionedPage($customer, 'summary', 'Summary', EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'See [[concept-b|Concept B]] and [[article|Article]].');
+        $run = $this->createAppliedRun($customer, $document, [$article, $summary, $conceptA, $conceptB]);
+
+        app(EnterpriseWikiBuildPageLinksService::class)->materializeWikilinksForRun($run);
+
+        $this->lintService()->lint($run);
+
+        foreach ([
+            EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            EnterpriseWikiLintFinding::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK,
+            EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_CONCEPT_OR_ENTITY_LINKS,
+            EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
+            EnterpriseWikiLintFinding::CODE_MISSING_REVERSE_LINK,
+        ] as $code) {
+            $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'code' => $code,
+                'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            ]);
+        }
     }
 
     public function test_missing_wikilink_materialization_is_detected(): void
@@ -161,6 +171,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_MISSING_WIKILINK_MATERIALIZATION,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
@@ -182,6 +193,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_WIKILINK_PROJECTION_MISMATCH,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
@@ -202,6 +214,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_STALE_WIKILINK_GRAPH_EDGE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
@@ -358,6 +371,123 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertSame(1, $this->currentVersion($article)->version_number);
     }
 
+    #[DataProvider('structuralHeadingMutations')]
+    public function test_repair_rejects_any_structural_heading_mutation(string $original, string $revised): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+        $serviceManagement = $this->createVersionedPage($customer, 'service-management', 'Service Management', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $original);
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept, $serviceManagement]);
+
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept', 'service-management'], remove: []);
+        $this->mockRevision($revised, changed: true);
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame($original, $this->currentVersion($article)->content_markdown);
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->count());
+        $this->assertDatabaseHas('enterprise_wiki_page_link_qa_attempts', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $article->id,
+            'status' => EnterpriseWikiPageLinkQaAttempt::STATUS_FAILED,
+            'reason' => EnterpriseWikiPageLinkQaAttempt::REASON_INVALID_REVISION,
+        ]);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function structuralHeadingMutations(): array
+    {
+        $original = "# Service Management\n\n## Problem review roles\n\n### Review preparation\n\nThe service owner participates in the review.";
+
+        return [
+            'H1 wikilink insertion' => [$original, "# [[service-management|Service Management]]\n\n## Problem review roles\n\n### Review preparation\n\nThe service owner participates in the review."],
+            'H2 wikilink insertion' => [$original, "# Service Management\n\n## Problem review [[konsept|roles]]\n\n### Review preparation\n\nThe service owner participates in the review."],
+            'H3 wikilink insertion' => [$original, "# Service Management\n\n## Problem review roles\n\n### Review [[konsept|preparation]]\n\nThe service owner participates in the review."],
+            'heading rename' => [$original, "# Service Management\n\n## Problem review responsibilities\n\n### Review preparation\n\nThe service owner participates in the review."],
+            'heading deletion' => [$original, "# Service Management\n\n### Review preparation\n\nThe service owner participates in the review."],
+            'heading insertion' => [$original, "# Service Management\n\n## Problem review roles\n\n## Extra section\n\n### Review preparation\n\nThe service owner participates in the review."],
+            'heading reorder' => [$original, "# Service Management\n\n### Review preparation\n\n## Problem review roles\n\nThe service owner participates in the review."],
+            'heading level change' => [$original, "# Service Management\n\n### Problem review roles\n\n### Review preparation\n\nThe service owner participates in the review."],
+        ];
+    }
+
+    public function test_repair_allows_a_body_wikilink_without_changing_headings_and_keeps_planned_section_lint_green(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $concept = $this->createVersionedPage($customer, 'service-owner', 'Service Owner', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+        $original = "# Service Management\n\n## Minimum content and review roles\n\nThe service owner participates in the review.";
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $original);
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => [
+                'proposed_slug' => $article->slug,
+                'owned_topics' => ['Minimum content and review roles'],
+            ],
+        ]]);
+
+        $revised = "# Service Management\n\n## Minimum content and review roles\n\nThe [[service-owner|service owner]] participates in the review.";
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['service-owner'], remove: []);
+        $this->mockRevision($revised, changed: true);
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['applied']);
+        $this->assertSame($revised, $this->currentVersion($article)->content_markdown);
+        $this->assertDatabaseHas('enterprise_wiki_page_links', [
+            'from_page_id' => $article->id,
+            'to_page_id' => $concept->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+        ]);
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $article->id,
+            'code' => EnterpriseWikiLintFinding::CODE_PLANNED_SECTION_MISSING,
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+        ]);
+    }
+
+    public function test_run_39_style_heading_mutation_rejects_the_entire_repair_atomically(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $roles = $this->createVersionedPage($customer, 'review-roles', 'Review Roles', EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'A concept.');
+        $original = "# Problem Management\n\n## Minimum content and review roles\n\nReview roles are recorded for every problem.";
+        $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $original);
+        $run = $this->createAppliedRun($customer, $document, [$article, $roles]);
+        $run->update(['maintainer_decision_json' => [
+            'source_article' => [
+                'proposed_slug' => $article->slug,
+                'owned_topics' => ['Minimum content and review roles'],
+            ],
+        ]]);
+
+        $revised = "# Problem Management\n\n## Minimum content and [[review-roles|review roles]]\n\nReview [[review-roles|roles]] are recorded for every problem.";
+        $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['review-roles'], remove: []);
+        $this->mockRevision($revised, changed: true);
+
+        $result = $this->repairService()->repairForRun($run);
+
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame($original, $this->currentVersion($article)->content_markdown);
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->count());
+        $this->assertDatabaseMissing('enterprise_wiki_page_links', [
+            'from_page_id' => $article->id,
+            'to_page_id' => $roles->id,
+        ]);
+
+        $this->lintService()->lint($run->fresh());
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $article->id,
+            'code' => EnterpriseWikiLintFinding::CODE_PLANNED_SECTION_MISSING,
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+        ]);
+    }
+
     public function test_no_change_assessment_creates_no_version(): void
     {
         $customer = $this->createCustomer();
@@ -440,9 +570,10 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $article = $this->createVersionedPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'This mentions Konsept without linking it.');
         $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
 
-        // Before repair: article has no outgoing wikilink despite another run page existing.
+        // Semantic QA may identify a real missing relation, but the absence of any link is not
+        // itself a lint defect merely because another run page exists.
         $this->lintService()->lint($run);
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
@@ -454,10 +585,10 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         // repairForRun() re-runs deterministic lint internally after applying the repair.
         $this->repairService()->repairForRun($run);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
-            'status' => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
         ]);
     }
 
@@ -548,7 +679,7 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->assertSame('block-0002', $match['block_key']);
     }
 
-    public function test_ambiguous_block_reconstruction_does_not_block_an_otherwise_successful_link_repair(): void
+    public function test_a_revision_that_would_drop_the_pages_blocks_is_declined_rather_than_promoted(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createDocument($customer);
@@ -571,13 +702,25 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
         $this->mockQaReview(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'repair_recommended', missing: ['konsept'], remove: []);
         // The revision merges both paragraphs into a single segment — segment count (1) no
         // longer matches the prior block count (2), so reconstruction must refuse rather than
-        // guess. The link repair itself is otherwise perfectly valid and must still succeed.
+        // guess. Promoting the revision anyway would leave the page with NO content blocks, which
+        // is where its image figures, source provenance and claim anchors live: run 54 lost a
+        // required figure exactly this way. The link improvement is declined instead, and the page
+        // keeps the version that still has its blocks.
         $this->mockRevision('Første avsnitt. Andre avsnitt om [[konsept|Konsept]].', changed: true);
 
         $result = $this->repairService()->repairForRun($run);
 
-        $this->assertSame(1, $result['applied']);
-        $this->assertEmpty($this->currentVersion($article)->content_blocks_json ?? []);
+        $this->assertSame(0, $result['applied']);
+        $this->assertCount(2, $this->currentVersion($article)->content_blocks_json ?? []);
+        $this->assertStringNotContainsString('[[konsept|Konsept]]', (string) $this->currentVersion($article)->content_markdown);
+
+        $attempt = EnterpriseWikiPageLinkQaAttempt::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->latest('id')
+            ->first();
+
+        $this->assertSame(EnterpriseWikiPageLinkQaAttempt::STATUS_SKIPPED, $attempt->status);
+        $this->assertSame(EnterpriseWikiPageLinkQaAttempt::REASON_BLOCK_PROVENANCE_AT_RISK, $attempt->reason);
     }
 
     public function test_prior_version_blocks_are_never_touched_by_block_provenance_restore(): void

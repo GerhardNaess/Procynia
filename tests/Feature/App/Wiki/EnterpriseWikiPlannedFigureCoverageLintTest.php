@@ -396,6 +396,175 @@ class EnterpriseWikiPlannedFigureCoverageLintTest extends TestCase
         $this->assertTrue($finding->isBlocking());
     }
 
+    /**
+     * Fase 8K-3 companion to the run-30 planned-section regression: plannedFiguresForPage() reads
+     * the same source_article/source_summary slots and needs the same identity guard. Here a false
+     * match is worse than a spurious finding — it would register the patched page as a legitimate
+     * owner of the figure in checkPlannedFigureCrossPageAssignment()'s $plannedPageIdsByKey and
+     * thereby MASK a real wrong-page materialization.
+     */
+    public function test_patched_existing_article_does_not_inherit_source_article_planned_figures(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $sourceArticle = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Change Notice Alpha');
+        $patchedArticle = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Operating Procedure Beta');
+
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'maintainer_decision_generated_at' => now(),
+            'maintainer_decision_json' => [
+                'source_article' => [
+                    'action' => 'create',
+                    'title' => $sourceArticle->title,
+                    'proposed_slug' => $sourceArticle->slug,
+                    'reason' => 'r',
+                    'planned_figures' => [$this->plannedFigure('img1', required: true)],
+                ],
+                'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+                'concept_pages' => [],
+                'entity_pages' => [],
+                'no_action_reason' => null,
+                'warnings' => [],
+            ],
+        ]);
+
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $sourceArticle->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+        EnterpriseWikiIngestRunPage::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $patchedArticle->id,
+            'action' => EnterpriseWikiIngestRunPage::ACTION_PATCHED,
+            'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+        ]);
+
+        // The source article correctly materializes its own planned figure.
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $sourceArticle->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => "# Change Notice Alpha\n\n**Figur**\n_Kilde: dok.docx_",
+            'content_blocks_json' => [$this->imageBlock('img1')],
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        // The patched page carries no image at all, so it must produce no figure finding.
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $patchedArticle->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Operating Procedure Beta\n\nExisting procedure text.",
+            'generated_by_model' => 'deterministic/section-patch',
+        ]);
+
+        app(EnterpriseWikiAppliedRunLintService::class)->lint($run);
+
+        $this->assertSame(
+            0,
+            EnterpriseWikiLintFinding::query()
+                ->where('enterprise_wiki_page_id', $patchedArticle->id)
+                ->whereIn('code', [
+                    EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_MISSING,
+                    EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_WRONG_PAGE,
+                ])
+                ->count(),
+            'A patched existing article must not inherit the new document source_article\'s required figure.',
+        );
+
+        $this->assertSame(
+            0,
+            EnterpriseWikiLintFinding::query()
+                ->where('enterprise_wiki_page_id', $sourceArticle->id)
+                ->where('code', EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_MISSING)
+                ->count(),
+            'The real source article satisfied its own planned figure and must stay clean.',
+        );
+    }
+
+    public function test_figure_planned_for_source_article_is_flagged_wrong_page_on_a_patched_article(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+
+        $sourceArticle = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Change Notice Alpha');
+        $patchedArticle = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Operating Procedure Beta');
+
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'maintainer_decision_generated_at' => now(),
+            'maintainer_decision_json' => [
+                'source_article' => [
+                    'action' => 'create',
+                    'title' => $sourceArticle->title,
+                    'proposed_slug' => $sourceArticle->slug,
+                    'reason' => 'r',
+                    'planned_figures' => [$this->plannedFigure('img1', required: true)],
+                ],
+                'source_summary' => ['action' => 'create', 'title' => 'S', 'proposed_slug' => 's', 'reason' => 'r'],
+                'concept_pages' => [],
+                'entity_pages' => [],
+                'no_action_reason' => null,
+                'warnings' => [],
+            ],
+        ]);
+
+        foreach ([[$sourceArticle, EnterpriseWikiIngestRunPage::ACTION_CREATED], [$patchedArticle, EnterpriseWikiIngestRunPage::ACTION_PATCHED]] as [$page, $action]) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $page->id,
+                'action' => $action,
+                'generation_status' => EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED,
+            ]);
+        }
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $sourceArticle->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# Change Notice Alpha',
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        // The figure planned for the source article ended up on the patched page instead. The
+        // identity guard is what keeps this detectable: without it the patched page would count as
+        // a planned owner of img1 and this real defect would be silently accepted.
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $patchedArticle->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => "# Operating Procedure Beta\n\n**Figur**\n_Kilde: dok.docx_",
+            'content_blocks_json' => [$this->imageBlock('img1')],
+            'generated_by_model' => 'deterministic/section-patch',
+        ]);
+
+        app(EnterpriseWikiAppliedRunLintService::class)->lint($run);
+
+        $finding = EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_page_id', $patchedArticle->id)
+            ->where('code', EnterpriseWikiLintFinding::CODE_PLANNED_FIGURE_WRONG_PAGE)
+            ->first();
+
+        $this->assertNotNull($finding, 'A figure planned for the source article but materialized on a patched page must still be flagged.');
+        $this->assertTrue($finding->isBlocking());
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

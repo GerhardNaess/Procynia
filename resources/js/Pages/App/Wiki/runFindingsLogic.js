@@ -104,7 +104,7 @@ export function resolveWikiBackLink(reviewReference, structureFinding) {
 
 export const RUN_TIMELINE_STEPS = [
     { key: 'queued', labelKey: 'ingest_timeline_queue', fallback: 'Kø' },
-    { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Beslutning' },
+    { key: 'maintainer_decision', labelKey: 'ingest_timeline_decision', fallback: 'Sideplanlegging' },
     { key: 'applying', labelKey: 'ingest_timeline_apply', fallback: 'Oppretter sidestruktur' },
     { key: 'generating_pages', labelKey: 'ingest_timeline_pages', fallback: 'Sider' },
     { key: 'verification_linking', labelKey: 'ingest_timeline_verification', fallback: 'Verifisering' },
@@ -233,7 +233,7 @@ export function activeWikiRunLikeObjectsForTab(activeTab, { sources = [], runs =
  *
  * Leaving decision_only out created a deadlock rather than a delay: the poll that would fetch the
  * run's new state is gated on run data that only that poll can refresh, so a Kjøringer tab opened
- * while a run sat in decision_only kept rendering that first snapshot — "Vedlikeholdersbeslutning
+ * while a run sat in decision_only kept rendering that first snapshot — "Sideplanlegging
  * behandles", 0 pages, 0 findings — indefinitely, even after the run had reached
  * awaiting_document_owner_approval with its pages generated. Only a manual browser refresh
  * recovered it.
@@ -439,9 +439,9 @@ export function getTransientFailureCopy(run, tw = {}) {
     const errorMessage = run?.error_message ?? '';
     const isTimeout = /timeout|timed out|curl error 28/i.test(errorMessage);
     const primaryMessage = isTimeout
-        ? (tw.run_transient_timeout_message ?? 'AI-tjenesten svarte ikke innen tidsgrensen under planleggingen av Wiki-sidene. Dokumentet og kildegrunnlaget er bevart. Du kan prøve beslutningsfasen på nytt uten å laste opp dokumentet igjen.')
+        ? (tw.run_transient_timeout_message ?? 'AI-tjenesten svarte ikke innen tidsgrensen under planleggingen av Wiki-sidene. Dokumentet og kildegrunnlaget er bevart. Du kan prøve sideplanleggingen på nytt uten å laste opp dokumentet igjen.')
         : (tw.run_transient_generic_message ?? 'En midlertidig kommunikasjonsfeil oppstod under planleggingen av Wiki-sidene. Dokumentet og kildegrunnlaget er bevart.');
-    const failedInPhase = tw.run_transient_failed_in_phase ?? 'Feilen oppstod i fasen «Beslutning».';
+    const failedInPhase = tw.run_transient_failed_in_phase ?? 'Feilen oppstod i fasen «Sideplanlegging».';
     const attemptCount = run?.maintainer_decision_attempt_count ?? 0;
     const attemptSummary = attemptCount > 0
         ? (tw.run_transient_attempt_count ?? ':count forsøk totalt.').replace(':count', attemptCount)

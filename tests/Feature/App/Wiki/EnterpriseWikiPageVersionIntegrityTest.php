@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
@@ -195,5 +196,87 @@ class EnterpriseWikiPageVersionIntegrityTest extends TestCase
             'maintainer_decision_generated_at' => now(),
             'maintainer_decision_json' => ['pages' => []],
         ]);
+    }
+    // =========================================================================
+    // Block-provenance invariant — promoting a version must not empty the page
+    // =========================================================================
+
+    /**
+     * Run 54, page 191: a link repair wrote a markdown-only version, its block reconstruction came
+     * back ambiguous, and the blockless version was promoted anyway — taking the page's image
+     * figures, source provenance and claim anchors with it. QA then reported the page's REQUIRED
+     * figure as missing; the figure block was sitting in the version that had just been demoted.
+     */
+    public function test_promoting_a_version_with_no_blocks_is_refused_when_the_previous_one_had_them(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'Provenance Page', 'v1');
+        $v1 = $this->currentVersion($page);
+        $v1->forceFill(['content_blocks_json' => [['block_key' => 'block-0001', 'markdown' => 'v1']]])->save();
+
+        try {
+            $this->writer()->writeNewCurrentVersion($page, ['content_markdown' => 'v2 without blocks']);
+            $this->fail('the promotion should have been refused');
+        } catch (EnterpriseWikiPageVersionBlockProvenanceLostException $e) {
+            $this->assertSame($page->id, $e->pageId);
+            $this->assertSame(1, $e->supersededBlockCount);
+        }
+
+        // Fully rolled back: no new version, and the page keeps the one that still has its blocks.
+        $this->assertSame(1, EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $page->id)->count());
+        $this->assertTrue((bool) $v1->refresh()->is_current);
+        $this->assertCount(1, $v1->content_blocks_json);
+    }
+
+    public function test_a_markdown_only_write_is_allowed_when_its_restorer_puts_the_blocks_back(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'Restored Page', 'v1');
+        $v1 = $this->currentVersion($page);
+        $v1->forceFill(['content_blocks_json' => [['block_key' => 'block-0001', 'markdown' => 'v1']]])->save();
+
+        $v2 = $this->writer()->writeNewCurrentVersionRestoringBlocks(
+            $page,
+            ['content_markdown' => 'v2'],
+            static function (EnterpriseWikiPageVersion $version): void {
+                $version->forceFill(['content_blocks_json' => [['block_key' => 'block-0001', 'markdown' => 'v2']]])->save();
+            },
+        );
+
+        $this->assertTrue((bool) $v2->refresh()->is_current);
+        $this->assertCount(1, $v2->content_blocks_json);
+        $this->assertFalse((bool) $v1->refresh()->is_current);
+    }
+
+    public function test_a_page_that_never_had_blocks_can_still_be_written(): void
+    {
+        // The invariant is about LOSING provenance, never about requiring it retroactively: a
+        // legacy version with no blocks at all keeps working exactly as before.
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'Legacy Page', 'v1');
+
+        $v2 = $this->writer()->writeNewCurrentVersion($page, ['content_markdown' => 'v2']);
+
+        $this->assertSame(2, $v2->version_number);
+        $this->assertTrue((bool) $v2->refresh()->is_current);
+    }
+
+    public function test_a_write_that_supplies_its_own_blocks_is_untouched_by_the_invariant(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'Blocks Page', 'v1');
+        $this->currentVersion($page)
+            ->forceFill(['content_blocks_json' => [['block_key' => 'block-0001', 'markdown' => 'v1']]])
+            ->save();
+
+        $v2 = $this->writer()->writeNewCurrentVersion($page, [
+            'content_markdown' => 'v2',
+            'content_blocks_json' => [
+                ['block_key' => 'block-0001', 'markdown' => 'v2'],
+                ['block_type' => 'image', 'source_element_key' => 'img1', 'markdown' => '**Figur 1**'],
+            ],
+        ]);
+
+        $this->assertCount(2, $v2->refresh()->content_blocks_json);
     }
 }

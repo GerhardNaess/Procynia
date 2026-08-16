@@ -327,6 +327,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         $page = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $version = $this->currentVersion($page);
         $claim = $this->createClaim($version, 'Claim with no source ref.');
+        $claim->update(['content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED]);
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
@@ -409,7 +410,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
     // Link findings
     // =========================================================================
 
-    public function test_creates_finding_when_page_has_no_outgoing_links(): void
+    public function test_page_without_outgoing_links_is_not_a_lint_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -418,13 +419,13 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $page->id,
             'code' => EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_OUTGOING_LINKS,
         ]);
     }
 
-    public function test_creates_finding_when_page_has_no_incoming_links(): void
+    public function test_page_without_incoming_links_is_not_a_lint_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -433,13 +434,13 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $page->id,
             'code' => EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_INCOMING_LINKS,
         ]);
     }
 
-    public function test_creates_finding_when_article_has_no_summary_link(): void
+    public function test_article_without_an_unambiguous_summary_pair_has_no_pairing_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -450,13 +451,13 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_SUMMARY_LINK,
         ]);
     }
 
-    public function test_creates_finding_when_summary_has_no_article_link(): void
+    public function test_summary_without_an_unambiguous_article_pair_has_no_pairing_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -467,13 +468,13 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $summary->id,
             'code' => EnterpriseWikiLintFinding::CODE_SUMMARY_WITHOUT_ARTICLE_LINK,
         ]);
     }
 
-    public function test_creates_finding_when_article_has_no_concept_or_entity_links(): void
+    public function test_article_without_concept_or_entity_links_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -485,14 +486,14 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_CONCEPT_OR_ENTITY_LINKS,
             'severity' => EnterpriseWikiLintFinding::SEVERITY_INFO,
         ]);
     }
 
-    public function test_creates_finding_when_concept_has_no_article_or_summary_link(): void
+    public function test_concept_without_article_or_summary_link_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -501,7 +502,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
         ]);
@@ -541,7 +542,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_concept_only_has_wikilinks_to_other_concepts(): void
+    public function test_concept_links_to_other_concepts_have_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -552,13 +553,13 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
         ]);
     }
 
-    public function test_creates_finding_when_concept_only_has_incoming_links(): void
+    public function test_concept_with_only_incoming_links_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -570,7 +571,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
         ]);
@@ -610,7 +611,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_wikilink_target_is_neither_article_nor_summary(): void
+    public function test_concept_link_target_type_does_not_create_a_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -624,7 +625,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
         ]);
@@ -654,23 +655,23 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_reopened_run_closes_stale_orphan_concept_finding_once_wikilink_is_added(): void
+    public function test_reopened_run_closes_removed_legacy_link_findings(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $concept = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
         $this->createClaim($this->currentVersion($concept), 'Claim.');
 
-        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
-
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Legacy link-shape finding.',
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
         ]);
-
-        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
-        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
@@ -681,7 +682,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_entity_has_no_article_or_summary_link(): void
+    public function test_entity_without_article_or_summary_link_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -690,7 +691,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $entity->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_ENTITY_PAGE,
         ]);
@@ -730,7 +731,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_entity_only_has_wikilinks_to_concepts(): void
+    public function test_entity_links_to_concepts_have_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -743,7 +744,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $entity->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_ENTITY_PAGE,
         ]);
@@ -766,7 +767,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_entity_only_has_incoming_links(): void
+    public function test_entity_with_only_incoming_links_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -778,7 +779,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $entity->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_ENTITY_PAGE,
         ]);
@@ -812,7 +813,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
         ]);
     }
 
-    public function test_creates_finding_when_reverse_link_is_missing(): void
+    public function test_missing_reverse_link_has_no_legacy_finding(): void
     {
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
@@ -825,7 +826,7 @@ class EnterpriseWikiLintAppliedRunCommandTest extends TestCase
 
         Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
 
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', [
             'enterprise_wiki_page_id' => $article->id,
             'code' => EnterpriseWikiLintFinding::CODE_MISSING_REVERSE_LINK,
         ]);

@@ -103,6 +103,22 @@ class EnterpriseWikiAiCapacityPlanner
             return [];
         }
 
+        $batchCount = (int) ceil($totalCandidates / $this->maxItemsPerBatch($operationType, $model));
+
+        return $this->distributeEvenly($totalCandidates, $batchCount);
+    }
+
+    /**
+     * How many items one batch-shaped call of this operation may take on — the capacity-driven
+     * maximum (how many fit the resolved ceiling with margin to spare) capped by the profile's own
+     * configured maximum, and floored at its configured minimum.
+     *
+     * Exposed because the bounded delta-repair flow packs repair groups into calls with the same
+     * budget arithmetic the split flow uses for candidate batches: one definition of "how much fits
+     * in one call", not two that can drift apart.
+     */
+    public function maxItemsPerBatch(string $operationType, string $model): int
+    {
         $batchConfig = $this->batchConfig($operationType);
         $operationConfig = $this->operationConfig($operationType);
 
@@ -121,11 +137,7 @@ class EnterpriseWikiAiCapacityPlanner
         $configuredMax = (int) ($batchConfig['max_candidates_per_batch'] ?? $capacityDrivenMax);
         $configuredMin = max(1, (int) ($batchConfig['min_candidates_per_batch'] ?? 1));
 
-        $effectiveMax = max($configuredMin, min($capacityDrivenMax, $configuredMax));
-
-        $batchCount = (int) ceil($totalCandidates / $effectiveMax);
-
-        return $this->distributeEvenly($totalCandidates, $batchCount);
+        return max($configuredMin, min($capacityDrivenMax, $configuredMax));
     }
 
     /**

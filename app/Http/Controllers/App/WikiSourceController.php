@@ -14,6 +14,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentDeletionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSourceElementService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiUtf8Guard;
 use App\Support\CustomerContext;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Http\JsonResponse;
@@ -39,6 +40,7 @@ class WikiSourceController extends Controller
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiDocumentDeletionService $deletionService,
         private readonly EnterpriseWikiDocumentSourceElementService $sourceElementService,
+        private readonly EnterpriseWikiUtf8Guard $utf8Guard,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -87,6 +89,9 @@ class WikiSourceController extends Controller
 
             $absolutePath = Storage::disk('local')->path($storedPath);
             $extractedText = trim($this->documentTextExtractor->extractText($absolutePath));
+            $this->utf8Guard->assertValid([
+                'extracted_text' => $extractedText,
+            ], 'enterprise_wiki_document_extraction');
 
             $document = DB::transaction(function () use ($customerId, $user, $ownerUserId, $file, $storedPath, $fileHash, $extractedText): EnterpriseWikiDocument {
                 return EnterpriseWikiDocument::query()->create([

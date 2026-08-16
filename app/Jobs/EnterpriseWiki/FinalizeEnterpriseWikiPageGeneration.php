@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -326,7 +327,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
 
         $entry = $this->conceptDecisionEntry($page, $decisionJson);
 
-        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+        return $entry !== null && EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []) !== [];
     }
 
     /**

@@ -2,8 +2,13 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiBlockProvenanceAmbiguousException;
+use App\Exceptions\EnterpriseWikiPageVersionBestPracticeReviewLostException;
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
+use Closure;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -37,19 +42,221 @@ class EnterpriseWikiPageVersionWriter
      */
     public function writeNewCurrentVersion(EnterpriseWikiPage|int $page, array $attributes): EnterpriseWikiPageVersion
     {
+        return $this->writeNewCurrentVersionRestoringBlocks($page, $attributes, null);
+    }
+
+    /**
+     * The same write, for a caller that produces MARKDOWN ONLY and reconstructs the block
+     * provenance immediately afterwards (link/semantic repair, incremental relink).
+     *
+     * The restorer runs inside this transaction, and the block invariant is checked after it: a
+     * version that still has no blocks when the superseded one had them aborts the whole write, so
+     * the page keeps its previous current version intact rather than silently losing its image
+     * figures, source provenance and claim anchors. Run 54 lost a required figure exactly this way
+     * — the reconstruction returned `skipped_ambiguous`, and the blockless version was promoted
+     * anyway.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @param  (Closure(EnterpriseWikiPageVersion): void)|null  $restoreBlocks  Reconstructs
+     *                                                                          content_blocks_json on the freshly written version. Null for an ordinary caller that
+     *                                                                          already supplies its own blocks.
+     *
+     * @throws EnterpriseWikiPageVersionBlockProvenanceLostException
+     */
+    public function writeNewCurrentVersionRestoringBlocks(
+        EnterpriseWikiPage|int $page,
+        array $attributes,
+        ?Closure $restoreBlocks,
+    ): EnterpriseWikiPageVersion {
         $pageId = $page instanceof EnterpriseWikiPage ? $page->id : $page;
 
-        return DB::transaction(function () use ($pageId, $attributes): EnterpriseWikiPageVersion {
+        return DB::transaction(function () use ($pageId, $attributes, $restoreBlocks): EnterpriseWikiPageVersion {
             $this->lockPage($pageId);
+
+            $superseded = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $pageId)
+                ->where('is_current', true)
+                ->first();
 
             $this->demoteCurrentVersion($pageId);
 
-            return EnterpriseWikiPageVersion::query()->create(array_merge($attributes, [
-                'enterprise_wiki_page_id' => $pageId,
-                'version_number' => $this->nextVersionNumberLocked($pageId),
-                'is_current' => true,
-            ]));
+            $version = EnterpriseWikiPageVersion::query()->create(array_merge(
+                $this->carryForwardBestPracticeReview($attributes, $superseded),
+                [
+                    'enterprise_wiki_page_id' => $pageId,
+                    'version_number' => $this->nextVersionNumberLocked($pageId),
+                    'is_current' => true,
+                ],
+            ));
+
+            if ($restoreBlocks !== null) {
+                $restoreBlocks($version);
+                $version->refresh();
+            }
+
+            $this->assertBlockProvenanceSurvived($pageId, $superseded, $version);
+            $this->assertAtomicBlockProvenance($pageId, $version);
+            $this->assertBestPracticeReviewSurvived($pageId, $superseded, $version);
+
+            return $version;
         });
+    }
+
+    /**
+     * ATOMIC PROVENANCE — the invariant every later withdrawal depends on.
+     *
+     * A source-based block represents substance from exactly one source document: all the document
+     * elements it cites share one (source_type, source_id), and the block's own source_id is that
+     * same document. A page may aggregate as many documents as it likes; one BLOCK may not.
+     *
+     * Enforced here because this is the single choke point every current version passes through —
+     * ordinary generation, section repair, figure repair, patch application, link and semantic
+     * repair, incremental relink. A guard in any one of those would leave the others free to write
+     * what this one rejects, which is exactly how the old sub-block replace produced blocks holding
+     * substance from two documents while their source_id still named only the first.
+     *
+     * Structural and best-practice blocks are untouched by this: they carry no document substance,
+     * and the source element keys a best-practice block may cite are the MOTIVATION for a Procynia
+     * recommendation, never its origin. A block with no document provenance at all is likewise not
+     * this guard's business — a source-based block that cites nothing is a grounding question, and
+     * EnterpriseWikiPageContentBlockService already refuses to build one.
+     */
+    private function assertAtomicBlockProvenance(int $pageId, EnterpriseWikiPageVersion $version): void
+    {
+        foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+            if (! is_array($block) || ($block['content_origin'] ?? null) !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED) {
+                continue;
+            }
+
+            $blockKey = trim((string) ($block['block_key'] ?? ''));
+            $documents = [];
+
+            foreach ((array) ($block['source_elements'] ?? []) as $element) {
+                if (! is_array($element)) {
+                    continue;
+                }
+
+                $type = trim((string) ($element['source_type'] ?? ''));
+                $id = $element['source_id'] ?? null;
+
+                if ($type === '' || $id === null) {
+                    continue;
+                }
+
+                $documents[$type.'#'.$id] = true;
+            }
+
+            if (count($documents) > 1) {
+                throw new EnterpriseWikiBlockProvenanceAmbiguousException(
+                    $pageId,
+                    $blockKey,
+                    array_keys($documents),
+                    'its source elements name '.count($documents).' different documents ('.implode(', ', array_keys($documents)).').',
+                );
+            }
+
+            $ownType = trim((string) ($block['source_type'] ?? ''));
+            $ownId = $block['source_id'] ?? null;
+
+            if ($documents === [] || $ownType === '' || $ownId === null) {
+                continue;
+            }
+
+            $own = $ownType.'#'.$ownId;
+
+            if (! array_key_exists($own, $documents)) {
+                throw new EnterpriseWikiBlockProvenanceAmbiguousException(
+                    $pageId,
+                    $blockKey,
+                    array_keys($documents),
+                    "it declares source [{$own}] while citing elements from [".implode(', ', array_keys($documents)).'].',
+                );
+            }
+        }
+    }
+
+    /**
+     * The invariant: promoting a version must never leave a page with fewer than the blocks it
+     * already had, from nothing.
+     *
+     * Deliberately narrow — it only fires when the outgoing version HAD blocks and the incoming one
+     * has NONE. A page that never had blocks (a legacy version, a first write) is untouched, and a
+     * caller that legitimately rewrites the block set is untouched; this is about total loss, which
+     * is never a legitimate outcome of writing a new version.
+     */
+    private function assertBlockProvenanceSurvived(
+        int $pageId,
+        ?EnterpriseWikiPageVersion $superseded,
+        EnterpriseWikiPageVersion $version,
+    ): void {
+        $supersededBlocks = $superseded !== null ? (array) ($superseded->content_blocks_json ?? []) : [];
+
+        if ($supersededBlocks === [] || (array) ($version->content_blocks_json ?? []) !== []) {
+            return;
+        }
+
+        throw new EnterpriseWikiPageVersionBlockProvenanceLostException(
+            pageId: $pageId,
+            supersededVersionId: (int) $superseded->id,
+            supersededBlockCount: count($supersededBlocks),
+            reason: 'The write has been rolled back; the page keeps its previous current version.',
+        );
+    }
+
+    /**
+     * A new current version inherits the superseded one's best-practice assessment unless the caller
+     * brings its own.
+     *
+     * Every path that writes a version WITHOUT regenerating the page — link/semantic repair,
+     * incremental relink, claim repair — supplies markdown only. Those rewrites do not re-assess
+     * anything, so dropping the assessment there would silently turn "assessed, nothing to add"
+     * back into "never assessed", which is precisely the distinction the contract exists to make.
+     * Carrying it forward here rather than in each caller is the same choice
+     * writeNewCurrentVersionRestoringBlocks() makes for block provenance: one choke point, so a
+     * future write path cannot forget.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function carryForwardBestPracticeReview(array $attributes, ?EnterpriseWikiPageVersion $superseded): array
+    {
+        $incoming = $attributes['best_practice_review_json'] ?? null;
+
+        if (is_array($incoming) && $incoming !== []) {
+            return $attributes;
+        }
+
+        $inherited = $superseded !== null ? $superseded->best_practice_review_json : null;
+
+        if (is_array($inherited) && $inherited !== []) {
+            $attributes['best_practice_review_json'] = $inherited;
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * The invariant, mirroring assertBlockProvenanceSurvived(): a page that HAD a recorded
+     * best-practice assessment must never end up with a current version that has none. Narrow by
+     * design — it says nothing about a page that never had one, and nothing about a caller that
+     * legitimately replaces the assessment with a new one.
+     */
+    private function assertBestPracticeReviewSurvived(
+        int $pageId,
+        ?EnterpriseWikiPageVersion $superseded,
+        EnterpriseWikiPageVersion $version,
+    ): void {
+        $supersededReview = $superseded !== null ? (array) ($superseded->best_practice_review_json ?? []) : [];
+
+        if ($supersededReview === [] || (array) ($version->best_practice_review_json ?? []) !== []) {
+            return;
+        }
+
+        throw new EnterpriseWikiPageVersionBestPracticeReviewLostException(
+            pageId: $pageId,
+            supersededVersionId: (int) $superseded->id,
+            supersededReviewCount: count($supersededReview),
+        );
     }
 
     /**

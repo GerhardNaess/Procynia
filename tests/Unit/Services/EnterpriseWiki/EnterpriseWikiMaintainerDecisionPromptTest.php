@@ -915,9 +915,14 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $props = EnterpriseWikiMaintainerDecisionPrompt::globalPlanSchema()['json_schema']['schema']['properties'];
         $mentionSchema = $props['concept_candidate_mentions']['items'];
 
-        $this->assertSame(['name', 'concept_type', 'mentioned_context'], $mentionSchema['required']);
+        // section_keys is ROUTING metadata (which sections phase 2 needs in full text), not a
+        // disposition — phase 1 stays an orientation step. The dispositional fields are what must
+        // never appear here.
+        $this->assertSame(['name', 'concept_type', 'mentioned_context', 'section_keys'], $mentionSchema['required']);
         $this->assertArrayNotHasKey('decision', $mentionSchema['properties']);
         $this->assertArrayNotHasKey('justification', $mentionSchema['properties']);
+        $this->assertArrayNotHasKey('owning_page_title', $mentionSchema['properties']);
+        $this->assertArrayNotHasKey('source_element_keys', $mentionSchema['properties'], 'evidence binding stays in phase 2');
     }
 
     public function test_global_plan_schema_reuses_the_same_source_page_shape_as_the_full_schema(): void
@@ -992,12 +997,25 @@ class EnterpriseWikiMaintainerDecisionPromptTest extends TestCase
         $this->assertFalse($schema['json_schema']['schema']['additionalProperties']);
     }
 
-    public function test_candidate_batch_schema_requires_concept_candidates_and_concept_pages_only(): void
+    /**
+     * A batch decides candidate disposition and nothing else about the document — with one Fase 8K-2
+     * addition: it may contribute patch_targets for its OWN candidates. Only this phase discovers
+     * that a candidate changes substance an existing page owns, so without it the create-gate's
+     * "an identified substance change must be a structured target" rule would be unsatisfiable in the
+     * split flow and the finding would fall back into free-text warnings.
+     */
+    public function test_candidate_batch_schema_carries_only_the_slots_a_batch_decides(): void
     {
         $schema = EnterpriseWikiMaintainerDecisionPrompt::candidateBatchSchema()['json_schema']['schema'];
 
-        $this->assertSame(['concept_candidates', 'concept_pages'], $schema['required']);
-        $this->assertSame(['concept_candidates', 'concept_pages'], array_keys($schema['properties']));
+        // entity_pages belongs here for the same reason patch_targets does: a batch can discover
+        // that its own candidate is covered by an existing ENTITY page, a disposition phase 1 never
+        // evaluates. Without the slot, the only legal way to say "reuse it" was concept_pages —
+        // naming an entity through a concept slot, which run 55 did and apply then refused.
+        $this->assertSame(['concept_candidates', 'concept_pages', 'entity_pages', 'patch_targets'], $schema['required']);
+        $this->assertSame(['concept_candidates', 'concept_pages', 'entity_pages', 'patch_targets'], array_keys($schema['properties']));
+        $this->assertArrayNotHasKey('source_article', $schema['properties'], 'a batch never redecides the document pages');
+        $this->assertArrayNotHasKey('source_summary', $schema['properties']);
     }
 
     public function test_candidate_batch_schema_reuses_the_exact_same_fragments_as_the_full_schema(): void

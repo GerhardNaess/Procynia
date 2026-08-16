@@ -34,7 +34,7 @@ class EnterpriseWikiLinkCatalogService
 
     /**
      * @return array{
-     *     catalog: list<array{slug: string, title: string, page_type: string}>,
+     *     catalog: list<array{page_id: int, slug: string, title: string, page_type: string}>,
      *     run_page_count: int,
      * }
      */
@@ -65,6 +65,7 @@ class EnterpriseWikiLinkCatalogService
 
         $catalog = $runPages->concat($otherPages)
             ->map(fn (EnterpriseWikiPage $page) => [
+                'page_id' => $page->id,
                 'slug' => $page->slug,
                 'title' => $page->title,
                 'page_type' => $page->page_type,

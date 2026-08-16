@@ -19,6 +19,7 @@ use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\WatchProfileController;
+use App\Http\Controllers\App\WikiAskController;
 use App\Http\Controllers\App\WikiClaimController;
 use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\App\WikiDocumentOwnerApprovalController;
@@ -322,12 +323,15 @@ Route::prefix('app')
             Route::get('/sources/{document}/images/{imageKey}', [WikiSourceController::class, 'image'])->name('sources.image');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
             Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
+            // "Spør Wiki" — read-only Q&A. Must stay above the /{slug} catch-all below, or "ask"
+            // would be resolved as a page slug.
+            Route::get('/ask', [WikiAskController::class, 'index'])->name('ask');
+            Route::post('/ask', [WikiAskController::class, 'ask'])->name('ask.submit');
             Route::get('/runs/{run}/pages', [WikiController::class, 'runPages'])->name('runs.pages');
             Route::get('/runs/{run}/findings', [WikiController::class, 'runFindings'])->name('runs.findings');
             Route::patch('/runs/{run}/cancel', [WikiController::class, 'cancelRun'])->name('runs.cancel');
             Route::patch('/runs/{run}/retry-maintainer-decision', [WikiController::class, 'retryMaintainerDecision'])->name('runs.retry-maintainer-decision');
             Route::patch('/{slug}/claims/{claim}/manual-block-edit', [WikiController::class, 'updateManualMixedBlockEdit'])->name('claims.manual-block-edit.update');
-            Route::patch('/{slug}/structure-findings/{finding}/link-target', [WikiController::class, 'linkOrphanConceptTarget'])->name('structure-findings.link-target');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');

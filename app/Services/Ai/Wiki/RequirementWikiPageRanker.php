@@ -64,7 +64,7 @@ class RequirementWikiPageRanker
      * @param  list<array<string, mixed>>  $catalog
      * @param  list<string>  $queryTokens
      * @param  list<int>  $excludePageIds
-     * @return list<array{page_id: int, title: string, page_type: string, slug: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int, score: int, score_breakdown: array}>
+     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int, score: int, score_breakdown: array}>
      */
     public function rank(array $catalog, array $queryTokens, int $customerId, array $excludePageIds = []): array
     {
@@ -101,6 +101,7 @@ class RequirementWikiPageRanker
                     'page_id' => $entry['page_id'],
                     'title' => $entry['title'],
                     'page_type' => $entry['page_type'],
+                    'scope' => $entry['scope'],
                     'slug' => $entry['slug'],
                     'headings' => $entry['headings'],
                     'excerpt' => $entry['excerpt'],

@@ -29,20 +29,46 @@ class RequirementWikiCatalogBuilder
     private const EXCERPT_MAX_CHARS = 220;
 
     /**
+     * Statuses that can ever represent CURRENT customer knowledge. Archived/superseded/rejected are
+     * excluded by construction, so no caller can widen $statuses into stale content.
+     */
+    public const CURRENT_KNOWLEDGE_STATUSES = [
+        EnterpriseWikiPage::STATUS_APPROVED,
+        EnterpriseWikiPage::STATUS_DRAFT,
+        EnterpriseWikiPage::STATUS_PENDING_REVIEW,
+    ];
+
+    /**
      * Purpose: Build the full customer-scoped Wiki catalog.
-     * Inputs: The customer id.
+     * Inputs: The customer id, and optionally which page statuses are eligible.
      * Returns: One entry per eligible page:
-     *          {page_id, title, page_type, slug, content_markdown, headings, excerpt,
+     *          {page_id, title, page_type, scope, slug, content_markdown, headings, excerpt,
      *           outgoing_link_count, backlink_count}.
      * Side effects: None (read-only).
      *
-     * @return list<array{page_id: int, title: string, page_type: string, slug: string, content_markdown: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
+     * $statuses defaults to approved-only, which is the behaviour every existing caller relies on.
+     * "Spør Wiki" (EnterpriseWikiQuestionAnswerService) passes the asking user's own visible
+     * statuses instead, so a reviewer who may legitimately read a draft page can also get answers
+     * grounded in it — the same read model the Wiki pages themselves use. Archived, superseded and
+     * rejected pages are never eligible for either caller: they are not current knowledge.
+     *
+     * @param  list<string>|null  $statuses
+     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
      */
-    public function build(int $customerId): array
+    public function build(int $customerId, ?array $statuses = null): array
     {
+        $eligibleStatuses = array_values(array_intersect(
+            $statuses ?? [EnterpriseWikiPage::STATUS_APPROVED],
+            self::CURRENT_KNOWLEDGE_STATUSES,
+        ));
+
+        if ($eligibleStatuses === []) {
+            return [];
+        }
+
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->where('status', EnterpriseWikiPage::STATUS_APPROVED)
+            ->whereIn('status', $eligibleStatuses)
             ->with('currentVersion')
             ->get()
             ->filter(fn (EnterpriseWikiPage $page): bool => trim((string) $page->currentVersion?->content_markdown) !== '')
@@ -64,6 +90,7 @@ class RequirementWikiCatalogBuilder
                     'page_id' => $page->id,
                     'title' => $page->title,
                     'page_type' => $page->page_type,
+                    'scope' => (string) $page->scope,
                     'slug' => $page->slug,
                     'content_markdown' => $contentMarkdown,
                     'headings' => $this->extractHeadings($contentMarkdown),

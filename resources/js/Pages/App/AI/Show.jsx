@@ -11,6 +11,7 @@ import {
     dedupeWikiAnswerSourcesByPageId,
     normalizeWikiAnswerText,
 } from './wikiAnswerPresentation';
+import { WikiAnswerMarkdown } from './wikiAnswerMarkdown';
 
 const AI_STATUS_META = {
     not_started: {
@@ -1948,6 +1949,9 @@ export default function AiShow({
     // holds the local, editable buffer for the generated answer text — mirrors the shape the legacy
     // answer-draft flow used (text + isDirty), so a hand-edited answer is never lost until saved.
     const [wikiAnswerEditsByRequirementId, setWikiAnswerEditsByRequirementId] = useState({});
+    // Which requirement's answer is open in the raw-Markdown editor. Null means every answer is in
+    // normal (rendered) display — the answer is a document to read, not a text field to stare at.
+    const [wikiAnswerEditingRequirementId, setWikiAnswerEditingRequirementId] = useState(null);
     const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
     const [wikiAnswerSavingRequirementId, setWikiAnswerSavingRequirementId] = useState(null);
     const [wikiAnswerCopyStatus, setWikiAnswerCopyStatus] = useState(null);
@@ -2191,6 +2195,8 @@ export default function AiShow({
         ? activeRequirementWikiAnswerLocalEdit.text
         : activeRequirementWikiAnswerServerText;
     const activeRequirementWikiAnswerIsDirty = activeRequirementWikiAnswerLocalEdit?.isDirty ?? false;
+    const isEditingActiveWikiAnswer = activeRequirement !== null
+        && wikiAnswerEditingRequirementId === activeRequirement.id;
     const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
     const activeRequirementWikiAnswerStaleContext = activeRequirementWikiAnswer?.stale_context ?? null;
     const activeRequirementWikiAnswerStaleSubjectName = (() => {
@@ -2535,6 +2541,9 @@ export default function AiShow({
 
         setActiveRequirementId(requirementKey);
         setWikiAnswerError(null);
+        // A regenerated answer replaces the text under the editor, so the editor must not stay open
+        // over it holding a hand-edit of the previous answer.
+        setWikiAnswerEditingRequirementId(null);
         setWikiAnswerGeneratingRequirementId(requirement.id);
 
         try {
@@ -2603,6 +2612,29 @@ export default function AiShow({
                 isDirty: normalizedText !== activeRequirementWikiAnswerServerText,
             },
         }));
+    };
+
+    const startEditingActiveWikiAnswer = () => {
+        if (activeRequirement === null) {
+            return;
+        }
+
+        setWikiAnswerEditingRequirementId(activeRequirement.id);
+    };
+
+    /**
+     * Purpose: Leave the Markdown editor without keeping the hand-edit.
+     * Side effects: Drops the local edit so the rendered view shows the saved answer again.
+     */
+    const cancelEditingActiveWikiAnswer = () => {
+        if (activeRequirementKey !== null) {
+            setWikiAnswerEditsByRequirementId((currentState) => ({
+                ...currentState,
+                [activeRequirementKey]: { text: activeRequirementWikiAnswerServerText, isDirty: false },
+            }));
+        }
+
+        setWikiAnswerEditingRequirementId(null);
     };
 
     /**
@@ -2728,6 +2760,7 @@ export default function AiShow({
                 ...currentState,
                 [activeRequirementKey]: { text: normalizedText, isDirty: false },
             }));
+            setWikiAnswerEditingRequirementId(null);
         } catch (error) {
             setWikiAnswerError({
                 requirementId: activeRequirement.id,
@@ -4099,49 +4132,93 @@ export default function AiShow({
                                                             </div>
                                                         ) : null}
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => void copyActiveWikiAnswerContent()}
-                                                        disabled={!activeRequirementWikiAnswerHasText}
-                                                        className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
-                                                    </button>
-                                                </div>
-
-                                                <div className="mt-4 flex flex-col gap-2">
-                                                    <textarea
-                                                        aria-label={`${tai.wiki_answer_for_requirement} ${activeRequirementDisplayIdentifier}`}
-                                                        value={activeRequirementWikiAnswerText}
-                                                        onChange={(event) => updateActiveWikiAnswerText(event.target.value)}
-                                                        rows={14}
-                                                        disabled={
-                                                            wikiAnswerGeneratingRequirementId === activeRequirement.id
-                                                            || wikiAnswerSavingRequirementId === activeRequirement.id
-                                                        }
-                                                        className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        placeholder={tai.answer_draft_placeholder}
-                                                    />
-                                                </div>
-
-                                                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                                                    <div className="text-base text-slate-600">
-                                                        {activeRequirementWikiAnswerIsDirty ? tai.unsaved_changes : ''}
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        {isEditingActiveWikiAnswer ? null : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={startEditingActiveWikiAnswer}
+                                                                disabled={
+                                                                    !activeRequirementWikiAnswerHasText
+                                                                    || !activeRequirement.wiki_answer_update_url
+                                                                    || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                                }
+                                                                className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {tai.wiki_answer_edit ?? 'Rediger'}
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void copyActiveWikiAnswerContent()}
+                                                            disabled={!activeRequirementWikiAnswerHasText}
+                                                            className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
+                                                        </button>
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => void saveActiveWikiAnswerText()}
-                                                        disabled={
-                                                            !activeRequirementWikiAnswerHasText
-                                                            || !activeRequirement.wiki_answer_update_url
-                                                            || wikiAnswerGeneratingRequirementId === activeRequirement.id
-                                                            || wikiAnswerSavingRequirementId === activeRequirement.id
-                                                        }
-                                                        className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {wikiAnswerSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
-                                                    </button>
                                                 </div>
+
+                                                {isEditingActiveWikiAnswer ? (
+                                                    <>
+                                                        <div className="mt-4 flex flex-col gap-2">
+                                                            <textarea
+                                                                aria-label={`${tai.wiki_answer_for_requirement} ${activeRequirementDisplayIdentifier}`}
+                                                                value={activeRequirementWikiAnswerText}
+                                                                onChange={(event) => updateActiveWikiAnswerText(event.target.value)}
+                                                                rows={14}
+                                                                disabled={
+                                                                    wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                                    || wikiAnswerSavingRequirementId === activeRequirement.id
+                                                                }
+                                                                className="h-[18rem] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 font-mono text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-500 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                placeholder={tai.answer_draft_placeholder}
+                                                            />
+                                                            <p className="text-base text-slate-600">
+                                                                {tai.wiki_answer_edit_markdown_hint ?? 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.'}
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                                            <div className="text-base text-slate-600">
+                                                                {activeRequirementWikiAnswerIsDirty ? tai.unsaved_changes : ''}
+                                                            </div>
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={cancelEditingActiveWikiAnswer}
+                                                                    disabled={wikiAnswerSavingRequirementId === activeRequirement.id}
+                                                                    className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {tai.cancel ?? 'Avbryt'}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => void saveActiveWikiAnswerText()}
+                                                                    disabled={
+                                                                        !activeRequirementWikiAnswerHasText
+                                                                        || !activeRequirement.wiki_answer_update_url
+                                                                        || wikiAnswerGeneratingRequirementId === activeRequirement.id
+                                                                        || wikiAnswerSavingRequirementId === activeRequirement.id
+                                                                    }
+                                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {wikiAnswerSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div
+                                                        data-testid="wiki-answer-rendered"
+                                                        className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base leading-7 text-slate-800"
+                                                    >
+                                                        {activeRequirementWikiAnswerHasText ? (
+                                                            <WikiAnswerMarkdown text={activeRequirementWikiAnswerText} />
+                                                        ) : (
+                                                            <span className="text-slate-600">{tai.wiki_answer_none_message}</span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </section>
 
                                             <section

@@ -5,6 +5,8 @@ namespace Tests\Unit\Services\Ai;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Data\Ai\Capacity\AiTimeoutRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
+use App\Exceptions\EnterpriseWikiInvalidUtf8Exception;
+use App\Exceptions\EnterpriseWikiPlannedSectionRepairShapeException;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiRequestTimeoutPolicy;
@@ -43,6 +45,30 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertSame('low', data_get($payload, 'reasoning.effort'));
         $this->assertFalse($payload['store']);
         $this->assertArrayNotHasKey('temperature', $payload);
+    }
+
+    public function test_invalid_source_element_text_is_rejected_before_the_ai_request_is_sent(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldNotReceive('createResponse');
+
+        try {
+            app(WikiPageContentAiClient::class)->generatePageFromSource(
+                pageTitle: 'Test Page',
+                pageType: 'article',
+                sourceText: 'Gyldig kildetekst.',
+                languageCode: 'no',
+                sourceElements: [[
+                    'source_element_key' => 'paragraph-7',
+                    'reference_text' => "Ugyldig \xB1 tekst",
+                ]],
+            );
+            $this->fail('Expected invalid UTF-8 to stop request construction.');
+        } catch (EnterpriseWikiInvalidUtf8Exception $exception) {
+            $this->assertSame('source_elements[0].reference_text', $exception->fieldPath);
+            $this->assertSame('paragraph-7', $exception->sourceElementKey);
+        }
     }
 
     // Wiki run-6: max_output_tokens (and, by extension, the request timeout — see
@@ -130,8 +156,8 @@ class WikiPageContentAiClientTest extends TestCase
     public function test_link_catalog_is_included_in_the_user_prompt(): void
     {
         $catalog = [
-            ['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept'],
-            ['slug' => 'prosjekteier', 'title' => 'Prosjekteier', 'page_type' => 'entity'],
+            ['page_id' => 101, 'slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept'],
+            ['page_id' => 102, 'slug' => 'prosjekteier', 'title' => 'Prosjekteier', 'page_type' => 'entity'],
         ];
 
         $payload = $this->capturePayload(linkCatalog: $catalog);
@@ -142,30 +168,30 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('prosjekteier', $userPrompt);
     }
 
-    // Runtime fix (run 18): the catalog must show exact, copyable canonical [[slug|Title]]
-    // markup per target — reduces the chance the model writes a title-cased bare slug instead
-    // of the real, differently-cased slug (e.g. [[Advania]] instead of [[advania|Advania]]).
-    public function test_catalog_shows_exact_copyable_canonical_markup_per_target(): void
+    public function test_catalog_shows_server_authoritative_page_id_per_target(): void
     {
         $catalog = [
-            ['slug' => 'advania', 'title' => 'Advania', 'page_type' => 'entity'],
-            ['slug' => 'risikostyring', 'title' => 'Risikostyring', 'page_type' => 'concept'],
+            ['page_id' => 201, 'slug' => 'advania', 'title' => 'Advania', 'page_type' => 'entity'],
+            ['page_id' => 202, 'slug' => 'risikostyring', 'title' => 'Risikostyring', 'page_type' => 'concept'],
         ];
 
         $payload = $this->capturePayload(linkCatalog: $catalog);
         $userPrompt = $this->userPromptTextFromPayload($payload);
 
-        $this->assertStringContainsString('[[advania|Advania]]', $userPrompt);
-        $this->assertStringContainsString('[[risikostyring|Risikostyring]]', $userPrompt);
+        $this->assertStringContainsString('"page_id": 201', $userPrompt);
+        $this->assertStringContainsString('"page_id": 202', $userPrompt);
     }
 
-    public function test_developer_prompt_instructs_copying_the_slug_exactly(): void
+    public function test_developer_prompt_instructs_selecting_server_authoritative_identity(): void
     {
         $payload = $this->capturePayload();
         $developerPrompt = $this->developerPromptTextFromPayload($payload);
 
-        $this->assertStringContainsString('copy', mb_strtolower($developerPrompt));
-        $this->assertStringContainsString('slug', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('target_page_id', $developerPrompt);
+        // The model names the words to link; it never writes the syntax (run 59).
+        $this->assertStringContainsString('anchor_text', $developerPrompt);
+        $this->assertStringNotContainsString('{{wiki_link:', $developerPrompt);
+        $this->assertStringContainsString('never write a target slug', mb_strtolower($developerPrompt));
     }
 
     // =========================================================================
@@ -311,9 +337,38 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('Every source_based block must cite one or more source_element_key values', $userPrompt);
     }
 
+    public function test_planned_generation_uses_per_section_evidence_instead_of_a_global_source_blob(): void
+    {
+        $payload = $this->capturePayload(
+            sourceText: 'Dette må ikke bli den globale kildeblobben.',
+            plannedSections: [[
+                'section_index' => 0,
+                'planned_topic' => 'Problemterskler',
+                'required_heading' => 'Problemterskler',
+                'section_purpose' => 'Explain the threshold.',
+                'source_element_keys' => ['paragraph-2'],
+                'source_evidence' => [[
+                    'source_element_key' => 'paragraph-2',
+                    'source_element_type' => 'paragraph',
+                    'reference_text' => 'Tre P2-hendelser innen 30 dager utløser problemregistrering.',
+                ]],
+            ]],
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+        $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('AUTHORITATIVE PLANNED SECTION CONTRACT', $userPrompt);
+        $this->assertStringContainsString('section_index: 0', $userPrompt);
+        $this->assertStringContainsString('source_element_keys: paragraph-2', $userPrompt);
+        $this->assertStringContainsString('Tre P2-hendelser', $userPrompt);
+        $this->assertStringNotContainsString('Dette må ikke bli den globale kildeblobben.', $userPrompt);
+        $this->assertStringContainsString('Generate exactly one substantial ## section', $developerPrompt);
+    }
+
     public function test_adding_a_link_catalog_does_not_change_the_model_token_reasoning_or_store_contract(): void
     {
-        $catalog = [['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];
+        $catalog = [['page_id' => 101, 'slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];
 
         $payloadWithoutCatalog = $this->capturePayload();
         $payloadWithCatalog = $this->capturePayload(linkCatalog: $catalog);
@@ -326,14 +381,16 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertFalse($payloadWithCatalog['store']);
     }
 
-    public function test_developer_prompt_documents_slug_and_slug_anchor_syntax(): void
+    public function test_developer_prompt_documents_structured_link_intents(): void
     {
         foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
             $payload = $this->capturePayload(pageType: $pageType);
             $developerPrompt = $this->developerPromptTextFromPayload($payload);
 
-            $this->assertStringContainsString('[[target-slug|natural visible text]]', $developerPrompt, "page type: {$pageType}");
-            $this->assertStringContainsString('[[target-slug]]', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('INLINE WIKILINK INTENTS', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('target_page_id', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('anchor_text copied verbatim', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringNotContainsString('{{wiki_link:', $developerPrompt, "page type: {$pageType}");
         }
     }
 
@@ -343,7 +400,7 @@ class WikiPageContentAiClientTest extends TestCase
 
         $schema = $payload['text']['format']['schema'];
 
-        $this->assertSame(['page'], $schema['required']);
+        $this->assertSame(['page', 'best_practice_review'], $schema['required']);
         $this->assertSame(['blocks'], $schema['properties']['page']['required']);
         $blockSchema = $schema['properties']['page']['properties']['blocks']['items'];
         $this->assertSame([
@@ -356,6 +413,22 @@ class WikiPageContentAiClientTest extends TestCase
         ], $blockSchema['required']);
         $this->assertFalse($schema['properties']['page']['additionalProperties']);
         $this->assertFalse($schema['additionalProperties']);
+    }
+
+    public function test_schema_limits_link_intent_target_page_id_to_the_allowed_catalog(): void
+    {
+        $payload = $this->capturePayload(linkCatalog: [
+            ['page_id' => 201, 'slug' => 'service-improvement-f93a12', 'title' => 'Service Improvement', 'page_type' => 'article'],
+            ['page_id' => 202, 'slug' => 'incident-management', 'title' => 'Incident Management', 'page_type' => 'concept'],
+        ]);
+
+        $targetPageIdSchema = data_get($payload, 'text.format.schema.properties.page.properties.blocks.items.properties.link_intents.items.properties.target_page_id');
+
+        $this->assertSame('integer', $targetPageIdSchema['type']);
+        $this->assertSame([201, 202], $targetPageIdSchema['enum']);
+        $intentSchema = data_get($payload, 'text.format.schema.properties.page.properties.blocks.items.properties.link_intents.items');
+        $this->assertSame(['intent_id', 'target_page_id', 'anchor_text', 'reason'], $intentSchema['required']);
+        $this->assertSame('^[A-Za-z0-9_-]+$', $intentSchema['properties']['intent_id']['pattern']);
     }
 
     // =========================================================================
@@ -840,7 +913,7 @@ class WikiPageContentAiClientTest extends TestCase
         $client = $this->clientWithRawResponse([
             'id' => 'resp_invalid_json',
             'output_text' => 'dette er ikke json',
-        ]);
+        ], expectedCalls: 2);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not valid JSON/');
@@ -935,6 +1008,234 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertStringContainsString('do not write the section heading', mb_strtolower($developerPrompt));
     }
 
+    public function test_repair_request_serializes_a_long_unicode_issue_body_without_utf8_corruption(): void
+    {
+        $capturedPayload = null;
+        $plannedTopic = 'Årsaksanalyse og oppfølging';
+        $currentInvalidBody = str_repeat('Årsak – «åpen» oppfølging. ', 60).'Å';
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload, $plannedTopic): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [$this->sourceBasedSection($plannedTopic, 'Årsakanalysen gjennomgås annenhver uke.')],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Årsaksanalyse',
+            pageType: 'concept',
+            existingMarkdown: "# Årsaksanalyse\n\n## {$plannedTopic}\n\n{$currentInvalidBody}",
+            issues: [[
+                'type' => 'planned_section_only_links',
+                'planned_topic' => $plannedTopic,
+                'heading' => $plannedTopic,
+                'current_invalid_body' => $currentInvalidBody,
+            ]],
+            sourceText: 'Årsaker og tiltak skal gjennomgås annenhver uke.',
+            languageCode: 'no',
+        );
+
+        $this->assertTrue(mb_check_encoding($currentInvalidBody, 'UTF-8'));
+        $this->assertNotFalse(json_encode($capturedPayload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        $this->assertStringContainsString($currentInvalidBody, $this->userPromptTextFromPayload((array) $capturedPayload));
+    }
+
+    public function test_repair_planned_sections_locks_planned_topic_to_the_exact_allowed_set_for_the_page(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [
+                            $this->sourceBasedSection('Roller i styringsmodellen', 'Ferdig tekst.'),
+                            $this->sourceBasedSection('Møtefora og beslutningsflyt', 'Ferdig tekst.'),
+                        ],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: "# Test Page\n\n## Roller i styringsmodellen\n\n## Møtefora og beslutningsflyt",
+            issues: [
+                ['type' => 'planned_section_missing', 'planned_topic' => 'Roller i styringsmodellen', 'heading' => 'Roller i styringsmodellen'],
+                ['type' => 'planned_section_missing', 'planned_topic' => 'Møtefora og beslutningsflyt', 'heading' => 'Møtefora og beslutningsflyt'],
+            ],
+            sourceText: 'Kildetekst med relevant informasjon.',
+            languageCode: 'no',
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($capturedPayload);
+        $developerPrompt = $this->developerPromptTextFromPayload($capturedPayload);
+        $allowedTopics = data_get($capturedPayload, 'text.format.schema.properties.sections.items.properties.planned_topic.enum', []);
+        $minItems = data_get($capturedPayload, 'text.format.schema.properties.sections.minItems');
+        $maxItems = data_get($capturedPayload, 'text.format.schema.properties.sections.maxItems');
+
+        $this->assertSame([
+            'Roller i styringsmodellen',
+            'Møtefora og beslutningsflyt',
+        ], $allowedTopics);
+        $this->assertSame(2, $minItems);
+        $this->assertSame(2, $maxItems);
+        $this->assertStringContainsString('ALLOWED PLANNED TOPICS FOR THIS PAGE', $userPrompt);
+        $this->assertStringContainsString('- Roller i styringsmodellen', $userPrompt);
+        $this->assertStringContainsString('- Møtefora og beslutningsflyt', $userPrompt);
+        $this->assertStringContainsString('allowed planned topics (exact copy only):', mb_strtolower($developerPrompt));
+        $this->assertStringContainsString('the only valid planned_topic values for this response are the exact allowed topics listed below', mb_strtolower($developerPrompt));
+    }
+
+    public function test_repair_planned_sections_includes_per_section_source_evidence_and_non_empty_contract(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [
+                            $this->sourceBasedSection('Innhold i problemregistrering og krav til gjennomgangskadens', 'Ferdig tekst.'),
+                        ],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: "# Test Page\n\n## Innhold i problemregistrering og krav til gjennomgangskadens",
+            issues: [
+                ['type' => 'planned_section_only_links', 'planned_topic' => 'Innhold i problemregistrering og krav til gjennomgangskadens', 'heading' => 'Innhold i problemregistrering og krav til gjennomgangskadens'],
+            ],
+            sourceText: 'Kildetekst med relevant informasjon.',
+            languageCode: 'no',
+            sourceElements: [
+                [
+                    'source_element_key' => 'paragraph-3',
+                    'source_element_type' => 'paragraph',
+                    'section_title' => '2. Problemhåndtering',
+                    'page_reference' => '2. Problemhåndtering',
+                    'reference_text' => 'Gjentakende hendelser og hendelser uten kjent varig løsning skal vurderes som problem.',
+                    'display_text' => 'Gjentakende hendelser og hendelser uten kjent varig løsning skal vurderes som problem.',
+                ],
+                [
+                    'source_element_key' => 'paragraph-5',
+                    'source_element_type' => 'paragraph',
+                    'section_title' => '4. Måling og rapportering',
+                    'page_reference' => '4. Måling og rapportering',
+                    'reference_text' => 'Månedsrapporten skal inneholde tilgjengelighet, antall hendelser per prioritet.',
+                    'display_text' => 'Månedsrapporten skal inneholde tilgjengelighet, antall hendelser per prioritet.',
+                ],
+            ],
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($capturedPayload);
+
+        $this->assertStringContainsString('PLANNED SECTION EVIDENCE', $userPrompt);
+        $this->assertStringContainsString('required_heading: Innhold i problemregistrering og krav til gjennomgangskadens', $userPrompt);
+        $this->assertStringContainsString('must_be_non_empty: true', $userPrompt);
+        $this->assertStringContainsString('[paragraph-3] (paragraph)', $userPrompt);
+        $this->assertStringContainsString('2. Problemhåndtering', $userPrompt);
+        $this->assertStringContainsString('[paragraph-5] (paragraph)', $userPrompt);
+        $this->assertStringContainsString('4. Måling og rapportering', $userPrompt);
+        $this->assertStringContainsString('SOURCE ELEMENTS (2 elements):', $userPrompt);
+        $this->assertStringContainsString('The source document, split into its addressable elements', $userPrompt);
+    }
+
+    public function test_only_links_repair_prompt_includes_the_exact_invalid_body_and_assigned_evidence(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+                $section = $this->sourceBasedSection('Review cadence for open problems', 'Open problems are reviewed every second week.');
+                $section['blocks'][0]['source_element_keys'] = ['paragraph-4'];
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'sections' => [$section],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Problem management',
+            pageType: 'concept',
+            existingMarkdown: "# Problem management\n\n## Review cadence for open problems\n\n[[problem-management|Problem management]]",
+            issues: [[
+                'type' => 'planned_section_only_links',
+                'issue_code' => 'planned_section_only_links',
+                'section_index' => 0,
+                'planned_topic' => 'Review cadence for open problems',
+                'heading' => 'Review cadence for open problems',
+                'current_invalid_body' => '[[problem-management|Problem management]]',
+                'assigned_source_element_keys' => ['paragraph-4'],
+                'assigned_source_evidence' => [[
+                    'source_element_key' => 'paragraph-4',
+                    'source_element_type' => 'paragraph',
+                    'reference_text' => 'Open problems are reviewed every second week.',
+                ]],
+            ]],
+            sourceText: 'Open problems are reviewed every second week.',
+            languageCode: 'en',
+            plannedSections: [[
+                'section_index' => 0,
+                'planned_topic' => 'Review cadence for open problems',
+                'required_heading' => 'Review cadence for open problems',
+                'source_element_keys' => ['paragraph-4'],
+                'source_evidence' => [[
+                    'source_element_key' => 'paragraph-4',
+                    'source_element_type' => 'paragraph',
+                    'reference_text' => 'Open problems are reviewed every second week.',
+                ]],
+            ]],
+            sectionStatuses: [[
+                'section_index' => 0,
+                'planned_topic' => 'Review cadence for open problems',
+                'status' => 'planned_section_only_links',
+            ]],
+        );
+
+        $userPrompt = $this->userPromptTextFromPayload($capturedPayload);
+        $developerPrompt = $this->developerPromptTextFromPayload($capturedPayload);
+
+        $this->assertStringContainsString('issue_code: planned_section_only_links', $userPrompt);
+        $this->assertStringContainsString('section_index: 0', $userPrompt);
+        $this->assertStringContainsString('current_invalid_body: [[problem-management|Problem management]]', $userPrompt);
+        $this->assertStringContainsString('assigned_source_element_keys: paragraph-4', $userPrompt);
+        $this->assertStringContainsString('Open problems are reviewed every second week.', $userPrompt);
+        $this->assertStringContainsString('must_contain_grounded_prose: true', $userPrompt);
+        $this->assertStringContainsString('links_must_not_be_the_only_content: true', $userPrompt);
+        $this->assertStringContainsString('replace the link-only body with concise grounded prose', mb_strtolower($developerPrompt));
+    }
+
     public function test_repair_planned_sections_uses_the_same_strict_schema(): void
     {
         /** @var OpenAiClient&MockInterface $mock */
@@ -977,8 +1278,8 @@ class WikiPageContentAiClientTest extends TestCase
                 'output_text' => json_encode(['sections' => []]),
             ]);
 
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/repaired sections were empty/');
+        $this->expectException(EnterpriseWikiPlannedSectionRepairShapeException::class);
+        $this->expectExceptionMessageMatches('/repair_section_count_mismatch/');
 
         app(WikiPageContentAiClient::class)->repairPlannedSections(
             pageTitle: 'Test Page',
@@ -987,6 +1288,71 @@ class WikiPageContentAiClientTest extends TestCase
             issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
             sourceText: 'Kildetekst.',
             languageCode: 'no',
+        );
+    }
+
+    public function test_repair_planned_sections_rejects_one_of_four_sections_with_an_explicit_shape_code(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'sections' => [$this->sourceBasedSection('A', 'Only one section returned.')],
+                ]),
+            ]);
+
+        try {
+            app(WikiPageContentAiClient::class)->repairPlannedSections(
+                pageTitle: 'Test Page',
+                pageType: 'concept',
+                existingMarkdown: '# Test Page',
+                issues: [['type' => 'planned_section_empty', 'planned_topic' => 'A', 'heading' => 'A']],
+                sourceText: 'Kildetekst.',
+                languageCode: 'no',
+                plannedSections: [
+                    ['planned_topic' => 'A', 'source_element_keys' => ['source-a']],
+                    ['planned_topic' => 'B', 'source_element_keys' => ['source-b']],
+                    ['planned_topic' => 'C', 'source_element_keys' => ['source-c']],
+                    ['planned_topic' => 'D', 'source_element_keys' => ['source-d']],
+                ],
+            );
+            $this->fail('Expected the repair shape contract to reject one of four sections.');
+        } catch (EnterpriseWikiPlannedSectionRepairShapeException $e) {
+            $this->assertSame(4, $e->expectedSectionCount);
+            $this->assertSame(1, $e->returnedSectionCount);
+        }
+    }
+
+    public function test_repair_planned_sections_rejects_evidence_assigned_to_another_section(): void
+    {
+        $foreignEvidenceSection = $this->sourceBasedSection('A', 'Body supported by the wrong element.');
+        $foreignEvidenceSection['blocks'][0]['source_element_keys'] = ['source-b'];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode(['sections' => [$foreignEvidenceSection]]),
+            ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/repair_section_unassigned_evidence/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [['type' => 'planned_section_empty', 'planned_topic' => 'A', 'heading' => 'A']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+            plannedSections: [
+                ['planned_topic' => 'A', 'source_element_keys' => ['source-a']],
+            ],
         );
     }
 
@@ -1030,13 +1396,45 @@ class WikiPageContentAiClientTest extends TestCase
             ]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/did not match any requested planned_topic/');
+        $this->expectExceptionMessageMatches('/did not match requested planned_topic/');
 
         app(WikiPageContentAiClient::class)->repairPlannedSections(
             pageTitle: 'Test Page',
             pageType: 'concept',
             existingMarkdown: '# Test Page',
             issues: [['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X']],
+            sourceText: 'Kildetekst.',
+            languageCode: 'no',
+        );
+    }
+
+    public function test_repair_planned_sections_throws_when_topics_are_returned_in_the_wrong_order(): void
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturn([
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'sections' => [
+                        $this->sourceBasedSection('Y', 'Some content.'),
+                        $this->sourceBasedSection('X', 'Some content.'),
+                    ],
+                ]),
+            ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/did not match requested planned_topic/');
+
+        app(WikiPageContentAiClient::class)->repairPlannedSections(
+            pageTitle: 'Test Page',
+            pageType: 'concept',
+            existingMarkdown: '# Test Page',
+            issues: [
+                ['type' => 'planned_section_empty', 'planned_topic' => 'X', 'heading' => 'X'],
+                ['type' => 'planned_section_empty', 'planned_topic' => 'Y', 'heading' => 'Y'],
+            ],
             sourceText: 'Kildetekst.',
             languageCode: 'no',
         );
@@ -1082,10 +1480,16 @@ class WikiPageContentAiClientTest extends TestCase
         $capture = function (array $payload) use (&$capturedPayloads): array {
             $capturedPayloads[] = $payload;
 
+            $sections = [$this->sourceBasedSection('X', 'Repaired body text.')];
+
+            if (count($capturedPayloads) === 2) {
+                $sections[] = $this->sourceBasedSection('Y', 'Repaired body text.');
+            }
+
             return [
                 'status' => 'completed',
                 'output_text' => json_encode([
-                    'sections' => [$this->sourceBasedSection('X', 'Repaired body text.')],
+                    'sections' => $sections,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ];
         };
@@ -1219,6 +1623,7 @@ class WikiPageContentAiClientTest extends TestCase
         string $additionalContext = '',
         array $linkCatalog = [],
         array $sourceElements = [],
+        array $plannedSections = [],
     ): array {
         $capturedPayload = null;
 
@@ -1249,6 +1654,7 @@ class WikiPageContentAiClientTest extends TestCase
             additionalContext: $additionalContext,
             linkCatalog: $linkCatalog,
             sourceElements: $sourceElements,
+            plannedSections: $plannedSections,
         );
 
         return (array) $capturedPayload;
@@ -1271,11 +1677,17 @@ class WikiPageContentAiClientTest extends TestCase
         ]);
     }
 
-    private function clientWithRawResponse(array $responseBody): WikiPageContentAiClient
+    /**
+     * @param  int  $expectedCalls  An UNUSABLE response (non-JSON, control bytes, invalid UTF-8) is
+     *                              retried exactly once by the shared corrupt-response policy in
+     *                              EnterpriseWikiAiCapacityRetryExecutor, so a fixture that stays
+     *                              broken is called twice before failing.
+     */
+    private function clientWithRawResponse(array $responseBody, int $expectedCalls = 1): WikiPageContentAiClient
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+        $mock->shouldReceive('createResponse')->times($expectedCalls)->andReturn(array_replace_recursive([
             'id' => 'resp_test',
             'status' => 'completed',
             'output_text' => '',

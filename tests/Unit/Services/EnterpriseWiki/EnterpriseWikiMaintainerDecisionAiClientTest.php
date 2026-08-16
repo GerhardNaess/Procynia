@@ -5,8 +5,10 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 use App\Data\Ai\Capacity\AiCapacityRequest;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityPlanner;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSectionMap;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
+use App\Services\EnterpriseWiki\EnterpriseWikiPlanningContext;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
 use Mockery\MockInterface;
@@ -19,6 +21,143 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         parent::setUp();
         config(['services.enterprise_wiki.ai_enabled' => true]);
+    }
+
+    // =========================================================================
+    // Fase 8K-1 — EXISTING PAGE CANDIDATES context alongside the source catalog
+    // =========================================================================
+
+    public function test_existing_page_candidates_reach_the_maintainer_prompt(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES', $prompt);
+        $this->assertStringContainsString('[page 41]', $prompt);
+        $this->assertStringContainsString('OLD-THRESHOLD-MARKER', $prompt, 'the superseded value must be visible');
+        $this->assertStringContainsString('current version: 77', $prompt);
+    }
+
+    public function test_candidate_context_does_not_replace_the_source_catalog(): void
+    {
+        // The two blocks answer different questions: SOURCE ELEMENTS is the NEW document,
+        // EXISTING PAGE CANDIDATES is what the Wiki already says. Both must survive together.
+        $prompt = $this->userMessageText($this->capturePayload(
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->candidateFixture(),
+        ));
+
+        $this->assertStringContainsString('SOURCE ELEMENTS', $prompt);
+        $this->assertStringContainsString('[paragraph-0] (paragraph) First body paragraph.', $prompt);
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES', $prompt);
+        $this->assertStringContainsString('OLD-THRESHOLD-MARKER', $prompt);
+    }
+
+    public function test_candidate_block_includes_authoritative_heading_contract_data(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringContainsString('page_has_subsections: false', $prompt);
+        $this->assertStringContainsString('page_has_subsections: true', $prompt);
+        $this->assertStringContainsString('valid_target_headings: []', $prompt);
+        $this->assertStringContainsString('"Response times"', $prompt);
+    }
+
+    public function test_prompt_is_unchanged_when_there_are_no_candidates(): void
+    {
+        $withCandidates = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
+
+        $this->assertStringNotContainsString('EXISTING PAGE CANDIDATES', $withCandidates);
+    }
+
+    public function test_only_the_supplied_candidates_are_sent_never_a_whole_wiki(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        // Exactly the two supplied candidates — the block never reaches back for more pages.
+        $this->assertSame(2, substr_count($prompt, '[page '));
+        $this->assertStringContainsString('EXISTING PAGE CANDIDATES (2 pages)', $prompt);
+    }
+
+    public function test_candidate_block_is_byte_identical_for_identical_input(): void
+    {
+        $first = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+        $second = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertSame($first, $second);
+    }
+
+    public function test_candidate_context_does_not_alter_the_decision_schema(): void
+    {
+        $schema = $this->capturePayload(existingPageCandidates: $this->candidateFixture())['text']['format']['schema'];
+
+        // 8K-1 is context only: it must not change the ownership contract's SHAPE either way.
+        $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
+        $this->assertSame('array', $ownedTopics['type']);
+        $this->assertSame(['topic', 'source_element_keys'], $ownedTopics['items']['required']);
+        $this->assertSame(['create', 'update'], $schema['properties']['source_article']['properties']['action']['enum']);
+    }
+
+    public function test_the_block_does_not_claim_every_candidate_is_named_in_the_source_document(): void
+    {
+        // Candidates reached through the Wiki's own relations are NOT mentioned by name — the fixture's
+        // second page has mention_count 0 for exactly that reason. Telling the maintainer that every
+        // candidate is named would make it dismiss precisely the pages run 25 showed it must inspect.
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        $this->assertStringNotContainsString('are named in the source document', $prompt);
+        $this->assertStringContainsString('without naming the page itself', $prompt);
+        $this->assertStringContainsString('on whether that document happens to mention the page by name', $prompt);
+
+        // The correction must not soften the guardrails in the other direction.
+        $this->assertStringContainsString('not a verdict', $prompt);
+        $this->assertStringContainsString('leave a candidate untouched when its substance is not affected', $prompt);
+    }
+
+    public function test_the_correction_leaves_candidate_rendering_and_data_untouched(): void
+    {
+        $prompt = $this->userMessageText($this->capturePayload(existingPageCandidates: $this->candidateFixture()));
+
+        // Only the framing sentences changed; every candidate row still renders identically.
+        $this->assertStringContainsString('[page 42] Governing Procedure', $prompt);
+        $this->assertStringContainsString('type: article | slug: governing-procedure | current version: 78 (v1) | content truncated', $prompt);
+        $this->assertStringContainsString('OLD-DEADLINE-MARKER', $prompt);
+    }
+
+    /**
+     * Domain-free candidates in the shape EnterpriseWikiPatchCandidateService returns them.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function candidateFixture(): array
+    {
+        return [
+            [
+                'page_id' => 41,
+                'title' => 'Existing Platform Page',
+                'slug' => 'existing-platform-page',
+                'page_type' => 'entity',
+                'page_version_id' => 77,
+                'version_number' => 2,
+                'content' => "# Existing Platform Page\n\nTarget availability is OLD-THRESHOLD-MARKER per month.",
+                'page_has_subsections' => false,
+                'valid_target_headings' => [],
+                'truncated' => false,
+                'mention_count' => 2,
+            ],
+            [
+                'page_id' => 42,
+                'title' => 'Governing Procedure',
+                'slug' => 'governing-procedure',
+                'page_type' => 'article',
+                'page_version_id' => 78,
+                'version_number' => 1,
+                'content' => "# Governing Procedure\n\n## Response times\n\nIncidents are confirmed within OLD-DEADLINE-MARKER.",
+                'page_has_subsections' => true,
+                'valid_target_headings' => ['Response times'],
+                'truncated' => true,
+                'mention_count' => 0,
+            ],
+        ];
     }
 
     // =========================================================================
@@ -39,11 +178,15 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         $prompt = $this->userMessageText($this->capturePayload(sourceElements: $this->sourceElementFixture()));
 
-        $this->assertStringContainsString('# 1. Alpha', $prompt);
-        $this->assertStringContainsString('# 2. Beta', $prompt);
-        // Grouped: the section is printed once per run of elements, not on every line.
-        $this->assertSame(1, substr_count($prompt, '# 1. Alpha'));
-        $this->assertSame(1, substr_count($prompt, '# 2. Beta'));
+        // Each section heading now carries its routable key (EnterpriseWikiDocumentSectionMap), so a
+        // planning call can cite the sections it needs the same deterministic way it cites element
+        // keys — and the heading itself is still printed once per run of elements, not per line.
+        $this->assertStringContainsString('# [sec-0] 1. Alpha', $prompt);
+        $this->assertStringContainsString('# [sec-1] 2. Beta', $prompt);
+        $this->assertSame(1, substr_count($prompt, '# [sec-0] 1. Alpha'));
+        $this->assertSame(1, substr_count($prompt, '# [sec-1] 2. Beta'));
+        // The whole-document overview accompanies the catalog, so a call always knows what exists.
+        $this->assertStringContainsString('DOCUMENT SECTION OVERVIEW', $prompt);
     }
 
     public function test_catalog_order_is_deterministic_and_follows_the_service_order(): void
@@ -156,10 +299,15 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame('object', $schema['type']);
         $this->assertArrayHasKey('concept_candidates', $schema['properties']);
 
-        // owned_topics must still be a plain string[] — 8J-1B does not touch the ownership schema.
+        // Every owned topic is evidence-bound: a topic name plus the source element keys the page
+        // will explain it from. Run 53 is why — a bare topic string let five concept pages plan
+        // sections no element supported, and only page generation ever found out.
         $ownedTopics = $schema['properties']['source_article']['properties']['owned_topics'];
         $this->assertSame('array', $ownedTopics['type']);
-        $this->assertSame(['type' => 'string'], $ownedTopics['items']);
+        $this->assertSame('object', $ownedTopics['items']['type']);
+        $this->assertSame(['topic', 'source_element_keys'], $ownedTopics['items']['required']);
+        $this->assertFalse($ownedTopics['items']['additionalProperties']);
+        $this->assertSame(['type' => 'string'], $ownedTopics['items']['properties']['source_element_keys']['items']);
     }
 
     // =========================================================================
@@ -194,20 +342,60 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $sourceText = 'Noe innhold her.';
         $payload = $this->capturePayload(sourceText: $sourceText);
 
-        // The capacity decision is sized off the RAW source text, not the templated prompt text
-        // the payload actually embeds — see EnterpriseWikiMaintainerDecisionAiClient::decide()'s
-        // docblock: sizing off the (truncated) prompt text would cap the input measure at
-        // MAX_SOURCE_TEXT_CHARS regardless of true document size, making split_required
-        // effectively unreachable.
+        // The split decision remains based on raw source size, but the output budget must reflect
+        // the rendered maintainer context the model actually receives.
         $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
             operationType: 'enterprise_wiki_maintainer_decision',
             model: 'gpt-5',
-            inputSizeChars: mb_strlen($sourceText),
+            inputSizeChars: mb_strlen($this->userMessageText($payload)),
             expectedResultObjects: 2,
         ));
 
         $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
         $this->assertGreaterThan(0, $payload['max_output_tokens']);
+    }
+
+    public function test_small_prompt_keeps_a_modest_bounded_initial_capacity(): void
+    {
+        $payload = $this->capturePayload(sourceText: 'Kort beslutningsgrunnlag.');
+
+        $this->assertLessThan(6_000, $payload['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $payload['max_output_tokens']);
+    }
+
+    public function test_large_rendered_context_with_candidate_pages_gets_realistic_first_call_capacity(): void
+    {
+        $payload = $this->capturePayload(
+            sourceText: 'Endringsnotat med ny terskel og ny frist.',
+            indexContext: $this->largeIndexFixture(),
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->largeCandidateFixture(),
+        );
+
+        $expectedPlan = app(EnterpriseWikiAiCapacityPlanner::class)->plan(new AiCapacityRequest(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            inputSizeChars: min(20_000, mb_strlen($this->userMessageText($payload))),
+            expectedResultObjects: 5, // source article + summary + the three bounded patch candidates
+        ));
+
+        $this->assertSame($expectedPlan->chosenMaxOutputTokens, $payload['max_output_tokens']);
+        $this->assertGreaterThanOrEqual(7_560, $payload['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $payload['max_output_tokens']);
+    }
+
+    public function test_candidate_context_increases_first_call_capacity_without_changing_split_routing(): void
+    {
+        $small = $this->capturePayload(sourceText: 'Kort endringsnotat.');
+        $contextual = $this->capturePayload(
+            sourceText: 'Kort endringsnotat.',
+            indexContext: $this->largeIndexFixture(),
+            sourceElements: $this->sourceElementFixture(),
+            existingPageCandidates: $this->largeCandidateFixture(),
+        );
+
+        $this->assertGreaterThan($small['max_output_tokens'], $contextual['max_output_tokens']);
+        $this->assertLessThanOrEqual(9_000, $contextual['max_output_tokens']);
     }
 
     public function test_larger_source_text_produces_a_larger_max_output_tokens_than_a_small_document(): void
@@ -306,12 +494,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $decision = $this->validDecision();
         $client = $this->clientReturning($decision);
 
-        $result = $client->decide(
-            sourceMeta: ['title' => 'Test Dokument', 'filename' => 'test.docx'],
-            sourceText: 'Noe innhold.',
-            indexContext: [],
-            languageCode: 'no',
-        );
+        $result = $client->decide($this->planning('Noe innhold.', [], [], [], []), 'no', null);
 
         $this->assertSame('create', $result['source_article']['action']);
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
@@ -324,7 +507,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         unset($decision['concept_pages'], $decision['entity_pages'], $decision['warnings'], $decision['no_action_reason']);
 
         $client = $this->clientReturning($decision);
-        $result = $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $result = $client->decide($this->planning('text', [], [], [], []), 'no', null);
 
         $this->assertSame([], $result['concept_pages']);
         $this->assertSame([], $result['entity_pages']);
@@ -343,7 +526,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not enabled/');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     public function test_decide_throws_on_empty_response(): void
@@ -355,7 +538,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/no output text/');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
 
         Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
             return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
@@ -377,14 +560,16 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         });
     }
 
-    public function test_decide_throws_on_non_json_response(): void
+    public function test_decide_retries_a_non_json_response_once_and_then_fails(): void
     {
-        $client = $this->clientWithRawResponse(['output_text' => 'dette er ikke json']);
+        // Output that is not JSON says nothing about the decision — it says the response is unusable.
+        // One fresh attempt, then hard fail: the shared policy, not a retry local to this client.
+        $client = $this->clientWithRawResponse(['output_text' => 'dette er ikke json'], expectedCalls: 2);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not valid JSON/');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     public function test_decide_returns_valid_decision_array_from_nested_output_text(): void
@@ -407,7 +592,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ],
         ]);
 
-        $result = $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $result = $client->decide($this->planning('text', [], [], [], []), 'no', null);
 
         $this->assertSame('create', $result['source_article']['action']);
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
@@ -448,7 +633,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             });
 
         $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
-            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+            ->decide($this->planning('text', [], [], [], []), 'no', null);
 
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
         $this->assertCount(2, $capturedPayloads);
@@ -478,7 +663,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectExceptionMessageMatches('/retry level 1/');
 
         app(EnterpriseWikiMaintainerDecisionAiClient::class)
-            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+            ->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     /**
@@ -498,7 +683,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*content_filter/s');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     /**
@@ -516,7 +701,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         ]);
 
         $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
-            ->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+            ->decide($this->planning('text', [], [], [], []), 'no', null);
 
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
     }
@@ -526,7 +711,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         Log::spy();
 
         $client = $this->clientReturning($this->validDecision());
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'Hemmelig kildetekst som aldri skal logges.', [], 'no');
+        $client->decide($this->planning('Hemmelig kildetekst som aldri skal logges.', [], [], [], []), 'no', null);
 
         // Wiki run-592: the executor now also logs one line per raw HTTP attempt (see
         // EnterpriseWikiAiCapacityRetryExecutor::logAttempt()), in addition to this existing
@@ -569,7 +754,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/refusal/');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
 
         Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
             return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
@@ -596,7 +781,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/schema validation/');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     public function test_api_exception_propagates_from_open_ai_client(): void
@@ -610,7 +795,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('upstream error');
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+        $client->decide($this->planning('text', [], [], [], []), 'no', null);
     }
 
     // =========================================================================
@@ -622,7 +807,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $client = $this->clientReturning($this->validDecision());
 
         // Must not throw — empty text is valid input
-        $result = $client->decide(['title' => 'T', 'filename' => 'T.docx'], '', [], 'no');
+        $result = $client->decide($this->planning('', [], [], [], []), 'no', null);
 
         $this->assertArrayHasKey('source_article', $result);
     }
@@ -649,12 +834,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         $client = $this->clientReturning($this->validDecision());
 
-        $result = $client->decide(
-            ['title' => 'Dokument', 'filename' => 'Dokument.docx'],
-            'Innhold.',
-            [],
-            'en',
-        );
+        $result = $client->decide($this->planning('Innhold.', [], [], [], []), 'en', null);
 
         $this->assertArrayHasKey('source_article', $result);
     }
@@ -683,7 +863,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $largeSourceText = str_repeat('ITIL prosessbeskrivelse med mange rammeverk og konsepter. ', 700);
 
         $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)
-            ->decide(['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no');
+            ->decide($this->planning($largeSourceText, [], [], [], []), 'no', null);
 
         $this->assertSame('Test Artikkel', $result['source_article']['title']);
     }
@@ -696,7 +876,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
 
         $client = $this->clientReturning($this->validDecision());
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'Noe kort innhold.', [], 'no');
+        $client->decide($this->planning('Noe kort innhold.', [], [], [], []), 'no', null);
     }
 
     /**
@@ -713,7 +893,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $sourceText = str_repeat('A', 12_500); // truncated to MAX_SOURCE_TEXT_CHARS=12000 in the prompt, matching run 584's actual scale.
         $client = $this->clientReturning($this->validDecision());
 
-        $client->decide(['title' => 'T', 'filename' => 'T.docx'], $sourceText, [], 'no');
+        $client->decide($this->planning($sourceText, [], [], [], []), 'no', null);
     }
 
     public function test_repair_never_routes_to_split_coordinator_regardless_of_size(): void
@@ -726,58 +906,65 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $aiMock = $this->mock(OpenAiClient::class);
         $aiMock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode($this->validDecision()),
+            'output_text' => json_encode($this->emptyDelta()),
         ]);
 
         $largeSourceText = str_repeat('ITIL prosessbeskrivelse med mange rammeverk og konsepter. ', 700);
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], $largeSourceText, [], 'no', $this->validDecision(), ['issue'],
-        );
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning($largeSourceText, []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
     }
 
     // =========================================================================
-    // repair() — Wiki run-581 fix: a single bounded pass to fix a decision that
-    // EnterpriseWikiMaintainerDecisionConsistencyValidator found logically inconsistent.
+    // repairGroup() — the bounded delta pass that replaced whole-decision repair.
+    // Run 51: a 31 599-character decision could not be re-emitted inside the 9 000-token
+    // ceiling, so its 21 issues (all local to individual concept candidates) were unrepairable.
     // =========================================================================
 
-    public function test_repair_returns_valid_corrected_decision(): void
+    public function test_repair_group_returns_a_parsed_delta(): void
     {
-        $corrected = $this->validDecision();
-        $corrected['concept_pages'] = [[
-            'action' => 'create',
-            'page_id' => null,
-            'title' => 'ITIL Incident Management',
-            'proposed_slug' => 'itil-incident-management',
-            'reason' => 'Central concept the article points to.',
+        $delta = $this->emptyDelta();
+        $delta['concept_page_repairs'] = [[
+            'object_id' => null,
+            'operation' => 'add',
+            'object' => $this->conceptPage('ITIL Incident Management'),
         ]];
 
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode($corrected),
+            'output_text' => json_encode($delta),
         ]);
 
-        $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('Innhold.', []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
 
-        $result = $client->repair(
-            sourceMeta: ['title' => 'Test Dokument', 'filename' => 'test.docx'],
-            sourceText: 'Innhold.',
-            indexContext: [],
-            languageCode: 'no',
-            decision: $this->validDecision(),
-            issues: ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'],
-        );
-
-        $this->assertCount(1, $result['concept_pages']);
-        $this->assertSame('ITIL Incident Management', $result['concept_pages'][0]['title']);
+        $this->assertCount(1, $result['operations']);
+        $this->assertSame('add', $result['operations'][0]['operation']);
+        $this->assertSame('concept_pages', $result['operations'][0]['collection']);
+        $this->assertSame('ITIL Incident Management', $result['operations'][0]['object']['title']);
     }
 
-    public function test_repair_payload_includes_previous_decision_and_issues_in_user_message(): void
+    public function test_repair_group_prompt_carries_only_the_groups_objects_and_issues(): void
     {
-        $previousDecision = $this->validDecision();
-        $issues = ['source_article points readers to "ITIL Incident Management" via related_page_guidance, but no existing or planned page matches that title.'];
+        $decision = $this->decisionWithCandidate();
+        // A second, VALIDATED candidate the repair group does not include. It must not be sent:
+        // the whole point of the bounded contract is that the model neither sees nor rewrites
+        // planning the deterministic validators already accepted.
+        $decision['concept_candidates'][] = [
+            'name' => 'UNRELATED-VALIDATED-CANDIDATE',
+            'concept_type' => 'process',
+            'independent_reason' => 'Own section.',
+            'mentioned_context' => 'section 4',
+            'existing_page_title' => null,
+            'decision' => 'exclude',
+            'justification' => 'Local detail.',
+            'owning_page_title' => null,
+            'necessary_for_article' => false,
+            'has_separate_source_evidence' => true,
+            'has_reuse_value' => false,
+            'relationship' => 'reference_only',
+            'existing_owner_page_id' => null,
+        ];
 
         $capturedPayload = null;
 
@@ -788,25 +975,86 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'Test Dokument', 'filename' => 'test.docx'],
-            'Innhold.',
-            [],
-            'no',
-            $previousDecision,
-            $issues,
-        );
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('Innhold.', []), 'no', $decision, $this->candidateGroup());
 
         $userText = $this->userMessageText($capturedPayload);
-        $this->assertStringContainsString('ITIL Incident Management', $userText);
+
+        $this->assertStringContainsString('OBJECTS TO REPAIR (1)', $userText);
+        $this->assertStringContainsString('[concept_candidates[0]]', $userText);
         $this->assertStringContainsString('ISSUES TO FIX', $userText);
-        $this->assertStringContainsString('Test Artikkel', $userText);
+        $this->assertStringContainsString('ITIL Incident Management', $userText);
+        $this->assertStringNotContainsString('UNRELATED-VALIDATED-CANDIDATE', $userText);
+        $this->assertStringNotContainsString('PREVIOUS DECISION', $userText);
     }
 
-    public function test_repair_uses_the_same_strict_schema_as_decide(): void
+    public function test_repair_group_prompt_lists_pages_planned_in_this_decision_as_owners(): void
+    {
+        $decision = $this->decisionWithCandidate();
+        $decision['concept_pages'] = [$this->conceptPage('Migreringsstrategi')];
+
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('text', []), 'no', $decision, $this->candidateGroup());
+
+        $userText = $this->userMessageText($capturedPayload);
+        $developerText = $capturedPayload['input'][0]['content'][0]['text'];
+
+        $this->assertStringContainsString('PAGES PLANNED IN THIS DECISION', $userText);
+        $this->assertStringContainsString('Migreringsstrategi', $userText);
+        $this->assertStringContainsString('never an owning page', $userText, 'the source pages must be shown as non-owners');
+        $this->assertStringContainsString('NOT valid owning pages for a concept candidate', $developerText);
+    }
+
+    /**
+     * A repair must be able to see what it would break. In the first bounded runtime verification,
+     * a repair demoted a concept two already-validated pages linked onward to, and the run failed
+     * on those pages — which the repair was never allowed to touch and never saw.
+     */
+    public function test_repair_group_prompt_shows_pages_outside_the_group_that_reference_it(): void
+    {
+        $decision = $this->decisionWithCandidate();
+        $decision['concept_pages'] = [
+            $this->conceptPage('ITIL Incident Management'),
+            array_merge($this->conceptPage('Endringshåndtering'), [
+                'related_page_guidance' => [['page_title' => 'ITIL Incident Management', 'relationship' => 'Se konseptsiden.']],
+            ]),
+        ];
+
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+            });
+
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('text', []), 'no', $decision, ['object_ids' => ['concept_pages[0]'], 'issues' => ['concept_pages[0] is wrong.']]);
+
+        $userText = $this->userMessageText($capturedPayload);
+
+        $this->assertStringContainsString('REFERENCED BY', $userText);
+        $this->assertStringContainsString('concept_pages[1] ("Endringshåndtering") points to "ITIL Incident Management"', $userText);
+        $this->assertStringContainsString('You cannot edit these pages here', $userText);
+    }
+
+    public function test_repair_group_uses_the_bounded_delta_schema(): void
     {
         $capturedPayload = null;
 
@@ -817,18 +1065,51 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
-        );
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('text', []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
 
-        $this->assertSame('maintainer_decision', $capturedPayload['text']['format']['name']);
+        $this->assertSame('maintainer_decision_repair_delta', $capturedPayload['text']['format']['name']);
         $this->assertTrue($capturedPayload['text']['format']['strict']);
     }
 
-    public function test_repair_throws_when_ai_is_disabled(): void
+    /**
+     * The failure that made run 51 unrepairable: repair's budget grew with the SOURCE DOCUMENT
+     * (its 60 000-character prompt computed a need of 15 985 tokens, clamped to the 9 000 ceiling)
+     * while the answer it demanded was the whole decision. A delta's budget must follow the number
+     * of repaired objects instead, so the same fix costs the same whatever document it came from.
+     */
+    public function test_repair_group_budget_does_not_grow_with_source_document_size(): void
+    {
+        $budgets = [];
+
+        foreach (['Kort kildetekst.', str_repeat('Lang kildetekst med mye innhold. ', 3_000)] as $sourceText) {
+            /** @var OpenAiClient&MockInterface $mock */
+            $mock = $this->mock(OpenAiClient::class);
+            $mock->shouldReceive('createResponse')
+                ->once()
+                ->andReturnUsing(function (array $payload) use (&$budgets): array {
+                    $budgets[] = $payload['max_output_tokens'];
+
+                    return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
+                });
+
+            app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning($sourceText, []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
+        }
+
+        $ceiling = (int) config('ai_capacity.operations.enterprise_wiki_maintainer_decision_repair.max_output_tokens');
+
+        $this->assertLessThan($ceiling, $budgets[0], 'a one-object repair must stay well inside the ceiling');
+        $this->assertLessThan($ceiling, $budgets[1], 'a large source document must not push a one-object repair to the ceiling');
+        $this->assertLessThan(
+            $budgets[0] * 1.5,
+            $budgets[1],
+            'the delta budget must be driven by repaired objects, not by source document size',
+        );
+    }
+
+    public function test_repair_group_throws_when_ai_is_disabled(): void
     {
         config(['services.enterprise_wiki.ai_enabled' => false]);
         $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
@@ -836,24 +1117,22 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not enabled/');
 
-        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+        $client->repairGroup($this->planning('text', []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
     }
 
     /**
-     * repair() shares the same capacity-retry mechanism as decide() (both go through
-     * executeWithCapacityRetry) — its prompt is larger (it echoes the full previous decision), so
-     * it independently benefits from the same one-bounded-retry behaviour.
+     * repairGroup() keeps the same capacity-retry mechanism decide() uses — a delta is small, so a
+     * retry that genuinely raises the budget stays useful.
      */
-    public function test_repair_also_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
+    public function test_repair_group_also_retries_once_on_incomplete_max_output_tokens_then_succeeds(): void
     {
-        $corrected = $this->validDecision();
         $capturedPayloads = [];
 
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
             ->twice()
-            ->andReturnUsing(function (array $payload) use (&$capturedPayloads, $corrected): array {
+            ->andReturnUsing(function (array $payload) use (&$capturedPayloads): array {
                 $capturedPayloads[] = $payload;
 
                 if (count($capturedPayloads) === 1) {
@@ -865,37 +1144,133 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
                     ];
                 }
 
-                return ['status' => 'completed', 'output_text' => json_encode($corrected)];
+                return ['status' => 'completed', 'output_text' => json_encode($this->emptyDelta())];
             });
 
-        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repair(
-            ['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue'],
-        );
+        $result = app(EnterpriseWikiMaintainerDecisionAiClient::class)->repairGroup($this->planning('text', []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
 
-        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+        $this->assertSame([], $result['operations']);
         $this->assertGreaterThan($capturedPayloads[0]['max_output_tokens'], $capturedPayloads[1]['max_output_tokens']);
     }
 
-    public function test_repair_throws_on_schema_violation(): void
+    public function test_repair_group_throws_on_delta_schema_violation(): void
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')->once()->andReturn([
             'status' => 'completed',
-            'output_text' => json_encode(['source_summary' => ['action' => 'create', 'title' => 'T', 'proposed_slug' => 'test', 'reason' => 'ok']]),
+            // "replace" without an object_id: the merge could not know what to replace.
+            'output_text' => json_encode(array_merge($this->emptyDelta(), [
+                'concept_candidate_repairs' => [['object_id' => null, 'operation' => 'replace', 'object' => ['name' => 'X']]],
+            ])),
         ]);
 
         $client = app(EnterpriseWikiMaintainerDecisionAiClient::class);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/repaired decision failed schema validation/');
+        $this->expectExceptionMessageMatches('/repair delta failed schema validation/');
 
-        $client->repair(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no', $this->validDecision(), ['issue']);
+        $client->repairGroup($this->planning('text', []), 'no', $this->decisionWithCandidate(), $this->candidateGroup());
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    /** A decision with one concept candidate — the object a repair group addresses. */
+    private function decisionWithCandidate(): array
+    {
+        $decision = $this->validDecision();
+        $decision['concept_candidates'] = [[
+            'name' => 'ITIL Incident Management',
+            'concept_type' => 'framework',
+            'independent_reason' => 'Reusable professional practice.',
+            'mentioned_context' => 'section 2',
+            'existing_page_title' => null,
+            'decision' => 'create',
+            'justification' => 'Central to the document.',
+            'owning_page_title' => null,
+            'necessary_for_article' => true,
+            'has_separate_source_evidence' => true,
+            'has_reuse_value' => true,
+            'relationship' => 'independent_new_topic',
+            'existing_owner_page_id' => null,
+        ]];
+
+        return $decision;
+    }
+
+    /** @return array{object_ids: list<string>, issues: list<string>} */
+    private function candidateGroup(): array
+    {
+        return [
+            'object_ids' => ['concept_candidates[0]'],
+            'issues' => ['Concept candidate "ITIL Incident Management" was decided "create" but no matching concept_pages entry exists.'],
+        ];
+    }
+
+    private function conceptPage(string $title): array
+    {
+        return [
+            'action' => 'create',
+            'page_id' => null,
+            'title' => $title,
+            'proposed_slug' => 'planned-page',
+            'reason' => 'Central concept the article points to.',
+            'owned_topics' => ['Scope'],
+            'reference_only_topics' => [],
+            'excluded_topics' => [],
+            'related_page_guidance' => [],
+            'planned_figures' => [],
+        ];
+    }
+
+    private function emptyDelta(): array
+    {
+        return [
+            'concept_candidate_repairs' => [],
+            'concept_page_repairs' => [],
+            'entity_page_repairs' => [],
+            'patch_target_repairs' => [],
+            'source_page_repairs' => [],
+            'notes' => null,
+        ];
+    }
+
+    /**
+     * The authoritative planning facts, assembled for a test the same way
+     * EnterpriseWikiPlanningContext::forDocument() assembles them for a real document — one place
+     * here too, so a test cannot construct a context a production path could not.
+     *
+     * @param  list<array<string, mixed>>  $elements
+     * @param  list<array<string, mixed>>  $figures
+     * @param  array<int, array<string, mixed>>  $pageCandidates
+     */
+    private function planning(
+        string $sourceText,
+        array $indexContext = [],
+        array $elements = [],
+        array $figures = [],
+        array $pageCandidates = [],
+        array $sourceMeta = ['title' => 'T', 'filename' => 'T.docx'],
+    ): EnterpriseWikiPlanningContext {
+        $catalog = EnterpriseWikiMaintainerDecisionAiClient::sourceCatalogElements($elements);
+
+        return new EnterpriseWikiPlanningContext(
+            customerId: 1,
+            documentId: 1,
+            sourceMeta: $sourceMeta,
+            sourceText: $sourceText,
+            elements: $elements,
+            catalogElements: $catalog,
+            figureCandidates: $figures,
+            sectionMap: EnterpriseWikiDocumentSectionMap::build($catalog),
+            wikiIndex: $indexContext,
+            validSourceElementKeys: array_column($catalog, 'source_element_key'),
+            validFigureKeys: array_column($figures, 'source_element_key'),
+            existingPageCandidatesResolver: static fn (): array => $pageCandidates,
+        );
+    }
 
     private function validDecision(): array
     {
@@ -925,6 +1300,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         array $indexContext = [],
         string $languageCode = 'no',
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): array {
         $capturedPayload = null;
 
@@ -938,9 +1314,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
                 return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
             });
 
-        app(EnterpriseWikiMaintainerDecisionAiClient::class)->decide(
-            $sourceMeta, $sourceText, $indexContext, $languageCode, [], null, $sourceElements,
-        );
+        app(EnterpriseWikiMaintainerDecisionAiClient::class)->decide($this->planning($sourceText, $indexContext, $sourceElements, [], $existingPageCandidates, $sourceMeta), $languageCode, null);
 
         return (array) $capturedPayload;
     }
@@ -963,16 +1337,63 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         ];
     }
 
+    /** @return list<array<string, mixed>> */
+    private function largeCandidateFixture(): array
+    {
+        $candidates = $this->candidateFixture();
+        $candidates[] = [
+            'page_id' => 43,
+            'title' => 'Release Procedure',
+            'slug' => 'release-procedure',
+            'page_type' => 'article',
+            'page_version_id' => 79,
+            'version_number' => 4,
+            'content' => '# Release Procedure',
+            'page_has_subsections' => false,
+            'valid_target_headings' => [],
+            'truncated' => false,
+            'mention_count' => 1,
+        ];
+
+        foreach ($candidates as $index => $candidate) {
+            $candidates[$index]['content'] .= "\n\n".str_repeat('Current authoritative requirement context. ', 160);
+        }
+
+        return $candidates;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function largeIndexFixture(): array
+    {
+        return array_map(static fn (int $id): array => [
+            'id' => $id,
+            'title' => "Current Wiki Page {$id}",
+            'slug' => "current-wiki-page-{$id}",
+            'page_type' => 'article',
+            'status' => 'approved',
+            'excerpt' => str_repeat('Indexed current knowledge. ', 12),
+            'open_lint_count' => 0,
+            'updated_at' => '2026-08-12T12:00:00+00:00',
+        ], range(1, 12));
+    }
+
     private function clientReturning(array $decision): EnterpriseWikiMaintainerDecisionAiClient
     {
         return $this->clientWithRawResponse(['status' => 'completed', 'output_text' => json_encode($decision)]);
     }
 
-    private function clientWithRawResponse(array $responseBody): EnterpriseWikiMaintainerDecisionAiClient
+    /**
+     * @param  int  $expectedCalls  An UNUSABLE response (not JSON, control bytes, invalid UTF-8) is
+     *                              retried exactly once by the shared corrupt-response policy in
+     *                              EnterpriseWikiAiCapacityRetryExecutor, so a fixture that stays
+     *                              broken is called twice before failing. A readable-but-invalid
+     *                              response is never retried and is called once.
+     */
+    private function clientWithRawResponse(array $responseBody, int $expectedCalls = 1): EnterpriseWikiMaintainerDecisionAiClient
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+        $mock->shouldReceive('createResponse')->times($expectedCalls)->andReturn(array_replace_recursive([
             'id' => 'resp_test',
             'status' => 'completed',
             'output_text' => '',

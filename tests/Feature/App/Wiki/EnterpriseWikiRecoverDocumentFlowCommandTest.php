@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
@@ -132,6 +133,59 @@ class EnterpriseWikiRecoverDocumentFlowCommandTest extends TestCase
         // survive onto a run that is no longer failed.
         $this->assertNull($fresh->failed_phase);
 
+        Queue::assertNothingPushed();
+    }
+
+    public function test_revalidation_reconciles_a_stale_planned_section_lint_finding_against_current_unicode_content(): void
+    {
+        Queue::fake();
+
+        $run = $this->createStuckRun($this->createCustomer(), stepsComplete: true, qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED);
+        $article = EnterpriseWikiPage::query()
+            ->whereIn('id', EnterpriseWikiIngestRunPage::where('enterprise_wiki_ingest_run_id', $run->id)->pluck('enterprise_wiki_page_id'))
+            ->where('page_type', EnterpriseWikiPage::PAGE_TYPE_ARTICLE)
+            ->firstOrFail();
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
+        $topic = 'Operativ Å-seksjon';
+        $run->update([
+            'maintainer_decision_json' => [
+                'source_article' => [
+                    'title' => $article->title,
+                    'owned_topics' => [$topic],
+                ],
+            ],
+        ]);
+        $version->update([
+            'content_markdown' => "# {$article->title}\n\n## {$topic}\n\nÅpne forhold skal forklares med reell tekst.",
+        ]);
+
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $run->customer_id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'code' => EnterpriseWikiLintFinding::CODE_PLANNED_SECTION_ONLY_LINKS,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
+            'message' => 'Stale finding from an earlier validation pass.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $this->artisan('wiki:recover-document-flow', ['--run-id' => $run->id])
+            ->assertExitCode(0);
+
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->fresh()->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->fresh()->qa_status);
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'code' => EnterpriseWikiLintFinding::CODE_PLANNED_SECTION_ONLY_LINKS,
+            'status' => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+        ]);
         Queue::assertNothingPushed();
     }
 

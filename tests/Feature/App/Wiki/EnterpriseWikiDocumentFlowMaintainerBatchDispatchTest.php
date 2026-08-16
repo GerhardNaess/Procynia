@@ -12,14 +12,18 @@ use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
+use App\Services\EnterpriseWiki\EnterpriseWikiCrossPageConsistencyService;
+use App\Services\EnterpriseWiki\EnterpriseWikiCrossPageReconciliationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiIncrementalRelinkService;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPatchApplicationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -72,7 +76,7 @@ class EnterpriseWikiDocumentFlowMaintainerBatchDispatchTest extends TestCase
     {
         return new EnterpriseWikiDocumentFlowService(
             Mockery::mock(EnterpriseWikiIngestService::class), $decision, app(EnterpriseWikiMaintainerDecisionBatchStateService::class),
-            Mockery::mock(EnterpriseWikiMaintainerDecisionApplyService::class), Mockery::mock(EnterpriseWikiExtractPageClaimsService::class), Mockery::mock(EnterpriseWikiVerifyPageClaimsService::class), Mockery::mock(EnterpriseWikiBuildPageLinksService::class), Mockery::mock(EnterpriseWikiIncrementalRelinkService::class), Mockery::mock(EnterpriseWikiAppliedRunLintService::class), Mockery::mock(EnterpriseWikiLinkSemanticRepairService::class), Mockery::mock(EnterpriseWikiPostIngestQaService::class), Mockery::mock(EnterpriseWikiDocumentOwnerApprovalService::class),
+            Mockery::mock(EnterpriseWikiMaintainerDecisionApplyService::class), Mockery::mock(EnterpriseWikiExtractPageClaimsService::class), Mockery::mock(EnterpriseWikiVerifyPageClaimsService::class), Mockery::mock(EnterpriseWikiGenerateAppliedPagesService::class), Mockery::mock(EnterpriseWikiBuildPageLinksService::class), Mockery::mock(EnterpriseWikiIncrementalRelinkService::class), Mockery::mock(EnterpriseWikiAppliedRunLintService::class), Mockery::mock(EnterpriseWikiLinkSemanticRepairService::class), Mockery::mock(EnterpriseWikiPostIngestQaService::class), Mockery::mock(EnterpriseWikiDocumentOwnerApprovalService::class), Mockery::mock(EnterpriseWikiPatchApplicationService::class), Mockery::mock(EnterpriseWikiCrossPageConsistencyService::class), Mockery::mock(EnterpriseWikiCrossPageReconciliationService::class),
         );
     }
 

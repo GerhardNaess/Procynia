@@ -440,11 +440,6 @@ function StructureFindingContextPanel({
     relatedArticles,
     relatedConcepts,
     relatedEntities,
-    onLinkCandidate,
-    linkingCandidateId,
-    confirmingCandidateId,
-    onRequestConfirm,
-    onCancelConfirm,
 }) {
     if (!finding) {
         return null;
@@ -555,17 +550,6 @@ function StructureFindingContextPanel({
                     </div>
                 </div>
             </div>
-
-            <OrphanConceptCandidateList
-                finding={finding}
-                tw={tw}
-                pageTypeLabel={pageTypeLabel}
-                onLinkCandidate={onLinkCandidate}
-                linkingCandidateId={linkingCandidateId}
-                confirmingCandidateId={confirmingCandidateId}
-                onRequestConfirm={onRequestConfirm}
-                onCancelConfirm={onCancelConfirm}
-            />
 
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base leading-7 text-slate-600">
                 <p className="font-semibold text-slate-800">
@@ -731,6 +715,13 @@ export default function WikiShow({
 }) {
     const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
+    // The best-practice assessment recorded for the current version: one entry per planned topic.
+    // An audit trail, never a finding — "no improvement found" is a conclusion a reviewer can judge,
+    // and its absence (a page generated before the contract) is deliberately different from an
+    // empty list.
+    const bestPracticeReview = Array.isArray(current_version?.best_practice_review)
+        ? current_version.best_practice_review
+        : [];
     const locale = document.documentElement.lang || 'no';
     const isSystemOwner = auth.user?.is_system_owner ?? false;
     // Backend-validated (WikiController::show()/buildReviewReference()) — never trust the raw
@@ -769,8 +760,6 @@ export default function WikiShow({
     const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
-    const [confirmingCandidateId, setConfirmingCandidateId] = useState(null);
-    const [linkingCandidateId, setLinkingCandidateId] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
         ? (tw.verification_basis_claim_handler_notice ?? 'Kontroller påstandene mot kildedokumentene. Koble kilde, godkjenn eller avvis påstanden.')
         : (tw.verification_basis_read_only_notice ?? 'Påstandene må behandles av en bruker med tilgang til det aktuelle kildegrunnlaget.');
@@ -865,29 +854,6 @@ export default function WikiShow({
                     setWikiBlockEditError(null);
                 },
                 onFinish: () => setWikiBlockSaveProcessingKey(null),
-            },
-        );
-    };
-
-    const linkOrphanConceptCandidate = (targetPageId) => {
-        if (linkingCandidateId !== null || !structureFinding?.id || !current_version?.id) {
-            return;
-        }
-
-        setLinkingCandidateId(targetPageId);
-        router.patch(
-            `/app/wiki/${page.slug}/structure-findings/${structureFinding.id}/link-target`,
-            {
-                target_page_id: targetPageId,
-                expected_page_version_id: current_version.id,
-                back_url: structureFinding?.back_url ?? undefined,
-            },
-            {
-                preserveScroll: true,
-                onFinish: () => {
-                    setLinkingCandidateId(null);
-                    setConfirmingCandidateId(null);
-                },
             },
         );
     };
@@ -2271,11 +2237,6 @@ export default function WikiShow({
                         relatedArticles={relatedArticles}
                         relatedConcepts={relatedConcepts}
                         relatedEntities={relatedEntities}
-                        onLinkCandidate={linkOrphanConceptCandidate}
-                        linkingCandidateId={linkingCandidateId}
-                        confirmingCandidateId={confirmingCandidateId}
-                        onRequestConfirm={setConfirmingCandidateId}
-                        onCancelConfirm={() => setConfirmingCandidateId(null)}
                     />
                 )}
 
@@ -2510,6 +2471,50 @@ export default function WikiShow({
                         </p>
                     )}
                 </section>
+
+                {bestPracticeReview.length > 0 && (
+                    <section className="space-y-3">
+                        <div className="flex flex-wrap items-baseline gap-3">
+                            <h2 className="text-base font-semibold text-slate-700">
+                                {tw.best_practice_review_heading ?? 'Beste praksis — vurdering'}
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                {(tw.best_practice_review_summary ?? ':reviewed vurdert · :gaps forbedring(er) foreslått')
+                                    .replace(':reviewed', String(bestPracticeReview.length))
+                                    .replace(':gaps', String(bestPracticeReview.filter((entry) => entry.gap_found).length))}
+                            </p>
+                        </div>
+                        <p className="text-sm text-slate-500">
+                            {tw.best_practice_review_intro
+                                ?? 'Hva vurderingen konkluderte for hvert tema på denne siden. «Ingen forbedring funnet» er et resultat, ikke et avvik.'}
+                        </p>
+                        <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white">
+                            {bestPracticeReview.map((entry, index) => (
+                                <li key={`${entry.planned_topic}-${index}`} className="flex flex-col gap-1 p-4 sm:flex-row sm:items-start sm:gap-4">
+                                    <span
+                                        className={`inline-flex w-fit shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                            entry.gap_found ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                    >
+                                        {entry.gap_found
+                                            ? (tw.best_practice_review_gap_found ?? 'Forbedring foreslått')
+                                            : (tw.best_practice_review_no_gap ?? 'Ingen forbedring funnet')}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-slate-700">
+                                            {entry.planned_topic === '__page__'
+                                                ? (tw.best_practice_review_whole_page ?? 'Siden som helhet')
+                                                : entry.planned_topic}
+                                        </p>
+                                        {entry.assessment && (
+                                            <p className="mt-0.5 text-sm text-slate-500">{entry.assessment}</p>
+                                        )}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
 
                 {current_version && documentOwnerApprovals.length === 0 && documentOwnerSummary?.state === 'qa_review_open' && (
                     <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">

@@ -118,7 +118,7 @@ class EnterpriseWikiLinkCatalogServiceTest extends TestCase
         $result = $this->service()->buildForPage($run, $article);
 
         foreach ($result['catalog'] as $entry) {
-            $this->assertSame(['slug', 'title', 'page_type'], array_keys($entry));
+            $this->assertSame(['page_id', 'slug', 'title', 'page_type'], array_keys($entry));
         }
     }
 

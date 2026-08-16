@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
@@ -1009,6 +1010,49 @@ class EnterpriseWikiPostIngestQaServiceTest extends TestCase
         $this->assertNotNull($result);
         $this->assertSame([], $result['critical_defects'], 'Warnings must not block passed.');
 
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+    }
+
+    public function test_current_wikilink_integrity_blocks_qa_but_a_superseded_version_finding_does_not(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+        $this->markStepsComplete($run);
+
+        $currentVersion = $article->currentVersion()->firstOrFail();
+        EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $article->id,
+            'enterprise_wiki_page_version_id' => $currentVersion->id,
+            'code' => EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
+            'message' => 'Current integrity defect.',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $this->service()->runForRun($run);
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+
+        $run->update(['qa_status' => null, 'qa_started_at' => null, 'qa_completed_at' => null, 'qa_last_error' => null]);
+        $currentVersion->update(['is_current' => false]);
+        $replacement = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => '# Article\n\nCurrent, healthy content.',
+            'generated_by_model' => 'gpt-5',
+        ]);
+        $this->assertNotNull($replacement);
+
+        $result = $this->service()->runForRun($run->fresh());
+
+        $this->assertSame([], $result['critical_defects']);
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }

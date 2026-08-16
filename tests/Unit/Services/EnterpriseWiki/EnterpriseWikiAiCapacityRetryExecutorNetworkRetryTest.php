@@ -5,6 +5,7 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 use App\Data\Ai\AiCallContext;
 use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiTimeoutPlan;
+use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseInvalidJsonException;
 use App\Services\EnterpriseWiki\EnterpriseWikiAiCapacityRetryExecutor;
@@ -103,6 +104,75 @@ class EnterpriseWikiAiCapacityRetryExecutorNetworkRetryTest extends TestCase
             fn (int $maxTokens) => ['max_output_tokens' => $maxTokens],
             fn (AiCapacityPlan $plan, ?int $budget) => $this->timeoutPlan(),
             $context,
+        );
+    }
+
+    // =========================================================================
+    // Capacity retries that cannot help are not attempted at all
+    // =========================================================================
+
+    /**
+     * Run 51 spent ~95 seconds on a second call that was mathematically identical to the first:
+     * the plan was already clamped to the operation's ceiling, so the "retry at a higher budget"
+     * got the very same budget. A retry is only a retry when it actually buys output tokens.
+     */
+    public function test_a_retry_that_cannot_raise_the_budget_is_skipped_instead_of_repeated(): void
+    {
+        Log::spy();
+
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->once()
+            ->andReturn($this->incompleteMaxTokensResponse());
+
+        try {
+            $this->executor($openAiClient)->execute(
+                'test_operation',
+                4000,
+                // Both levels clamp to the same ceiling — exactly what a clamped plan looks like.
+                fn (int $retryLevel) => $this->clampedPlan($retryLevel),
+                fn (int $maxTokens) => ['max_output_tokens' => $maxTokens],
+                fn (AiCapacityPlan $plan, ?int $budget) => $this->timeoutPlan(),
+            );
+
+            $this->fail('the capacity failure should have been raised');
+        } catch (EnterpriseWikiAiOutputCapacityExceededException $e) {
+            $this->assertTrue($e->retrySkippedAsPointless);
+            $this->assertStringContainsString('no capacity retry was attempted', $e->getMessage());
+            $this->assertStringNotContainsString('exhausted capacity retry', $e->getMessage());
+        }
+
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn (string $message): bool => str_contains($message, 'Skipping capacity retry'))
+            ->once();
+    }
+
+    public function test_a_retry_that_does_raise_the_budget_still_runs(): void
+    {
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->twice()
+            ->andReturn($this->incompleteMaxTokensResponse(), $this->completedResponse());
+
+        // planFor() grows the budget by one token per retry level — small, but genuinely larger.
+        $result = $this->execute($openAiClient);
+
+        $this->assertSame(['foo' => 'bar'], $result);
+    }
+
+    private function clampedPlan(int $retryLevel): AiCapacityPlan
+    {
+        return new AiCapacityPlan(
+            operationType: 'enterprise_wiki_maintainer_decision',
+            model: 'gpt-5',
+            chosenMaxOutputTokens: 9000,
+            estimatedMinimumTokens: 10,
+            estimatedNeedTokens: 15_000,
+            maxAllowedTokens: 9000,
+            wasClamped: true,
+            basis: 'test-clamped-plan',
+            retryLevel: $retryLevel,
+            strategy: AiCapacityPlan::STRATEGY_SPLIT_REQUIRED,
         );
     }
 

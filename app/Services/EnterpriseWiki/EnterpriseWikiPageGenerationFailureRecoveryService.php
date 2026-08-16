@@ -279,7 +279,7 @@ class EnterpriseWikiPageGenerationFailureRecoveryService
 
         $entry = $this->conceptDecisionEntry($page, $decisionJson);
 
-        return $entry !== null && $this->nonEmptyStringList($entry['owned_topics'] ?? []) !== [];
+        return $entry !== null && EnterpriseWikiMaintainerDecisionPrompt::ownedTopicNames($entry['owned_topics'] ?? []) !== [];
     }
 
     /**

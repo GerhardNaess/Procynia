@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiPageVersionBlockProvenanceLostException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -114,10 +115,23 @@ class EnterpriseWikiSemanticRepairService
             $languageCode,
         );
 
-        $newVersion = $this->createRevisedVersion(
-            (int) $articleVersion->enterprise_wiki_page_id,
-            $revisedMarkdown,
-        );
+        try {
+            $newVersion = $this->createRevisedVersion(
+                (int) $articleVersion->enterprise_wiki_page_id,
+                $revisedMarkdown,
+            );
+        } catch (EnterpriseWikiPageVersionBlockProvenanceLostException $e) {
+            // The revision was valid, but promoting it would have left the page with no content
+            // blocks — no image figures, no source provenance, no claim anchors (run 54, page 191).
+            // Declining the repair keeps the page whole; QA still sees the unresolved finding.
+            Log::warning('[WIKI_QA] Semantic repair not promoted — it would have dropped the page\'s content blocks.', [
+                'run_id' => $run->id,
+                'page_id' => $articleVersion->enterprise_wiki_page_id,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return $this->skippedResult('block_provenance_at_risk');
+        }
 
         Log::info('[WIKI_QA] Semantic repair completed — new version created', [
             'run_id' => $run->id,
@@ -137,12 +151,16 @@ class EnterpriseWikiSemanticRepairService
 
     private function createRevisedVersion(int $pageId, string $content): EnterpriseWikiPageVersion
     {
-        $version = $this->versionWriter->writeNewCurrentVersion($pageId, [
-            'content_markdown' => $content,
-            'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
-        ]);
-
-        $this->restoreBlockProvenance($pageId, $version);
+        // Write and restore are ONE unit — a revision that cannot keep the page's block provenance
+        // is rolled back rather than promoted blockless (see EnterpriseWikiPageVersionWriter).
+        $version = $this->versionWriter->writeNewCurrentVersionRestoringBlocks(
+            $pageId,
+            [
+                'content_markdown' => $content,
+                'generated_by_model' => WikiSemanticReviserAiClient::MODEL.'/semantic-repair',
+            ],
+            fn (EnterpriseWikiPageVersion $written) => $this->restoreBlockProvenance($pageId, $written),
+        );
 
         $this->wikiAnswerStalenessService->markAnswersStaleForWikiPageChange($pageId);
 
