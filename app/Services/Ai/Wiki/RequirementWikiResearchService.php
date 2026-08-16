@@ -230,6 +230,9 @@ class RequirementWikiResearchService
                     'content_mode' => $read['content_mode'],
                     'content_markdown' => $read['content_markdown'],
                     'selected_headings' => $read['selected_headings'],
+                    // Only figures this read actually covered. A figure the answer may use must
+                    // come from a page that was read, not merely from a page that exists.
+                    'figures' => $read['figures'],
                     // 'all' is kept for backward compatibility with older persisted research_trace
                     // readers; source_based/best_practice are the new origin-scoped buckets that
                     // let downstream steps (RequirementWikiAnswerService) know WHICH claims may be

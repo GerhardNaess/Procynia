@@ -28,6 +28,10 @@ class RequirementWikiCatalogBuilder
     /** Excerpt length is deliberately short — just enough for a human/AI to judge topical relevance. */
     private const EXCERPT_MAX_CHARS = 220;
 
+    public function __construct(
+        private readonly RequirementWikiFigureCatalog $figureCatalog = new RequirementWikiFigureCatalog,
+    ) {}
+
     /**
      * Statuses that can ever represent CURRENT customer knowledge. Archived/superseded/rejected are
      * excluded by construction, so no caller can widen $statuses into stale content.
@@ -42,8 +46,8 @@ class RequirementWikiCatalogBuilder
      * Purpose: Build the full customer-scoped Wiki catalog.
      * Inputs: The customer id, and optionally which page statuses are eligible.
      * Returns: One entry per eligible page:
-     *          {page_id, title, page_type, scope, slug, content_markdown, headings, excerpt,
-     *           outgoing_link_count, backlink_count}.
+     *          {page_id, title, page_type, scope, slug, content_markdown, figures, headings,
+     *           excerpt, outgoing_link_count, backlink_count}.
      * Side effects: None (read-only).
      *
      * $statuses defaults to approved-only, which is the behaviour every existing caller relies on.
@@ -53,7 +57,7 @@ class RequirementWikiCatalogBuilder
      * rejected pages are never eligible for either caller: they are not current knowledge.
      *
      * @param  list<string>|null  $statuses
-     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
+     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, figures: list<array<string, mixed>>, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
      */
     public function build(int $customerId, ?array $statuses = null): array
     {
@@ -93,6 +97,12 @@ class RequirementWikiCatalogBuilder
                     'scope' => (string) $page->scope,
                     'slug' => $page->slug,
                     'content_markdown' => $contentMarkdown,
+                    // Figures live only in content_blocks_json — content_markdown carries their
+                    // caption and citation but never the image itself. Carried alongside the text
+                    // so a page that is actually read can offer its own figures to the answer.
+                    'figures' => $this->figureCatalog->fromContentBlocks(
+                        (array) ($page->currentVersion->content_blocks_json ?? []),
+                    ),
                     'headings' => $this->extractHeadings($contentMarkdown),
                     'excerpt' => $this->extractExcerpt($contentMarkdown),
                     'outgoing_link_count' => $outgoingCounts[$page->id] ?? 0,

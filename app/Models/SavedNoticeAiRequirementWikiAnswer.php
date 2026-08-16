@@ -59,6 +59,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
         'saved_notice_ai_requirement_id',
         'coverage_status',
         'answer_text',
+        'answer_figures',
         'missing_summary',
         'sources',
         'research_trace',
@@ -77,6 +78,7 @@ class SavedNoticeAiRequirementWikiAnswer extends Model
     {
         return [
             'sources' => 'array',
+            'answer_figures' => 'array',
             'research_trace' => 'array',
             'alignment_trace' => 'array',
             'has_possible_conflict' => 'boolean',

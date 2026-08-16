@@ -64,7 +64,7 @@ class RequirementWikiAnswerAiClient
      *          used_page_ids when it is mainly best practice.
      * Side effects: None (one OpenAI call).
      *
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, figures: list<array<string, mixed>>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      * @param  string|null  $caseInstructions  The owning SavedNotice's free-text ai_instructions
      *                                         (tone/terminology/style guidance the customer configured for this case — see
      *                                         AiController::updateAiInstructions()). Governs HOW the answer is written, never WHAT
@@ -94,14 +94,49 @@ class RequirementWikiAnswerAiClient
         $response = $this->openAiClient->createResponse($payload);
         $decoded = $this->responsesDecoder->decode($response, 'RequirementWikiAnswerAiClient');
 
-        return $this->normalize($decoded, array_column($pages, 'page_id'));
+        return $this->normalize($decoded, array_column($pages, 'page_id'), $this->offeredFiguresByRef($pages));
+    }
+
+    /**
+     * Purpose: The exact set of figures this call put in front of the model, keyed by the ref the
+     *          model is allowed to answer with.
+     * Inputs: The pages DTO.
+     * Returns: figure_ref => figure metadata (with the owning page_id attached).
+     * Side effects: None.
+     *
+     * This map is the whole validation contract: a ref the model returns is accepted only when it
+     * is a key here. An invented ref, a ref for a page that was not read, and a ref the model
+     * assembled itself all fail the same lookup, so no parsing of model-authored identity happens
+     * anywhere.
+     *
+     * @param  list<array<string, mixed>>  $pages
+     * @return array<string, array<string, mixed>>
+     */
+    private function offeredFiguresByRef(array $pages): array
+    {
+        $byRef = [];
+
+        foreach ($pages as $page) {
+            foreach ((array) ($page['figures'] ?? []) as $figure) {
+                $ref = (string) ($figure['figure_ref'] ?? '');
+
+                if ($ref === '') {
+                    continue;
+                }
+
+                $byRef[$ref] = array_merge($figure, ['page_id' => (int) $page['page_id']]);
+            }
+        }
+
+        return $byRef;
     }
 
     /**
      * @param  list<int>  $allowedPageIds
-     * @return array{answer_sections: list<array{key: string, heading: string, text: string, used_page_ids: list<int>}>}
+     * @param  array<string, array<string, mixed>>  $offeredFiguresByRef
+     * @return array{answer_sections: list<array{key: string, heading: string, text: string, used_page_ids: list<int>, figure_refs: list<string>}>}
      */
-    private function normalize(array $decoded, array $allowedPageIds): array
+    private function normalize(array $decoded, array $allowedPageIds, array $offeredFiguresByRef = []): array
     {
         $rawSections = $decoded['answer_sections'] ?? [];
         $rawSections = is_array($rawSections) ? $rawSections : [];
@@ -140,9 +175,19 @@ class RequirementWikiAnswerAiClient
                 $allowedPageIds,
             )));
 
+            $sectionFigureRefs = $rawSection['figure_refs'] ?? [];
+            $sectionFigureRefs = is_array($sectionFigureRefs) ? $sectionFigureRefs : [];
+            // Fail closed, exactly as used_page_ids does: anything not offered is dropped silently
+            // rather than trusted. A section keeps its text either way — a bad figure ref is never
+            // a reason to lose the answer.
+            $sectionFigureRefs = array_values(array_unique(array_filter(
+                array_map(static fn (mixed $ref): string => is_string($ref) ? trim($ref) : '', $sectionFigureRefs),
+                static fn (string $ref): bool => $ref !== '' && isset($offeredFiguresByRef[$ref]),
+            )));
+
             // Unlike the earlier claim-based model, a section is NOT required to cite a page — it
             // may be legitimate, undocumented best practice, and is kept as-is (see class docblock).
-            $validSections[] = ['key' => $key, 'heading' => $heading, 'text' => $text, 'used_page_ids' => $sectionPageIds];
+            $validSections[] = ['key' => $key, 'heading' => $heading, 'text' => $text, 'used_page_ids' => $sectionPageIds, 'figure_refs' => $sectionFigureRefs];
         }
 
         if ($validSections === []) {
@@ -153,7 +198,7 @@ class RequirementWikiAnswerAiClient
     }
 
     /**
-     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
+     * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, figures: list<array<string, mixed>>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
      */
     private function buildPayload(string $requirementIdentifier, string $requirementText, array $pages, string $languageName, ?string $caseInstructions = null, ?string $requirementUserPrompt = null): array
     {
@@ -177,6 +222,30 @@ class RequirementWikiAnswerAiClient
                     if ($page['best_practice_claim_texts'] !== []) {
                         $lines[] = 'BEST-PRACTICE SUGGESTIONS for this page (NOT documented in the customer\'s own sources — you may use these as professional recommendations, but must phrase them as a suggested/recommended approach, never as an existing customer fact or commitment):';
                         $lines[] = implode("\n", array_map(static fn (string $claim): string => '- '.$claim, $page['best_practice_claim_texts']));
+                    }
+
+                    $figures = (array) ($page['figures'] ?? []);
+
+                    if ($figures !== []) {
+                        $lines[] = 'AVAILABLE FIGURES on this page (real figures from the customer\'s own source documents; described in words only — you never receive or produce the image itself):';
+                        $lines[] = implode("\n", array_map(
+                            static function (array $figure): string {
+                                $label = $figure['caption']
+                                    ?? ($figure['figure_number'] !== null ? 'Figur '.$figure['figure_number'] : 'Figur');
+                                $parts = ['- FIGURE_REF: '.$figure['figure_ref'], '  LABEL: '.$label];
+
+                                if (($figure['alt_text'] ?? null) !== null) {
+                                    $parts[] = '  ALT TEXT: '.$figure['alt_text'];
+                                }
+
+                                if (($figure['description'] ?? null) !== null) {
+                                    $parts[] = '  SHOWS: '.str_replace("\n", ' ', $figure['description']);
+                                }
+
+                                return implode("\n", $parts);
+                            },
+                            $figures,
+                        ));
                     }
 
                     return implode("\n", $lines);
@@ -269,6 +338,13 @@ class RequirementWikiAnswerAiClient
             '- Each section\'s used_page_ids must list the page_ids of the Wiki pages that actually ground that section\'s content. Never cite a page_id that was not provided to you.',
             '- A section built mainly from best practice, with no real Wiki grounding, should have an EMPTY used_page_ids — do not force a citation onto a page that doesn\'t actually support the section, and do not omit or water down good best-practice content just because no page supports it.',
             '- Every section must contribute new information. Do not repeat the same facts, effects, or phrasing in multiple sections.',
+            '',
+            'Figures:',
+            '- Some pages list AVAILABLE FIGURES. These are real figures from the customer\'s own source documents, already part of the Wiki.',
+            '- Put a figure\'s FIGURE_REF in figure_refs on the ONE section it genuinely illustrates. The figure is then shown with that section, with its own source citation.',
+            '- Use figure_refs EXACTLY as given. Never invent a ref, never modify one, never use a ref from a page that was not provided above, and never write image or link markup in the answer text.',
+            '- Only include a figure that genuinely supports the section — a decorative or loosely related figure weakens the answer. Most sections have no figure; figure_refs is then an empty array.',
+            '- Do not describe the figure in place of writing the section. The text must stand on its own; the figure supports it.',
             '- Use the sections with clear division of purpose appropriate to the requirement; each section should focus on the specific subject matter it needs to cover.',
             '- Avoid repeating CMDB, monitoring, traceability, Change Enablement, and continuous improvement unless a section genuinely adds new information about them.',
             '- Prioritize precision and subject-matter substance over length.',
@@ -306,8 +382,12 @@ class RequirementWikiAnswerAiClient
                                 'type' => 'array',
                                 'items' => ['type' => 'integer'],
                             ],
+                            'figure_refs' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
                         ],
-                        'required' => ['key', 'heading', 'text', 'used_page_ids'],
+                        'required' => ['key', 'heading', 'text', 'used_page_ids', 'figure_refs'],
                         'additionalProperties' => false,
                     ],
                 ],

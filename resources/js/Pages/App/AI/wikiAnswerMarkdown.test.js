@@ -92,9 +92,11 @@ describe('Wiki answer round-trip', () => {
 describe('WikiAnswerMarkdown usage in the AI answer panel', () => {
     const showSource = readFileSync(fileURLToPath(new URL('./Show.jsx', import.meta.url)), 'utf8');
 
-    test('the answer panel renders through WikiAnswerMarkdown', () => {
-        assert.match(showSource, /import \{ WikiAnswerMarkdown \} from '\.\/wikiAnswerMarkdown'/);
-        assert.match(showSource, /<WikiAnswerMarkdown text=\{activeRequirementWikiAnswerText\} \/>/);
+    test('the answer panel renders through the shared Markdown renderer', () => {
+        // Since figure support, the panel mounts WikiAnswerBody, which renders the answer's
+        // Markdown through WikiAnswerMarkdown and places the answer's figures around it.
+        assert.match(showSource, /import \{ WikiAnswerBody \} from '\.\/wikiAnswerMarkdown'/);
+        assert.match(showSource, /<WikiAnswerBody\s+text=\{activeRequirementWikiAnswerText\}/);
     });
 
     test('the raw textarea only appears while the user is editing', () => {

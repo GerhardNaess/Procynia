@@ -7,11 +7,12 @@ import {
     writeRememberedAiRequirementId,
 } from '../../../Support/aiWorkspaceState';
 import {
+    buildWikiAnswerCopyHtml,
     buildWikiAnswerCopyText,
     dedupeWikiAnswerSourcesByPageId,
     normalizeWikiAnswerText,
 } from './wikiAnswerPresentation';
-import { WikiAnswerMarkdown } from './wikiAnswerMarkdown';
+import { WikiAnswerBody } from './wikiAnswerMarkdown';
 
 const AI_STATUS_META = {
     not_started: {
@@ -1339,6 +1340,32 @@ async function imageSourceToPngClipboardBlob(source) {
     });
 }
 
+/**
+ * Fetches one same-origin image through the browser's own session (the Wiki image route is
+ * authenticated and customer-scoped) and returns it as a data: URI. Returns null on any failure —
+ * a figure that cannot be fetched is simply left out of the clipboard HTML.
+ */
+async function fetchImageAsDataUri(imageUrl) {
+    try {
+        const response = await fetch(imageUrl, { credentials: 'same-origin' });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const blob = await response.blob();
+
+        return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+        });
+    } catch (error) {
+        return null;
+    }
+}
+
 async function writeSingleImageClipboardPayload(source) {
     if (
         typeof window === 'undefined'
@@ -1952,6 +1979,7 @@ export default function AiShow({
     // Which requirement's answer is open in the raw-Markdown editor. Null means every answer is in
     // normal (rendered) display — the answer is a document to read, not a text field to stare at.
     const [wikiAnswerEditingRequirementId, setWikiAnswerEditingRequirementId] = useState(null);
+    const wikiAnswerRenderedRef = useRef(null);
     const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
     const [wikiAnswerSavingRequirementId, setWikiAnswerSavingRequirementId] = useState(null);
     const [wikiAnswerCopyStatus, setWikiAnswerCopyStatus] = useState(null);
@@ -2197,6 +2225,17 @@ export default function AiShow({
     const activeRequirementWikiAnswerIsDirty = activeRequirementWikiAnswerLocalEdit?.isDirty ?? false;
     const isEditingActiveWikiAnswer = activeRequirement !== null
         && wikiAnswerEditingRequirementId === activeRequirement.id;
+    // Wiki figures the answer carries. Resolved server-side against live Wiki state, so this list
+    // is already free of figures whose page or source document is gone.
+    const activeRequirementWikiAnswerFigures = Array.isArray(activeRequirementWikiAnswer?.figures)
+        ? activeRequirementWikiAnswer.figures
+        : [];
+    // Present only while the server can still prove the stored section split describes the answer
+    // text; a hand-edit drops it to null and the figures fall back to following the whole answer.
+    const activeRequirementWikiAnswerSegments = !activeRequirementWikiAnswerIsDirty
+        && Array.isArray(activeRequirementWikiAnswer?.segments)
+        ? activeRequirementWikiAnswer.segments
+        : null;
     const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
     const activeRequirementWikiAnswerStaleContext = activeRequirementWikiAnswer?.stale_context ?? null;
     const activeRequirementWikiAnswerStaleSubjectName = (() => {
@@ -2709,7 +2748,23 @@ export default function AiShow({
         setWikiAnswerCopyStatus(null);
 
         try {
-            if (navigator.clipboard?.writeText) {
+            // Rich flavour first: the rendered answer with its tables and its Wiki figures inlined,
+            // so a paste into Word arrives as a real document. Plain text always rides along, and
+            // is the whole payload when the answer is open in the Markdown editor (nothing is
+            // rendered to read from) or when the browser has no rich-clipboard support.
+            const html = await buildWikiAnswerCopyHtml(wikiAnswerRenderedRef.current, fetchImageAsDataUri);
+            const canWriteRich = typeof window !== 'undefined'
+                && typeof window.ClipboardItem !== 'undefined'
+                && Boolean(navigator.clipboard?.write);
+
+            if (html !== '' && canWriteRich) {
+                await navigator.clipboard.write([
+                    new window.ClipboardItem({
+                        'text/html': new Blob([html], { type: 'text/html' }),
+                        'text/plain': new Blob([payloadText], { type: 'text/plain' }),
+                    }),
+                ]);
+            } else if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(payloadText);
             } else if (copyHtmlSelectionToClipboard(escapeClipboardHtml(payloadText).replace(/\n/g, '<br />'))) {
             } else {
@@ -4176,6 +4231,12 @@ export default function AiShow({
                                                             <p className="text-base text-slate-600">
                                                                 {tai.wiki_answer_edit_markdown_hint ?? 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.'}
                                                             </p>
+                                                            {activeRequirementWikiAnswerFigures.length > 0 ? (
+                                                                <p className="text-base text-slate-600" data-testid="wiki-answer-figure-edit-notice">
+                                                                    {(tai.wiki_answer_edit_figures_notice ?? 'Svaret har :count figur(er) fra Wikien. De redigeres ikke her og beholdes når du lagrer.')
+                                                                        .replace(':count', String(activeRequirementWikiAnswerFigures.length))}
+                                                                </p>
+                                                            ) : null}
                                                         </div>
 
                                                         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -4209,11 +4270,16 @@ export default function AiShow({
                                                     </>
                                                 ) : (
                                                     <div
+                                                        ref={wikiAnswerRenderedRef}
                                                         data-testid="wiki-answer-rendered"
                                                         className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base leading-7 text-slate-800"
                                                     >
                                                         {activeRequirementWikiAnswerHasText ? (
-                                                            <WikiAnswerMarkdown text={activeRequirementWikiAnswerText} />
+                                                            <WikiAnswerBody
+                                                                text={activeRequirementWikiAnswerText}
+                                                                figures={activeRequirementWikiAnswerFigures}
+                                                                segments={activeRequirementWikiAnswerSegments}
+                                                            />
                                                         ) : (
                                                             <span className="text-slate-600">{tai.wiki_answer_none_message}</span>
                                                         )}

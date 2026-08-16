@@ -861,6 +861,7 @@ return [
         'wiki_answer_expert_draft_title' => 'Ekspertutkast',
         'wiki_answer_copy_answer' => 'Kopier svar',
         'wiki_answer_edit' => 'Rediger',
+        'wiki_answer_edit_figures_notice' => 'Svaret har :count figur(er) fra Wikien. De redigeres ikke her og beholdes når du lagrer.',
         'wiki_answer_edit_markdown_hint' => 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.',
         'wiki_answer_generated_at_prefix' => 'Generert:',
         'wiki_answer_coverage_full' => 'Full dekning',
