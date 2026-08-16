@@ -306,6 +306,47 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
+     * The pages whose CURRENT version is fully signed off by its document owners — the one
+     * authoritative "approved current knowledge" signal in this architecture.
+     *
+     * Same rule evaluateRunCompletionGate() applies to a run, asked per page instead: every
+     * approval row on the current version is approved, and there is at least one. A version with
+     * no approval requirement at all is not "approved by default" — nobody vouched for it, so it
+     * stays out of anything that presents Wiki content as documented customer fact.
+     *
+     * Why the current version and not enterprise_wiki_pages.status: approvals are keyed to
+     * (version, owner, source_documents_hash), so a regenerated page gets fresh pending rows and
+     * loses its approval automatically. A page-level status carries no version identity and would
+     * keep saying "approved" over content nobody has read.
+     *
+     * Read-only and set-based — never syncs or writes rows.
+     *
+     * @param  list<int>  $pageIds  optional narrowing; empty means every page of the customer
+     * @return list<int>
+     */
+    public function approvedCurrentVersionPageIds(int $customerId, array $pageIds = []): array
+    {
+        return EnterpriseWikiPageVersion::query()
+            ->join('enterprise_wiki_pages', 'enterprise_wiki_pages.id', '=', 'enterprise_wiki_page_versions.enterprise_wiki_page_id')
+            ->join(
+                'enterprise_wiki_page_version_document_owner_approvals as approvals',
+                'approvals.enterprise_wiki_page_version_id',
+                '=',
+                'enterprise_wiki_page_versions.id',
+            )
+            ->where('enterprise_wiki_pages.customer_id', $customerId)
+            ->where('enterprise_wiki_page_versions.is_current', true)
+            ->when($pageIds !== [], fn ($query) => $query->whereIn('enterprise_wiki_page_versions.enterprise_wiki_page_id', $pageIds))
+            ->groupBy('enterprise_wiki_page_versions.enterprise_wiki_page_id')
+            ->havingRaw('count(*) = count(*) filter (where approvals.approval_status = ?)', [
+                EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
+            ])
+            ->pluck('enterprise_wiki_page_versions.enterprise_wiki_page_id')
+            ->map(static fn ($pageId): int => (int) $pageId)
+            ->all();
+    }
+
+    /**
      * @return Collection<int, EnterpriseWikiPageVersionDocumentOwnerApproval>
      */
     private function buildRequirementsForPageVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): Collection

@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 
 /**
  * Builds a compact, customer-scoped catalog of the pages a Wiki-research run is allowed to
@@ -29,6 +30,7 @@ class RequirementWikiCatalogBuilder
     private const EXCERPT_MAX_CHARS = 220;
 
     public function __construct(
+        private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovals,
         private readonly RequirementWikiFigureCatalog $figureCatalog = new RequirementWikiFigureCatalog,
     ) {}
 
@@ -56,10 +58,21 @@ class RequirementWikiCatalogBuilder
      * grounded in it — the same read model the Wiki pages themselves use. Archived, superseded and
      * rejected pages are never eligible for either caller: they are not current knowledge.
      *
+     * $requireCurrentVersionApproval adds the sign-off gate on top: only pages whose CURRENT
+     * version is fully approved by its document owners are eligible. That is the gate the ingest
+     * flow itself ends on — a run stops at 'awaiting_document_owner_approval', and nothing in the
+     * current architecture ever advances enterprise_wiki_pages.status past 'draft'. Page status
+     * therefore says nothing about whether anyone has signed off on today's content; it is the
+     * legacy single-page review lifecycle (WikiController::submit()/approve(),
+     * FinalizeEnterpriseWikiIngest), still meaningful for archived/superseded/rejected but not a
+     * statement of approval. Off by default so read-oriented callers keep their exploratory
+     * semantics; requirement answers turn it on, because a bid answer presents Wiki content as
+     * documented customer fact.
+     *
      * @param  list<string>|null  $statuses
      * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, figures: list<array<string, mixed>>, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
      */
-    public function build(int $customerId, ?array $statuses = null): array
+    public function build(int $customerId, ?array $statuses = null, bool $requireCurrentVersionApproval = false): array
     {
         $eligibleStatuses = array_values(array_intersect(
             $statuses ?? [EnterpriseWikiPage::STATUS_APPROVED],
@@ -77,6 +90,17 @@ class RequirementWikiCatalogBuilder
             ->get()
             ->filter(fn (EnterpriseWikiPage $page): bool => trim((string) $page->currentVersion?->content_markdown) !== '')
             ->values();
+
+        if ($requireCurrentVersionApproval) {
+            $approvedPageIds = array_flip($this->documentOwnerApprovals->approvedCurrentVersionPageIds(
+                $customerId,
+                $pages->pluck('id')->map(static fn ($id): int => (int) $id)->all(),
+            ));
+
+            $pages = $pages
+                ->filter(fn (EnterpriseWikiPage $page): bool => isset($approvedPageIds[(int) $page->id]))
+                ->values();
+        }
 
         if ($pages->isEmpty()) {
             return [];

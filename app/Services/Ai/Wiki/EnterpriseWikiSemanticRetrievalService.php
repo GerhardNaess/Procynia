@@ -36,10 +36,10 @@ class EnterpriseWikiSemanticRetrievalService
      * @param  list<string>|null  $statuses
      * @return array{catalog: list<array<string, mixed>>, navigation_plan: array<string, mixed>, candidate_pool: list<array<string, mixed>>, telemetry: array<string, mixed>}
      */
-    public function retrieve(string $input, int $customerId, string $languageCode, ?array $statuses = null): array
+    public function retrieve(string $input, int $customerId, string $languageCode, ?array $statuses = null, bool $requireCurrentVersionApproval = false): array
     {
         $input = trim($input);
-        $catalog = $this->catalogBuilder->build($customerId, $statuses);
+        $catalog = $this->catalogBuilder->build($customerId, $statuses, $requireCurrentVersionApproval);
         [$wikiIndex, $indexOmittedCount] = $this->buildWikiIndex($catalog, $customerId);
 
         if ($wikiIndex === []) {

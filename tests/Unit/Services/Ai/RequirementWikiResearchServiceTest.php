@@ -180,23 +180,60 @@ class RequirementWikiResearchServiceTest extends TestCase
         $this->assertSame([], $context['pages']);
     }
 
-    public function test_a_draft_page_can_never_be_read(): void
+    /**
+     * The gate is document-owner sign-off on the current version, not enterprise_wiki_pages.status
+     * — the ingest flow never advances that field past 'draft'. So an unsigned page is refused
+     * whatever its status says, and a signed 'draft' page is legitimate current knowledge.
+     */
+    public function test_a_page_no_document_owner_has_signed_off_can_never_be_read(): void
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
         $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
-        $draftPage = $this->createWikiPageWithVersion($customer, 'Problembehandling kladd', 'Kladdinnhold om problembehandling.', ['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $unsignedPage = $this->createWikiPageWithVersion(
+            $customer,
+            'Problembehandling kladd',
+            'Kladdinnhold om problembehandling.',
+            ['status' => EnterpriseWikiPage::STATUS_DRAFT],
+            withDocumentOwnerApproval: false,
+        );
 
         $this->mockResearchClient(fn (array $candidates) => [
             'action' => 'read_pages',
-            'page_ids' => [$draftPage->id],
+            'page_ids' => [$unsignedPage->id],
             'search_terms' => [],
-            'reason' => 'Forsøk på å lese kladd.',
+            'reason' => 'Forsøk på å lese usignert side.',
         ]);
 
         $context = app(RequirementWikiResearchService::class)->research($requirement, $customer->id, 'no');
 
         $this->assertSame([], $context['pages']);
+    }
+
+    public function test_a_draft_page_signed_off_by_its_document_owner_is_read_normally(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
+        // Exactly the state a real generated Wiki is in: status never left 'draft', but the
+        // document owner has approved the current version in the UI.
+        $signedDraft = $this->createWikiPageWithVersion(
+            $customer,
+            'Problembehandling',
+            'Innhold om problembehandling.',
+            ['status' => EnterpriseWikiPage::STATUS_DRAFT],
+        );
+
+        $this->mockResearchClient(fn (array $candidates) => [
+            'action' => 'read_pages',
+            'page_ids' => [$signedDraft->id],
+            'search_terms' => [],
+            'reason' => 'Godkjent current versjon.',
+        ]);
+
+        $context = app(RequirementWikiResearchService::class)->research($requirement, $customer->id, 'no');
+
+        $this->assertCount(1, $context['pages']);
+        $this->assertSame($signedDraft->id, $context['pages'][0]['page_id']);
     }
 
     public function test_the_same_page_is_never_read_twice_even_if_rediscovered(): void

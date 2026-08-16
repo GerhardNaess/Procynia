@@ -66,7 +66,18 @@ class RequirementWikiResearchService
     public function research(SavedNoticeAiRequirement $requirement, int $customerId, string $languageCode): array
     {
         $researchInput = trim(($requirement->requirement_identifier ?? '').' '.$requirement->requirement_text);
-        $semanticRetrieval = $this->semanticRetrieval->retrieve($researchInput, $customerId, $languageCode);
+        // A bid answer presents Wiki content as the customer's documented fact, so it reads only
+        // pages whose current version the document owners have signed off on. Status is passed
+        // explicitly as CURRENT_KNOWLEDGE_STATUSES rather than approved-only: it exists here to
+        // keep archived/superseded/rejected pages out, not to express approval — that is what the
+        // sign-off gate is for. See RequirementWikiCatalogBuilder::build().
+        $semanticRetrieval = $this->semanticRetrieval->retrieve(
+            $researchInput,
+            $customerId,
+            $languageCode,
+            RequirementWikiCatalogBuilder::CURRENT_KNOWLEDGE_STATUSES,
+            requireCurrentVersionApproval: true,
+        );
         $catalog = $semanticRetrieval['catalog'];
         $catalogByPageId = [];
 

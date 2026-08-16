@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\Language;
 use App\Models\Nationality;
 use Illuminate\Support\Str;
@@ -54,23 +55,56 @@ trait CreatesEnterpriseWikiFixtures
         ], $overrides));
     }
 
+    /**
+     * A page that counts as current, usable customer knowledge — which since the document-owner
+     * gate means both an eligible page status AND a current version its document owners have
+     * signed off on. Pass $withDocumentOwnerApproval = false to build a page nobody has signed
+     * yet (a page the requirement-answer engine must refuse to read).
+     */
     protected function createWikiPageWithVersion(
         Customer $customer,
         string $title,
         string $markdown,
         array $pageOverrides = [],
         array $versionOverrides = [],
+        bool $withDocumentOwnerApproval = true,
     ): EnterpriseWikiPage {
         $page = $this->createWikiPage($customer, $title, $pageOverrides);
 
-        EnterpriseWikiPageVersion::query()->create(array_merge([
+        $version = EnterpriseWikiPageVersion::query()->create(array_merge([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 1,
             'is_current' => true,
             'content_markdown' => $markdown,
         ], $versionOverrides));
 
+        if ($withDocumentOwnerApproval && ($version->is_current ?? false)) {
+            $this->approveWikiPageVersionAsDocumentOwner($version);
+        }
+
         return $page->refresh();
+    }
+
+    /**
+     * Materialize one settled document-owner approval row for a page version — the signal
+     * RequirementWikiCatalogBuilder treats as "this current version is approved".
+     */
+    protected function approveWikiPageVersionAsDocumentOwner(
+        EnterpriseWikiPageVersion $version,
+        string $approvalStatus = EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED,
+    ): EnterpriseWikiPageVersionDocumentOwnerApproval {
+        $page = $version->relationLoaded('page') ? $version->page : $version->page()->first();
+
+        return EnterpriseWikiPageVersionDocumentOwnerApproval::query()->create([
+            'customer_id' => $page->customer_id,
+            'enterprise_wiki_page_id' => $version->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'document_owner_user_id' => null,
+            'source_document_ids' => [],
+            'source_documents_hash' => Str::random(64),
+            'approval_status' => $approvalStatus,
+            'decided_at' => $approvalStatus === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING ? null : now(),
+        ]);
     }
 
     protected function createWikilink(Customer $customer, EnterpriseWikiPage $from, EnterpriseWikiPage $to): EnterpriseWikiPageLink
