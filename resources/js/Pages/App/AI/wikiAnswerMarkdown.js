@@ -69,3 +69,76 @@ export function WikiAnswerMarkdown({ text }) {
         markdown,
     );
 }
+
+/**
+ * Purpose: Render one Wiki figure the answer carries.
+ * Inputs: A resolved figure from the answer payload (image_url, caption, alt_text, page_reference).
+ * Returns: A semantic <figure>/<img>/<figcaption>, the same shape the Wiki page itself uses.
+ *
+ * The citation is not decoration: a figure lifted out of the Wiki into a bid answer must keep
+ * saying where it came from, so it never reads as a loose illustration the AI produced.
+ */
+export function WikiAnswerFigure({ figure }) {
+    if (!figure || typeof figure.image_url !== 'string' || figure.image_url === '') {
+        return null;
+    }
+
+    const caption = typeof figure.caption === 'string' ? figure.caption : '';
+    const sourceLine = typeof figure.page_reference === 'string' && figure.page_reference !== ''
+        ? figure.page_reference
+        : (typeof figure.page_title === 'string' ? figure.page_title : '');
+
+    return createElement(
+        'figure',
+        { className: 'not-prose my-4 space-y-2', 'data-testid': 'wiki-answer-figure' },
+        createElement('img', {
+            src: figure.image_url,
+            alt: typeof figure.alt_text === 'string' ? figure.alt_text : '',
+            className: 'max-w-full rounded-2xl border border-slate-200 bg-white shadow-sm',
+        }),
+        createElement(
+            'figcaption',
+            { className: 'text-base text-slate-600' },
+            caption !== '' ? createElement('span', { className: 'font-semibold text-slate-700' }, caption) : null,
+            caption !== '' && sourceLine !== '' ? ' — ' : null,
+            sourceLine !== '' ? sourceLine : null,
+        ),
+    );
+}
+
+/**
+ * Purpose: Render a whole answer — text plus the figures the generator placed in it.
+ * Inputs: `text` (the stored Markdown), `figures` (resolved figures) and `segments` (the answer
+ *         split into its generated sections, or null when that split can no longer be proven).
+ * Returns: Section-by-section output with each figure at its own section when `segments` is
+ *          available; otherwise the whole answer followed by its figures.
+ *
+ * The fallback exists because answer_text is hand-editable: once an edit has moved the section
+ * boundaries, placing a figure "at section 3" would put it against text it does not illustrate.
+ * The figures are still shown, still cited — only their position degrades.
+ */
+export function WikiAnswerBody({ text, figures = [], segments = null }) {
+    const allFigures = Array.isArray(figures) ? figures.filter(Boolean) : [];
+
+    if (Array.isArray(segments) && segments.length > 0) {
+        return createElement(
+            'div',
+            null,
+            ...segments.map((segment, index) => createElement(
+                'div',
+                { key: segment?.section_key ?? `segment-${index}` },
+                createElement(WikiAnswerMarkdown, { text: segment?.text }),
+                ...(Array.isArray(segment?.figures) ? segment.figures : []).map((figure, figureIndex) =>
+                    createElement(WikiAnswerFigure, { key: figure?.figure_ref ?? `figure-${figureIndex}`, figure })),
+            )),
+        );
+    }
+
+    return createElement(
+        'div',
+        null,
+        createElement(WikiAnswerMarkdown, { text }),
+        ...allFigures.map((figure, index) =>
+            createElement(WikiAnswerFigure, { key: figure?.figure_ref ?? `figure-${index}`, figure })),
+    );
+}

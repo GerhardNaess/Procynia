@@ -15,6 +15,10 @@ namespace App\Services\Ai\Wiki;
  */
 class RequirementWikiPageReader
 {
+    public function __construct(
+        private readonly RequirementWikiFigureCatalog $figureCatalog = new RequirementWikiFigureCatalog,
+    ) {}
+
     /**
      * Pages at or under this length are sent whole. Chosen from real data: a real customer's
      * approved Wiki pages ranged 1904-16100 chars (median 2616); 4000 sends 27 of 31 pages (87%)
@@ -35,28 +39,36 @@ class RequirementWikiPageReader
      * Inputs: A RequirementWikiCatalogBuilder entry (must carry content_markdown) and the
      *         normalized query tokens driving relevance (requirement tokens, or the search terms
      *         that led to this page).
-     * Returns: {content_mode: 'full'|'sections', content_markdown: string, selected_headings: list<string>}.
+     * Returns: {content_mode: 'full'|'sections', content_markdown: string, selected_headings:
+     *          list<string>, figures: list<array<string, mixed>>}.
      *          selected_headings is always [] for content_mode='full' (the whole page was used,
-     *          there is nothing to itemize).
+     *          there is nothing to itemize). figures are the page's own Wiki figures, narrowed to
+     *          the ones whose block actually appears in the content this read returned — a
+     *          sectioned read must not offer a figure from a section it skipped.
      * Side effects: None.
      *
      * @param  array<string, mixed>  $catalogEntry
      * @param  list<string>  $queryTokens
-     * @return array{content_mode: string, content_markdown: string, selected_headings: list<string>}
+     * @return array{content_mode: string, content_markdown: string, selected_headings: list<string>, figures: list<array<string, mixed>>}
      */
     public function read(array $catalogEntry, array $queryTokens): array
     {
         $content = (string) $catalogEntry['content_markdown'];
+        $figures = (array) ($catalogEntry['figures'] ?? []);
 
         if (mb_strlen($content, 'UTF-8') <= self::FULL_CONTENT_MAX_CHARS) {
             return [
                 'content_mode' => 'full',
                 'content_markdown' => $content,
                 'selected_headings' => [],
+                'figures' => array_values($figures),
             ];
         }
 
-        return $this->readSections($content, $queryTokens);
+        $read = $this->readSections($content, $queryTokens);
+        $read['figures'] = $this->figureCatalog->readable(array_values($figures), $read['content_markdown']);
+
+        return $read;
     }
 
     /**

@@ -32,6 +32,7 @@ use App\Services\Ai\Retrieval\KnowledgeMetadataMapService;
 use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
+use App\Services\Ai\Wiki\RequirementWikiAnswerFigureResolver;
 use App\Services\Ai\Wiki\RequirementWikiAnswerService;
 use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Billing\BillingEntitlementService;
@@ -105,6 +106,7 @@ class AiController extends Controller
         private readonly RequirementWordExportService $requirementWordExportService,
         private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
         private readonly RequirementWikiAssessmentService $requirementWikiAssessmentService,
+        private readonly RequirementWikiAnswerFigureResolver $wikiAnswerFigureResolver,
     ) {}
 
     /**
@@ -2214,6 +2216,8 @@ class AiController extends Controller
                 'coverage_status' => null,
                 'coverage_status_label' => null,
                 'text' => null,
+                'figures' => [],
+                'segments' => null,
                 'missing_summary' => null,
                 'sources' => [],
                 'sections' => [],
@@ -2325,11 +2329,21 @@ class AiController extends Controller
             $alignmentSummary = array_merge($counts, ['total' => array_sum($counts)]);
         }
 
+        // Customer scope is taken from the current frontend context, never from the answer row —
+        // the same rule every other read in this controller follows.
+        $figures = $this->wikiAnswerFigureResolver->resolve($wikiAnswer, (int) $this->customerContext->currentCustomerId());
+
         return [
             'coverage_status' => $wikiAnswer->coverage_status,
             'coverage_status_label' => SavedNoticeAiRequirementWikiAnswer::COVERAGE_STATUS_LABELS[$wikiAnswer->coverage_status]
                 ?? $wikiAnswer->coverage_status,
             'text' => $wikiAnswer->answer_text,
+            // Resolved live, every request: a figure whose Wiki page no longer carries it simply
+            // disappears from the payload rather than rendering as a broken image.
+            'figures' => $figures,
+            // Non-null only while the persisted section boundaries still describe answer_text
+            // exactly, so a figure is never anchored to text a hand-edit has moved.
+            'segments' => $this->wikiAnswerFigureResolver->segments($wikiAnswer, $figures),
             'missing_summary' => $wikiAnswer->missing_summary,
             'sources' => $sources,
             'sections' => $sections,

@@ -7,11 +7,13 @@ import {
     writeRememberedAiRequirementId,
 } from '../../../Support/aiWorkspaceState';
 import {
+    buildWikiAnswerCopyHtml,
     buildWikiAnswerCopyText,
     dedupeWikiAnswerSourcesByPageId,
+    copyWikiAnswerToClipboard,
     normalizeWikiAnswerText,
 } from './wikiAnswerPresentation';
-import { WikiAnswerMarkdown } from './wikiAnswerMarkdown';
+import { WikiAnswerBody } from './wikiAnswerMarkdown';
 
 const AI_STATUS_META = {
     not_started: {
@@ -1339,6 +1341,32 @@ async function imageSourceToPngClipboardBlob(source) {
     });
 }
 
+/**
+ * Fetches one same-origin image through the browser's own session (the Wiki image route is
+ * authenticated and customer-scoped) and returns it as a data: URI. Returns null on any failure —
+ * a figure that cannot be fetched is simply left out of the clipboard HTML.
+ */
+async function fetchImageAsDataUri(imageUrl) {
+    try {
+        const response = await fetch(imageUrl, { credentials: 'same-origin' });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const blob = await response.blob();
+
+        return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+        });
+    } catch (error) {
+        return null;
+    }
+}
+
 async function writeSingleImageClipboardPayload(source) {
     if (
         typeof window === 'undefined'
@@ -1952,9 +1980,11 @@ export default function AiShow({
     // Which requirement's answer is open in the raw-Markdown editor. Null means every answer is in
     // normal (rendered) display — the answer is a document to read, not a text field to stare at.
     const [wikiAnswerEditingRequirementId, setWikiAnswerEditingRequirementId] = useState(null);
+    const wikiAnswerRenderedRef = useRef(null);
     const [wikiAnswerGeneratingRequirementId, setWikiAnswerGeneratingRequirementId] = useState(null);
     const [wikiAnswerSavingRequirementId, setWikiAnswerSavingRequirementId] = useState(null);
     const [wikiAnswerCopyStatus, setWikiAnswerCopyStatus] = useState(null);
+    const [wikiAnswerCopyingRequirementId, setWikiAnswerCopyingRequirementId] = useState(null);
     const [wikiAnswerError, setWikiAnswerError] = useState(null);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
     const [promptEditorOpenRequirementId, setPromptEditorOpenRequirementId] = useState(null);
@@ -2197,6 +2227,17 @@ export default function AiShow({
     const activeRequirementWikiAnswerIsDirty = activeRequirementWikiAnswerLocalEdit?.isDirty ?? false;
     const isEditingActiveWikiAnswer = activeRequirement !== null
         && wikiAnswerEditingRequirementId === activeRequirement.id;
+    // Wiki figures the answer carries. Resolved server-side against live Wiki state, so this list
+    // is already free of figures whose page or source document is gone.
+    const activeRequirementWikiAnswerFigures = Array.isArray(activeRequirementWikiAnswer?.figures)
+        ? activeRequirementWikiAnswer.figures
+        : [];
+    // Present only while the server can still prove the stored section split describes the answer
+    // text; a hand-edit drops it to null and the figures fall back to following the whole answer.
+    const activeRequirementWikiAnswerSegments = !activeRequirementWikiAnswerIsDirty
+        && Array.isArray(activeRequirementWikiAnswer?.segments)
+        ? activeRequirementWikiAnswer.segments
+        : null;
     const activeRequirementWikiAnswerIsStale = activeRequirementWikiAnswer?.is_stale === true;
     const activeRequirementWikiAnswerStaleContext = activeRequirementWikiAnswer?.stale_context ?? null;
     const activeRequirementWikiAnswerStaleSubjectName = (() => {
@@ -2695,30 +2736,55 @@ export default function AiShow({
         };
     }, [selectedEvidence]);
 
+    /**
+     * Copy the answer, richly when the browser allows it and as plain text whenever it does not.
+     *
+     * Nothing is awaited before the clipboard is touched. Every clipboard write — rich, plain, and
+     * even the execCommand fallback — requires transient user activation, and fetching the answer's
+     * figures spends it. The earlier version awaited that work first, so all three writes were
+     * refused together and the button reported "Kunne ikke kopiere" for an answer that was
+     * perfectly copyable. The figure work now travels INSIDE the ClipboardItem as a promise, so the
+     * write is issued under the live gesture.
+     */
     const copyActiveWikiAnswerContent = async () => {
         if (activeRequirement === null || activeRequirementWikiAnswer === null) {
+            return;
+        }
+
+        if (wikiAnswerCopyingRequirementId !== null) {
             return;
         }
 
         const payloadText = buildWikiAnswerCopyText(activeRequirementWikiAnswerText).trim();
 
         if (payloadText === '') {
+            setWikiAnswerCopyStatus('empty');
+
             return;
         }
 
+        const renderedAnswer = wikiAnswerRenderedRef.current;
+        // Started, not awaited: the rich write receives this promise and resolves it itself. While
+        // the Markdown editor is open there is nothing rendered to read, and the answer is copied
+        // as plain text — the same contract as before.
+        const htmlPromise = renderedAnswer === null
+            ? null
+            : buildWikiAnswerCopyHtml(renderedAnswer, fetchImageAsDataUri);
+
         setWikiAnswerCopyStatus(null);
+        setWikiAnswerCopyingRequirementId(activeRequirement.id);
 
         try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(payloadText);
-            } else if (copyHtmlSelectionToClipboard(escapeClipboardHtml(payloadText).replace(/\n/g, '<br />'))) {
-            } else {
-                throw new Error('Clipboard API is not available.');
-            }
+            const { copied, reason } = await copyWikiAnswerToClipboard({ htmlPromise, plainText: payloadText });
 
-            setWikiAnswerCopyStatus('copied');
+            // The reason is carried into the UI on purpose: "it failed" leaves the user stuck,
+            // while "the browser will not give this page the clipboard" tells them the page must
+            // be opened over https or localhost — something no amount of retrying fixes.
+            setWikiAnswerCopyStatus(copied ? 'copied' : `failed:${reason}`);
         } catch (error) {
             setWikiAnswerCopyStatus('failed');
+        } finally {
+            setWikiAnswerCopyingRequirementId(null);
         }
     };
 
@@ -4149,14 +4215,34 @@ export default function AiShow({
                                                         )}
                                                         <button
                                                             type="button"
+                                                            data-testid="wiki-answer-copy-button"
                                                             onClick={() => void copyActiveWikiAnswerContent()}
-                                                            disabled={!activeRequirementWikiAnswerHasText}
+                                                            disabled={
+                                                                !activeRequirementWikiAnswerHasText
+                                                                || wikiAnswerCopyingRequirementId === activeRequirement.id
+                                                            }
                                                             className="inline-flex items-center justify-center rounded-full border border-violet-300 bg-white px-3 py-1.5 text-base font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
-                                                            {wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer}
+                                                            {wikiAnswerCopyingRequirementId === activeRequirement.id
+                                                                ? (tai.wiki_answer_copying ?? 'Kopierer...')
+                                                                : (wikiAnswerCopyStatus === 'copied' ? tai.copied : tai.wiki_answer_copy_answer)}
                                                         </button>
                                                     </div>
                                                 </div>
+
+                                                {wikiAnswerCopyStatus === 'empty' || String(wikiAnswerCopyStatus ?? '').startsWith('failed') ? (
+                                                    <div
+                                                        data-testid="wiki-answer-copy-error"
+                                                        role="status"
+                                                        className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-base leading-6 text-rose-700"
+                                                    >
+                                                        {wikiAnswerCopyStatus === 'empty'
+                                                            ? tai.copy_empty
+                                                            : (wikiAnswerCopyStatus === 'failed:unavailable'
+                                                                ? (tai.copy_failed_no_clipboard_access ?? 'Kunne ikke kopiere: nettleseren gir ikke denne siden tilgang til utklippstavlen. Åpne Procynia via localhost eller https.')
+                                                                : (tai.copy_failed_denied ?? 'Kunne ikke kopiere: nettleseren avviste kopieringen. Klikk i siden og prøv igjen.'))}
+                                                    </div>
+                                                ) : null}
 
                                                 {isEditingActiveWikiAnswer ? (
                                                     <>
@@ -4176,6 +4262,12 @@ export default function AiShow({
                                                             <p className="text-base text-slate-600">
                                                                 {tai.wiki_answer_edit_markdown_hint ?? 'Teksten redigeres som Markdown. Tabeller skrives med | og vises som tabell når du lagrer.'}
                                                             </p>
+                                                            {activeRequirementWikiAnswerFigures.length > 0 ? (
+                                                                <p className="text-base text-slate-600" data-testid="wiki-answer-figure-edit-notice">
+                                                                    {(tai.wiki_answer_edit_figures_notice ?? 'Svaret har :count figur(er) fra Wikien. De redigeres ikke her og beholdes når du lagrer.')
+                                                                        .replace(':count', String(activeRequirementWikiAnswerFigures.length))}
+                                                                </p>
+                                                            ) : null}
                                                         </div>
 
                                                         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -4209,11 +4301,16 @@ export default function AiShow({
                                                     </>
                                                 ) : (
                                                     <div
+                                                        ref={wikiAnswerRenderedRef}
                                                         data-testid="wiki-answer-rendered"
                                                         className="mt-4 max-h-[24rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base leading-7 text-slate-800"
                                                     >
                                                         {activeRequirementWikiAnswerHasText ? (
-                                                            <WikiAnswerMarkdown text={activeRequirementWikiAnswerText} />
+                                                            <WikiAnswerBody
+                                                                text={activeRequirementWikiAnswerText}
+                                                                figures={activeRequirementWikiAnswerFigures}
+                                                                segments={activeRequirementWikiAnswerSegments}
+                                                            />
                                                         ) : (
                                                             <span className="text-slate-600">{tai.wiki_answer_none_message}</span>
                                                         )}

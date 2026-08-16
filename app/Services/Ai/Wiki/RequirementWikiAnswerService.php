@@ -147,11 +147,13 @@ class RequirementWikiAnswerService
         $missingSummary = $this->computeMissingSummary($alignmentFinal, $coverageStatus, $context);
         $usedPageIds = $this->unionUsedPageIds($answerSections);
         $answerText = implode("\n\n", array_column($answerSections, 'text'));
+        $answerFigures = $this->answerFigures($answerSections, $pagesForAi);
         $provenanceBySectionKey = $this->computeSectionsProvenance($answerSections, $pagesForAi);
 
         return $this->persist($requirement, [
             'coverage_status' => $coverageStatus,
             'answer_text' => $answerText,
+            'answer_figures' => $answerFigures,
             'missing_summary' => $missingSummary,
             'sources' => $this->sourcesPayload($context['pages'], $usedPageIds),
             'model' => 'gpt-4.1-mini',
@@ -283,6 +285,10 @@ class RequirementWikiAnswerService
                     'heading' => $fix['heading'] !== '' ? $fix['heading'] : $section['heading'],
                     'text' => $fix['text'],
                     'used_page_ids' => $fix['used_page_ids'],
+                    // The revision pass rewrites wording to remove a possible conflict; it is not
+                    // given the figure contract and has no opinion on illustration. The section
+                    // keeps the figure it was generated with.
+                    'figure_refs' => $section['figure_refs'] ?? [],
                 ];
             },
             $answerSections,
@@ -580,6 +586,69 @@ class RequirementWikiAnswerService
      * @param  array<int, array{source_based: list<string>, best_practice: list<string>}>  $claimTextsByPageId
      * @return list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>
      */
+    /**
+     * Purpose: Reduce the model's per-section figure choices to the flat, ordered figure list
+     *          persisted alongside the answer.
+     * Inputs: The final answer sections (each carrying already-validated figure_refs) and the
+     *         pagesForAi DTO the figures were offered from.
+     * Returns: One entry per chosen figure, in answer order:
+     *          {figure_ref, document_id, source_image_key, page_id, section_key, section_index}.
+     * Side effects: None.
+     *
+     * Only identity is stored — never a caption, an alt text or a URL. Everything a reader sees is
+     * resolved from live Wiki state when the answer is displayed, so a figure whose page or source
+     * document later changes or disappears cannot leave stale text or a dead image behind in a
+     * saved answer.
+     *
+     * @param  list<array<string, mixed>>  $answerSections
+     * @param  list<array<string, mixed>>  $pagesForAi
+     * @return list<array<string, mixed>>
+     */
+    private function answerFigures(array $answerSections, array $pagesForAi): array
+    {
+        $offered = [];
+
+        foreach ($pagesForAi as $page) {
+            foreach ((array) ($page['figures'] ?? []) as $figure) {
+                $ref = (string) ($figure['figure_ref'] ?? '');
+
+                if ($ref !== '') {
+                    $offered[$ref] = ['figure' => $figure, 'page_id' => (int) $page['page_id']];
+                }
+            }
+        }
+
+        $answerFigures = [];
+        $seenRefs = [];
+
+        foreach (array_values($answerSections) as $sectionIndex => $section) {
+            foreach ((array) ($section['figure_refs'] ?? []) as $ref) {
+                $ref = (string) $ref;
+                $match = $offered[$ref] ?? null;
+
+                // Re-checked here and not merely trusted from the AI client: this is the last step
+                // before the reference becomes persisted state. A figure is also shown once — the
+                // same illustration repeated across sections reads as padding.
+                if ($match === null || isset($seenRefs[$ref])) {
+                    continue;
+                }
+
+                $seenRefs[$ref] = true;
+
+                $answerFigures[] = [
+                    'figure_ref' => $ref,
+                    'document_id' => (int) $match['figure']['document_id'],
+                    'source_image_key' => (string) $match['figure']['source_image_key'],
+                    'page_id' => $match['page_id'],
+                    'section_key' => (string) $section['key'],
+                    'section_index' => $sectionIndex,
+                ];
+            }
+        }
+
+        return $answerFigures;
+    }
+
     private function pagesForAi(array $pages, array $claimTextsByPageId): array
     {
         return array_map(
@@ -593,6 +662,7 @@ class RequirementWikiAnswerService
                     'content_mode' => $page['content_mode'],
                     'content_markdown' => $page['content_markdown'],
                     'selected_headings' => $page['selected_headings'],
+                    'figures' => array_values((array) ($page['figures'] ?? [])),
                     'source_based_claim_texts' => $texts['source_based'],
                     'best_practice_claim_texts' => $texts['best_practice'],
                 ];

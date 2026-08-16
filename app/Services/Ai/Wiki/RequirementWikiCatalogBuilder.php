@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 
 /**
  * Builds a compact, customer-scoped catalog of the pages a Wiki-research run is allowed to
@@ -28,6 +29,11 @@ class RequirementWikiCatalogBuilder
     /** Excerpt length is deliberately short — just enough for a human/AI to judge topical relevance. */
     private const EXCERPT_MAX_CHARS = 220;
 
+    public function __construct(
+        private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovals,
+        private readonly RequirementWikiFigureCatalog $figureCatalog = new RequirementWikiFigureCatalog,
+    ) {}
+
     /**
      * Statuses that can ever represent CURRENT customer knowledge. Archived/superseded/rejected are
      * excluded by construction, so no caller can widen $statuses into stale content.
@@ -42,8 +48,8 @@ class RequirementWikiCatalogBuilder
      * Purpose: Build the full customer-scoped Wiki catalog.
      * Inputs: The customer id, and optionally which page statuses are eligible.
      * Returns: One entry per eligible page:
-     *          {page_id, title, page_type, scope, slug, content_markdown, headings, excerpt,
-     *           outgoing_link_count, backlink_count}.
+     *          {page_id, title, page_type, scope, slug, content_markdown, figures, headings,
+     *           excerpt, outgoing_link_count, backlink_count}.
      * Side effects: None (read-only).
      *
      * $statuses defaults to approved-only, which is the behaviour every existing caller relies on.
@@ -52,10 +58,21 @@ class RequirementWikiCatalogBuilder
      * grounded in it — the same read model the Wiki pages themselves use. Archived, superseded and
      * rejected pages are never eligible for either caller: they are not current knowledge.
      *
+     * $requireCurrentVersionApproval adds the sign-off gate on top: only pages whose CURRENT
+     * version is fully approved by its document owners are eligible. That is the gate the ingest
+     * flow itself ends on — a run stops at 'awaiting_document_owner_approval', and nothing in the
+     * current architecture ever advances enterprise_wiki_pages.status past 'draft'. Page status
+     * therefore says nothing about whether anyone has signed off on today's content; it is the
+     * legacy single-page review lifecycle (WikiController::submit()/approve(),
+     * FinalizeEnterpriseWikiIngest), still meaningful for archived/superseded/rejected but not a
+     * statement of approval. Off by default so read-oriented callers keep their exploratory
+     * semantics; requirement answers turn it on, because a bid answer presents Wiki content as
+     * documented customer fact.
+     *
      * @param  list<string>|null  $statuses
-     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
+     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, figures: list<array<string, mixed>>, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
      */
-    public function build(int $customerId, ?array $statuses = null): array
+    public function build(int $customerId, ?array $statuses = null, bool $requireCurrentVersionApproval = false): array
     {
         $eligibleStatuses = array_values(array_intersect(
             $statuses ?? [EnterpriseWikiPage::STATUS_APPROVED],
@@ -73,6 +90,17 @@ class RequirementWikiCatalogBuilder
             ->get()
             ->filter(fn (EnterpriseWikiPage $page): bool => trim((string) $page->currentVersion?->content_markdown) !== '')
             ->values();
+
+        if ($requireCurrentVersionApproval) {
+            $approvedPageIds = array_flip($this->documentOwnerApprovals->approvedCurrentVersionPageIds(
+                $customerId,
+                $pages->pluck('id')->map(static fn ($id): int => (int) $id)->all(),
+            ));
+
+            $pages = $pages
+                ->filter(fn (EnterpriseWikiPage $page): bool => isset($approvedPageIds[(int) $page->id]))
+                ->values();
+        }
 
         if ($pages->isEmpty()) {
             return [];
@@ -93,6 +121,12 @@ class RequirementWikiCatalogBuilder
                     'scope' => (string) $page->scope,
                     'slug' => $page->slug,
                     'content_markdown' => $contentMarkdown,
+                    // Figures live only in content_blocks_json — content_markdown carries their
+                    // caption and citation but never the image itself. Carried alongside the text
+                    // so a page that is actually read can offer its own figures to the answer.
+                    'figures' => $this->figureCatalog->fromContentBlocks(
+                        (array) ($page->currentVersion->content_blocks_json ?? []),
+                    ),
                     'headings' => $this->extractHeadings($contentMarkdown),
                     'excerpt' => $this->extractExcerpt($contentMarkdown),
                     'outgoing_link_count' => $outgoingCounts[$page->id] ?? 0,
