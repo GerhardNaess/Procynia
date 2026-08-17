@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     readRememberedAiRequirementId,
     writeRememberedAiRequirementId,
@@ -2969,6 +2970,60 @@ export default function AiShow({
                                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                         {caseData?.title ?? tai.ai_case_title}
                                     </h1>
+                                    {/* Same position as on AI → Oversikt: directly right of the page
+                                        heading, inside the existing flex-wrap title row, so it wraps
+                                        with the status badge instead of being pinned to the far right. */}
+                                    <PageHelpButton
+                                        buttonLabel={tai.help_button ?? 'Hjelp'}
+                                        title={tai.workspace_help_panel_title ?? 'Om arbeidsflaten for saken'}
+                                        intro={tai.workspace_help_panel_intro}
+                                        sections={[
+                                            {
+                                                title: tai.workspace_help_section_documents ?? 'Saksdokumenter',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_documents_scope_title,
+                                                        text: tai.workspace_help_item_documents_scope_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_extraction ?? 'Last opp og ekstraher krav',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_extraction_formats_title,
+                                                        text: tai.workspace_help_item_extraction_formats_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_requirements ?? 'Ekstraherte krav',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_review_title,
+                                                        text: tai.workspace_help_item_requirements_review_text,
+                                                    },
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_reject_title,
+                                                        text: tai.workspace_help_item_requirements_reject_text,
+                                                    },
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_delete_title,
+                                                        text: tai.workspace_help_item_requirements_delete_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_next ?? 'Arbeid videre',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_next_answers_title,
+                                                        text: tai.workspace_help_item_next_answers_text,
+                                                    },
+                                                ],
+                                            },
+                                        ]}
+                                    />
                                     <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${aiStatusMeta.className}`}>
                                         {aiStatusMeta.label}
                                     </span>
