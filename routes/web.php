@@ -212,6 +212,13 @@ Route::prefix('app')
             ->name('ai.requirements.store');
         Route::patch('/ai/{savedNotice}/requirements/reject-all', [AiController::class, 'rejectAllRequirements'])
             ->name('ai.requirements.reject-all');
+        // Permanent deletion, deliberately distinct from reject-all above: rejection is reversible,
+        // this is not. Declared before the {requirement} route so 'delete-all' is never bound as a
+        // requirement id.
+        Route::delete('/ai/{savedNotice}/requirements/delete-all', [AiController::class, 'destroyAllRequirements'])
+            ->name('ai.requirements.destroy-all');
+        Route::delete('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'destroyRequirement'])
+            ->name('ai.requirements.destroy');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
             ->name('ai.requirements.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/assigned-user', [AiController::class, 'updateRequirementAssignedUser'])

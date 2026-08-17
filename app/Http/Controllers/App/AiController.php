@@ -177,6 +177,7 @@ class AiController extends Controller
             'requirements' => $requirementsPayload,
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
             'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
+            'requirements_delete_all_url' => route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
@@ -813,6 +814,89 @@ class AiController extends Controller
         });
 
         return back()->with('success', 'Ekstraherte krav er avvist. Du kan gjenopprette dem enkeltvis.');
+    }
+
+    /**
+     * Purpose: Permanently delete one extracted requirement candidate.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: Deletes the requirement row. Postgres cascades its evidence, answer-basis
+     *               selections, assessments, revisions and Wiki answer along with it.
+     *
+     * Deliberately separate from rejection rather than replacing it. Rejection
+     * (approval_status = rejected) takes a requirement out of active work and can be undone;
+     * this cannot. Both belong on the page, because "this is not a requirement for us" and "this
+     * should never have been extracted" are different things, and only the second justifies
+     * losing an answer draft.
+     *
+     * Scope is server-owned: the requirement is re-fetched through the case's own relation, so a
+     * requirement id belonging to another case or customer resolves to nothing regardless of what
+     * the client sent. Only AI-extracted candidates are deletable here — a manually added
+     * requirement is the user's own work, not import residue.
+     */
+    public function destroyRequirement(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+            ->firstOrFail();
+
+        DB::transaction(static fn () => $ownedRequirement->delete());
+
+        Log::info('[PROCYNIA][REQUIREMENT_DELETE] Requirement deleted permanently.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $requirement->id,
+            'user_id' => $request->user()?->id,
+        ]);
+
+        return back()->with('success', __('procynia.ai.requirement_deleted'));
+    }
+
+    /**
+     * Purpose: Permanently delete every extracted requirement candidate in this case.
+     * Inputs: The current request and route-bound saved notice.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: Deletes the rows and their cascaded dependants inside one transaction.
+     *
+     * "All" is defined by the server, never by whatever the client currently has filtered or
+     * paginated into view: every ai_candidate requirement belonging to this case, rejected ones
+     * included. Manually added requirements are left alone.
+     *
+     * The uploaded document, its extraction run and any parsed workbook data are untouched, so a
+     * case emptied by mistake can be rebuilt by running extraction again.
+     */
+    public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $deletedCount = DB::transaction(static function () use ($record): int {
+            $requirements = $record->aiRequirements()
+                ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+                ->get();
+
+            foreach ($requirements as $requirement) {
+                $requirement->delete();
+            }
+
+            return $requirements->count();
+        });
+
+        Log::info('[PROCYNIA][REQUIREMENT_DELETE] Extracted requirements deleted permanently.', [
+            'saved_notice_id' => $record->id,
+            'deleted_count' => $deletedCount,
+            'user_id' => $request->user()?->id,
+        ]);
+
+        return back()->with('success', $deletedCount === 0
+            ? __('procynia.ai.requirements_deleted_none')
+            : __('procynia.ai.requirements_deleted_all', ['count' => $deletedCount]));
     }
 
     /**
@@ -2103,6 +2187,11 @@ class AiController extends Controller
                     'requirement' => $requirement->id,
                 ]),
                 'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
+                // Only AI-extracted candidates are deletable; a manually added requirement is the
+                // user's own work and has no delete affordance.
+                'delete_url' => $requirement->source_type === SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE
+                    ? route('app.ai.requirements.destroy', ['savedNotice' => $requirement->saved_notice_id, 'requirement' => $requirement->id])
+                    : null,
                 'wiki_answer_generate_url' => route('app.ai.requirements.wiki-answer.generate', [
                     'savedNotice' => $requirement->saved_notice_id,
                     'requirement' => $requirement->id,
