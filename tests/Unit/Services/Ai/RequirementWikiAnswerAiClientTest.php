@@ -305,7 +305,7 @@ class RequirementWikiAnswerAiClientTest extends TestCase
     }
 
     /**
-     * AI-to-Wiki consolidation: the owning SavedNotice's ai_instructions (case_instructions) must
+     * AI-to-Wiki consolidation: the owning customer's shared ai_instructions (case_instructions) must
      * reach the prompt, framed as a style-only directive that can never be mistaken for a knowledge
      * source or an override of the anti-fabrication/citation rules.
      */

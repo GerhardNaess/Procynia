@@ -79,8 +79,12 @@ export default function AiInstructions({
                                             title: tai.instructions_page_help_section_what ?? 'Hva er AI-instrukser?',
                                             items: [
                                                 {
-                                                    title: tai.instructions_page_help_item_what_title ?? 'Kundespesifikke føringer',
-                                                    text: tai.instructions_page_help_item_what_text ?? 'AI-instrukser er faste regler som tas med når AI-en lager forslag til kravsvar, oppsummeringer og andre tekstutkast.',
+                                                    title: tai.instructions_page_help_item_scope_title ?? 'Én felles instruks for kunden',
+                                                    text: tai.instructions_page_help_item_scope_text ?? 'AI-instruksen lagres på kunden, ikke på den enkelte saken. Endrer du den her, gjelder den samme instruksen for alle saker hos kunden.',
+                                                },
+                                                {
+                                                    title: tai.instructions_page_help_item_what_title ?? 'Faste føringer for kunden',
+                                                    text: tai.instructions_page_help_item_what_text ?? 'AI-instruksen er faste regler som tas med når AI-en lager forslag til kravsvar, kravvurderinger og andre tekstutkast. Den brukes ikke til kravekstraksjon, dokumentimport eller bygging av Enterprise Wiki.',
                                                 },
                                             ],
                                         },
@@ -110,7 +114,10 @@ export default function AiInstructions({
                                 />
                             </div>
                             <p className="max-w-2xl text-base leading-6 text-slate-600">
-                                {tai.instructions_page_subtitle ?? 'Enterprise Wiki er hva Procynia vet. AI-instrukser styrer hvordan AI-en skal bruke den kunnskapen — tone, terminologi, stil og arbeidsmåte, aldri fakta eller kilder.'}
+                                {tai.instructions_page_subtitle ?? 'Enterprise Wiki er hva Procynia vet. AI-instruksen styrer hvordan AI-en formulerer svar — tone, terminologi, stil og kapitalisering, aldri fakta eller kilder.'}
+                            </p>
+                            <p className="max-w-2xl rounded-2xl bg-violet-50 px-3 py-2 text-base font-medium leading-6 text-violet-900">
+                                {tai.instructions_page_scope_notice ?? 'Denne instruksen gjelder alle saker for kunden.'}
                             </p>
                         </div>
 

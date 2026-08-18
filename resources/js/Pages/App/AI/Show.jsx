@@ -2615,7 +2615,7 @@ export default function AiShow({
 
     // Enterprise Wiki answer engine is the sole operational answer generator in "I arbeid"
     // (AI-to-Wiki consolidation). Generates/regenerates requirement.wiki_answer — the operative,
-    // editable answer — using only approved Wiki content plus the case's ai_instructions and this
+    // editable answer — using only approved Wiki content plus the customer's shared ai_instructions and this
     // requirement's own one-off prompt.
     const requestWikiAnswerGeneration = async (requirement) => {
         if (!canUseAiOffer) {

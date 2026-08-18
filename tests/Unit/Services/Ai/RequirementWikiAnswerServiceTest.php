@@ -80,7 +80,7 @@ class RequirementWikiAnswerServiceTest extends TestCase
 
     /**
      * AI-to-Wiki consolidation: generate()'s optional $caseInstructions parameter (the owning
-     * SavedNotice's ai_instructions) must reach RequirementWikiAnswerAiClient::generateAnswer()
+     * customer's shared ai_instructions) must reach RequirementWikiAnswerAiClient::generateAnswer()
      * unchanged, as its final positional argument — see that client's own tests for how it is framed
      * in the prompt as a style-only directive.
      */

@@ -196,6 +196,10 @@ class AiController extends Controller
      * Inputs: The current request and the route-bound saved notice model.
      * Returns: Inertia\Response for the AI instruction page.
      * Side effects: None.
+     *
+     * The instruction itself is owned by the customer, not the case: the page is reached through a
+     * case only because that is where the AI menu lives. Every case belonging to the customer reads
+     * and writes the same value.
      */
     public function instructions(Request $request, SavedNotice $savedNotice): Response
     {
@@ -213,16 +217,21 @@ class AiController extends Controller
                 'stage' => $analysisCase['stage_label'],
                 'updated_at' => $analysisCase['updated_at'],
             ],
-            'ai_instructions' => (string) ($record->ai_instructions ?? ''),
+            'ai_instructions' => (string) ($this->customerAiInstructions($record) ?? ''),
             'ai_instructions_update_url' => route('app.ai.instructions.update', ['savedNotice' => $record->id]),
         ]);
     }
 
     /**
-     * Purpose: Persist the case-level AI instructions for a visible saved notice.
+     * Purpose: Persist the shared, customer-owned AI instruction reached through a visible saved notice.
      * Inputs: The current request and the route-bound saved notice.
-     * Returns: A redirect back to the AI case view after saving the instructions.
-     * Side effects: Updates the saved notice row.
+     * Returns: A redirect back to the AI instruction page after saving.
+     * Side effects: Updates the owning customer row; the saved notice itself is not written to.
+     *
+     * The route is case-scoped only for URL continuity — the value is stored on the customer that
+     * owns the case and therefore applies to all of that customer's cases. visibleAiSavedNotice()
+     * already restricts the case to the request's own customer, so a manipulated savedNotice id
+     * belonging to another customer cannot reach this write.
      */
     public function updateAiInstructions(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
@@ -235,7 +244,7 @@ class AiController extends Controller
 
         $normalizedInstructions = trim(str_replace(["\r\n", "\r"], "\n", (string) ($validated['ai_instructions'] ?? '')));
 
-        $record->forceFill([
+        $record->customer()->firstOrFail()->forceFill([
             'ai_instructions' => $normalizedInstructions !== '' ? $normalizedInstructions : null,
         ])->save();
 
@@ -1270,7 +1279,7 @@ class AiController extends Controller
             $ownedRequirement,
             $selectedAnswerBasisItems,
             (bool) ($validated['force'] ?? false),
-            $record->ai_instructions,
+            $this->customerAiInstructions($record),
             $userAnswerPrompt,
             $retrievedKnowledgeChunks,
             $groundingJudge,
@@ -1452,7 +1461,7 @@ class AiController extends Controller
                 (int) $record->customer_id,
                 $languageCode,
                 $request->user()?->id,
-                $record->ai_instructions,
+                $this->customerAiInstructions($record),
                 $userAnswerPrompt,
             );
         } catch (Throwable $exception) {
@@ -1663,6 +1672,7 @@ class AiController extends Controller
         }
 
         $languageCode = $this->customerContext->resolveLanguageCode();
+        $customerAiInstructions = $this->customerAiInstructions($record);
         $failedCount = 0;
 
         foreach ($confirmedRequirements as $requirement) {
@@ -1672,7 +1682,7 @@ class AiController extends Controller
                     (int) $record->customer_id,
                     $languageCode,
                     $userId,
-                    $record->ai_instructions,
+                    $customerAiInstructions,
                 );
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
@@ -3748,6 +3758,20 @@ class AiController extends Controller
      * Returns: The visible saved notice record for the current customer context.
      * Side effects: Aborts with HTTP 404 if the saved notice is not visible.
      */
+    /**
+     * Purpose: Resolve the shared AI instruction that applies to a case, via its owning customer.
+     * Inputs: The saved notice whose customer owns the instruction.
+     * Returns: The instruction text, or null when the customer has not set one.
+     * Side effects: None.
+     *
+     * The instruction is customer-scoped: every case belonging to the customer resolves the same
+     * value. It stays subordinate to grounded facts and sources in every prompt that receives it.
+     */
+    private function customerAiInstructions(SavedNotice $record): ?string
+    {
+        return $record->customer()->first()?->resolvedAiInstructions();
+    }
+
     private function visibleAiSavedNotice(Request $request, SavedNotice $savedNotice): SavedNotice
     {
         [$user, $customerId] = $this->frontendContext($request);
