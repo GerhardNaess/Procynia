@@ -39,11 +39,10 @@ function readTranslations(locale) {
 }
 
 /**
- * The Kvalitet tab rendered as a blank content area while every other Wiki tab worked: Index.jsx
- * called getQualityCheckCopy(), but wikiQualityChecks only ever exported it as
- * getWikiQualityCheckCopy(). An undefined identifier is not a build error — Vite bundles it
- * happily — it throws a ReferenceError the moment the component using it renders, which unmounts
- * the whole React tree and leaves the tab empty. Only QualityTab called it, so only that tab broke.
+ * A Wiki tab once rendered as a blank content area while every other tab worked: the page called
+ * getQualityCheckCopy(), but wikiQualityChecks only ever exported it as getWikiQualityCheckCopy().
+ * An undefined identifier is not a build error — Vite bundles it happily — it throws a
+ * ReferenceError the moment the component using it renders, which unmounts the whole React tree.
  *
  * These are source-level guards rather than render tests: the project has no JSX test renderer,
  * and this bug class is precisely what a renderer would be needed to catch otherwise.

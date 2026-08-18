@@ -9,7 +9,6 @@ const WIKI_NAV_ITEMS = [
     { key: 'pages', label: 'Wiki-sider', url: '/app/wiki?tab=pages' },
     { key: 'sources', label: 'Kildedokumenter', url: '/app/wiki?tab=sources' },
     { key: 'runs', label: 'Kjøringer', url: '/app/wiki?tab=runs' },
-    { key: 'quality', label: 'Kvalitet', url: '/app/wiki?tab=quality' },
     { key: 'graph', label: 'Grafvisning', url: '/app/wiki/graph' },
 ];
 
@@ -19,7 +18,7 @@ function secondaryNav(page) {
     return page.locator('nav').filter({ hasText: 'Wiki-sider' });
 }
 
-test('Wiki secondary navigation shows all five items in the shared nav pattern', async ({ page }) => {
+test('Wiki secondary navigation shows all four items in the shared nav pattern', async ({ page }) => {
     const response = await page.goto('/app/wiki');
 
     expect(response?.status()).toBe(200);

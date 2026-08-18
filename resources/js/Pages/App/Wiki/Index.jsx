@@ -3,10 +3,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
-import {
-    getWikiQualityCheckCopy,
-    resolveWikiFindingSecondaryText,
-} from './wikiQualityChecks';
+import { resolveWikiFindingSecondaryText } from './wikiQualityChecks';
 import {
     RUN_TIMELINE_STEPS,
     matchesFindingsLocalFilter,
@@ -1211,58 +1208,6 @@ function getWikiRunsHelpSections(tw) {
     ];
 }
 
-function getWikiQualityHelpSections(tw) {
-    return [
-        {
-            title: tw.quality_page_help_section_worklist ?? 'Kvalitet som arbeidsliste',
-            items: [
-                {
-                    title: tw.quality_page_help_item_worklist_title ?? 'Hver rad peker til et konkret sted',
-                    text: tw.quality_page_help_item_worklist_text ?? 'Kvalitetsfunn er laget for oppfølging. Velg en rad for å åpne Wiki-siden eller påstanden funnet gjelder.',
-                },
-                {
-                    title: tw.quality_page_help_item_worklist_scope_title ?? 'Noen funn peker på en hel side',
-                    text: tw.quality_page_help_item_worklist_scope_text ?? 'Sidebaserte funn åpner den berørte Wiki-siden slik at du kan kontrollere og rette innholdet på riktig sted.',
-                },
-            ],
-        },
-        {
-            title: tw.quality_page_help_section_claims ?? 'Når funnet gjelder en påstand',
-            items: [
-                {
-                    title: tw.quality_page_help_item_claim_focus_title ?? 'Så nær den konkrete påstanden som mulig',
-                    text: tw.quality_page_help_item_claim_focus_text ?? 'Funn som gjelder en påstand, åpner den aktuelle Wiki-siden og fokuserer påstanden når det er mulig. Hvis presist påstandsfokus mangler, åpnes siden likevel på trygg måte.',
-                },
-                {
-                    title: tw.quality_page_help_item_claim_focus_scope_title ?? 'Kilden hjelper deg videre',
-                    text: tw.quality_page_help_item_claim_focus_scope_text ?? 'Kildefilen og kjøringen kan fortsatt åpnes fra tabellen, men de skal ikke overstyre radens hovedmål.',
-                },
-            ],
-        },
-        {
-            title: tw.quality_page_help_section_meaning ?? 'Hvordan lese alvorligheten',
-            items: [
-                {
-                    title: tw.quality_page_help_item_meaning_title ?? 'Alvorlighet beskriver funnet',
-                    text: tw.quality_page_help_item_meaning_text ?? 'Alvorligheten sier hvor viktig funnet er, men den retter ikke problemet automatisk. Du må fortsatt åpne den berørte siden eller påstanden og gjøre den faktiske kontrollen der.',
-                },
-            ],
-        },
-    ];
-}
-
-/**
- * Wiki run-3: "Fullført / bestått" means, and only ever has meant, that the technical pipeline
- * finished (run.status === 'completed') and automated QA passed (qa_status === 'passed') — it is
- * NOT evidence that a human Document Owner reviewed or approved anything. A run can and does reach
- * this exact status/qa_status pair with pending, rejected, or not-yet-required Document Owner
- * approvals; that distinct human-approval evidence is surfaced separately by the Kjøringer
- * timeline's Dokumenteiergodkjenning step (see documentOwnerApprovalStepState() in
- * runFindingsLogic.js), which reads run.document_owner_approval rather than this badge. Keep this
- * label as-is (not renamed) — in context (next to the Dokumenteiergodkjenning step and the
- * "Sider" panel's own per-page Document Owner status) it already reads as a pipeline/QA badge, not
- * a claim of human sign-off.
- */
 function ingestStatusLabel(status, qaStatus = null, tw = {}) {
     if (status === 'completed' && qaStatus === 'passed') {
         return tw.ingest_status_completed_passed ?? 'Fullført / bestått';
@@ -1486,178 +1431,6 @@ function DecisionModal({ run, tw, onClose }) {
         </div>
     );
 }
-
-// ─── Coverage panel ──────────────────────────────────────────────────────────
-
-function CoverageStat({ label, value, warn = false, error = false, numCls: numClsOverride }) {
-    const numCls = numClsOverride ?? (
-        (error && value > 0) ? 'text-rose-600' :
-        (warn && value > 0) ? 'text-amber-600' :
-        'text-slate-900'
-    );
-    return (
-        <div className="flex flex-col gap-0.5">
-            <span className={`text-xl font-semibold tabular-nums ${numCls}`}>{value ?? '—'}</span>
-            <span className="text-[11px] text-slate-500">{label}</span>
-        </div>
-    );
-}
-
-function CoverageSection({ title, children }) {
-    return (
-        <div className="space-y-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{title}</h3>
-            <div className="flex flex-wrap gap-x-8 gap-y-3">{children}</div>
-        </div>
-    );
-}
-
-function CoveragePanel({ coverage, tw }) {
-    if (!coverage) return null;
-
-    const sc = coverage.source_coverage ?? {};
-    const pq = coverage.page_quality ?? {};
-    const cc = coverage.claim_coverage ?? {};
-    const gq = coverage.graph_quality ?? {};
-    const lint = coverage.lint ?? {};
-    const gaps = sc.gaps ?? [];
-
-    const gapLabelMap = {
-        applied_run:                      tw.coverage_docs_with_run             ?? 'applied kjøring',
-        article_missing:                  tw.coverage_gap_article_missing        ?? 'Artikkel-side mangler',
-        article_missing_current_version:  tw.coverage_gap_article_no_version    ?? 'Artikkel: mangler gjeldende versjon',
-        article_missing_content:          tw.coverage_gap_article_no_content    ?? 'Artikkel: mangler innhold',
-        summary_missing:                  tw.coverage_gap_summary_missing        ?? 'Sammendrag-side mangler',
-        summary_missing_current_version:  tw.coverage_gap_summary_no_version    ?? 'Sammendrag: mangler gjeldende versjon',
-        summary_missing_content:          tw.coverage_gap_summary_no_content    ?? 'Sammendrag: mangler innhold',
-    };
-
-    return (
-        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-            <div className="border-b border-slate-100 px-5 py-4">
-                <h2 className="text-sm font-semibold text-slate-800">
-                    {tw.coverage_title ?? 'Dekning'}
-                </h2>
-            </div>
-
-            <div className="divide-y divide-slate-100">
-                {/* Source coverage */}
-                <div className="px-5 py-4">
-                    <CoverageSection title={tw.coverage_section_sources ?? 'Kildedekning'}>
-                        <CoverageStat label={tw.coverage_extracted_docs ?? 'Extracted dokumenter'} value={sc.extracted_documents ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_with_run ?? 'Med applied kjøring'} value={sc.documents_with_applied_run ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_with_article ?? 'Artikkel-side opprettet'} value={sc.documents_with_article ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_with_summary ?? 'Sammendrag-side opprettet'} value={sc.documents_with_summary ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_article_content ?? 'Artikkel med gjeldende innhold'} value={sc.documents_with_article_content ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_summary_content ?? 'Sammendrag med gjeldende innhold'} value={sc.documents_with_summary_content ?? 0} />
-                    </CoverageSection>
-                </div>
-
-                {/* Page quality */}
-                <div className="px-5 py-4">
-                    <CoverageSection title={tw.coverage_section_pages ?? 'Sidekvalitet'}>
-                        <CoverageStat label={tw.coverage_pages_total ?? 'Totalt sider'} value={pq.total ?? 0} />
-                        <CoverageStat label={tw.coverage_pages_no_version ?? 'Uten gjeldende versjon'} value={pq.without_current_version ?? 0} warn />
-                        <CoverageStat label={tw.coverage_pages_no_content ?? 'Uten innhold'} value={pq.without_content ?? 0} warn />
-                        <CoverageStat label={tw.coverage_pages_no_claims ?? 'Uten claims'} value={pq.without_claims ?? 0} warn />
-                    </CoverageSection>
-                </div>
-
-                {/* Claim coverage + graph */}
-                <div className="flex flex-wrap divide-x divide-slate-100">
-                    <div className="px-5 py-4">
-                        <CoverageSection title={tw.coverage_section_claims ?? 'Claim-dekning'}>
-                            <CoverageStat
-                                label={tw.coverage_claim_pct ?? 'Dekningsgrad'}
-                                value={cc.claim_coverage_pct != null ? `${cc.claim_coverage_pct}%` : '—'}
-                                numCls={
-                                    cc.claim_coverage_pct == null ? 'text-slate-900' :
-                                    cc.claim_coverage_pct >= 80 ? 'text-emerald-600' :
-                                    cc.claim_coverage_pct >= 50 ? 'text-amber-600' :
-                                    'text-rose-600'
-                                }
-                            />
-                            <CoverageStat label="Med kildereferanse" value={cc.claims_with_source_reference ?? 0} />
-                            <CoverageStat label="Uten kildereferanse" value={cc.claims_without_source_reference ?? 0} warn />
-                        </CoverageSection>
-                    </div>
-                    <div className="px-5 py-4">
-                        <CoverageSection title={tw.coverage_section_graph ?? 'Graf og struktur'}>
-                            <CoverageStat label={tw.lint_severity_error ?? 'Feil'} value={lint.open_errors ?? 0} error />
-                            <CoverageStat label={tw.lint_severity_warning ?? 'Advarsler'} value={lint.open_warnings ?? 0} warn />
-                            <CoverageStat label={tw.coverage_canonical_edges ?? 'Kanoniske wikilenker'} value={gq.canonical_edges ?? 0} />
-                            <CoverageStat label={tw.coverage_pages_without_outgoing_links ?? 'Sider uten utgående lenker'} value={gq.pages_without_outgoing_links ?? 0} />
-                            <CoverageStat label={tw.coverage_pages_without_incoming_links ?? 'Sider uten innkommende lenker'} value={gq.pages_without_incoming_links ?? 0} />
-                            <CoverageStat label={tw.coverage_isolated_pages ?? 'Isolerte sider'} value={gq.isolated_pages ?? 0} />
-                        </CoverageSection>
-                    </div>
-                </div>
-
-                {/* Gaps */}
-                <div className="px-5 py-4">
-                    <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                        {tw.coverage_gaps_title ?? 'Dekning-gap'}
-                    </h3>
-                    {gaps.length === 0 ? (
-                        <p className="text-sm text-slate-500">{tw.coverage_no_gaps ?? 'Ingen dekning-gap'}</p>
-                    ) : (
-                        <ul className="space-y-1">
-                            {gaps.map((gap) => (
-                                <li key={gap.document_id} className="flex items-baseline gap-2 text-sm">
-                                    <span className="max-w-[240px] truncate font-medium text-slate-700" title={gap.filename}>
-                                        {gap.filename}
-                                    </span>
-                                    <span className="text-slate-400">—</span>
-                                    <span className="text-amber-600">
-                                        {tw.coverage_gap_missing ?? 'Mangler'}:{' '}
-                                        {gap.missing.map((m) => gapLabelMap[m] ?? m).join(', ')}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
-            </div>
-        </section>
-    );
-}
-
-function LintHealthBar({ health, tw }) {
-    if (health.total === 0) {
-        return (
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-                </svg>
-                {tw.lint_health_ok ?? 'Ingen åpne helsefunn'}
-            </div>
-        );
-    }
-    return (
-        <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500">
-                {tw.lint_health_title ?? 'Wiki-helse'}:
-            </span>
-            {health.error > 0 && (
-                <span className={`${BADGE} ${SEVERITY_STYLES.error}`}>
-                    {health.error} {tw.lint_severity_error ?? 'Feil'}
-                </span>
-            )}
-            {health.warning > 0 && (
-                <span className={`${BADGE} ${SEVERITY_STYLES.warning}`}>
-                    {health.warning} {tw.lint_severity_warning ?? 'Advarsel'}
-                </span>
-            )}
-            {health.info > 0 && (
-                <span className={`${BADGE} ${SEVERITY_STYLES.info}`}>
-                    {health.info} {tw.lint_severity_info ?? 'Info'}
-                </span>
-            )}
-        </div>
-    );
-}
-
-// ─── Tab bar ────────────────────────────────────────────────────────────────
 
 // ─── Pages tab ───────────────────────────────────────────────────────────────
 
@@ -3446,207 +3219,6 @@ const PAGE_TYPE_LABELS = {
     backlinks: 'Backlinks',
 };
 
-function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale }) {
-    const filters = qualityFilters ?? {};
-
-    const navigate = (overrides) => {
-        router.get('/app/wiki', {
-            tab: 'quality',
-            q_severity: filters.severity ?? '',
-            q_code: filters.code ?? '',
-            q_page_type: filters.page_type ?? '',
-            ...overrides,
-        }, { preserveState: true, preserveScroll: true });
-    };
-
-    const hasActiveFilter = !!(filters.severity || filters.code || filters.page_type);
-
-    const usedCodes = [...new Set(findings.map((f) => f.code))].sort();
-
-    const openFinding = (finding) => {
-        if (!finding.target_url) {
-            return;
-        }
-
-        router.visit(finding.target_url, { preserveScroll: true });
-    };
-
-    const handleFindingKeyDown = (event, finding) => {
-        if (!finding.target_url) {
-            return;
-        }
-
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openFinding(finding);
-        }
-    };
-
-    return (
-        <div className="space-y-5">
-            <CoveragePanel coverage={coverage} tw={tw} />
-            <LintHealthBar health={lintHealth} tw={tw} />
-
-            {/* Filter bar */}
-            <div className="flex flex-wrap items-center gap-2">
-                <select
-                    value={filters.severity ?? ''}
-                    onChange={(e) => navigate({ q_severity: e.target.value })}
-                    className={SELECT_CLS}
-                >
-                    <option value="">{tw.quality_filter_severity_all ?? 'Alle alvorligheter'}</option>
-                    <option value="error">{tw.lint_severity_error ?? 'Feil'}</option>
-                    <option value="warning">{tw.lint_severity_warning ?? 'Advarsel'}</option>
-                    <option value="info">{tw.lint_severity_info ?? 'Info'}</option>
-                </select>
-
-                <select
-                    value={filters.code ?? ''}
-                    onChange={(e) => navigate({ q_code: e.target.value })}
-                    className={SELECT_CLS}
-                >
-                    <option value="">{tw.quality_filter_code_all ?? 'Alle sjekker'}</option>
-                    {usedCodes.map((c) => (
-                        <option key={c} value={c}>{getWikiQualityCheckCopy(c, tw).label}</option>
-                    ))}
-                </select>
-
-                <select
-                    value={filters.page_type ?? ''}
-                    onChange={(e) => navigate({ q_page_type: e.target.value })}
-                    className={SELECT_CLS}
-                >
-                    <option value="">{tw.quality_filter_page_type_all ?? 'Alle sidetyper'}</option>
-                    {Object.entries(PAGE_TYPE_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>{v}</option>
-                    ))}
-                </select>
-
-                {hasActiveFilter && (
-                    <button
-                        type="button"
-                        onClick={() => navigate({ q_severity: '', q_code: '', q_page_type: '' })}
-                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
-                    >
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                        </svg>
-                        {tw.quality_filter_clear ?? 'Nullstill'}
-                    </button>
-                )}
-            </div>
-
-            {findings.length === 0 ? (
-                <EmptyStateBox
-                    title={tw.quality_empty ?? 'Ingen åpne helsefunn'}
-                    description=""
-                />
-            ) : (
-                <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-slate-200">
-                            <thead className="bg-slate-50">
-                                <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
-                                    <th className="px-4 py-3">{tw.quality_col_page ?? 'Side'}</th>
-                                    <th className="px-4 py-3">{tw.quality_col_page_type ?? 'Sidetype'}</th>
-                                    <th className="px-4 py-3">{tw.quality_col_severity ?? 'Alvorlighet'}</th>
-                                    <th className="px-4 py-3">{tw.quality_col_type ?? 'Type'}</th>
-                                    <th className="px-4 py-3">{tw.quality_col_message ?? 'Beskrivelse'}</th>
-                                    <th className="px-4 py-3">{tw.quality_col_source ?? 'Kildefil'}</th>
-                                    <th className="px-4 py-3 text-right">{tw.quality_col_run ?? 'Kjøring'}</th>
-                                    <th className="px-4 py-3 whitespace-nowrap">{tw.quality_col_detected ?? 'Oppdaget'}</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {findings.map((f) => {
-                                    const sevCls = SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600';
-                                    const checkCopy = getWikiQualityCheckCopy(f.code, tw);
-                                    const description = checkCopy.unknown && f.message ? f.message : (checkCopy.description || f.message || '');
-                                    const rowTitle = f.page_title ?? f.page_slug ?? checkCopy.label;
-                                    return (
-                                        <tr
-                                            key={f.id}
-                                            role={f.target_url ? 'link' : undefined}
-                                            tabIndex={f.target_url ? 0 : undefined}
-                                            aria-label={f.target_url ? `${tw.quality_row_open ?? 'Åpne kvalitetsfunn'}: ${rowTitle}` : undefined}
-                                            onClick={() => openFinding(f)}
-                                            onKeyDown={(event) => handleFindingKeyDown(event, f)}
-                                            className={`text-sm text-slate-700 ${f.target_url ? 'cursor-pointer transition hover:bg-violet-50 focus-visible:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-300' : ''}`}
-                                        >
-                                            <td className="max-w-[180px] px-4 py-3">
-                                                {f.page_slug ? (
-                                                    <Link
-                                                        href={`/app/wiki/${f.page_slug}`}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                        className="block truncate font-medium text-violet-700 hover:underline"
-                                                        title={f.page_title ?? f.page_slug}
-                                                    >
-                                                        {f.page_title ?? f.page_slug}
-                                                    </Link>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {f.page_type ? (
-                                                    <span className="font-mono text-[11px] text-slate-500">{f.page_type}</span>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`${BADGE} ${sevCls}`}>{f.severity}</span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <div className="space-y-0.5">
-                                                    <div className="text-sm font-medium text-slate-700">
-                                                        {checkCopy.label}
-                                                    </div>
-                                                    {checkCopy.unknown && (
-                                                        <div className="font-mono text-[11px] text-slate-400">{f.code}</div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="max-w-[240px] px-4 py-3 text-slate-600">
-                                                <span className="block truncate" title={description}>{description || '—'}</span>
-                                            </td>
-                                            <td className="max-w-[160px] px-4 py-3">
-                                                {f.source_filename ? (
-                                                    <span className="block truncate text-[11px] text-slate-500" title={f.source_filename}>
-                                                        {f.source_filename}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-right tabular-nums">
-                                                {f.run_id ? (
-                                                    <Link
-                                                        href={`/app/wiki?tab=runs&run_src=${f.run_id}`}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                        className="font-mono text-[11px] text-slate-400 hover:text-violet-700 hover:underline"
-                                                    >
-                                                        #{f.run_id}
-                                                    </Link>
-                                                ) : (
-                                                    <span className="text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
-                                                {formatDate(f.created_at, locale)}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-            )}
-        </div>
-    );
-}
-
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export default function WikiIndex({
@@ -3660,12 +3232,8 @@ export default function WikiIndex({
     document_owner_options: documentOwnerOptions = [],
     runs = [],
     runs_filters: runsFilters = null,
-    quality_findings: qualityFindings = [],
-    quality_filters: qualityFilters = null,
-    coverage = null,
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
     wiki_generation_available: wikiGenerationAvailable = false,
-    lint_health: lintHealth = { error: 0, warning: 0, info: 0, total: 0 },
     has_active_wiki_run: hasActiveWikiRunAnyTab = false,
 }) {
     const { translations = {} } = usePage().props;
@@ -3698,13 +3266,7 @@ export default function WikiIndex({
                         intro: tw.runs_page_help_intro ?? 'Kjøringer viser hvordan kildedokumenter behandles og blir til Wiki-materiale. Her kan du følge fremdrift, se hvilket steg behandlingen er på, og finne forståelige forklaringer dersom noe stopper eller venter på godkjenning.',
                         sections: getWikiRunsHelpSections(tw),
                     }
-                    : activeTab === 'quality'
-                        ? {
-                            title: tw.quality_page_help_title ?? 'Slik fungerer Kvalitet',
-                            intro: tw.quality_page_help_intro ?? 'Kvalitetsfunn er en arbeidsliste for å gå direkte til stedet der noe bør kontrolleres eller rettes. Noen funn peker på en hel side, mens andre kan peke på en konkret påstand.',
-                            sections: getWikiQualityHelpSections(tw),
-                        }
-                : null;
+                    : null;
 
     useEffect(() => {
         // The Pages tab never loads a `runs` prop of its own (see WikiController::index()'s
@@ -3773,9 +3335,6 @@ export default function WikiIndex({
                 )}
                 {activeTab === 'runs' && (
                     <RunsTab runs={runs} runsFilters={runsFilters} tw={tw} locale={locale} />
-                )}
-                {activeTab === 'quality' && (
-                    <QualityTab findings={qualityFindings} qualityFilters={qualityFilters} lintHealth={lintHealth} coverage={coverage} tw={tw} locale={locale} />
                 )}
             </div>
         </CustomerAppLayout>

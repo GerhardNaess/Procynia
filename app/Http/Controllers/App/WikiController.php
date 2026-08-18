@@ -19,7 +19,6 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
-use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
@@ -47,7 +46,6 @@ class WikiController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
-        private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
@@ -65,21 +63,7 @@ class WikiController extends Controller
 
         $tab = $this->resolveWikiReturnTab($request);
 
-        $lintBySeverity = EnterpriseWikiLintFinding::query()
-            ->where('customer_id', $customerId)
-            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->selectRaw('severity, count(*) as cnt')
-            ->groupBy('severity')
-            ->pluck('cnt', 'severity');
-
-        $lintHealth = [
-            'error' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
-            'warning' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
-            'info' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
-            'total' => (int) $lintBySeverity->sum(),
-        ];
-
-        // Computed regardless of active tab (like lint_health above) so the Pages tab — whose own
+        // Computed regardless of active tab so the Pages tab — whose own
         // prop payload never includes runs — can still know to poll for newly generated pages
         // while a run is working in the background on another tab.
         $hasActiveWikiRun = EnterpriseWikiIngestRun::query()
@@ -90,7 +74,6 @@ class WikiController extends Controller
 
         $props = [
             'active_tab' => $tab,
-            'lint_health' => $lintHealth,
             'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),
             'has_active_wiki_run' => $hasActiveWikiRun,
@@ -99,7 +82,6 @@ class WikiController extends Controller
         $props += match ($tab) {
             'sources' => $this->loadSourcesTab($user, $customerId, $request),
             'runs' => $this->loadRunsTab($user, $customerId, $request),
-            'quality' => $this->loadQualityTab($customerId, $request),
             default => $this->loadPagesTab($user, $customerId, $request),
         };
 
@@ -1256,113 +1238,6 @@ class WikiController extends Controller
         return response()->json($this->runFindingsService->buildForRun($run, $user, $includeTechnical));
     }
 
-    private function loadQualityTab(int $customerId, Request $request): array
-    {
-        $allowedSeverities = [
-            EnterpriseWikiLintFinding::SEVERITY_ERROR,
-            EnterpriseWikiLintFinding::SEVERITY_WARNING,
-            EnterpriseWikiLintFinding::SEVERITY_INFO,
-        ];
-        $allowedPageTypes = EnterpriseWikiPage::PAGE_TYPES;
-        $allowedCodes = EnterpriseWikiLintFinding::CODES;
-
-        $severity = in_array($request->query('q_severity'), $allowedSeverities, true)
-            ? $request->query('q_severity') : null;
-        $code = in_array($request->query('q_code'), $allowedCodes, true)
-            ? $request->query('q_code') : null;
-        $pageType = in_array($request->query('q_page_type'), $allowedPageTypes, true)
-            ? $request->query('q_page_type') : null;
-
-        $query = EnterpriseWikiLintFinding::query()
-            ->where('enterprise_wiki_lint_findings.customer_id', $customerId)
-            ->where('enterprise_wiki_lint_findings.status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->with([
-                'page:id,title,slug,page_type',
-                'run:id,source_id',
-            ])
-            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
-            ->orderByDesc('enterprise_wiki_lint_findings.created_at');
-
-        if ($severity !== null) {
-            $query->where('enterprise_wiki_lint_findings.severity', $severity);
-        }
-
-        if ($code !== null) {
-            $query->where('enterprise_wiki_lint_findings.code', $code);
-        }
-
-        if ($pageType !== null) {
-            $query->whereHas('page', fn ($q) => $q->where('page_type', $pageType));
-        }
-
-        $findings = $query->get();
-
-        $docIds = $findings
-            ->map(fn ($f) => $f->run?->source_id)
-            ->filter()
-            ->unique()
-            ->values();
-
-        $docFilenames = $docIds->isNotEmpty()
-            ? EnterpriseWikiDocument::query()
-                ->where('customer_id', $customerId)
-                ->whereIn('id', $docIds)
-                ->pluck('original_filename', 'id')
-            : collect();
-
-        $mapped = $findings->map(fn (EnterpriseWikiLintFinding $f) => [
-            'id' => $f->id,
-            'code' => $f->code,
-            'severity' => $f->severity,
-            'message' => $f->message,
-            'page_title' => $f->page?->title,
-            'page_slug' => $f->page?->slug,
-            'page_type' => $f->page?->page_type,
-            'target_url' => $this->qualityFindingTargetUrl($f),
-            'target_page_id' => $f->enterprise_wiki_page_id,
-            'target_page_version_id' => $f->enterprise_wiki_page_version_id,
-            'target_claim_id' => $f->enterprise_wiki_claim_id,
-            'run_id' => $f->enterprise_wiki_ingest_run_id,
-            'source_filename' => $f->run?->source_id ? $docFilenames->get($f->run->source_id) : null,
-            'created_at' => $f->created_at,
-        ])->all();
-
-        $coverage = $this->coverageService->computeForCustomer($customerId);
-
-        return [
-            'quality_findings' => $mapped,
-            'quality_filters' => [
-                'severity' => $severity,
-                'code' => $code,
-                'page_type' => $pageType,
-            ],
-            'coverage' => $coverage,
-        ];
-    }
-
-    private function qualityFindingTargetUrl(EnterpriseWikiLintFinding $finding): ?string
-    {
-        $pageSlug = $finding->page?->slug;
-
-        if ($pageSlug === null || $pageSlug === '') {
-            return null;
-        }
-
-        $parameters = ['slug' => $pageSlug];
-        $claimId = $finding->enterprise_wiki_claim_id !== null ? (int) $finding->enterprise_wiki_claim_id : null;
-
-        if ($claimId !== null && $claimId > 0) {
-            $parameters['claim_id'] = $claimId;
-        } else {
-            $parameters['finding_id'] = $finding->id;
-        }
-
-        return route('app.wiki.show', $parameters);
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
     private function buildStructureFindingReference(
         Request $request,
         EnterpriseWikiPage $page,

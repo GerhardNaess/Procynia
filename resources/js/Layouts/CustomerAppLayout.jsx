@@ -225,7 +225,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
                 { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
                 { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
-                { key: 'wiki-quality', label: tw.tab_quality ?? 'Kvalitet', href: buildHref('/app/wiki', { tab: 'quality' }) },
                 { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
             ];
         }
