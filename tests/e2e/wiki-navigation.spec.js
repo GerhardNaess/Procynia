@@ -5,10 +5,11 @@ test.beforeEach(async ({ page }) => {
     await loginAs(page, USER.email, USER.password);
 });
 
+// Listed in the order the menu renders them — the workflow order.
 const WIKI_NAV_ITEMS = [
-    { key: 'pages', label: 'Wiki-sider', url: '/app/wiki?tab=pages' },
     { key: 'sources', label: 'Kildedokumenter', url: '/app/wiki?tab=sources' },
     { key: 'runs', label: 'Kjøringer', url: '/app/wiki?tab=runs' },
+    { key: 'pages', label: 'Wiki-sider', url: '/app/wiki?tab=pages' },
     { key: 'graph', label: 'Grafvisning', url: '/app/wiki/graph' },
 ];
 
@@ -29,6 +30,10 @@ test('Wiki secondary navigation shows all four items in the shared nav pattern',
     for (const { label } of WIKI_NAV_ITEMS) {
         await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible();
     }
+
+    // The order is the point: source material first, then what the system did with it, then the
+    // result, then exploration.
+    await expect(nav.getByRole('link')).toHaveText(WIKI_NAV_ITEMS.map(({ label }) => label));
 });
 
 for (const { key, label, url } of WIKI_NAV_ITEMS) {
