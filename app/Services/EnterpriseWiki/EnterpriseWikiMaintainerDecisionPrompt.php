@@ -664,6 +664,12 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 // substance, which is what makes the create-gate decidable rather than advisory.
                 'relationship' => ['type' => 'string', 'enum' => self::TOPIC_RELATIONSHIPS],
                 'existing_owner_page_id' => ['type' => ['integer', 'null']],
+                // J2 — the create audit trail. A "create" says no existing page represents this
+                // knowledge object; these two fields are where that claim is shown rather than
+                // asserted. Page IDS, not titles, so the statement is checkable against the pages
+                // the planner was actually given (EnterpriseWikiPatchCandidateService).
+                'considered_existing_page_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                'considered_rejection_reason' => ['type' => ['string', 'null']],
             ],
             'required' => [
                 'name',
@@ -679,6 +685,8 @@ class EnterpriseWikiMaintainerDecisionPrompt
                 'has_reuse_value',
                 'relationship',
                 'existing_owner_page_id',
+                'considered_existing_page_ids',
+                'considered_rejection_reason',
             ],
             'additionalProperties' => false,
         ];
@@ -1648,6 +1656,31 @@ class EnterpriseWikiMaintainerDecisionPrompt
             && (! is_int($entry['existing_owner_page_id']) || $entry['existing_owner_page_id'] < 1)
         ) {
             $errors[] = "{$ctx}.existing_owner_page_id must be a positive integer or null.";
+        }
+
+        // J2 create-consideration fields. Optional in PHP for the same reason as the granularity
+        // fields above — a stored decision predating them still parses. Whether a `create` actually
+        // HAS to fill them is not a shape question and is not answered here: it depends on which
+        // existing pages the planner was shown, which only
+        // EnterpriseWikiCanonicalOwnershipValidator::findUndocumentedCreates() knows.
+        if (array_key_exists('considered_existing_page_ids', $entry)) {
+            if (! is_array($entry['considered_existing_page_ids'])) {
+                $errors[] = "{$ctx}.considered_existing_page_ids must be an array of page ids.";
+            } else {
+                foreach ($entry['considered_existing_page_ids'] as $j => $pageId) {
+                    if (! is_int($pageId) || $pageId < 1) {
+                        $errors[] = "{$ctx}.considered_existing_page_ids[{$j}] must be a positive integer.";
+                    }
+                }
+            }
+        }
+
+        if (
+            array_key_exists('considered_rejection_reason', $entry)
+            && $entry['considered_rejection_reason'] !== null
+            && ! is_string($entry['considered_rejection_reason'])
+        ) {
+            $errors[] = "{$ctx}.considered_rejection_reason must be a string or null.";
         }
 
         return $errors;

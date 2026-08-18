@@ -316,8 +316,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
             $decision,
             $group,
             $planning->figureCandidates,
+            $planning->existingPageCandidates(),
         );
         $inputSizeChars = mb_strlen($repairPromptText);
+        // Same rule as every other prompt carrying the block — see
+        // capacityInputSizeCharsWithoutCandidates(). A delta returns only its own group's objects.
+        $capacityInputSizeChars = self::capacityInputSizeCharsWithoutCandidates($repairPromptText, $planning->existingPageCandidates());
         // The delta's output is driven by how many objects this group repairs, not by the size of
         // the decision they came from — that is the whole point of the bounded contract.
         $repairedObjects = max(1, count($group['object_ids']));
@@ -329,7 +333,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                 self::DELTA_REPAIR_CAPACITY_OPERATION_TYPE,
                 self::MODEL,
                 $repairedObjects,
-                $inputSizeChars,
+                $capacityInputSizeChars,
                 $retryAttempt,
             ),
             fn (int $maxOutputTokens): array => $this->buildRepairPayload($languageName, $repairPromptText, $maxOutputTokens),
@@ -679,7 +683,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  has_separate_source_evidence (boolean), has_reuse_value (boolean), relationship,',
             '  existing_owner_page_id (nullable) — the last two are the granularity classification',
             '  described under CANONICAL OWNERSHIP AND PAGE GRANULARITY above, and they decide whether',
-            '  "create" is permitted at all.',
+            '  "create" is permitted at all — plus considered_existing_page_ids and',
+            '  considered_rejection_reason, described next.',
+            ...self::createConsiderationRules(),
             '  KEEP FREE-TEXT FIELDS SHORT — this is a planning decision, not a report:',
             '    independent_reason: ONE short sentence (roughly 15 words or fewer).',
             '    mentioned_context: a short phrase naming WHERE it is mentioned (e.g. "document title",',
@@ -920,6 +926,40 @@ class EnterpriseWikiMaintainerDecisionAiClient
             '  But they must not become the owner of that faglige substance: keep their owned_topics on',
             '  what the document itself is and decides, put the substance change on the existing owner',
             '  as a patch target, and link between them.',
+        ];
+    }
+
+    /**
+     * J2 — the create audit trail, shared verbatim by every prompt that can decide a concept
+     * candidate (single call, split phase 1B, split phase 2 batch, bounded delta repair), so the
+     * planner can never be told one thing while EnterpriseWikiCanonicalOwnershipValidator enforces
+     * another.
+     *
+     * The point is not paperwork. "create" asserts that no existing page represents this knowledge
+     * object; before this contract that assertion was unfalsifiable, because nothing recorded which
+     * pages had been weighed. Naming ids makes it checkable against the EXISTING PAGE CANDIDATES the
+     * planner was actually shown.
+     *
+     * @return string[]
+     */
+    public static function createConsiderationRules(): array
+    {
+        return [
+            '  BEFORE deciding "create", weigh the pages under EXISTING PAGE CANDIDATES (and the wiki',
+            '  index) and record what you concluded:',
+            '    considered_existing_page_ids: the numeric page ids you actually weighed as possible',
+            '    homes for this topic. Required, and non-empty, whenever EXISTING PAGE CANDIDATES',
+            '    lists any page and your decision is "create" — name at least one of THOSE page ids.',
+            '    An empty list is only correct when no existing page was offered at all.',
+            '    considered_rejection_reason: ONE short sentence saying why none of them represents',
+            '    this knowledge object — what the topic is that those pages do not already own.',
+            '    Required whenever considered_existing_page_ids is non-empty and the decision is',
+            '    "create"; null otherwise.',
+            '  For decision "reuse", "reference_only" or "exclude" these two fields are optional:',
+            '  those decisions already name the page they defer to.',
+            '  Do NOT invent an id. Do NOT list a page you did not read. If a listed candidate DOES',
+            '  cover the topic, the answer is not a documented "create" — it is "reuse", or a',
+            '  relationship of "topic_extended"/"topic_specialized" with that page as the owner.',
         ];
     }
 
@@ -1322,6 +1362,34 @@ class EnterpriseWikiMaintainerDecisionAiClient
         }
 
         return implode("\n", $parts);
+    }
+
+    /**
+     * The character count the CAPACITY planner is given for a prompt that carries the existing-page
+     * candidate block, which is deliberately not the rendered prompt length.
+     *
+     * `tokens_per_input_chars_unit` is documented in config/ai_capacity.php as "standing in for the
+     * number of concept_candidates the AI will enumerate — unknown before it responds, so estimated
+     * from source text size instead". It is an OUTPUT-size estimator, not an input budget. Existing
+     * Wiki content cannot make a response longer: a phase-2 batch returns exactly one disposition per
+     * mention it was handed (priced separately at `tokens_per_candidate`), phase 1B returns this
+     * document's entity pages and patch targets, and a delta repair returns only the objects of its
+     * own group. Counting the candidate block would raise `max_output_tokens` for a reason unrelated
+     * to the response — an implicit budget increase this change must not make.
+     *
+     * Timeout policies still receive the full rendered length: that one is about wall-clock, and a
+     * longer prompt genuinely takes longer to read.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     */
+    public static function capacityInputSizeCharsWithoutCandidates(string $promptText, array $candidates): int
+    {
+        if ($candidates === []) {
+            return mb_strlen($promptText);
+        }
+
+        // +1 for the blank separator line the callers put in front of the block.
+        return max(0, mb_strlen($promptText) - mb_strlen(self::existingPageCandidatesBlock($candidates)) - 1);
     }
 
     /**

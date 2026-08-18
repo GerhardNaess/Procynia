@@ -445,6 +445,21 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
      *
      * Capacity therefore needs its own measurement pass against logged token usage, not a tuning
      * guess bundled into a contract change. Until then the retry path is what absorbs it.
+     *
+     * 13 -> 15 for the create-consideration contract (considered_existing_page_ids,
+     * considered_rejection_reason). The review this tripwire demands was done and its conclusion is
+     * that NO profile change is warranted:
+     *
+     *  - Both fields are substantive only on a `create` candidate. On reuse/reference_only/exclude
+     *    they serialise as `[]` and `null` — under 10 tokens.
+     *  - On a create they are a short id list (1-3 integers) and ONE short sentence the prompt caps
+     *    explicitly: roughly 100 characters, ~25-30 tokens against a `tokens_per_candidate` of 260.
+     *  - That is ~11 % of the per-candidate estimate, well inside the profile's existing 35 %
+     *    safety margin, and the create share of candidates is a minority by construction — the whole
+     *    point of the create-gate.
+     *
+     * Deliberately NOT raised: a budget increase is the thing this change set was required not to
+     * make, and inflating tokens_per_candidate would also shrink how many candidates fit one batch.
      */
     public function test_concept_candidate_field_count_is_a_deliberate_capacity_tripwire(): void
     {
@@ -452,7 +467,7 @@ class EnterpriseWikiAiCapacityPlannerTest extends TestCase
         $candidateProps = $schema['json_schema']['schema']['properties']['concept_candidates']['items']['properties'];
 
         $this->assertCount(
-            13,
+            15,
             $candidateProps,
             'concept_candidates field count changed — review the enterprise_wiki_maintainer_decision '.
             'capacity profile in config/ai_capacity.php before assuming existing budgets still hold.',
