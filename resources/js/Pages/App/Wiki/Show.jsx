@@ -19,6 +19,11 @@ import {
     resolveBestPracticeSectionForBlock,
     hasInvalidBestPracticeMetadata,
 } from './wikiBestPracticeSectionLogic';
+import {
+    buildOpenClaimWorklist,
+    resolveDistinctPageExcerpt,
+    worklistRangesByCard,
+} from './wikiOpenClaimWorklist';
 
 function getWikiShowHelpSections(tw) {
     return [
@@ -468,16 +473,24 @@ function StructureFindingContextPanel({
                     </div>
                     <div className="space-y-2">
                         <p className="text-base font-semibold uppercase tracking-[0.18em] text-sky-700">
-                            {tw.structure_finding_panel_kicker ?? 'Sidefunn'}
+                            {tw.structure_finding_panel_kicker ?? 'Kvalitetsfunn'}
                         </p>
                         <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                            {tw.structure_finding_panel_heading ?? 'Problem med sidestrukturen'}
+                            {finding.category_label || (tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden')}
                         </h2>
                         <p className="text-base leading-7 text-slate-700">
-                            {finding.description || finding.message || (tw.structure_finding_panel_unknown ?? 'Dette funnet gjelder strukturen på Wiki-siden.')}
+                            {finding.description || finding.message}
                         </p>
+                        {finding.action && (
+                            <p className="text-base leading-7 text-slate-700">
+                                <span className="font-semibold">
+                                    {tw.quality_check_action_label ?? 'Hva gjør du?'}
+                                </span>{' '}
+                                {finding.action}
+                            </p>
+                        )}
                         <p className="text-base leading-7 text-slate-600">
-                            {tw.structure_finding_panel_scope_note ?? 'Dette gjelder hele siden, ikke et bestemt avsnitt. Bruk lenkestatusen under til å vurdere hvilke Wiki-sider denne siden bør kobles til.'}
+                            {tw.structure_finding_panel_scope_note ?? 'Funnet gjelder hele Wiki-siden, ikke en enkelt påstand.'}
                         </p>
                     </div>
                 </div>
@@ -496,9 +509,9 @@ function StructureFindingContextPanel({
                     </div>
                     <div>
                         <dt className="text-base font-semibold text-slate-700">
-                            {tw.structure_finding_type_label ?? 'Funntype'}
+                            {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}
                         </dt>
-                        <dd>{finding.category_label ?? finding.code}</dd>
+                        <dd className="font-mono text-sm text-slate-500">{finding.code}</dd>
                     </div>
                 </dl>
             </div>
@@ -1314,11 +1327,6 @@ export default function WikiShow({
                             <p className="text-base font-semibold uppercase tracking-wide text-violet-700">
                                 {tw.review_reference_inline_heading ?? 'Vurdering for dette avsnittet'}
                             </p>
-                            {findingIdForClaim(claim) && (
-                                <p className="font-mono text-sm font-semibold text-slate-600">
-                                    {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
-                                </p>
-                            )}
                             <p className="text-lg font-semibold text-slate-900">
                                 {claim.finding_category_label ?? (tw.claim_finding_category_possible_content_deviation ?? 'Mulig innholdsavvik')}
                             </p>
@@ -1363,7 +1371,7 @@ export default function WikiShow({
                                     )}
                                     className="rounded-full border border-slate-300 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
                                 >
-                                    Rediger teksten
+                                    {tw.wiki_block_edit_label ?? 'Rediger teksten'}
                                 </button>
                             </div>
                         )}
@@ -1406,7 +1414,7 @@ export default function WikiShow({
                                         onClick={() => approveClaim(claim)}
                                         className="rounded-full bg-emerald-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                                     >
-                                        Behold teksten
+                                        {tw.claim_card_keep_text ?? 'Behold teksten'}
                                     </button>
                                     <button
                                         type="button"
@@ -1414,7 +1422,7 @@ export default function WikiShow({
                                         onClick={() => rejectClaim(claim)}
                                         className="rounded-full border border-rose-200 bg-white px-4 py-2 text-base font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
                                     >
-                                        Fjern teksten
+                                        {tw.claim_card_remove_text ?? 'Fjern teksten'}
                                     </button>
                                 </div>
                             </div>
@@ -1482,6 +1490,13 @@ export default function WikiShow({
                                 {claimAccessNotice}
                             </div>
                         )}
+
+                        {findingIdForClaim(claim) && (
+                            <p className="font-mono text-[11px] text-slate-400">
+                                {(tw.claim_card_reference_label ?? 'Referanse #:id')
+                                    .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
+                            </p>
+                        )}
                     </div>
                 </article>
             );
@@ -1496,17 +1511,19 @@ export default function WikiShow({
             >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                        {findingIdForClaim(claim) && (
-                            <p className="font-mono text-sm font-semibold text-slate-600">
-                                {(tw.runs_findings_id_label ?? 'Funn #:id').replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
+                        {isOpenGroup && (
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-600">
+                                {(tw.verification_worklist_position ?? 'Påstand :position av :total')
+                                    .replace(':position', worklistPositionForCard(claim))
+                                    .replace(':total', openClaims.length)}
                             </p>
                         )}
                         {showClaimText && (
-                            <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                            <p className="mt-1 text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
                         )}
-                        {showClaimText && claim.page_excerpt && claim.page_excerpt !== claim.claim_text && (
+                        {showClaimText && resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt) && (
                             <p className="mt-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-                                {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {claim.page_excerpt}
+                                {tw.verification_basis_page_excerpt_label ?? 'Tekst i Wiki-siden'}: {resolveDistinctPageExcerpt(claim.claim_text, claim.page_excerpt)}
                             </p>
                         )}
 
@@ -1525,18 +1542,15 @@ export default function WikiShow({
                             )}
                             {isBestPracticeClaim && (
                                 <Badge
-                                    label={tw.verification_basis_best_practice_badge ?? 'Beste praksis'}
+                                    label={tw.verification_basis_best_practice_badge ?? 'Forslag basert på beste praksis'}
                                     cls="bg-amber-100 text-amber-700"
                                 />
                             )}
-                            {groupedClaimCount > 1 && (
-                                <Badge
-                                    label={(tw.verification_basis_block_claim_count ?? 'Samlet vurdering · :count påstander')
-                                        .replace(':count', groupedClaimCount)}
-                                    cls="bg-slate-100 text-slate-600"
-                                />
-                            )}
-                            {claim.finding_category_label && (
+                            {/* A best-practice suggestion's category label and source-status chip
+                                both restate "not taken from the source document", which the badge
+                                above and the explanation below already say. Kept for every other
+                                claim type, where they carry information the badge does not. */}
+                            {claim.finding_category_label && !isBestPracticeClaim && (
                                 <Badge
                                     label={claim.finding_category_label}
                                     cls={FINDING_CATEGORY_STYLES[claim.finding_category] ?? 'bg-slate-200 text-slate-600'}
@@ -1564,25 +1578,51 @@ export default function WikiShow({
                                     {tw.conflict_detected ?? 'Mulig konflikt'}
                                 </span>
                             )}
-                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
-                                {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
-                                    <WarnIcon className="h-3 w-3" />
-                                ) : (
-                                    <CheckIcon className="h-3 w-3" />
-                                )}
-                                {claimSourceStatusLabel(claim.source_status)}
-                            </span>
+                            {!isBestPracticeClaim && (
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${CLAIM_SOURCE_STATUS_STYLES[claim.source_status] ?? 'bg-slate-200 text-slate-500'}`}>
+                                    {SOURCE_STATUS_WARNS.has(claim.source_status) ? (
+                                        <WarnIcon className="h-3 w-3" />
+                                    ) : (
+                                        <CheckIcon className="h-3 w-3" />
+                                    )}
+                                    {claimSourceStatusLabel(claim.source_status)}
+                                </span>
+                            )}
                         </div>
+
+                        {groupedClaimCount > 1 && (
+                            <p className="mt-2 text-xs leading-5 text-slate-500">
+                                {(tw.claim_card_shared_decision ?? 'Én beslutning for :count påstander i samme avsnitt.')
+                                    .replace(':count', groupedClaimCount)}
+                            </p>
+                        )}
                     </div>
                 </div>
 
-                {problemLabel && (
-                    <p className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                        {problemLabel}
-                    </p>
+                {/* One "why" block per card. For a best-practice suggestion the standing
+                    explanation replaces the three overlapping texts that used to say the same
+                    thing; the AI's own reason is kept underneath because it is the only part that
+                    differs per suggestion. */}
+                {(problemLabel || isBestPracticeClaim) && (
+                    <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {tw.claim_card_why_label ?? 'Hvorfor må du vurdere dette?'}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-700">
+                            {isBestPracticeClaim
+                                ? (tw.claim_card_best_practice_explanation
+                                    ?? 'Procynia foreslår dette som beste praksis. Teksten finnes ikke i kundens kildedokumenter, derfor må du selv avgjøre om den skal beholdes.')
+                                : problemLabel}
+                        </p>
+                        {isBestPracticeClaim && claim.review_reason && (
+                            <p className="mt-1.5 text-xs leading-5 text-slate-500">
+                                {claim.review_reason}
+                            </p>
+                        )}
+                    </div>
                 )}
 
-                {claim.finding_recommended_action && (
+                {claim.finding_recommended_action && !isBestPracticeClaim && (
                     <p className="mt-2 text-xs leading-5 text-slate-500">
                         {claim.finding_recommended_action}
                     </p>
@@ -1651,28 +1691,29 @@ export default function WikiShow({
                                         {tw.claim_finding_no_source_excerpt ?? 'Systemet fant ingen sikker kildetekst for denne påstanden.'}
                                     </p>
                                 )}
-                                {isBestPracticeClaim && (
+                                {/* The "this is not documented customer knowledge" warning that used
+                                    to sit here repeated the badge and the why-block above it, so
+                                    only the editable suggested text remains. */}
+                                {isBestPracticeClaim && canHandleClaim && isPendingDecision && (
                                     <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-                                        <p className="text-sm leading-6 text-amber-800">
-                                            {tw.verification_basis_best_practice_no_source_search ?? 'Dette er ikke presentert som dokumentert kundekunnskap. Vurder teksten faglig, eller avvis den. Du skal ikke lete etter en manglende kilde.'}
+                                        <label className="block space-y-1">
+                                            <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                                                {tw.verification_basis_best_practice_edit_label ?? 'Foreslått tekst'}
+                                            </span>
+                                            <textarea
+                                                rows={3}
+                                                maxLength={4000}
+                                                value={claimTextEdit}
+                                                onChange={(e) => setClaimTextEdits((prev) => ({
+                                                    ...prev,
+                                                    [claim.id]: e.target.value,
+                                                }))}
+                                                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-amber-400 focus:outline-none"
+                                            />
+                                        </label>
+                                        <p className="text-[11px] leading-5 text-amber-800">
+                                            {tw.claim_card_best_practice_edit_hint ?? 'Du kan justere teksten før du beholder den.'}
                                         </p>
-                                        {canHandleClaim && isPendingDecision && (
-                                            <label className="block space-y-1">
-                                                <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-                                                    {tw.verification_basis_best_practice_edit_label ?? 'Rediger og godkjenn'}
-                                                </span>
-                                                <textarea
-                                                    rows={3}
-                                                    maxLength={4000}
-                                                    value={claimTextEdit}
-                                                    onChange={(e) => setClaimTextEdits((prev) => ({
-                                                        ...prev,
-                                                        [claim.id]: e.target.value,
-                                                    }))}
-                                                    className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 focus:border-amber-400 focus:outline-none"
-                                                />
-                                            </label>
-                                        )}
                                     </div>
                                 )}
 
@@ -1969,31 +2010,36 @@ export default function WikiShow({
                     </div>
 
                     {canHandleClaim && isPendingDecision && (
-                        <div className="flex flex-wrap items-center gap-2">
-                            <input
-                                type="text"
-                                maxLength={1000}
-                                placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
-                                value={approvalComments[claim.id] ?? ''}
-                                onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
-                                className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-violet-300 focus:outline-none"
-                            />
-                            <button
-                                type="button"
-                                disabled={claimProcessing === claim.id}
-                                onClick={() => approveClaim(claim)}
-                                className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                            >
-                                Behold teksten
-                            </button>
-                            <button
-                                type="button"
-                                disabled={claimProcessing === claim.id}
-                                onClick={() => rejectClaim(claim)}
-                                className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
-                            >
-                                Fjern teksten
-                            </button>
+                        <div className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {tw.claim_card_what_label ?? 'Hva skal du gjøre?'}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                    type="text"
+                                    maxLength={1000}
+                                    placeholder={tw.approval_comment_placeholder ?? 'Valgfri kommentar'}
+                                    value={approvalComments[claim.id] ?? ''}
+                                    onChange={(e) => setApprovalComments((prev) => ({ ...prev, [claim.id]: e.target.value }))}
+                                    className="min-w-50 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-violet-300 focus:outline-none"
+                                />
+                                <button
+                                    type="button"
+                                    disabled={claimProcessing === claim.id}
+                                    onClick={() => approveClaim(claim)}
+                                    className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                                >
+                                    {tw.claim_card_keep_text ?? 'Behold teksten'}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={claimProcessing === claim.id}
+                                    onClick={() => rejectClaim(claim)}
+                                    className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                >
+                                    {tw.claim_card_remove_text ?? 'Fjern teksten'}
+                                </button>
+                            </div>
                         </div>
                     )}
 
@@ -2020,6 +2066,16 @@ export default function WikiShow({
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
                             {claimAccessNotice}
                         </div>
+                    )}
+
+                    {/* Support/debug trace only. The same id the Kjøringer "Funn" panel shows, kept
+                        so a support case can be matched — but no longer the reader's first clue to
+                        what this card is about. */}
+                    {findingIdForClaim(claim) && (
+                        <p className="font-mono text-[11px] text-slate-400">
+                            {(tw.claim_card_reference_label ?? 'Referanse #:id')
+                                .replace(':id', formatFindingUserId(findingIdForClaim(claim)))}
+                        </p>
                     )}
                 </div>
             </article>
@@ -2073,6 +2129,36 @@ export default function WikiShow({
     // pending is listed only under "krever behandling" — never simultaneously under "Verifiserte
     // påstander", which previously made settled text look like it still needed approving.
     const reviewUnits = partitionBestPracticeReviewUnits(verificationClaims, contentBlocks, claimRequiresAction);
+
+    // The header's number and the cards below counted different things: openClaims counts CLAIMS,
+    // while a card is one review UNIT — three pending suggestions in one section rendered as a
+    // single card. The work list restores the correspondence: one row per open claim, each pointing
+    // at the card that actually decides it.
+    const openClaimWorklist = buildOpenClaimWorklist(reviewUnits.open, verificationClaims, claimRequiresAction);
+    const worklistRanges = worklistRangesByCard(openClaimWorklist);
+
+    // Only read while rendering, which happens after the ranges are built. A card that decides
+    // several claims names all of them rather than pretending to be just the first.
+    const worklistPositionForCard = (claim) => {
+        const range = worklistRanges.get(claim?.id);
+
+        if (range === undefined) {
+            return '1';
+        }
+
+        return range.first === range.last ? String(range.first) : `${range.first}–${range.last}`;
+    };
+
+    const focusOpenClaim = (cardClaimId) => {
+        const target = document.getElementById(`claim-${cardClaimId}`);
+
+        if (!target) {
+            return;
+        }
+
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.focus({ preventScroll: true });
+    };
 
     // Derive semantic traversal groups from outgoing links
     const summaryLinks = outgoingLinks.filter((p) => p.page_type === 'summary');
@@ -2720,31 +2806,20 @@ export default function WikiShow({
                         )}
                         {structuralFindings.length > 0 && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
-                                {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
+                                {structuralFindings.length} {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
                             </span>
                         )}
                     </button>
 
                     {verificationOpen && (
                         <div className="space-y-5">
+                            {/* The counts already sit on the collapsible header directly above; a
+                                second identical badge row only pushed the actual work list further
+                                down the page. */}
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
                                 <p className="text-sm leading-6 text-slate-600">
                                     {claimAccessNotice}
                                 </p>
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <Badge
-                                        label={`${openClaims.length} ${tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}`}
-                                        cls="bg-rose-100 text-rose-700"
-                                    />
-                                    <Badge
-                                        label={`${verifiedClaims.length} ${tw.verification_basis_verified_heading ?? 'Verifiserte påstander'}`}
-                                        cls="bg-emerald-100 text-emerald-700"
-                                    />
-                                    <Badge
-                                        label={`${structuralFindings.length} ${tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}`}
-                                        cls="bg-slate-100 text-slate-600"
-                                    />
-                                </div>
                                 {claimLintFindings.length > 0 && (
                                     <p className="mt-3 text-xs text-slate-500">
                                         {tw.verification_basis_claim_findings_note ?? 'Påstandsrelaterte kontrollfunn vises direkte i påstandskortene nedenfor.'}
@@ -2753,17 +2828,14 @@ export default function WikiShow({
                             </div>
 
                             <section className="space-y-3">
-                                <div className="space-y-1">
-                                    <h3 className="text-sm font-semibold text-slate-700">
-                                        {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
-                                        <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
-                                            {openClaims.length}
-                                        </span>
-                                    </h3>
-                                    <p className="text-sm text-slate-500">
-                                        {claimAccessNotice}
-                                    </p>
-                                </div>
+                                {/* The access notice sits once, in the box above — repeating it here
+                                    separated the heading from the work list it introduces. */}
+                                <h3 className="text-sm font-semibold text-slate-700">
+                                    {tw.verification_basis_open_heading ?? 'Påstander som krever behandling'}
+                                    <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                                        {openClaims.length}
+                                    </span>
+                                </h3>
 
                                 {!current_version ? (
                                     <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
@@ -2773,6 +2845,51 @@ export default function WikiShow({
                                     </p>
                                 ) : (
                                     <div className="space-y-4">
+                                        {/* The number above, spelled out: one row per open claim, so
+                                            "3" is visibly the same three things the cards decide. */}
+                                        <ol
+                                            data-testid="open-claim-worklist"
+                                            className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                                        >
+                                            {openClaimWorklist.map((entry) => (
+                                                <li key={entry.claimId}>
+                                                    <button
+                                                        type="button"
+                                                        data-testid="open-claim-worklist-entry"
+                                                        data-claim-id={entry.claimId}
+                                                        onClick={() => focusOpenClaim(entry.cardClaimId)}
+                                                        aria-label={`${tw.verification_worklist_open_entry ?? 'Gå til påstanden'}: ${entry.title || (tw.verification_worklist_untitled ?? 'Påstand uten tekst')}`}
+                                                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-violet-50 focus-visible:bg-violet-50 focus-visible:outline-none"
+                                                    >
+                                                        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rose-100 text-xs font-semibold text-rose-700">
+                                                            {entry.position}
+                                                        </span>
+                                                        <span className="min-w-0 flex-1">
+                                                            <span className="block text-sm leading-6 text-slate-900">
+                                                                {entry.title || (tw.verification_worklist_untitled ?? 'Påstand uten tekst')}
+                                                            </span>
+                                                            <span className="mt-0.5 block text-xs text-slate-500">
+                                                                {tw[`verification_worklist_reason_${entry.reasonKey}`]
+                                                                    ?? tw.verification_worklist_reason_other
+                                                                    ?? 'Krever en vurdering'}
+                                                                {entry.sharedDecisionCount > 1 && (
+                                                                    <>
+                                                                        {' · '}
+                                                                        {(tw.verification_worklist_shared_decision ?? 'Behandles sammen med :count andre påstander i samme avsnitt')
+                                                                            .replace(':count', entry.sharedDecisionCount - 1)}
+                                                                    </>
+                                                                )}
+                                                            </span>
+                                                        </span>
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ol>
+
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                            {tw.verification_worklist_intro ?? 'Slik behandler du dem:'}
+                                        </p>
+
                                         {reviewUnits.open.map((unit) => renderClaimCard(unit.claim, 'open', { claimCount: unit.claimCount }))}
                                     </div>
                                 )}
@@ -2813,7 +2930,7 @@ export default function WikiShow({
                                     className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
                                 >
                                     <ChevronIcon open={structuralFindingsOpen} />
-                                    {tw.verification_basis_structural_heading ?? 'Problem med sidestrukturen'}
+                                    {tw.verification_basis_structural_heading ?? 'Kvalitetsfunn på siden'}
                                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
                                         {structuralFindings.length}
                                     </span>
@@ -2836,7 +2953,12 @@ export default function WikiShow({
                                                     const checkCopy = getWikiQualityCheckCopy(first.code, tw);
 
                                                     return (
-                                                        <article key={first.code} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                                                        <article
+                                                            key={first.code}
+                                                            data-testid="page-quality-finding"
+                                                            data-finding-code={first.code}
+                                                            className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
+                                                        >
                                                             <div className="flex items-start gap-3">
                                                                 <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[first.severity] ?? 'bg-slate-100 text-slate-600'}`}>
                                                                     {first.severity === 'error'
@@ -2854,11 +2976,23 @@ export default function WikiShow({
                                                                             ×{group.findings.length}
                                                                         </span>
                                                                     </div>
-                                                                    {checkCopy.unknown && (
-                                                                        <p className="font-mono text-[11px] text-slate-400">{first.code}</p>
+                                                                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                                                                        {checkCopy.description}
+                                                                    </p>
+                                                                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                        <span className="font-semibold">
+                                                                            {tw.quality_check_action_label ?? 'Hva gjør du?'}
+                                                                        </span>{' '}
+                                                                        {checkCopy.action}
+                                                                    </p>
+                                                                    {first.message && first.message !== checkCopy.description && (
+                                                                        <p className="mt-2 text-xs leading-5 text-slate-500">
+                                                                            {first.message}
+                                                                        </p>
                                                                     )}
-                                                                    <p className="mt-1 text-sm text-slate-600">
-                                                                        {checkCopy.description || first.message}
+                                                                    <p className="mt-2 text-[11px] text-slate-400">
+                                                                        {tw.quality_check_technical_reference_label ?? 'Teknisk referanse'}:{' '}
+                                                                        <span className="font-mono">{first.code}</span>
                                                                     </p>
                                                                 </div>
                                                             </div>

@@ -1,67 +1,112 @@
-export const WIKI_QUALITY_CHECKS = {
-    applied_run_without_article: 'applied_run_without_article',
-    applied_run_without_pages: 'applied_run_without_pages',
-    applied_run_without_summary: 'applied_run_without_summary',
-    article_without_concept_or_entity_links: 'article_without_concept_or_entity_links',
-    article_without_summary_link: 'article_without_summary_link',
-    best_practice_block_without_claim: 'best_practice_block_without_claim',
-    broken_wikilink: 'broken_wikilink',
-    claim_missing_source: 'claim_missing_source',
-    concept_without_incoming_wikilink: 'concept_without_incoming_wikilink',
-    cross_customer_wikilink: 'cross_customer_wikilink',
-    empty_page_content: 'empty_page_content',
-    entity_without_incoming_wikilink: 'entity_without_incoming_wikilink',
-    malformed_wikilink: 'malformed_wikilink',
-    unmaterialized_wikilink_marker: 'unmaterialized_wikilink_marker',
-    missing_current_version: 'missing_current_version',
-    missing_reverse_link: 'missing_reverse_link',
-    missing_wikilink_materialization: 'missing_wikilink_materialization',
-    orphan_concept_page: 'orphan_concept_page',
-    orphan_entity_page: 'orphan_entity_page',
-    page_without_claims: 'page_without_claims',
-    page_without_incoming_links: 'page_without_incoming_links',
-    page_without_outgoing_links: 'page_without_outgoing_links',
-    run_targets_available_but_not_linked: 'run_targets_available_but_not_linked',
-    self_wikilink: 'self_wikilink',
-    source_reference_customer_mismatch: 'source_reference_customer_mismatch',
-    source_reference_missing_excerpt: 'source_reference_missing_excerpt',
-    source_reference_without_document: 'source_reference_without_document',
-    stale_wikilink_graph_edge: 'stale_wikilink_graph_edge',
-    summary_without_article_link: 'summary_without_article_link',
-    wikilink_projection_mismatch: 'wikilink_projection_mismatch',
+/**
+ * One central presentation mapping for Enterprise Wiki quality (lint) findings.
+ *
+ * A finding is only useful when the reader can answer three questions: what is wrong, what does it
+ * mean, and what should I do about it. The technical lint code answers none of them, so it is never
+ * the headline — it is available as a discreet technical reference instead.
+ *
+ * WIKI_QUALITY_CHECK_REMEDIES mirrors App\Support\EnterpriseWiki\WikiQualityCheckPresentation::REMEDIES
+ * (a PHP test asserts the two are identical). Each remedy names a capability the product actually
+ * has — regenerating from Kilder, reviewing a claim on the page — or says plainly that the user
+ * cannot fix it. Never add a remedy describing an action the UI does not support.
+ */
+export const WIKI_QUALITY_CHECK_REMEDIES = {
+    // Missing or defective generated content — regenerate from the source document.
+    missing_current_version: 'source_document',
+    empty_page_content: 'source_document',
+    page_without_claims: 'source_document',
+    best_practice_block_without_claim: 'source_document',
+    planned_section_missing: 'source_document',
+    planned_section_empty: 'source_document',
+    planned_section_only_links: 'source_document',
+    planned_section_below_minimum_substance: 'source_document',
+    planned_figure_missing: 'source_document',
+    planned_figure_wrong_section: 'source_document',
+    planned_figure_wrong_page: 'source_document',
+    planned_figure_source_missing: 'source_document',
+    planned_figure_duplicate: 'source_document',
+    document_ingest_failed: 'source_document',
+    applied_run_without_pages: 'source_document',
+    applied_run_without_article: 'source_document',
+    applied_run_without_summary: 'source_document',
+
+    // One claim and its source reference — resolved in the claim cards on this page.
+    claim_missing_source: 'claim_review',
+    source_reference_missing_excerpt: 'claim_review',
+    source_reference_without_document: 'claim_review',
+    source_reference_customer_mismatch: 'claim_review',
+
+    // The page text needs a human judgment before anything is regenerated.
+    stale_current_assertion: 'page_content',
+    cross_page_current_conflict: 'page_content',
+    historical_wording_in_current_canonical_content: 'page_content',
+    cross_page_consistency_unknown: 'page_content',
+
+    // Links are written by generation; there is no link editor on the page.
+    broken_wikilink: 'link_structure',
+    malformed_wikilink: 'link_structure',
+    self_wikilink: 'link_structure',
+    article_without_summary_link: 'link_structure',
+    summary_without_article_link: 'link_structure',
+    article_without_concept_or_entity_links: 'link_structure',
+    orphan_concept_page: 'link_structure',
+    orphan_entity_page: 'link_structure',
+    page_without_outgoing_links: 'link_structure',
+    page_without_incoming_links: 'link_structure',
+    concept_without_incoming_wikilink: 'link_structure',
+    entity_without_incoming_wikilink: 'link_structure',
+    run_targets_available_but_not_linked: 'link_structure',
+    missing_reverse_link: 'link_structure',
+
+    // Internal bookkeeping defects: the customer has no lever for these at all.
+    cross_customer_wikilink: 'system',
+    unmaterialized_wikilink_marker: 'system',
+    missing_wikilink_materialization: 'system',
+    wikilink_projection_mismatch: 'system',
+    stale_wikilink_graph_edge: 'system',
 };
 
-const CLAIM_QUALITY_CHECK_CODES = new Set([
-    'claim_missing_source',
-    'source_reference_missing_excerpt',
-]);
+export const WIKI_QUALITY_CHECKS = Object.keys(WIKI_QUALITY_CHECK_REMEDIES)
+    .reduce((codes, code) => ({ ...codes, [code]: code }), {});
+
+/**
+ * Findings the lint engine anchors to a single claim (enterprise_wiki_claim_id). They are about one
+ * assertion and its source reference, so they belong with the claim cards — not with findings about
+ * the page as a whole. Kept in sync with the claim_review remedy above.
+ */
+const CLAIM_QUALITY_CHECK_CODES = new Set(
+    Object.entries(WIKI_QUALITY_CHECK_REMEDIES)
+        .filter(([, remedy]) => remedy === 'claim_review')
+        .map(([code]) => code),
+);
 
 export function getNestedTranslation(source, path, fallback = null) {
     return path.split('.').reduce((value, key) => value?.[key], source) ?? fallback;
 }
 
+/**
+ * Resolve the human presentation for one finding code: a plain title, a plain explanation, and the
+ * one action that is actually available. An unrecognised or untranslated code never degrades into
+ * a raw technical string — it gets a safe, still-actionable fallback, and the code itself is
+ * returned separately so the caller can show it as a discreet technical reference.
+ */
 export function getWikiQualityCheckCopy(code, tw) {
-    const key = WIKI_QUALITY_CHECKS[code];
-    const translated = key ? {
-        label: getNestedTranslation(tw, `quality_checks.${key}.label`),
-        description: getNestedTranslation(tw, `quality_checks.${key}.description`),
-    } : null;
-
-    if (translated) {
-        return {
-            label: translated.label ?? code,
-            description: translated.description ?? '',
-            unknown: false,
-        };
-    }
-
-    const unknownLabel = tw.quality_check_unknown_label ?? 'Ukjent sjekktype';
-    const unknownDescription = tw.quality_check_unknown_description ?? 'Denne kvalitetssjekken er ikke oversatt ennå.';
+    const label = getNestedTranslation(tw, `quality_checks.${code}.label`);
+    const description = getNestedTranslation(tw, `quality_checks.${code}.description`);
+    const unknown = !label || !description;
+    const remedy = unknown ? 'unknown' : (WIKI_QUALITY_CHECK_REMEDIES[code] ?? 'unknown');
 
     return {
-        label: `${unknownLabel}: ${code}`,
-        description: `${unknownDescription} (${code})`,
-        unknown: true,
+        code,
+        remedy,
+        unknown,
+        label: label ?? tw.quality_check_unknown_label ?? 'Kvalitetsproblem på Wiki-siden',
+        description: description
+            ?? tw.quality_check_unknown_description
+            ?? 'Procynia har funnet et problem med denne siden som ikke har en egen brukerforklaring ennå.',
+        action: getNestedTranslation(tw, `quality_check_actions.${remedy}`)
+            ?? getNestedTranslation(tw, 'quality_check_actions.unknown')
+            ?? 'Kontroller siden og kildedokumentet. Er problemet fortsatt uklart, kontakt systemansvarlig.',
     };
 }
 

@@ -28,6 +28,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
+use App\Support\EnterpriseWiki\WikiQualityCheckPresentation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -1405,6 +1406,8 @@ class WikiController extends Controller
             'code' => $finding->code,
             'category_label' => $copy['label'],
             'description' => $copy['description'],
+            'action' => $copy['action'],
+            'remedy' => $copy['remedy'],
             'message' => $finding->message,
             'severity' => $finding->severity,
             'severity_label' => $this->lintSeverityLabel($finding->severity),
@@ -1426,20 +1429,18 @@ class WikiController extends Controller
     }
 
     /**
-     * @return array{label: string, description: string}
+     * Purpose: Resolve one lint code's human presentation — title, explanation and the recommended
+     *          action — from the single central mapping.
+     * Inputs: The technical lint code.
+     * Returns: array{label: string, description: string, action: string, remedy: string, unknown: bool}
+     * Side effects: None.
+     *
+     * The raw code is deliberately never folded into the label: it is returned separately so callers
+     * can show it as a discreet technical reference instead of as the user's only clue.
      */
     private function qualityCheckCopy(string $code): array
     {
-        $label = __('procynia.wiki.quality_checks.'.$code.'.label');
-        $description = __('procynia.wiki.quality_checks.'.$code.'.description');
-
-        $unresolvedLabel = 'procynia.wiki.quality_checks.'.$code.'.label';
-        $unresolvedDescription = 'procynia.wiki.quality_checks.'.$code.'.description';
-
-        return [
-            'label' => $label === $unresolvedLabel ? __('procynia.wiki.quality_check_unknown_label').': '.$code : $label,
-            'description' => $description === $unresolvedDescription ? __('procynia.wiki.quality_check_unknown_description').' ('.$code.')' : $description,
-        ];
+        return WikiQualityCheckPresentation::copy($code);
     }
 
     private function lintSeverityLabel(string $severity): string
