@@ -43,6 +43,10 @@ const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-now
 const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
 const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
+// Icon-only sibling of ACTION_BUTTON_SECONDARY: same border, hover and focus-visible treatment,
+// square so it reads as one control next to the field it commits.
+const ICON_BUTTON_SECONDARY = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-slate-300 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
+
 const ACTION_BUTTON_DESTRUCTIVE_WRAP = 'inline-flex h-10 max-w-full items-center justify-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 text-sm font-semibold leading-5 text-rose-700 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-50 whitespace-normal break-words text-center';
 
 const STATUS_STYLES = {
@@ -146,7 +150,7 @@ const INGEST_STATUS_LABELS = {
     post_claim_verification: 'Etterbehandler påstander',
     verification_linking: 'Verifisering og lenking',
     qa: 'QA',
-    awaiting_document_owner_approval: 'Venter på dokumenteiergodkjenning',
+    awaiting_document_owner_approval: 'Avventer godkjenning',
     completed: 'Fullført',
     failed: 'Feilet',
     escalated: 'Eskalert',
@@ -1043,7 +1047,7 @@ function getWikiRunsHelpSections(tw) {
             items: [
                 {
                     title: tw.runs_page_help_item_when_start_title ?? 'Når Wiki-behandling startes',
-                    text: tw.runs_page_help_item_when_start_text ?? 'En kjøring kan opprettes når brukeren velger Lag Wiki-utkast for et kildedokument, eller når eksisterende Wiki-materiale må behandles på nytt eller gjenopprettes gjennom eksisterende UI.',
+                    text: tw.runs_page_help_item_when_start_text ?? 'En kjøring kan opprettes når brukeren velger Lag Wiki for et kildedokument, eller når eksisterende Wiki-materiale må behandles på nytt eller gjenopprettes gjennom eksisterende UI.',
                 },
                 {
                     title: tw.runs_page_help_item_when_scope_title ?? 'Én kjøring kan dekke mer enn ett steg',
@@ -2103,16 +2107,24 @@ function SourcesTab({
                                             </td>
                                             <td className="px-4 py-3 align-top">
                                                 {canAssignDocumentOwner ? (
-                                                    <div className="space-y-2">
+                                                    /* Select and save sit on one line: a row has exactly one owner, so the
+                                                       cell only ever needs the name plus the action that commits a change.
+                                                       Saving stays EXPLICIT — the select never submits on change. */
+                                                    <div className="flex items-center gap-1.5">
                                                         <select
                                                             value={ownerDrafts[source.id] ?? String(source.owner_user_id ?? '')}
                                                             onChange={(event) => handleOwnerChange(source.id, event.target.value)}
-                                                            className={`${RUNS_SELECT_CLS} w-full`}
+                                                            /* w-0 + flex-1: a <select>'s intrinsic width is its longest
+                                                               option, and in a table-fixed column that minimum was what
+                                                               kept the Dokumenteier column ~100px wider than the name it
+                                                               now shows — which is width Handlinger needs for its three
+                                                               buttons. */
+                                                            className={`${RUNS_SELECT_CLS} w-0 min-w-0 flex-1`}
                                                         >
                                                             <option value="">{tw.document_owner_missing ?? 'Mangler Dokumenteier'}</option>
                                                             {ownerOptions.map((option) => (
                                                                 <option key={option.id} value={option.id}>
-                                                                    {option.label}
+                                                                    {option.name ?? option.label}
                                                                 </option>
                                                             ))}
                                                         </select>
@@ -2120,11 +2132,17 @@ function SourcesTab({
                                                             type="button"
                                                             disabled={savingOwnerIds.has(source.id)}
                                                             onClick={() => handleOwnerSave(source)}
-                                                            className={ACTION_BUTTON_SECONDARY}
-                                                        >
-                                                            {savingOwnerIds.has(source.id)
+                                                            aria-label={savingOwnerIds.has(source.id)
                                                                 ? (tw.document_owner_saving ?? 'Lagrer eier...')
                                                                 : (tw.document_owner_save ?? 'Lagre eier')}
+                                                            title={savingOwnerIds.has(source.id)
+                                                                ? (tw.document_owner_saving ?? 'Lagrer eier...')
+                                                                : (tw.document_owner_save ?? 'Lagre eier')}
+                                                            className={ICON_BUTTON_SECONDARY}
+                                                        >
+                                                            <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                <path d="M3 4.75A1.75 1.75 0 0 1 4.75 3h8.19c.464 0 .909.184 1.237.513l2.31 2.31c.329.328.513.773.513 1.237v8.19A1.75 1.75 0 0 1 15.25 17H4.75A1.75 1.75 0 0 1 3 15.25V4.75Zm3.5-.25v3.5h6V4.5h-6Zm3.5 5.75a2.75 2.75 0 1 0 0 5.5 2.75 2.75 0 0 0 0-5.5Z" />
+                                                            </svg>
                                                         </button>
                                                     </div>
                                                 ) : (
@@ -2134,6 +2152,8 @@ function SourcesTab({
                                                 )}
                                             </td>
                                             <td className="px-4 py-3 align-top">
+                                                {/* One action container: Last ned | Lag Wiki | Slett stay on the same line on
+                                                    desktop and fall back to the existing wrap on narrow viewports. */}
                                                 <div className="flex flex-col items-start gap-2">
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         <a
@@ -2176,7 +2196,7 @@ function SourcesTab({
                                                                 </svg>
                                                                 {ingestingIds.has(source.id)
                                                                     ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                    : (tw.source_ingest_button ?? 'Lag Wiki-utkast')}
+                                                                    : (tw.source_ingest_button ?? 'Lag Wiki')}
                                                             </button>
                                                         )}
                                                         {canDelete && (
@@ -2194,12 +2214,6 @@ function SourcesTab({
                                                             </button>
                                                         )}
                                                     </div>
-                                                    <Link
-                                                        href={`/app/wiki?tab=runs&run_src=${source.id}`}
-                                                        className="text-base text-slate-500 hover:text-violet-600 hover:underline"
-                                                    >
-                                                        {tw.runs_view_runs ?? 'Kjøringer'}
-                                                    </Link>
                                                     {source.document_status === 'extracted' && !wikiGenerationAvailable && (
                                                         <span className="text-base text-slate-500">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}

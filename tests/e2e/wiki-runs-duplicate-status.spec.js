@@ -51,16 +51,16 @@ test.describe.serial('Kjøringer duplicate status badge removal', () => {
         await expect(row).toBeVisible();
         const mainRow = row.locator('[data-run-main-row]');
 
-        await expect(mainRow.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toHaveCount(1);
+        await expect(mainRow.getByText('Avventer godkjenning', { exact: true })).toHaveCount(1);
         await expect(mainRow.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
     });
 
-    test('2. the main status badge (Venter på dokumenteiergodkjenning) is still shown', async ({ page }) => {
+    test('2. the main status badge (Avventer godkjenning) is still shown', async ({ page }) => {
         await loginAsDevDataUser(page);
         await page.goto('/app/wiki?tab=runs');
 
         const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
-        await expect(row.locator('[data-run-main-row]').getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(row.locator('[data-run-main-row]').getByText('Avventer godkjenning', { exact: true })).toBeVisible();
     });
 
     test('3. the explanation text says automatic processing is complete and the run is waiting', async ({ page }) => {

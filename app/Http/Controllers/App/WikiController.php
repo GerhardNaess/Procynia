@@ -2370,8 +2370,13 @@ class WikiController extends Controller
                 ['name', 'asc'],
                 ['id', 'asc'],
             ])
+            // `name` and `label` are both offered on purpose. The row's owner select shows the bare
+            // name (a row already has one owner; the e-mail only made the cell wider and had to be
+            // truncated), while the filter and the upload picker keep `label` — there, e-mail is what
+            // separates two people with the same name. Nothing is removed from the payload.
             ->map(static fn (User $user): array => [
                 'id' => $user->id,
+                'name' => $user->name,
                 'label' => sprintf('%s · %s', $user->name, $user->email),
             ])
             ->values()

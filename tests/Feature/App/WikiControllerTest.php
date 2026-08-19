@@ -1238,13 +1238,13 @@ class WikiControllerTest extends TestCase
         app()->setLocale('no');
 
         $label = trans('procynia.wiki.source_ingest_button');
-        $this->assertSame('Lag Wiki-utkast', $label);
+        $this->assertSame('Lag Wiki', $label);
         // Not a status word — this is the specific bug this layout fix corrects (Del: the button
         // must never read like one of the Wiki-status chip labels, e.g. "I kø"/"Kjører"/"Fullført").
         $this->assertNotContains($label, ['I kø', 'Kjører', 'Fullført', 'Feilet', 'Venter']);
 
         app()->setLocale('en');
-        $this->assertSame('Create Wiki draft', trans('procynia.wiki.source_ingest_button'));
+        $this->assertSame('Create Wiki', trans('procynia.wiki.source_ingest_button'));
         app()->setLocale($locale);
     }
 

@@ -72,7 +72,7 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         const row = page.locator(`[data-run-item][data-run-id="${waitingRunId}"]`).first();
         const mainRow = row.locator('[data-run-main-row]');
         await expect(row).toBeVisible();
-        await expect(mainRow.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(mainRow.getByText('Avventer godkjenning', { exact: true })).toBeVisible();
         await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toBeVisible();
         await expect(mainRow.getByText('Automatisk behandling fullført', { exact: true })).toHaveAttribute(
             'title',
@@ -123,7 +123,7 @@ test.describe.serial('Kjøringer stalled-indicator gating', () => {
         const mobileCard = row.locator('[data-run-mobile-card]');
         await expect(row).toBeVisible();
         await expect(mobileCard.getByText('Ser ut til å stå stille', { exact: true })).toHaveCount(0);
-        await expect(mobileCard.getByText('Venter på dokumenteiergodkjenning', { exact: true })).toBeVisible();
+        await expect(mobileCard.getByText('Avventer godkjenning', { exact: true })).toBeVisible();
         await expect(mobileCard.getByText('Avventer dokumenteiergodkjenning', { exact: true })).toHaveCount(0);
 
         const bodyOverflows = await page.evaluate(
