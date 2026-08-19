@@ -45,7 +45,7 @@ class RequirementWikiAssessmentAiClient
      * Purpose: Judge how well the given Wiki pages cover one requirement.
      * Inputs: The requirement identifier/text, the pages read during research (may be empty — the
      *         model still writes a valid "missing" assessment using only the requirement text), the
-     *         answer language, the owning SavedNotice's case_instructions, and this generation's
+     *         answer language, the owning customer's shared case_instructions, and this generation's
      *         one-off requirementUserPrompt — both subordinate, style-only directives, applied in
      *         that priority order, exactly as in RequirementWikiAnswerAiClient.
      * Returns: The full assessment judgment.

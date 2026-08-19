@@ -33,12 +33,17 @@ class Customer extends Model
     ];
 
     public const PLAN_FREE = 'free';
+
     public const PLAN_PRO = 'pro';
+
     public const PLAN_MAX = 'max';
+
     public const PLAN_ULTRA = 'ultra';
+
     public const PLAN_ENTERPRISE = 'enterprise';
 
     public const BILLING_MONTHLY = 'monthly';
+
     public const BILLING_YEARLY = 'yearly';
 
     protected $fillable = [
@@ -48,6 +53,7 @@ class Customer extends Model
         'language_id',
         'is_active',
         'permission_settings',
+        'ai_instructions',
         'stripe_id',
         'pm_type',
         'pm_last_four',
@@ -106,6 +112,23 @@ class Customer extends Model
     public function billingEvents(): HasMany
     {
         return $this->hasMany(BillingEvent::class);
+    }
+
+    /**
+     * Purpose: Return the customer's shared AI instruction, or null when none is set.
+     * Inputs: None.
+     * Returns: The normalized instruction text, or null when empty/unset.
+     * Side effects: None.
+     *
+     * The AI instruction is owned by the customer and applies to every case that belongs to it. It
+     * governs tone, terminology, style and capitalization only — it is always subordinate to
+     * grounded facts, selected sources and the anti-fabrication rules in the AI prompts.
+     */
+    public function resolvedAiInstructions(): ?string
+    {
+        $instructions = trim(str_replace(["\r\n", "\r"], "\n", (string) ($this->ai_instructions ?? '')));
+
+        return $instructions !== '' ? $instructions : null;
     }
 
     public function resolvedPermissionSettings(): array

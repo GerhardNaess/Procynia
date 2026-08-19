@@ -65,7 +65,7 @@ class RequirementWikiAnswerAiClient
      * Side effects: None (one OpenAI call).
      *
      * @param  list<array{page_id: int, title: string, page_type: string, content_mode: string, content_markdown: string, selected_headings: list<string>, figures: list<array<string, mixed>>, source_based_claim_texts: list<string>, best_practice_claim_texts: list<string>}>  $pages
-     * @param  string|null  $caseInstructions  The owning SavedNotice's free-text ai_instructions
+     * @param  string|null  $caseInstructions  The owning customer's shared free-text ai_instructions
      *                                         (tone/terminology/style guidance the customer configured for this case — see
      *                                         AiController::updateAiInstructions()). Governs HOW the answer is written, never WHAT
      *                                         it claims: buildPayload() places it as a subordinate style directive that the developer

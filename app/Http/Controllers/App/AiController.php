@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
+use App\Exceptions\Ai\XlsxRequirementImportException;
 use App\Http\Controllers\Controller;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
@@ -19,6 +20,7 @@ use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\DocumentPreviewService;
+use App\Services\Ai\Requirements\Excel\XlsxRequirementImportPreparer;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementEditorService;
@@ -107,6 +109,7 @@ class AiController extends Controller
         private readonly RequirementWikiAnswerService $requirementWikiAnswerService,
         private readonly RequirementWikiAssessmentService $requirementWikiAssessmentService,
         private readonly RequirementWikiAnswerFigureResolver $wikiAnswerFigureResolver,
+        private readonly XlsxRequirementImportPreparer $xlsxRequirementImportPreparer,
     ) {}
 
     /**
@@ -174,6 +177,7 @@ class AiController extends Controller
             'requirements' => $requirementsPayload,
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
             'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
+            'requirements_delete_all_url' => route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
@@ -192,6 +196,10 @@ class AiController extends Controller
      * Inputs: The current request and the route-bound saved notice model.
      * Returns: Inertia\Response for the AI instruction page.
      * Side effects: None.
+     *
+     * The instruction itself is owned by the customer, not the case: the page is reached through a
+     * case only because that is where the AI menu lives. Every case belonging to the customer reads
+     * and writes the same value.
      */
     public function instructions(Request $request, SavedNotice $savedNotice): Response
     {
@@ -209,16 +217,21 @@ class AiController extends Controller
                 'stage' => $analysisCase['stage_label'],
                 'updated_at' => $analysisCase['updated_at'],
             ],
-            'ai_instructions' => (string) ($record->ai_instructions ?? ''),
+            'ai_instructions' => (string) ($this->customerAiInstructions($record) ?? ''),
             'ai_instructions_update_url' => route('app.ai.instructions.update', ['savedNotice' => $record->id]),
         ]);
     }
 
     /**
-     * Purpose: Persist the case-level AI instructions for a visible saved notice.
+     * Purpose: Persist the shared, customer-owned AI instruction reached through a visible saved notice.
      * Inputs: The current request and the route-bound saved notice.
-     * Returns: A redirect back to the AI case view after saving the instructions.
-     * Side effects: Updates the saved notice row.
+     * Returns: A redirect back to the AI instruction page after saving.
+     * Side effects: Updates the owning customer row; the saved notice itself is not written to.
+     *
+     * The route is case-scoped only for URL continuity — the value is stored on the customer that
+     * owns the case and therefore applies to all of that customer's cases. visibleAiSavedNotice()
+     * already restricts the case to the request's own customer, so a manipulated savedNotice id
+     * belonging to another customer cannot reach this write.
      */
     public function updateAiInstructions(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
@@ -231,7 +244,7 @@ class AiController extends Controller
 
         $normalizedInstructions = trim(str_replace(["\r\n", "\r"], "\n", (string) ($validated['ai_instructions'] ?? '')));
 
-        $record->forceFill([
+        $record->customer()->firstOrFail()->forceFill([
             'ai_instructions' => $normalizedInstructions !== '' ? $normalizedInstructions : null,
         ])->save();
 
@@ -389,11 +402,44 @@ class AiController extends Controller
                 $extractedText = $docxResult['text'];
                 $parsedTables = $docxResult['tables'];
                 $parsedTextElements = $docxResult['text_elements'];
+            } elseif ($extension === 'xlsx') {
+                // Excel goes through structure discovery instead of flat text: a workbook has no
+                // reading order to flatten, and the old fallback produced requirements with no
+                // reliable link to any cell. Prepared BEFORE the document row is created, so a
+                // workbook we cannot read safely leaves nothing half-imported behind — the file on
+                // disk is removed and the user is told why.
+                try {
+                    $excelInput = $this->xlsxRequirementImportPreparer->prepare(
+                        $absolutePath,
+                        $originalFilename,
+                        $this->customerContext->resolveLanguageCode($request->user()),
+                    );
+                } catch (XlsxRequirementImportException $exception) {
+                    Storage::disk('local')->delete($storedPath);
+
+                    Log::warning('[EXCEL_REQUIREMENT_IMPORT] Upload refused.', [
+                        'saved_notice_id' => $record->id,
+                        'document_filename' => $originalFilename,
+                        'reason' => $exception->translationKey,
+                        'details' => $exception->details,
+                    ]);
+
+                    return back()->with('error', __($exception->translationKey, ['file' => $originalFilename]));
+                }
+
+                $extractedText = $excelInput['extracted_text'];
+                $parsedTextElements = $excelInput['text_elements'];
             } else {
                 $extractedText = $this->documentTextExtractor->extractText($absolutePath);
             }
 
-            $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
+            $structuredBlocks = $extension === 'xlsx'
+                // One block per logical requirement, so a chunk never splits a requirement in half.
+                ? array_map(
+                    static fn (array $element): array => ['text' => $element['text'], 'style' => null, 'level' => null],
+                    $parsedTextElements,
+                )
+                : $this->documentTextExtractor->extractStructuredText($absolutePath);
 
             $documentRecord = $record->aiDocuments()->create([
                 'uploaded_by_user_id' => $request->user()?->id,
@@ -780,6 +826,89 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Permanently delete one extracted requirement candidate.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: Deletes the requirement row. Postgres cascades its evidence, answer-basis
+     *               selections, assessments, revisions and Wiki answer along with it.
+     *
+     * Deliberately separate from rejection rather than replacing it. Rejection
+     * (approval_status = rejected) takes a requirement out of active work and can be undone;
+     * this cannot. Both belong on the page, because "this is not a requirement for us" and "this
+     * should never have been extracted" are different things, and only the second justifies
+     * losing an answer draft.
+     *
+     * Scope is server-owned: the requirement is re-fetched through the case's own relation, so a
+     * requirement id belonging to another case or customer resolves to nothing regardless of what
+     * the client sent. Only AI-extracted candidates are deletable here — a manually added
+     * requirement is the user's own work, not import residue.
+     */
+    public function destroyRequirement(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+            ->firstOrFail();
+
+        DB::transaction(static fn () => $ownedRequirement->delete());
+
+        Log::info('[PROCYNIA][REQUIREMENT_DELETE] Requirement deleted permanently.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $requirement->id,
+            'user_id' => $request->user()?->id,
+        ]);
+
+        return back()->with('success', __('procynia.ai.requirement_deleted'));
+    }
+
+    /**
+     * Purpose: Permanently delete every extracted requirement candidate in this case.
+     * Inputs: The current request and route-bound saved notice.
+     * Returns: A redirect back to the AI case view.
+     * Side effects: Deletes the rows and their cascaded dependants inside one transaction.
+     *
+     * "All" is defined by the server, never by whatever the client currently has filtered or
+     * paginated into view: every ai_candidate requirement belonging to this case, rejected ones
+     * included. Manually added requirements are left alone.
+     *
+     * The uploaded document, its extraction run and any parsed workbook data are untouched, so a
+     * case emptied by mistake can be rebuilt by running extraction again.
+     */
+    public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $deletedCount = DB::transaction(static function () use ($record): int {
+            $requirements = $record->aiRequirements()
+                ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+                ->get();
+
+            foreach ($requirements as $requirement) {
+                $requirement->delete();
+            }
+
+            return $requirements->count();
+        });
+
+        Log::info('[PROCYNIA][REQUIREMENT_DELETE] Extracted requirements deleted permanently.', [
+            'saved_notice_id' => $record->id,
+            'deleted_count' => $deletedCount,
+            'user_id' => $request->user()?->id,
+        ]);
+
+        return back()->with('success', $deletedCount === 0
+            ? __('procynia.ai.requirements_deleted_none')
+            : __('procynia.ai.requirements_deleted_all', ['count' => $deletedCount]));
+    }
+
+    /**
      * Purpose: Persist edits to a single visible requirement.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A redirect back to the AI case view after saving the edits.
@@ -1150,7 +1279,7 @@ class AiController extends Controller
             $ownedRequirement,
             $selectedAnswerBasisItems,
             (bool) ($validated['force'] ?? false),
-            $record->ai_instructions,
+            $this->customerAiInstructions($record),
             $userAnswerPrompt,
             $retrievedKnowledgeChunks,
             $groundingJudge,
@@ -1332,7 +1461,7 @@ class AiController extends Controller
                 (int) $record->customer_id,
                 $languageCode,
                 $request->user()?->id,
-                $record->ai_instructions,
+                $this->customerAiInstructions($record),
                 $userAnswerPrompt,
             );
         } catch (Throwable $exception) {
@@ -1543,6 +1672,7 @@ class AiController extends Controller
         }
 
         $languageCode = $this->customerContext->resolveLanguageCode();
+        $customerAiInstructions = $this->customerAiInstructions($record);
         $failedCount = 0;
 
         foreach ($confirmedRequirements as $requirement) {
@@ -1552,7 +1682,7 @@ class AiController extends Controller
                     (int) $record->customer_id,
                     $languageCode,
                     $userId,
-                    $record->ai_instructions,
+                    $customerAiInstructions,
                 );
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
@@ -2067,6 +2197,11 @@ class AiController extends Controller
                     'requirement' => $requirement->id,
                 ]),
                 'wiki_answer' => $this->aiRequirementWikiAnswerPayload($requirement->wikiAnswer),
+                // Only AI-extracted candidates are deletable; a manually added requirement is the
+                // user's own work and has no delete affordance.
+                'delete_url' => $requirement->source_type === SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE
+                    ? route('app.ai.requirements.destroy', ['savedNotice' => $requirement->saved_notice_id, 'requirement' => $requirement->id])
+                    : null,
                 'wiki_answer_generate_url' => route('app.ai.requirements.wiki-answer.generate', [
                     'savedNotice' => $requirement->saved_notice_id,
                     'requirement' => $requirement->id,
@@ -3623,6 +3758,20 @@ class AiController extends Controller
      * Returns: The visible saved notice record for the current customer context.
      * Side effects: Aborts with HTTP 404 if the saved notice is not visible.
      */
+    /**
+     * Purpose: Resolve the shared AI instruction that applies to a case, via its owning customer.
+     * Inputs: The saved notice whose customer owns the instruction.
+     * Returns: The instruction text, or null when the customer has not set one.
+     * Side effects: None.
+     *
+     * The instruction is customer-scoped: every case belonging to the customer resolves the same
+     * value. It stays subordinate to grounded facts and sources in every prompt that receives it.
+     */
+    private function customerAiInstructions(SavedNotice $record): ?string
+    {
+        return $record->customer()->first()?->resolvedAiInstructions();
+    }
+
     private function visibleAiSavedNotice(Request $request, SavedNotice $savedNotice): SavedNotice
     {
         [$user, $customerId] = $this->frontendContext($request);

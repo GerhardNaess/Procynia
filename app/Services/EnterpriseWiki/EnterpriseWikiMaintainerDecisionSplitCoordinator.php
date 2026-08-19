@@ -286,6 +286,10 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     ): array {
         $userPromptText = $this->candidatePlanUserPrompt($planning, $documentPlan);
         $inputSizeChars = mb_strlen($userPromptText);
+        // See EnterpriseWikiMaintainerDecisionAiClient::capacityInputSizeCharsWithoutCandidates():
+        // the candidate block is context to read, never output to produce, so the output-token
+        // estimate stays exactly what it was before this block existed.
+        $capacityInputSizeChars = EnterpriseWikiMaintainerDecisionAiClient::capacityInputSizeCharsWithoutCandidates($userPromptText, $planning->existingPageCandidates());
 
         return $this->capacityRetryExecutor->execute(
             'EnterpriseWikiMaintainerDecisionAiClient:candidate_plan',
@@ -294,7 +298,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 self::CAPACITY_OPERATION_TYPE,
                 self::MODEL,
                 self::CANDIDATE_PLAN_EXPECTED_RESULT_OBJECTS,
-                $inputSizeChars,
+                $capacityInputSizeChars,
                 $retryAttempt,
             ),
             fn (int $maxOutputTokens): array => $this->buildPhasePayload(
@@ -331,8 +335,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         ?AiCallContext $context = null,
     ): array {
         // Phase B's view: the sections THIS batch's own candidates were placed in, the section
-        // overview, the section-less elements, the index, phase 1's planned pages, its own mentions
-        // and the figure candidates. Never the whole catalog unless routing is not possible.
+        // overview, the section-less elements, the index, the existing-page candidates with their
+        // real current content, phase 1's planned pages, its own mentions and the figure candidates.
+        // Never the whole catalog unless routing is not possible.
         $userPromptText = $this->candidateBatchUserPrompt(
             $planning->sourceMeta,
             $planning->sourceText,
@@ -341,8 +346,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             $batchMentions,
             $planning->figureCandidates,
             $planning->catalogElements,
+            $planning->existingPageCandidates(),
         );
         $inputSizeChars = mb_strlen($userPromptText);
+        // See EnterpriseWikiMaintainerDecisionAiClient::capacityInputSizeCharsWithoutCandidates().
+        // A batch returns one disposition per mention it was handed, priced by $candidateCount below —
+        // existing Wiki content cannot make that response longer.
+        $capacityInputSizeChars = EnterpriseWikiMaintainerDecisionAiClient::capacityInputSizeCharsWithoutCandidates($userPromptText, $planning->existingPageCandidates());
         $candidateCount = count($batchMentions);
 
         return $this->capacityRetryExecutor->execute(
@@ -352,7 +362,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 self::CAPACITY_OPERATION_TYPE,
                 self::MODEL,
                 $candidateCount,
-                $inputSizeChars,
+                $capacityInputSizeChars,
                 $retryAttempt,
             ),
             fn (int $maxOutputTokens): array => $this->buildCandidateBatchPayload($languageName, $userPromptText, $maxOutputTokens),
@@ -700,6 +710,8 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '  independent_reason: ONE short sentence (roughly 15 words or fewer).',
             '  mentioned_context: a short phrase naming WHERE it is mentioned — never a quote.',
             '  justification: ONE short sentence — do not repeat independent_reason or mentioned_context.',
+            '',
+            ...EnterpriseWikiMaintainerDecisionAiClient::createConsiderationRules(),
         ];
     }
 
@@ -721,8 +733,15 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
     }
 
     /**
-     * PHASE 1B's view: the same orientation catalog and Wiki index, no figure candidates at all, and
-     * — when phase 1A has already run — the two page identities it must not claim.
+     * PHASE 1B's view: the same orientation catalog and Wiki index, the existing-page candidates
+     * with their real current content, no figure candidates at all, and — when phase 1A has already
+     * run — the two page identities it must not claim.
+     *
+     * The candidate block is what makes this phase's entity_pages and patch_targets decidable
+     * against what the Wiki ACTUALLY says. Until it was added here, the split flow decided
+     * create-vs-patch from the index alone, whose 200-character excerpt provably cannot reveal a
+     * concrete value a document supersedes (EnterpriseWikiPatchCandidateContextTest::
+     * test_the_old_values_are_not_visible_from_the_wiki_index_alone).
      *
      * That last block is why the split is sequential rather than parallel: it PREVENTS the one real
      * collision between the halves instead of repairing it afterwards. Passing null is supported and
@@ -738,6 +757,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             'EXISTING WIKI INDEX ('.count($planning->wikiIndex).' pages):',
             $this->indexContextJson($planning->wikiIndex),
+            ...self::existingPageCandidateLines($planning),
             ...($documentPlan !== null
                 ? [
                     '',
@@ -750,6 +770,26 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
                 ]
                 : []),
         ]);
+    }
+
+    /**
+     * The existing-page candidate block as prompt lines, or nothing when this document plausibly
+     * revises no existing page.
+     *
+     * Same bounded mechanism the single-call path already uses — EnterpriseWikiPatchCandidateService,
+     * at most MAX_CANDIDATES pages, at most MAX_CONTENT_CHARS each, customer-scoped, current version
+     * only, deterministically ordered. No cap is raised and no new selection rule is introduced; the
+     * split flow simply stops being the one planning path that could not see it.
+     *
+     * @return list<string>
+     */
+    private static function existingPageCandidateLines(EnterpriseWikiPlanningContext $planning): array
+    {
+        $candidates = $planning->existingPageCandidates();
+
+        return $candidates === []
+            ? []
+            : ['', EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($candidates)];
     }
 
     /** @return list<string> */
@@ -794,6 +834,7 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         array $batchMentions,
         array $figureCandidates = [],
         array $sourceElements = [],
+        array $existingPageCandidates = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
 
@@ -823,6 +864,9 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
             '',
             'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $this->indexContextJson($indexContext),
+            ...($existingPageCandidates !== []
+                ? ['', EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($existingPageCandidates)]
+                : []),
             '',
             // The source article/summary are shown so a batch knows they exist and does not plan a
             // duplicate — NOT as owning-page targets. Calling them "valid owning pages" here is

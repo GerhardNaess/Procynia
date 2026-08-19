@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     readRememberedAiRequirementId,
     writeRememberedAiRequirementId,
@@ -1674,6 +1675,7 @@ export default function AiShow({
     requirements = [],
     requirements_store_url: requirementsStoreUrl = '',
     requirements_reject_all_url: requirementsRejectAllUrl = '',
+    requirements_delete_all_url: requirementsDeleteAllUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
@@ -1801,7 +1803,7 @@ export default function AiShow({
                 className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
             },
             {
-                label: tai.approval_action_reject_delete,
+                label: tai.approval_action_reject,
                 value: 'rejected',
                 className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
             },
@@ -1813,7 +1815,7 @@ export default function AiShow({
                 className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
             },
             {
-                label: tai.approval_action_reject_delete,
+                label: tai.approval_action_reject,
                 value: 'rejected',
                 className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
             },
@@ -1929,6 +1931,12 @@ export default function AiShow({
     const [rejectingAllRequirements, setRejectingAllRequirements] = useState(false);
     const [showBulkRejectConfirm, setShowBulkRejectConfirm] = useState(false);
     const [confirmRejectRequirementId, setConfirmRejectRequirementId] = useState(null);
+    // Deletion is permanent, so it gets its own confirmation state rather than sharing rejection's
+    // — the two must never be one click apart from each other by accident.
+    const [confirmDeleteRequirementId, setConfirmDeleteRequirementId] = useState(null);
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const [deletingRequirementId, setDeletingRequirementId] = useState(null);
+    const [deletingAllRequirements, setDeletingAllRequirements] = useState(false);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
     const [responsiblePickerRequirementId, setResponsiblePickerRequirementId] = useState(null);
     const [responsibleSavingRequirementId, setResponsibleSavingRequirementId] = useState(null);
@@ -2499,6 +2507,52 @@ export default function AiShow({
         }
     };
 
+    /**
+     * Permanently delete one extracted requirement. Unlike rejection this cannot be undone, and it
+     * takes the requirement's answer draft with it — the confirmation says so before we get here.
+     */
+    const deleteRequirement = (requirement) => {
+        if (!requirement?.delete_url || requirementUpdatesLocked || deletingRequirementId !== null) {
+            return;
+        }
+
+        setDeletingRequirementId(requirement.id);
+
+        router.delete(requirement.delete_url, {
+            preserveScroll: true,
+            onFinish: () => {
+                setDeletingRequirementId(null);
+                setConfirmDeleteRequirementId(null);
+            },
+        });
+    };
+
+    /**
+     * Delete every extracted requirement in this case. The server decides what "every" means —
+     * the client only supplies the trigger, never a list of ids.
+     */
+    const deleteAllExtractedRequirements = () => {
+        if (
+            !canUseAiOffer
+            || !requirementsDeleteAllUrl
+            || extractedRequirementRows.length === 0
+            || requirementUpdatesLocked
+            || deletingAllRequirements
+        ) {
+            return;
+        }
+
+        setDeletingAllRequirements(true);
+
+        router.delete(requirementsDeleteAllUrl, {
+            preserveScroll: true,
+            onFinish: () => {
+                setDeletingAllRequirements(false);
+                setShowBulkDeleteConfirm(false);
+            },
+        });
+    };
+
     const rejectAllExtractedRequirements = () => {
         if (
             !canUseAiOffer
@@ -2561,7 +2615,7 @@ export default function AiShow({
 
     // Enterprise Wiki answer engine is the sole operational answer generator in "I arbeid"
     // (AI-to-Wiki consolidation). Generates/regenerates requirement.wiki_answer — the operative,
-    // editable answer — using only approved Wiki content plus the case's ai_instructions and this
+    // editable answer — using only approved Wiki content plus the customer's shared ai_instructions and this
     // requirement's own one-off prompt.
     const requestWikiAnswerGeneration = async (requirement) => {
         if (!canUseAiOffer) {
@@ -2916,6 +2970,60 @@ export default function AiShow({
                                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                         {caseData?.title ?? tai.ai_case_title}
                                     </h1>
+                                    {/* Same position as on AI → Oversikt: directly right of the page
+                                        heading, inside the existing flex-wrap title row, so it wraps
+                                        with the status badge instead of being pinned to the far right. */}
+                                    <PageHelpButton
+                                        buttonLabel={tai.help_button ?? 'Hjelp'}
+                                        title={tai.workspace_help_panel_title ?? 'Om arbeidsflaten for saken'}
+                                        intro={tai.workspace_help_panel_intro}
+                                        sections={[
+                                            {
+                                                title: tai.workspace_help_section_documents ?? 'Saksdokumenter',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_documents_scope_title,
+                                                        text: tai.workspace_help_item_documents_scope_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_extraction ?? 'Last opp og ekstraher krav',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_extraction_formats_title,
+                                                        text: tai.workspace_help_item_extraction_formats_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_requirements ?? 'Ekstraherte krav',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_review_title,
+                                                        text: tai.workspace_help_item_requirements_review_text,
+                                                    },
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_reject_title,
+                                                        text: tai.workspace_help_item_requirements_reject_text,
+                                                    },
+                                                    {
+                                                        title: tai.workspace_help_item_requirements_delete_title,
+                                                        text: tai.workspace_help_item_requirements_delete_text,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                title: tai.workspace_help_section_next ?? 'Arbeid videre',
+                                                items: [
+                                                    {
+                                                        title: tai.workspace_help_item_next_answers_title,
+                                                        text: tai.workspace_help_item_next_answers_text,
+                                                    },
+                                                ],
+                                            },
+                                        ]}
+                                    />
                                     <span className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 ring-1 ring-inset ${aiStatusMeta.className}`}>
                                         {aiStatusMeta.label}
                                     </span>
@@ -3287,6 +3395,48 @@ export default function AiShow({
                                             {refreshingAssessments ? tai.analyzing : tai.analyze_requirements}
                                         </button>
                                     </>
+                                ) : null}
+
+                                {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsDeleteAllUrl ? (
+                                    showBulkDeleteConfirm ? (
+                                        <div data-testid="requirements-delete-all-confirm" className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base">
+                                            {/* The count comes from extractedRequirementRows, which excludes manual
+                                                requirements exactly as the server's ai_candidate scope does — so the
+                                                number shown is the number actually deleted. */}
+                                            <p className="font-semibold text-rose-900">
+                                                {(tai.requirements_delete_all_confirm_title ?? 'Slette :count ekstraherte krav permanent?')
+                                                    .replace(':count', String(extractedRequirementRows.length))}
+                                            </p>
+                                            <p className="text-rose-800">{tai.requirements_delete_all_confirm_message}</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={deleteAllExtractedRequirements}
+                                                    disabled={requirementUpdatesLocked || deletingAllRequirements}
+                                                    className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-1 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {tai.requirement_delete_confirm_button}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowBulkDeleteConfirm(false)}
+                                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                >
+                                                    {tai.cancel}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            data-testid="requirements-delete-all-button"
+                                            onClick={() => { setShowBulkRejectConfirm(false); setShowBulkDeleteConfirm(true); }}
+                                            disabled={requirementUpdatesLocked}
+                                            className="inline-flex items-center justify-center rounded-full border border-rose-300 bg-white px-3 py-1.5 text-base font-semibold text-rose-700 transition hover:border-rose-400 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {tai.requirements_delete_all_button ?? 'Slett alle'}
+                                        </button>
+                                    )
                                 ) : null}
 
                                 {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
@@ -4055,6 +4205,45 @@ export default function AiShow({
                                                         >
                                                             {tai.edit_requirement}
                                                         </button>
+
+                                                        {requirement.delete_url && confirmDeleteRequirementId !== requirement.id && confirmRejectRequirementId !== requirement.id ? (
+                                                            <button
+                                                                type="button"
+                                                                data-testid="requirement-delete-button"
+                                                                onClick={() => {
+                                                                    setConfirmRejectRequirementId(null);
+                                                                    setConfirmDeleteRequirementId(requirement.id);
+                                                                }}
+                                                                disabled={requirementUpdatesLocked}
+                                                                className="inline-flex items-center justify-center rounded-full border border-rose-300 bg-white px-3 py-1.5 text-base font-semibold text-rose-700 transition hover:border-rose-400 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {tai.requirement_action_delete ?? 'Slett'}
+                                                            </button>
+                                                        ) : null}
+
+                                                        {confirmDeleteRequirementId === requirement.id ? (
+                                                            <div data-testid="requirement-delete-confirm" className="flex flex-col gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-3 py-2.5 text-base">
+                                                                <p className="font-semibold text-rose-900">{tai.requirement_delete_confirm_title}</p>
+                                                                <p className="text-rose-800">{tai.requirement_delete_confirm_message}</p>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => deleteRequirement(requirement)}
+                                                                        disabled={requirementUpdatesLocked || deletingRequirementId !== null}
+                                                                        className="inline-flex items-center justify-center rounded-full bg-rose-600 px-3 py-1 font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        {tai.requirement_delete_confirm_button}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setConfirmDeleteRequirementId(null)}
+                                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                    >
+                                                                        {tai.cancel}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
 
                                                         {confirmRejectRequirementId === requirement.id ? (
                                                             <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-base">

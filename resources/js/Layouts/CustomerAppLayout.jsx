@@ -222,10 +222,13 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (activeMainArea === 'wiki') {
             return [
-                { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
+                // Ordered by the actual workflow: the knowledge base goes in first, the runs show
+                // what the system did with it, the pages are the result, and the graph is where
+                // the connections are explored. Display order only — the active item is resolved
+                // from the tab value below, and /app/wiki still opens on Wiki-sider.
                 { key: 'wiki-sources', label: tw.tab_sources ?? 'Kildedokumenter', href: buildHref('/app/wiki', { tab: 'sources' }) },
                 { key: 'wiki-runs', label: tw.tab_runs ?? 'Kjøringer', href: buildHref('/app/wiki', { tab: 'runs' }) },
-                { key: 'wiki-quality', label: tw.tab_quality ?? 'Kvalitet', href: buildHref('/app/wiki', { tab: 'quality' }) },
+                { key: 'wiki-pages', label: tw.tab_pages ?? 'Wiki-sider', href: buildHref('/app/wiki', { tab: 'pages' }) },
                 { key: 'wiki-graph', label: tw.tab_graph ?? 'Grafvisning', href: '/app/wiki/graph' },
             ];
         }

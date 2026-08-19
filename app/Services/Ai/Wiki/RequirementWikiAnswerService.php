@@ -46,7 +46,7 @@ use RuntimeException;
  * professionally sound best-practice statement.
  *
  * Prompt layering (AI-to-Wiki consolidation): generate()'s optional $caseInstructions parameter
- * (the owning SavedNotice's ai_instructions) is passed straight through to
+ * (the owning customer's shared ai_instructions) is passed straight through to
  * RequirementWikiAnswerAiClient::generateAnswer() as a subordinate style directive — governs HOW the
  * answer is phrased (tone/terminology/style/capitalization), never WHAT it claims. It is never used
  * for the revision pass (reviseConflictingSectionsOnce()): that step's only job is resolving a
@@ -89,7 +89,8 @@ class RequirementWikiAnswerService
      * Inputs: The requirement, the customer id it belongs to (never trusted from the requirement
      *         itself — always the owning SavedNotice's own customer_id, resolved by the caller),
      *         the language to answer in, the user triggering generation, the owning SavedNotice's
-     *         free-text case_instructions (ai_instructions) — governs tone/terminology/style only,
+     *         free-text case_instructions (the customer's shared ai_instructions, applying to every
+     *         case that customer owns) — governs tone/terminology/style only,
      *         see RequirementWikiAnswerAiClient::generateAnswer() for the exact priority contract —
      *         and an optional one-off requirementUserPrompt for this specific generation only (same
      *         subordinate, style-only status as case_instructions, applied after it).

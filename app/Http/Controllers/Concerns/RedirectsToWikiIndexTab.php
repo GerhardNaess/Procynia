@@ -19,7 +19,12 @@ use Illuminate\Http\Request;
  */
 trait RedirectsToWikiIndexTab
 {
-    public const WIKI_TABS = ['pages', 'sources', 'runs', 'quality'];
+    /**
+     * The separate "Kvalitet" tab was retired: quality findings are now explained on the Wiki page
+     * they belong to. A stale ?tab=quality link is not an error — it falls through to the standard
+     * tab like any other unknown value, so old bookmarks still land somewhere sensible.
+     */
+    public const WIKI_TABS = ['pages', 'sources', 'runs'];
 
     public const DEFAULT_WIKI_TAB = 'pages';
 
@@ -34,7 +39,7 @@ trait RedirectsToWikiIndexTab
      */
     private const WIKI_TAB_FILTER_KEYS = [
         'runs' => ['run_status', 'run_decision', 'run_src'],
-        'sources' => ['src_q', 'src_status'],
+        'sources' => ['src_q', 'src_status', 'src_owner'],
     ];
 
     protected function resolveWikiReturnTab(Request $request): string

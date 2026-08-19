@@ -2,14 +2,11 @@
 
 namespace App\Services\Ai\Requirements;
 
-use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Data\Ai\Requirements\RequirementExtractionResultData;
-use App\Data\Ai\Requirements\RequirementSegmentExtractionResultData;
 use App\Models\SavedNoticeAiDocument;
-use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\User;
-use Illuminate\Support\Collection;
+use App\Services\Ai\Requirements\Excel\WorkbookDeterministicCandidateResolver;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -19,8 +16,8 @@ class RequirementExtractionPipeline
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly DocumentRequirementSegmentBuilder $segmentBuilder,
         private readonly RequirementEditorService $requirementEditorService,
-    ) {
-    }
+        private readonly WorkbookDeterministicCandidateResolver $deterministicCandidateResolver,
+    ) {}
 
     /**
      * Purpose: Rebuild AI requirement candidates for one persisted AI document using a single full-document AI call.
@@ -195,7 +192,17 @@ class RequirementExtractionPipeline
             );
         }
 
-        $extractionResult = $this->candidateExtractor->extractFullDocument($document, $runId);
+        // A document whose requirements were already determined deterministically skips discovery
+        // entirely. Asking a model to rediscover finished units cannot add anything — it can only
+        // drop them or reword them, which is exactly what it did — so the extraction step is
+        // bypassed and everything below (validation, provenance, persistence, run bookkeeping)
+        // stays the shared path. Word and PDF still carry text that genuinely needs interpreting,
+        // and are unaffected.
+        $deterministicCandidates = $this->deterministicCandidateResolver->resolve($document);
+
+        $extractionResult = $deterministicCandidates !== null
+            ? $this->deterministicExtractionResult($document, $runId, $deterministicCandidates)
+            : $this->candidateExtractor->extractFullDocument($document, $runId);
         $documentCandidates = [];
         $resultCandidateCount = count($extractionResult->candidates);
         $rawRequirementCountTotal = (int) data_get($extractionResult->metadata, 'raw_candidate_count', $resultCandidateCount);
@@ -557,6 +564,48 @@ class RequirementExtractionPipeline
      * Returns: The elapsed time rounded to the nearest millisecond.
      * Side effects: None.
      */
+    /**
+     * Wrap already-determined candidates in the same result shape the AI path produces, so the
+     * validation and persistence code below cannot tell the difference — and so run bookkeeping
+     * reports zero AI calls, which is the truth for this path.
+     *
+     * @param  list<RequirementExtractionCandidateData>  $candidates
+     */
+    private function deterministicExtractionResult(SavedNoticeAiDocument $document, string $runId, array $candidates): RequirementExtractionResultData
+    {
+        $count = count($candidates);
+
+        return new RequirementExtractionResultData(
+            ok: true,
+            partial: false,
+            savedNoticeId: (int) $document->saved_notice_id,
+            savedNoticeAiDocumentId: (int) $document->id,
+            runId: $runId,
+            documentTitle: (string) $document->original_filename,
+            documentFilename: (string) $document->original_filename,
+            model: 'deterministic',
+            relevanceModel: 'deterministic',
+            extractionModel: 'deterministic',
+            segmentCount: $count,
+            relevantSegmentCount: $count,
+            relevanceCallCount: 0,
+            extractionCallCount: 0,
+            openAiCallCount: 0,
+            segments: [],
+            relevanceResults: [],
+            extractionResults: [],
+            candidates: $candidates,
+            metadata: [
+                'parse_strategy' => 'deterministic_units',
+                'candidate_count' => $count,
+                'raw_candidate_count' => $count,
+                'mapped_candidate_count' => $count,
+                'deduped_candidate_count' => $count,
+                'openai_call_count' => 0,
+            ],
+        );
+    }
+
     private function elapsedMs(float $startedAt): int
     {
         return (int) round((microtime(true) - $startedAt) * 1000);

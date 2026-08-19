@@ -28,7 +28,7 @@ use Tests\TestCase;
  * Exercises the REAL RequirementWikiResearchService/RequirementWikiAssessmentService through the
  * HTTP route; only the OpenAI-calling boundaries (RequirementWikiResearchAiClient,
  * RequirementWikiAssessmentAiClient) are faked. Confirms: only confirmed/approved requirements are
- * assessed, cross-customer isolation, ai_instructions reaches the AI client, zero Wiki pages still
+ * assessed, cross-customer isolation, customer ai_instructions reaches the AI client, zero Wiki pages still
  * produces a valid "missing" assessment (never a 500 or hidden Knowledge Base fallback), and AI
  * failures are persisted as a controlled "failed" row without downgrading a prior completed one.
  * Inputs: None.
@@ -139,11 +139,15 @@ class RequirementWikiAssessmentControllerTest extends TestCase
         $this->assertNotNull($caseUsage, 'Assessment refresh must still record one AI case usage row.');
     }
 
-    public function test_the_saved_notices_ai_instructions_reach_the_assessment_ai_client(): void
+    /**
+     * The AI instruction is customer-owned and shared across every case; the assessment flow must
+     * read it from the customer, not from the case.
+     */
+    public function test_the_customers_ai_instructions_reach_the_assessment_ai_client(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-003', 'Wiki assessment instructions case');
-        $savedNotice->update(['ai_instructions' => 'Skriv kort og presist.']);
+        $context['customer']->forceFill(['ai_instructions' => 'Skriv kort og presist.'])->save();
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
         $this->createAiRequirement($savedNotice, $document, $chunk, [

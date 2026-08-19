@@ -50,18 +50,95 @@ class EnterpriseWikiCanonicalOwnershipValidator
      * @param  array<string, mixed>  $decision
      * @param  array<int, array<string, mixed>>  $indexContext  Existing wiki pages (id/title/...).
      * @param  string[]  $validSourceElementKeys  Every addressable key in this document's catalog.
+     * @param  list<int>  $existingPageCandidateIds  The pages the planner was actually SHOWN with their
+     *                                               real content (EnterpriseWikiPatchCandidateService).
+     *                                               Empty means none was offered — see
+     *                                               findUndocumentedCreates() for why that is not a fault.
      * @return string[] Empty when the decision is sound; one human-readable issue per problem.
      */
-    public function findIssues(array $decision, array $indexContext = [], array $validSourceElementKeys = []): array
-    {
+    public function findIssues(
+        array $decision,
+        array $indexContext = [],
+        array $validSourceElementKeys = [],
+        array $existingPageCandidateIds = [],
+    ): array {
         return array_merge(
             $this->findUnknownSourceElementKeys($decision, $validSourceElementKeys),
             $this->findConflictingTargets($decision),
             $this->findCreateGateViolations($decision),
+            $this->findUndocumentedCreates($decision, $existingPageCandidateIds),
             $this->findUntargetedSubstanceChanges($decision),
             $this->findDuplicateCanonicalOwnership($decision, $indexContext),
             $this->findPatchTargetAlsoPlannedAsPage($decision),
         );
+    }
+
+    /**
+     * J2 — a `create` must show which existing pages were weighed and why none of them is the home
+     * for this knowledge object.
+     *
+     * The create-gate above asks the model to CLASSIFY the relationship; this asks it to show the
+     * work behind that classification. The two are different guarantees: a classification can be
+     * wrong silently, an unreviewable assertion cannot even be inspected afterwards.
+     *
+     * Conditional on purpose. The requirement fires only when the planner was actually offered
+     * candidate pages — a genuinely new topic in a Wiki with nothing related must still be
+     * creatable, and an empty consideration list is then the truthful answer, not a fault. Naming
+     * pages OUTSIDE the offered set does not satisfy it either: that would let a create be waved
+     * through by citing arbitrary ids.
+     *
+     * @param  array<string, mixed>  $decision
+     * @param  list<int>  $existingPageCandidateIds
+     * @return string[]
+     */
+    private function findUndocumentedCreates(array $decision, array $existingPageCandidateIds): array
+    {
+        if ($existingPageCandidateIds === []) {
+            return [];
+        }
+
+        $offered = array_flip(array_map('intval', $existingPageCandidateIds));
+        $offeredList = implode(', ', array_map('strval', $existingPageCandidateIds));
+        $issues = [];
+
+        foreach ((array) ($decision['concept_candidates'] ?? []) as $i => $candidate) {
+            if (! is_array($candidate) || (string) ($candidate['decision'] ?? '') !== 'create') {
+                continue;
+            }
+
+            // A candidate predating this contract carries neither field. Never retroactively flagged,
+            // exactly like the relationship gate above.
+            if (! array_key_exists('considered_existing_page_ids', $candidate)) {
+                continue;
+            }
+
+            $name = trim((string) ($candidate['name'] ?? ''));
+            $ctx = "concept_candidates[{$i}]";
+
+            $considered = array_values(array_filter(
+                (array) ($candidate['considered_existing_page_ids'] ?? []),
+                static fn (mixed $id): bool => is_int($id) || (is_string($id) && ctype_digit($id)),
+            ));
+            $consideredOffered = array_filter(
+                array_map('intval', $considered),
+                static fn (int $id): bool => array_key_exists($id, $offered),
+            );
+
+            if ($consideredOffered === []) {
+                $issues[] = "{$ctx} decides \"create\" for [{$name}] without naming any of the existing pages it was shown — "
+                    ."list the page ids you weighed in considered_existing_page_ids (offered: {$offeredList}), "
+                    .'or reuse/patch the page that already owns this topic.';
+
+                continue;
+            }
+
+            if (trim((string) ($candidate['considered_rejection_reason'] ?? '')) === '') {
+                $issues[] = "{$ctx} decides \"create\" for [{$name}] and names the pages it weighed, but gives no reason for rejecting them — "
+                    .'state in considered_rejection_reason what this topic is that none of those pages already owns.';
+            }
+        }
+
+        return $issues;
     }
 
     /**
@@ -322,9 +399,19 @@ class EnterpriseWikiCanonicalOwnershipValidator
      * CREATED under a title an existing page already carries. This catches the entity_pages route
      * too, which has no candidate enumeration to hang the create-gate on.
      *
-     * Exact normalized-title matching only — case, whitespace and punctuation drift, nothing
-     * semantic. Detecting that two differently-named pages own the same substance is a semantic
-     * problem and belongs to 8K-4, not here.
+     * Two levels of title matching, both deterministic and both domain-free:
+     *
+     *  1. Exact normalized title — case, whitespace and punctuation drift.
+     *  2. J3: EnterpriseWikiConceptIdentityMatcher::sameIdentity() — the conservative token-subset
+     *     rule already used by the consistency and hierarchy validators. "Incident Management" and
+     *     "ITIL Incident Management" are one identity, not two. It is deliberately narrow: a
+     *     single-token title still requires exact equality (so a lone generic word never swallows
+     *     everything), and disjoint core tokens never match ("Problem Management" stays separate).
+     *
+     * What this still does NOT do is detect that two differently-NAMED pages own the same substance
+     * ("Tilgangsstyring" vs "Brukertilgang" share no token). That is a semantic judgment, and the
+     * answer to it is the existing-page candidate context the planner now receives in every path
+     * plus the documented consideration findUndocumentedCreates() requires — not a synonym table here.
      *
      * @param  array<string, mixed>  $decision
      * @param  array<int, array<string, mixed>>  $indexContext
@@ -339,10 +426,11 @@ class EnterpriseWikiCanonicalOwnershipValidator
         $existing = [];
 
         foreach ($indexContext as $page) {
-            $title = $this->normalize((string) ($page['title'] ?? ''));
+            $rawTitle = (string) ($page['title'] ?? '');
+            $title = $this->normalize($rawTitle);
 
             if ($title !== '') {
-                $existing[$title] = (int) ($page['id'] ?? 0);
+                $existing[$title] = ['id' => (int) ($page['id'] ?? 0), 'title' => $rawTitle];
             }
         }
 
@@ -354,18 +442,50 @@ class EnterpriseWikiCanonicalOwnershipValidator
                     continue;
                 }
 
-                $title = $this->normalize((string) ($entry['title'] ?? ''));
+                $rawTitle = (string) ($entry['title'] ?? '');
+                $title = $this->normalize($rawTitle);
 
-                if ($title === '' || ! array_key_exists($title, $existing)) {
+                if ($title === '') {
                     continue;
                 }
 
-                $issues[] = "{$key}[{$i}] creates a new canonical page titled [{$entry['title']}] while page [{$existing[$title]}] already carries that title — "
-                    .'reuse the existing page (action "update" with its page_id) or patch it; never create a second owner for the same topic.';
+                if (array_key_exists($title, $existing)) {
+                    $issues[] = "{$key}[{$i}] creates a new canonical page titled [{$rawTitle}] while page [{$existing[$title]['id']}] already carries that title — "
+                        .'reuse the existing page (action "update" with its page_id) or patch it; never create a second owner for the same topic.';
+
+                    continue;
+                }
+
+                $sameIdentity = $this->findSameIdentityPage($rawTitle, $existing);
+
+                if ($sameIdentity !== null) {
+                    $issues[] = "{$key}[{$i}] creates a new canonical page titled [{$rawTitle}] while page [{$sameIdentity['id']}] "
+                        ."[{$sameIdentity['title']}] is the same concept under a differently qualified name — "
+                        .'reuse that page (action "update" with its page_id) or patch it; a qualifier is not a second knowledge object.';
+                }
             }
         }
 
         return $issues;
+    }
+
+    /**
+     * J3 — the first existing page whose title is the same identity as $title under the shared,
+     * conservative matcher. Iteration is over the normalized-title map so the result is stable for a
+     * stable index order, and the caller has already ruled out an exact match.
+     *
+     * @param  array<string, array{id: int, title: string}>  $existing
+     * @return array{id: int, title: string}|null
+     */
+    private function findSameIdentityPage(string $title, array $existing): ?array
+    {
+        foreach ($existing as $page) {
+            if (EnterpriseWikiConceptIdentityMatcher::sameIdentity($title, $page['title'])) {
+                return $page;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -174,12 +174,94 @@ class EnterpriseWikiDocumentFlowService
         foreach ($runIds as $runId) {
             $run = EnterpriseWikiIngestRun::query()->find($runId);
 
-            if ($run instanceof EnterpriseWikiIngestRun && ! $run->isTerminal()) {
-                $this->reconcileRunDocumentOwnerApprovalState($run);
+            if (! $run instanceof EnterpriseWikiIngestRun) {
+                continue;
             }
+
+            if (! $run->isTerminal()) {
+                $this->reconcileRunDocumentOwnerApprovalState($run);
+
+                continue;
+            }
+
+            // A run that already finished is normally left alone — that is what the terminal guard
+            // is for. The one exception is this exact situation: the owner change just created a
+            // NEW, still-undecided approval requirement on a current page version of a run that had
+            // completed, which would otherwise leave the run looking finished while a real human
+            // decision is outstanding. Only `completed` is eligible; see the method's own docs.
+            $this->reopenCompletedRunForOutstandingOwnerApproval($run);
         }
 
         return $versions;
+    }
+
+    /**
+     * Reopen a COMPLETED run whose document owner approval is no longer satisfied.
+     *
+     * Called only from syncDocumentOwnerApprovals(), i.e. only after a document's owner actually
+     * changed. The change itself is never sufficient: approval requirements are keyed on
+     * (page version, document owner, source documents), so a new owner produces a new PENDING row,
+     * and it is that outstanding requirement — established by the same
+     * EnterpriseWikiDocumentOwnerApprovalService::evaluateRunCompletionGate() the ordinary path
+     * uses — that reopens the run. A gate that still reports ready leaves the run completed.
+     *
+     * Deliberately narrow in three ways:
+     *
+     *  - Only `completed`. `failed`, `cancelled` and `escalated` are terminal for reasons that have
+     *    nothing to do with who owns a document, and a pending approval says nothing about the
+     *    technical fault that ended them. Reopening those would turn an ownership edit into a way to
+     *    resurrect a broken run.
+     *  - The write itself re-asserts `status = completed`, so a run that moved on between the read
+     *    and the update is left exactly as it is.
+     *
+     * Deliberately NOT guarded on qa_status, unlike reconcileRunDocumentOwnerApprovalState(). That
+     * guard exists there because that method can COMPLETE a run, and a technically failed run must
+     * never be completed by an approval. This method only ever moves completed -> awaiting, which is
+     * strictly more conservative: it grants nothing, it only reinstates a human gate. Requiring a
+     * sound qa_status here would instead make the reopen silently depend on a column a legitimately
+     * completed run need not carry (an older run has qa_status null), which is exactly the
+     * non-determinism this fix exists to remove. `status = completed` already carries the only
+     * precondition that matters: this run was previously judged finished.
+     *
+     * No new status, no new column and no new state machine: this sets the same fields, to the same
+     * values, as the awaiting branch of reconcileRunDocumentOwnerApprovalState(). Once the new owner
+     * (or a System Owner override) decides, the ordinary completion path runs unchanged — the run is
+     * non-terminal again, so WikiDocumentOwnerApprovalController's existing
+     * finalizeFromExistingQaResult() call completes it exactly as it did the first time.
+     */
+    private function reopenCompletedRunForOutstandingOwnerApproval(EnterpriseWikiIngestRun $run): void
+    {
+        $fresh = $run->fresh() ?? $run;
+
+        if ($fresh->status !== EnterpriseWikiIngestRun::STATUS_COMPLETED) {
+            return;
+        }
+
+        $gate = $this->documentOwnerApprovalService->evaluateRunCompletionGate($fresh);
+
+        if ($gate['ready']) {
+            return;
+        }
+
+        $updated = EnterpriseWikiIngestRun::query()
+            ->whereKey($fresh->id)
+            ->where('status', EnterpriseWikiIngestRun::STATUS_COMPLETED)
+            ->update([
+                'status' => EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL,
+                'finished_at' => null,
+                'error_message' => mb_substr((string) ($gate['message'] ?? 'Avventer godkjenning fra Dokumenteier.'), 0, 1000),
+                'failed_phase' => null,
+                'transient_failure' => null,
+            ]);
+
+        if ($updated > 0) {
+            Log::info('[WIKI_DOCUMENT_FLOW] Completed run reopened for outstanding document owner approval.', [
+                'run_id' => $fresh->id,
+                'pending' => count($gate['pending'] ?? []),
+                'rejected' => count($gate['rejected'] ?? []),
+                'missing_owner' => count($gate['missing_owner'] ?? []),
+            ]);
+        }
     }
 
     /**

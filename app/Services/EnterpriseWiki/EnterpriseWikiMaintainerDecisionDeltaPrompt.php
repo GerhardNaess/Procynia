@@ -147,6 +147,11 @@ class EnterpriseWikiMaintainerDecisionDeltaPrompt
             '',
             ...EnterpriseWikiMaintainerDecisionAiClient::repairResolutionRules(),
             '',
+            // A repair may be asked to document a "create" it never justified. Without these rules
+            // it would have the fields (the object schema carries them) and no idea what belongs in
+            // them, and the same fault would come back on the next round.
+            ...EnterpriseWikiMaintainerDecisionAiClient::createConsiderationRules(),
+            '',
             'Return JSON only. No text outside JSON.',
         ]);
     }
@@ -162,6 +167,8 @@ class EnterpriseWikiMaintainerDecisionDeltaPrompt
      * @param  array<string, mixed>  $decision
      * @param  array{object_ids: list<string>, issues: list<string>, context_object_ids?: list<string>}  $group
      * @param  list<array<string, mixed>>  $figureCandidates
+     * @param  list<array<string, mixed>>  $existingPageCandidates  Bounded existing-page context — the
+     *                                                              same block phases 1B and 2 receive.
      */
     public static function userPrompt(
         array $sourceMeta,
@@ -170,6 +177,7 @@ class EnterpriseWikiMaintainerDecisionDeltaPrompt
         array $decision,
         array $group,
         array $figureCandidates = [],
+        array $existingPageCandidates = [],
     ): string {
         $title = (string) ($sourceMeta['title'] ?? '');
 
@@ -184,6 +192,10 @@ class EnterpriseWikiMaintainerDecisionDeltaPrompt
                 // Compact: representation only, see EnterpriseWikiMaintainerDecisionAiClient.
                 ? (string) json_encode($indexContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                 : 'No pages yet.',
+            // A repair told to name the existing pages it weighed has to be able to see them.
+            ...($existingPageCandidates !== []
+                ? ['', EnterpriseWikiMaintainerDecisionAiClient::existingPageCandidatesBlock($existingPageCandidates)]
+                : []),
             '',
             self::plannedPagesBlock($decision),
             '',

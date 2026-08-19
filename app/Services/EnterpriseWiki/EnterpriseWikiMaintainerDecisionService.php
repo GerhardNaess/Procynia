@@ -119,7 +119,12 @@ class EnterpriseWikiMaintainerDecisionService
         $indexContext = $planning->wikiIndex;
         $validFigureKeys = $planning->validFigureKeys;
         $validSourceElementKeys = $planning->validSourceElementKeys;
-        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+        // J2: the pages the planner was actually SHOWN, so "which existing pages did you weigh?" is
+        // checked against the same set the prompt rendered — never against the whole Wiki, and never
+        // against ids the model was free to invent. Resolving them here is free in practice: every
+        // planning path already rendered this exact list, and the context memoises it.
+        $existingPageCandidateIds = $this->existingPageCandidateIds($planning);
+        $issues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
 
         if ($issues === []) {
             Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -135,7 +140,7 @@ class EnterpriseWikiMaintainerDecisionService
         [$normalizedDecision, $normalizations] = $this->normalizeMaintainerDecisionStructure($decision);
 
         if ($normalizations !== []) {
-            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+            $normalizedIssues = $this->findAllIssues($normalizedDecision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
 
             if ($normalizedIssues === []) {
                 Log::info('[WIKI_MAINTAINER_DECISION] Consistency validation completed.', [
@@ -168,7 +173,7 @@ class EnterpriseWikiMaintainerDecisionService
             $attribution = $this->issueAttributor->attribute(
                 $decision,
                 $remainingIssues,
-                fn (array $candidateDecision): array => $this->findPureIssues($candidateDecision, $indexContext, $validFigureKeys, $validSourceElementKeys),
+                fn (array $candidateDecision): array => $this->findPureIssues($candidateDecision, $indexContext, $validFigureKeys, $validSourceElementKeys, $existingPageCandidateIds),
             );
 
             // An issue nobody can attribute to a specific object cannot be repaired within a
@@ -284,6 +289,19 @@ class EnterpriseWikiMaintainerDecisionService
      * @param  string[]  $validFigureKeys
      * @return string[]
      */
+    /**
+     * The page ids of the bounded existing-page candidate set the planning prompts rendered.
+     *
+     * @return list<int>
+     */
+    private function existingPageCandidateIds(EnterpriseWikiPlanningContext $planning): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (array $candidate): int => (int) ($candidate['page_id'] ?? 0),
+            $planning->existingPageCandidates(),
+        ), static fn (int $id): bool => $id > 0));
+    }
+
     private function findAllIssues(
         array $decision,
         array $indexContext,
@@ -291,13 +309,14 @@ class EnterpriseWikiMaintainerDecisionService
         int $customerId = 0,
         array $validSourceElementKeys = [],
         ?int $runId = null,
+        array $existingPageCandidateIds = [],
     ): array {
         return array_merge(
             $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
             $this->hierarchyValidator->findIssues($decision),
             // Fase 8K-2: canonical ownership + page granularity + patch-target coherence. Pure
             // array rules, so it joins the existing bounded AI repair loop unchanged.
-            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys),
+            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys, $existingPageCandidateIds),
             // Every owned topic must be bound to real source evidence — the plan-to-evidence
             // contract page generation already consumes but nothing used to produce. This is the
             // cheapest place it can be checked: here an ungrounded planned section costs a few
@@ -334,11 +353,12 @@ class EnterpriseWikiMaintainerDecisionService
         array $indexContext,
         array $validFigureKeys,
         array $validSourceElementKeys,
+        array $existingPageCandidateIds = [],
     ): array {
         return array_merge(
             $this->consistencyValidator->findIssues($decision, $indexContext, $validFigureKeys),
             $this->hierarchyValidator->findIssues($decision),
-            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys),
+            $this->canonicalOwnershipValidator->findIssues($decision, $indexContext, $validSourceElementKeys, $existingPageCandidateIds),
             // Every owned topic must be bound to real source evidence before any page is generated.
             // Cheapest possible place to catch an ungrounded planned section: here it is a few
             // hundred repair tokens, at generation time it is a failed page per topic (run 53).

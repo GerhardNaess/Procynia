@@ -17,6 +17,7 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
+use App\Services\Ai\Requirements\Excel\WorkbookDeterministicCandidateResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -35,6 +36,7 @@ class RequirementExtractionRunService
     public function __construct(
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly RequirementEditorService $requirementEditorService,
+        private readonly WorkbookDeterministicCandidateResolver $deterministicCandidateResolver,
         private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
         private readonly AiTokenLogger $tokenLogger = new AiTokenLogger,
     ) {}
@@ -446,7 +448,19 @@ class RequirementExtractionRunService
             );
 
             try {
-                $result = $this->candidateExtractor->extractFullDocument(
+                // A document whose requirements were already determined deterministically (a parsed
+                // workbook: structure discovered, schema validated, units built) has nothing left to
+                // discover. Re-running discovery over it can only drop or reword finished
+                // requirements — five of nineteen were lost on a realistic file — so the AI call is
+                // skipped and candidates are mapped straight from the units. Word and PDF carry text
+                // that genuinely needs interpreting and are untouched.
+                $result = $this->deterministicCandidateResolver->resultForChunk(
+                    $chunkDocument,
+                    $document,
+                    $run->uuid.'-chunk-'.$chunk->chunk_index,
+                    (int) $chunk->char_start,
+                    (int) $chunk->char_end,
+                ) ?? $this->candidateExtractor->extractFullDocument(
                     $chunkDocument,
                     $run->uuid.'-chunk-'.$chunk->chunk_index,
                     $chunkTableRows,
@@ -705,7 +719,19 @@ class RequirementExtractionRunService
             );
 
             try {
-                $result = $this->candidateExtractor->extractFullDocument(
+                // A document whose requirements were already determined deterministically (a parsed
+                // workbook: structure discovered, schema validated, units built) has nothing left to
+                // discover. Re-running discovery over it can only drop or reword finished
+                // requirements — five of nineteen were lost on a realistic file — so the AI call is
+                // skipped and candidates are mapped straight from the units. Word and PDF carry text
+                // that genuinely needs interpreting and are untouched.
+                $result = $this->deterministicCandidateResolver->resultForChunk(
+                    $chunkDocument,
+                    $document,
+                    $run->uuid.'-chunk-'.$chunk->chunk_index,
+                    (int) $chunk->char_start,
+                    (int) $chunk->char_end,
+                ) ?? $this->candidateExtractor->extractFullDocument(
                     $chunkDocument,
                     $run->uuid.'-chunk-'.$chunk->chunk_index,
                     $chunkTableRows,

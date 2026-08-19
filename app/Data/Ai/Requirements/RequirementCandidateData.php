@@ -233,6 +233,11 @@ final readonly class RequirementCandidateData implements JsonSerializable
             'char_end' => $sourceReference['char_end'] ?? ($chunk?->char_end !== null ? (int) $chunk->char_end : null),
             'source_chunk_ids' => $sourceReference['source_chunk_ids'] ?? ($chunk !== null ? [$chunk->id] : []),
             'row_index' => $sourceReference['row_index'] ?? null,
+            // Source-kind provenance the resolving element supplied (see
+            // RequirementExtractionCandidateData::withResolvedTextElement()). Named explicitly
+            // rather than letting the reference through wholesale, so this stays the one place
+            // that decides what a persisted source_reference contains.
+            'source_metadata' => $sourceReference['source_metadata'] ?? null,
         ] + array_filter([
             'page' => $sourceReference['page'] ?? null,
             'section' => $sourceReference['section'] ?? null,

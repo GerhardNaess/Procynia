@@ -91,16 +91,16 @@ class RequirementWikiAnswerControllerTest extends TestCase
     }
 
     /**
-     * AI-to-Wiki consolidation: the case's ai_instructions (set on the owning SavedNotice via the
-     * existing AI-instrukser page) must reach RequirementWikiAnswerAiClient::generateAnswer() as its
-     * final argument — confirms the full HTTP → controller → service → AI-client chain, not just the
-     * service-level unit test.
+     * The AI instruction is customer-owned: it is set once (via the AI-instrukser page, reached
+     * through any case) and must reach RequirementWikiAnswerAiClient::generateAnswer() as its
+     * case_instructions argument for every case belonging to that customer — confirms the full
+     * HTTP → controller → service → AI-client chain, not just the service-level unit test.
      */
-    public function test_the_saved_notices_ai_instructions_reach_the_answer_ai_client(): void
+    public function test_the_customers_ai_instructions_reach_the_answer_ai_client(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-INSTR-001', 'Wiki answer instructions case');
-        $savedNotice->update(['ai_instructions' => 'Skriv formelt og presist, uten fyllord.']);
+        $context['customer']->forceFill(['ai_instructions' => 'Skriv formelt og presist, uten fyllord.'])->save();
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
         $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
@@ -122,6 +122,80 @@ class RequirementWikiAnswerControllerTest extends TestCase
 
         $response->assertOk();
         $this->assertDatabaseCount('saved_notice_ai_requirement_wiki_answers', 1);
+    }
+
+    /**
+     * The instruction moved from the case to the customer: the legacy saved_notices.ai_instructions
+     * column is retained for now as a data fallback, but no active AI flow may read it. With the
+     * customer's own instruction unset, the AI client must receive null even though the old case
+     * column still holds a value.
+     */
+    public function test_the_legacy_saved_notice_ai_instructions_column_is_ignored_by_the_answer_flow(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ANS-INSTR-002', 'Wiki answer legacy instructions case');
+        $savedNotice->forceFill(['ai_instructions' => 'Gammel saksinstruks som ikke skal brukes.'])->save();
+        $context['customer']->forceFill(['ai_instructions' => null])->save();
+        $document = $this->createAiDocument($savedNotice);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon innen ti dager.',
+        ]);
+
+        $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('selectNextAction'));
+        $this->mock(RequirementWikiAnswerAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('generateAnswer')
+            ->once()
+            ->withArgs(fn (string $identifier, string $text, array $pages, string $language, ?string $caseInstructions): bool => $caseInstructions === null)
+            ->andReturn(['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]]));
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
+
+        $response = $this->actingAs($context['user'])->postJson(
+            "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
+        );
+
+        $response->assertOk();
+    }
+
+    /**
+     * Two cases owned by the same customer must both receive that customer's single shared
+     * instruction — this is the core proof that the instruction is no longer per case.
+     */
+    public function test_two_cases_for_the_same_customer_share_one_ai_instruction_in_the_answer_flow(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill(['ai_instructions' => 'Bruk Kunde med stor K.'])->save();
+
+        $receivedInstructions = [];
+
+        $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('selectNextAction'));
+        $this->mock(RequirementWikiAnswerAiClient::class, function (MockInterface $mock) use (&$receivedInstructions) {
+            $mock->shouldReceive('generateAnswer')
+                ->twice()
+                ->andReturnUsing(function (string $identifier, string $text, array $pages, string $language, ?string $caseInstructions) use (&$receivedInstructions): array {
+                    $receivedInstructions[] = $caseInstructions;
+
+                    return ['answer_sections' => [['key' => 'S1', 'heading' => '', 'text' => 'Svar.', 'used_page_ids' => []]]];
+                });
+        });
+        $this->mock(RequirementWikiAlignmentAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('assessAlignment'));
+        $this->mock(RequirementWikiAnswerRevisionAiClient::class, fn (MockInterface $mock) => $mock->shouldNotReceive('reviseSections'));
+
+        foreach (['WIKI-ANS-SHARED-001', 'WIKI-ANS-SHARED-002'] as $externalId) {
+            $savedNotice = $this->createSavedNotice($context['customer']->id, $externalId, 'Shared instruction case '.$externalId);
+            $document = $this->createAiDocument($savedNotice);
+            $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen ti dager.');
+            $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+                'requirement_text' => 'Leverandøren skal levere dokumentasjon innen ti dager.',
+            ]);
+
+            $this->actingAs($context['user'])->postJson(
+                "/app/ai/{$savedNotice->id}/requirements/{$requirement->id}/wiki-answer",
+            )->assertOk();
+        }
+
+        $this->assertSame(['Bruk Kunde med stor K.', 'Bruk Kunde med stor K.'], $receivedInstructions);
     }
 
     /**

@@ -518,12 +518,18 @@ class AiControllerTest extends TestCase
         $this->assertSame('draft', data_get($manualRow, 'approval_status'));
     }
 
-    public function test_ai_case_instructions_page_includes_ai_instructions_payload_and_update_url(): void
+    // -------------------------------------------------------------------------
+    // AI instructions are owned by the CUSTOMER, not the case. The page is still
+    // reached through a case (that is where the AI menu lives), but one shared
+    // instruction applies to every case the customer owns.
+    // -------------------------------------------------------------------------
+
+    public function test_ai_case_instructions_page_reads_the_customers_ai_instructions(): void
     {
         $context = $this->customerAdminContext();
+        $context['customer']->forceFill(['ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.'])->save();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS', 'Instructions target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-            'ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.',
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 10:35:00');
 
@@ -542,26 +548,153 @@ class AiControllerTest extends TestCase
         $this->assertSame($savedNotice->title, data_get($page, 'props.case.title'));
     }
 
-    public function test_ai_case_ai_instructions_update_endpoint_persists_instructions(): void
+    public function test_ai_case_instructions_page_shows_nothing_when_the_customer_has_no_instruction(): void
     {
         $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-EMPTY', 'Instructions empty target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:34:00');
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.instructions.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $this->assertSame('', data_get($this->inertiaPageFromResponse($response), 'props.ai_instructions'));
+        $this->assertNull($context['customer']->fresh()->ai_instructions);
+    }
+
+    public function test_ai_case_ai_instructions_update_endpoint_persists_on_the_customer_not_the_case(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill(['ai_instructions' => 'Opprinnelig instruksjon.'])->save();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-UPDATE', 'Instructions update target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-            'ai_instructions' => 'Opprinnelig instruksjon.',
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 10:36:00');
 
         $response = $this->actingAs($context['user'])
             ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
             ->patch(route('app.ai.instructions.update', ['savedNotice' => $savedNotice->id]), [
-                'ai_instructions' => "Skriv formelt.\nBruk Kunde med stor K.",
+                'ai_instructions' => "Skriv formelt.\r\nBruk Kunde med stor K.",
             ]);
 
         $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
         $response->assertSessionHas('success', 'AI-instruks lagret.');
 
-        $savedNotice->refresh();
-        $this->assertSame("Skriv formelt.\nBruk Kunde med stor K.", $savedNotice->ai_instructions);
+        $this->assertSame("Skriv formelt.\nBruk Kunde med stor K.", $context['customer']->fresh()->ai_instructions);
+        $this->assertNull($savedNotice->fresh()->ai_instructions);
+    }
+
+    public function test_an_empty_ai_instruction_clears_the_customer_value(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill(['ai_instructions' => 'Skal fjernes.'])->save();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-CLEAR', 'Instructions clear target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:37:00');
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $savedNotice->id]), [
+                'ai_instructions' => "   \n  ",
+            ])->assertRedirect();
+
+        $this->assertNull($context['customer']->fresh()->ai_instructions);
+    }
+
+    /**
+     * The core proof of the customer-scoped move: saving through one case must be visible from
+     * another case owned by the same customer, in both directions.
+     */
+    public function test_ai_instructions_saved_via_one_case_are_visible_from_another_case_of_the_same_customer(): void
+    {
+        $context = $this->customerAdminContext();
+        $firstCase = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-SHARED-1', 'Shared instructions case one', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $secondCase = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-SHARED-2', 'Shared instructions case two', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($firstCase, '2026-04-06 10:38:00');
+        $this->touchSavedNotice($secondCase, '2026-04-06 10:39:00');
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.instructions.show', ['savedNotice' => $firstCase->id]))
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $firstCase->id]), [
+                'ai_instructions' => 'Instruks satt via sak 1.',
+            ])->assertRedirect();
+
+        $viaSecondCase = $this->actingAs($context['user'])
+            ->get(route('app.ai.instructions.show', ['savedNotice' => $secondCase->id]));
+        $viaSecondCase->assertOk();
+        $this->assertSame('Instruks satt via sak 1.', data_get($this->inertiaPageFromResponse($viaSecondCase), 'props.ai_instructions'));
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.instructions.show', ['savedNotice' => $secondCase->id]))
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $secondCase->id]), [
+                'ai_instructions' => 'Instruks oppdatert via sak 2.',
+            ])->assertRedirect();
+
+        $viaFirstCase = $this->actingAs($context['user'])
+            ->get(route('app.ai.instructions.show', ['savedNotice' => $firstCase->id]));
+        $viaFirstCase->assertOk();
+        $this->assertSame('Instruks oppdatert via sak 2.', data_get($this->inertiaPageFromResponse($viaFirstCase), 'props.ai_instructions'));
+    }
+
+    public function test_ai_instructions_never_leak_between_customers(): void
+    {
+        $first = $this->customerAdminContext();
+        $second = $this->customerAdminContext('Other Instructions Customer AS');
+
+        $firstCase = $this->createSavedNotice($first['customer']->id, 'AI-2001-INSTRUCTIONS-ISO-1', 'Isolation case one', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $secondCase = $this->createSavedNotice($second['customer']->id, 'AI-2001-INSTRUCTIONS-ISO-2', 'Isolation case two', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($firstCase, '2026-04-06 10:40:00');
+        $this->touchSavedNotice($secondCase, '2026-04-06 10:41:00');
+
+        $second['customer']->forceFill(['ai_instructions' => 'Kunde B sin instruks.'])->save();
+
+        $this->actingAs($first['user'])
+            ->from(route('app.ai.instructions.show', ['savedNotice' => $firstCase->id]))
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $firstCase->id]), [
+                'ai_instructions' => 'Kunde A sin instruks.',
+            ])->assertRedirect();
+
+        $this->assertSame('Kunde A sin instruks.', $first['customer']->fresh()->ai_instructions);
+        $this->assertSame('Kunde B sin instruks.', $second['customer']->fresh()->ai_instructions);
+
+        $viaSecondCase = $this->actingAs($second['user'])
+            ->get(route('app.ai.instructions.show', ['savedNotice' => $secondCase->id]));
+        $viaSecondCase->assertOk();
+        $this->assertSame('Kunde B sin instruks.', data_get($this->inertiaPageFromResponse($viaSecondCase), 'props.ai_instructions'));
+    }
+
+    public function test_a_user_cannot_write_another_customers_ai_instructions_through_a_foreign_case_id(): void
+    {
+        $first = $this->customerAdminContext();
+        $second = $this->customerAdminContext('Foreign Instructions Customer AS');
+        $second['customer']->forceFill(['ai_instructions' => 'Kunde B sin instruks.'])->save();
+
+        $foreignCase = $this->createSavedNotice($second['customer']->id, 'AI-2001-INSTRUCTIONS-FOREIGN', 'Foreign case', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($foreignCase, '2026-04-06 10:42:00');
+
+        $this->actingAs($first['user'])
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $foreignCase->id]), [
+                'ai_instructions' => 'Forsøk på å skrive til feil kunde.',
+            ])->assertNotFound();
+
+        $this->actingAs($first['user'])
+            ->get(route('app.ai.instructions.show', ['savedNotice' => $foreignCase->id]))
+            ->assertNotFound();
+
+        $this->assertSame('Kunde B sin instruks.', $second['customer']->fresh()->ai_instructions);
+        $this->assertNull($first['customer']->fresh()->ai_instructions);
     }
 
     // -------------------------------------------------------------------------

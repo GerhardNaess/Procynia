@@ -19,7 +19,6 @@ use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiBestPracticeSectionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimContentRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimFindingExplainer;
-use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
@@ -28,6 +27,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
+use App\Support\EnterpriseWiki\WikiQualityCheckPresentation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -46,7 +46,6 @@ class WikiController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
-        private readonly EnterpriseWikiCoverageService $coverageService,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
@@ -64,21 +63,7 @@ class WikiController extends Controller
 
         $tab = $this->resolveWikiReturnTab($request);
 
-        $lintBySeverity = EnterpriseWikiLintFinding::query()
-            ->where('customer_id', $customerId)
-            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->selectRaw('severity, count(*) as cnt')
-            ->groupBy('severity')
-            ->pluck('cnt', 'severity');
-
-        $lintHealth = [
-            'error' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
-            'warning' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
-            'info' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
-            'total' => (int) $lintBySeverity->sum(),
-        ];
-
-        // Computed regardless of active tab (like lint_health above) so the Pages tab — whose own
+        // Computed regardless of active tab so the Pages tab — whose own
         // prop payload never includes runs — can still know to poll for newly generated pages
         // while a run is working in the background on another tab.
         $hasActiveWikiRun = EnterpriseWikiIngestRun::query()
@@ -89,7 +74,6 @@ class WikiController extends Controller
 
         $props = [
             'active_tab' => $tab,
-            'lint_health' => $lintHealth,
             'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),
             'has_active_wiki_run' => $hasActiveWikiRun,
@@ -98,7 +82,6 @@ class WikiController extends Controller
         $props += match ($tab) {
             'sources' => $this->loadSourcesTab($user, $customerId, $request),
             'runs' => $this->loadRunsTab($user, $customerId, $request),
-            'quality' => $this->loadQualityTab($customerId, $request),
             default => $this->loadPagesTab($user, $customerId, $request),
         };
 
@@ -696,6 +679,18 @@ class WikiController extends Controller
         $srcStatus = in_array($request->query('src_status'), $allowedDocStatuses, true)
             ? $request->query('src_status') : null;
 
+        // The owner filter offers exactly the people the row's own owner select offers — one
+        // definition of "valid document owner" (documentOwnerOptionsForCustomer()), which is itself
+        // customer-scoped and permission-gated. Validating the requested id against that same list
+        // is what makes a foreign or invented id inert: it resolves to null and the filter is simply
+        // not applied, so no row of another customer can ever be addressed through this parameter.
+        $documentOwnerOptions = $this->documentOwnerOptionsForCustomer($customerId);
+        $requestedSrcOwner = $request->query('src_owner');
+        $srcOwner = is_numeric($requestedSrcOwner)
+            && in_array((int) $requestedSrcOwner, array_column($documentOwnerOptions, 'id'), true)
+                ? (int) $requestedSrcOwner
+                : null;
+
         $docQuery = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->with('owner:id,name,email,is_active')
@@ -708,6 +703,10 @@ class WikiController extends Controller
 
         if ($srcStatus !== null) {
             $docQuery->where('document_status', $srcStatus);
+        }
+
+        if ($srcOwner !== null) {
+            $docQuery->where('owner_user_id', $srcOwner);
         }
 
         $documents = $docQuery->get();
@@ -778,10 +777,11 @@ class WikiController extends Controller
 
         return [
             'sources' => $sources,
-            'document_owner_options' => $this->documentOwnerOptionsForCustomer($customerId),
+            'document_owner_options' => $documentOwnerOptions,
             'sources_filters' => [
                 'search' => $srcSearch,
                 'status' => $srcStatus,
+                'document_owner' => $srcOwner,
             ],
         ];
     }
@@ -1255,113 +1255,6 @@ class WikiController extends Controller
         return response()->json($this->runFindingsService->buildForRun($run, $user, $includeTechnical));
     }
 
-    private function loadQualityTab(int $customerId, Request $request): array
-    {
-        $allowedSeverities = [
-            EnterpriseWikiLintFinding::SEVERITY_ERROR,
-            EnterpriseWikiLintFinding::SEVERITY_WARNING,
-            EnterpriseWikiLintFinding::SEVERITY_INFO,
-        ];
-        $allowedPageTypes = EnterpriseWikiPage::PAGE_TYPES;
-        $allowedCodes = EnterpriseWikiLintFinding::CODES;
-
-        $severity = in_array($request->query('q_severity'), $allowedSeverities, true)
-            ? $request->query('q_severity') : null;
-        $code = in_array($request->query('q_code'), $allowedCodes, true)
-            ? $request->query('q_code') : null;
-        $pageType = in_array($request->query('q_page_type'), $allowedPageTypes, true)
-            ? $request->query('q_page_type') : null;
-
-        $query = EnterpriseWikiLintFinding::query()
-            ->where('enterprise_wiki_lint_findings.customer_id', $customerId)
-            ->where('enterprise_wiki_lint_findings.status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->with([
-                'page:id,title,slug,page_type',
-                'run:id,source_id',
-            ])
-            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
-            ->orderByDesc('enterprise_wiki_lint_findings.created_at');
-
-        if ($severity !== null) {
-            $query->where('enterprise_wiki_lint_findings.severity', $severity);
-        }
-
-        if ($code !== null) {
-            $query->where('enterprise_wiki_lint_findings.code', $code);
-        }
-
-        if ($pageType !== null) {
-            $query->whereHas('page', fn ($q) => $q->where('page_type', $pageType));
-        }
-
-        $findings = $query->get();
-
-        $docIds = $findings
-            ->map(fn ($f) => $f->run?->source_id)
-            ->filter()
-            ->unique()
-            ->values();
-
-        $docFilenames = $docIds->isNotEmpty()
-            ? EnterpriseWikiDocument::query()
-                ->where('customer_id', $customerId)
-                ->whereIn('id', $docIds)
-                ->pluck('original_filename', 'id')
-            : collect();
-
-        $mapped = $findings->map(fn (EnterpriseWikiLintFinding $f) => [
-            'id' => $f->id,
-            'code' => $f->code,
-            'severity' => $f->severity,
-            'message' => $f->message,
-            'page_title' => $f->page?->title,
-            'page_slug' => $f->page?->slug,
-            'page_type' => $f->page?->page_type,
-            'target_url' => $this->qualityFindingTargetUrl($f),
-            'target_page_id' => $f->enterprise_wiki_page_id,
-            'target_page_version_id' => $f->enterprise_wiki_page_version_id,
-            'target_claim_id' => $f->enterprise_wiki_claim_id,
-            'run_id' => $f->enterprise_wiki_ingest_run_id,
-            'source_filename' => $f->run?->source_id ? $docFilenames->get($f->run->source_id) : null,
-            'created_at' => $f->created_at,
-        ])->all();
-
-        $coverage = $this->coverageService->computeForCustomer($customerId);
-
-        return [
-            'quality_findings' => $mapped,
-            'quality_filters' => [
-                'severity' => $severity,
-                'code' => $code,
-                'page_type' => $pageType,
-            ],
-            'coverage' => $coverage,
-        ];
-    }
-
-    private function qualityFindingTargetUrl(EnterpriseWikiLintFinding $finding): ?string
-    {
-        $pageSlug = $finding->page?->slug;
-
-        if ($pageSlug === null || $pageSlug === '') {
-            return null;
-        }
-
-        $parameters = ['slug' => $pageSlug];
-        $claimId = $finding->enterprise_wiki_claim_id !== null ? (int) $finding->enterprise_wiki_claim_id : null;
-
-        if ($claimId !== null && $claimId > 0) {
-            $parameters['claim_id'] = $claimId;
-        } else {
-            $parameters['finding_id'] = $finding->id;
-        }
-
-        return route('app.wiki.show', $parameters);
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
     private function buildStructureFindingReference(
         Request $request,
         EnterpriseWikiPage $page,
@@ -1405,6 +1298,8 @@ class WikiController extends Controller
             'code' => $finding->code,
             'category_label' => $copy['label'],
             'description' => $copy['description'],
+            'action' => $copy['action'],
+            'remedy' => $copy['remedy'],
             'message' => $finding->message,
             'severity' => $finding->severity,
             'severity_label' => $this->lintSeverityLabel($finding->severity),
@@ -1426,20 +1321,18 @@ class WikiController extends Controller
     }
 
     /**
-     * @return array{label: string, description: string}
+     * Purpose: Resolve one lint code's human presentation — title, explanation and the recommended
+     *          action — from the single central mapping.
+     * Inputs: The technical lint code.
+     * Returns: array{label: string, description: string, action: string, remedy: string, unknown: bool}
+     * Side effects: None.
+     *
+     * The raw code is deliberately never folded into the label: it is returned separately so callers
+     * can show it as a discreet technical reference instead of as the user's only clue.
      */
     private function qualityCheckCopy(string $code): array
     {
-        $label = __('procynia.wiki.quality_checks.'.$code.'.label');
-        $description = __('procynia.wiki.quality_checks.'.$code.'.description');
-
-        $unresolvedLabel = 'procynia.wiki.quality_checks.'.$code.'.label';
-        $unresolvedDescription = 'procynia.wiki.quality_checks.'.$code.'.description';
-
-        return [
-            'label' => $label === $unresolvedLabel ? __('procynia.wiki.quality_check_unknown_label').': '.$code : $label,
-            'description' => $description === $unresolvedDescription ? __('procynia.wiki.quality_check_unknown_description').' ('.$code.')' : $description,
-        ];
+        return WikiQualityCheckPresentation::copy($code);
     }
 
     private function lintSeverityLabel(string $severity): string
@@ -2477,8 +2370,13 @@ class WikiController extends Controller
                 ['name', 'asc'],
                 ['id', 'asc'],
             ])
+            // `name` and `label` are both offered on purpose. The row's owner select shows the bare
+            // name (a row already has one owner; the e-mail only made the cell wider and had to be
+            // truncated), while the filter and the upload picker keep `label` — there, e-mail is what
+            // separates two people with the same name. Nothing is removed from the payload.
             ->map(static fn (User $user): array => [
                 'id' => $user->id,
+                'name' => $user->name,
                 'label' => sprintf('%s · %s', $user->name, $user->email),
             ])
             ->values()
