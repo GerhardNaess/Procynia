@@ -679,6 +679,18 @@ class WikiController extends Controller
         $srcStatus = in_array($request->query('src_status'), $allowedDocStatuses, true)
             ? $request->query('src_status') : null;
 
+        // The owner filter offers exactly the people the row's own owner select offers — one
+        // definition of "valid document owner" (documentOwnerOptionsForCustomer()), which is itself
+        // customer-scoped and permission-gated. Validating the requested id against that same list
+        // is what makes a foreign or invented id inert: it resolves to null and the filter is simply
+        // not applied, so no row of another customer can ever be addressed through this parameter.
+        $documentOwnerOptions = $this->documentOwnerOptionsForCustomer($customerId);
+        $requestedSrcOwner = $request->query('src_owner');
+        $srcOwner = is_numeric($requestedSrcOwner)
+            && in_array((int) $requestedSrcOwner, array_column($documentOwnerOptions, 'id'), true)
+                ? (int) $requestedSrcOwner
+                : null;
+
         $docQuery = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->with('owner:id,name,email,is_active')
@@ -691,6 +703,10 @@ class WikiController extends Controller
 
         if ($srcStatus !== null) {
             $docQuery->where('document_status', $srcStatus);
+        }
+
+        if ($srcOwner !== null) {
+            $docQuery->where('owner_user_id', $srcOwner);
         }
 
         $documents = $docQuery->get();
@@ -761,10 +777,11 @@ class WikiController extends Controller
 
         return [
             'sources' => $sources,
-            'document_owner_options' => $this->documentOwnerOptionsForCustomer($customerId),
+            'document_owner_options' => $documentOwnerOptions,
             'sources_filters' => [
                 'search' => $srcSearch,
                 'status' => $srcStatus,
+                'document_owner' => $srcOwner,
             ],
         ];
     }

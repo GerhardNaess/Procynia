@@ -39,7 +39,7 @@ trait RedirectsToWikiIndexTab
      */
     private const WIKI_TAB_FILTER_KEYS = [
         'runs' => ['run_status', 'run_decision', 'run_src'],
-        'sources' => ['src_q', 'src_status'],
+        'sources' => ['src_q', 'src_status', 'src_owner'],
     ];
 
     protected function resolveWikiReturnTab(Request $request): string

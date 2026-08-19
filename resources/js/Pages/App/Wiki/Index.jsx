@@ -1724,6 +1724,7 @@ function SourcesTab({
         tab: 'sources',
         src_q: srcFilters.search ?? '',
         src_status: srcFilters.status ?? '',
+        src_owner: srcFilters.document_owner ?? '',
     });
     const { auth = {} } = usePage().props;
     const currentUser = auth.user ?? {};
@@ -1735,6 +1736,7 @@ function SourcesTab({
             tab: 'sources',
             src_q: srcFilters.search ?? '',
             src_status: srcFilters.status ?? '',
+            src_owner: srcFilters.document_owner ?? '',
             ...overrides,
         }, { preserveState: true, preserveScroll: true });
     };
@@ -1977,10 +1979,27 @@ function SourcesTab({
                             <option value="failed">{tw.source_status_failed ?? 'Feilet'}</option>
                         </select>
 
-                        {(srcFilters.search || srcFilters.status) && (
+                        {/* Same owner list the row's own owner select uses — one definition of who
+                            can be a document owner, so the filter can never offer someone the row
+                            cannot assign. */}
+                        {ownerOptions.length > 0 && (
+                            <select
+                                value={srcFilters.document_owner ?? ''}
+                                onChange={(e) => navigateSources({ src_owner: e.target.value })}
+                                className={SELECT_CLS}
+                                aria-label={tw.filter_document_owner_all ?? 'Alle dokumenteiere'}
+                            >
+                                <option value="">{tw.filter_document_owner_all ?? 'Alle dokumenteiere'}</option>
+                                {ownerOptions.map((owner) => (
+                                    <option key={owner.id} value={owner.id}>{owner.label}</option>
+                                ))}
+                            </select>
+                        )}
+
+                        {(srcFilters.search || srcFilters.status || srcFilters.document_owner) && (
                             <button
                                 type="button"
-                                onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '' }); }}
+                                onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '', src_owner: '' }); }}
                                 className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-base font-medium leading-6 text-slate-500 transition hover:text-slate-800"
                             >
                                 <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
