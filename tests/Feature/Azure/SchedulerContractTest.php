@@ -3,6 +3,7 @@
 namespace Tests\Feature\Azure;
 
 use App\Models\BackupSetting;
+use App\Services\Operations\BackupService;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -16,14 +17,17 @@ use Tests\TestCase;
  * minReplicas = maxReplicas = 1, but the application side has to hold up its end too: anything
  * scheduled must be safe if a deployment briefly overlaps the old and new revision.
  *
- * It also carries the single clearest Azure blocker in the codebase. procynia:backup runs hourly and
+ * It also carried the single clearest Azure blocker in the codebase. procynia:backup runs hourly and
  * ends up executing scripts/backup-production.sh, which requires the docker CLI and runs
  * `docker compose exec -T postgres pg_dump`. There is no docker CLI inside a Container App, and
  * there is no compose project to exec into. Azure-native PostgreSQL backup with point-in-time
  * restore replaces it.
  *
- * This class does not change the scheduler. It makes the blocker explicit and verifiable, so it
- * cannot be forgotten when staging is provisioned.
+ * That blocker is now closed by an explicit runtime guard: config('procynia.backup.legacy_enabled'),
+ * fed by PROCYNIA_LEGACY_BACKUP_ENABLED, which the Azure IaC sets to false in every environment. The
+ * tests below verify the Azure side of that contract — that the environment really is configured to
+ * disable it, and that the reason it had to exist is still true. The behavioural proof that the
+ * script cannot start lives in Tests\Feature\Operations\LegacyBackupRuntimeGuardTest.
  */
 class SchedulerContractTest extends TestCase
 {
@@ -158,7 +162,7 @@ class SchedulerContractTest extends TestCase
     }
 
     // -----------------------------------------------------------------------
-    // procynia:backup — the Azure blocker
+    // procynia:backup — closed by the runtime guard
     // -----------------------------------------------------------------------
 
     /**
@@ -228,10 +232,81 @@ class SchedulerContractTest extends TestCase
     }
 
     /**
-     * The deployment precondition, made explicit. This is the gate the brief asks for: the Azure
-     * scheduler must not be enabled while the docker-based backup could still fire.
+     * The Azure side of the contract: every Azure environment must explicitly disable the legacy
+     * mechanism. This is what closes the blocker — not the database flag, which a migrated database
+     * can carry as true.
      */
-    public function test_the_azure_backup_precondition_is_documented_in_both_places(): void
+    public function test_every_azure_environment_explicitly_disables_the_legacy_backup(): void
+    {
+        $main = file_get_contents(base_path('infra/main.bicep'));
+
+        $this->assertStringContainsString(
+            'param legacyBackupEnabled bool = false',
+            $main,
+            'The Azure template default for the legacy backup must be disabled.',
+        );
+
+        $this->assertMatchesRegularExpression(
+            "/name: 'PROCYNIA_LEGACY_BACKUP_ENABLED'\s*\n\s*value: string\(legacyBackupEnabled\)/",
+            $main,
+            'The Azure environment contract must expose PROCYNIA_LEGACY_BACKUP_ENABLED to the containers.',
+        );
+
+        foreach (['staging', 'production'] as $environment) {
+            $this->assertStringContainsString(
+                'param legacyBackupEnabled = false',
+                file_get_contents(base_path("infra/environments/{$environment}.bicepparam")),
+                sprintf('%s.bicepparam must explicitly disable the legacy Compose backup.', $environment),
+            );
+        }
+    }
+
+    /**
+     * The variable must reach every workload, not only the scheduler. A manual
+     * `php artisan procynia:backup` — or an admin clicking the manual backup button, which the
+     * database flag never guarded — could otherwise reach the Compose script from the web app or any
+     * worker.
+     */
+    public function test_the_legacy_backup_flag_reaches_every_container_not_just_the_scheduler(): void
+    {
+        $main = file_get_contents(base_path('infra/main.bicep'));
+
+        $sharedBlockStart = strpos($main, 'var sharedEnvironmentVariables = [');
+        $this->assertNotFalse($sharedBlockStart, 'The shared environment variable contract is missing.');
+
+        $sharedBlock = substr($main, $sharedBlockStart, (int) strpos($main, "\nvar resolvedWebImage") - $sharedBlockStart);
+
+        $this->assertStringContainsString(
+            'PROCYNIA_LEGACY_BACKUP_ENABLED',
+            $sharedBlock,
+            'PROCYNIA_LEGACY_BACKUP_ENABLED must be part of the shared environment contract, so web, '
+            .'every worker and the scheduler all receive it.',
+        );
+    }
+
+    /**
+     * The application must honour that contract: with the Azure value in effect, the scheduler must
+     * not register the backup command at all.
+     */
+    public function test_the_azure_configuration_prevents_the_scheduler_from_triggering_compose_backup(): void
+    {
+        $this->assertStringContainsString(
+            "if (config('procynia.backup.legacy_enabled'))",
+            file_get_contents(base_path('routes/console.php')),
+            'The scheduler must gate procynia:backup on the runtime guard.',
+        );
+
+        $this->assertTrue(
+            method_exists(BackupService::class, 'legacyBackupIsSupported'),
+            'BackupService must expose the runtime guard used by the scheduler, the command and the '
+            .'admin panel.',
+        );
+    }
+
+    /**
+     * The precondition is still documented, but now as a closed item rather than an open blocker.
+     */
+    public function test_the_backup_precondition_is_documented_in_both_places(): void
     {
         $readiness = base_path('docs/azure-migration-test-readiness.md');
         $infraReadme = base_path('infra/README.md');
@@ -244,14 +319,20 @@ class SchedulerContractTest extends TestCase
             $this->assertStringContainsString(
                 'procynia:backup',
                 $contents,
-                sprintf('%s must name the backup task as an Azure precondition.', basename($document)),
+                sprintf('%s must still explain what happened to the backup task.', basename($document)),
+            );
+
+            $this->assertStringContainsString(
+                'PROCYNIA_LEGACY_BACKUP_ENABLED',
+                $contents,
+                sprintf('%s must document the runtime guard that closed the blocker.', basename($document)),
             );
         }
 
         $this->assertMatchesRegularExpression(
-            '/procynia:backup/',
+            '/PROCYNIA_LEGACY_BACKUP_ENABLED/',
             file_get_contents(base_path('scripts/azure-readiness/azure-smoke.sh')),
-            'The readiness smoke script must check the backup precondition, not just document it.',
+            'The readiness smoke script must verify the runtime guard, not just the database flag.',
         );
     }
 }

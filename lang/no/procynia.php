@@ -2653,6 +2653,7 @@ return [
             'backup_disabled_success' => 'Backup er stoppet.',
             'manual_success' => 'Manuell backup fullført.',
             'manual_failed' => 'Manuell backup feilet.',
+            'manual_skipped' => 'Manuell backup ble ikke kjørt.',
             'no_runs' => 'Ingen backup-kjøringer registrert ennå.',
             'no_files' => 'Ingen backupfiler funnet i backup-katalogen.',
             'directory_missing' => 'Backup-katalogen finnes ikke eller er ikke tilgjengelig.',
@@ -2690,6 +2691,8 @@ return [
             'no_files_step' => 'Kontroller at backup-scriptet kjøres korrekt og at backup-katalogen er riktig.',
             'backup_stopped' => 'Backup er stoppet manuelt. Ingen planlagte backuper kjøres.',
             'backup_stopped_step' => 'Start backup fra Admin → Drift → Backup og restore.',
+            'legacy_backup_disabled' => 'Legacy Compose-backup er deaktivert for denne runtime. Azure PostgreSQL automatisk backup og point-in-time restore gjelder i stedet.',
+            'legacy_backup_disabled_step' => 'Ingen handling kreves. Backup og restore styres av Azure, ikke av procynia:backup. Se docs/azure-migration-test-readiness.md.',
         ],
     ],
     'operational_runbooks' => [

@@ -2653,6 +2653,7 @@ return [
             'backup_disabled_success' => 'Backup has been stopped.',
             'manual_success' => 'Manual backup completed.',
             'manual_failed' => 'Manual backup failed.',
+            'manual_skipped' => 'Manual backup was not run.',
             'no_runs' => 'No backup runs recorded yet.',
             'no_files' => 'No backup files found in the backup directory.',
             'directory_missing' => 'Backup directory does not exist or is not accessible.',
@@ -2690,6 +2691,8 @@ return [
             'no_files_step' => 'Verify that the backup script runs correctly and the backup directory is correct.',
             'backup_stopped' => 'Backup has been manually stopped. No scheduled backups are running.',
             'backup_stopped_step' => 'Start backup from Admin → Drift → Backup and restore.',
+            'legacy_backup_disabled' => 'Legacy Compose backup is disabled for this runtime. Azure PostgreSQL automated backup and point-in-time restore apply instead.',
+            'legacy_backup_disabled_step' => 'No action required. Backup and restore are handled by Azure, not by procynia:backup. See docs/azure-migration-test-readiness.md.',
         ],
     ],
     'operational_runbooks' => [

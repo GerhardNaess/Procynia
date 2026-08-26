@@ -20,7 +20,8 @@ Infrastrukturen selv er dokumentert i [`infra/README.md`](../infra/README.md). D
 | `tests/Feature/Azure/SharedStorageHandoffTest.php` | Web → delt fil → separat prosess → PostgreSQL → tilbake via applaget |
 | `tests/Feature/Azure/StatelessRuntimeContractTest.php` | Boot uten `.env`, stderr-logging, ingen lokale host-antakelser |
 | `tests/Feature/Azure/MigrationJobAndPgvectorContractTest.php` | Migrations som egen jobb, idempotens, pgvector |
-| `tests/Feature/Azure/SchedulerContractTest.php` | Én scheduler-instans, og `procynia:backup`-blokkeren |
+| `tests/Feature/Azure/SchedulerContractTest.php` | Én scheduler-instans, og Azure-kontrakten for `procynia:backup` |
+| `tests/Feature/Operations/LegacyBackupRuntimeGuardTest.php` | Runtime-guarden som stenger legacy Compose-backup i Azure |
 | `tests/Feature/Azure/support/*.php` | Hjelpeprosesser som kjøres som **egne OS-prosesser**, ikke i testprosessen |
 | `scripts/azure-readiness/azure-smoke.sh` | Det som krever mer enn én container |
 
@@ -70,7 +71,7 @@ Parser-testene er **ikke** duplisert. Der formatene allerede var dekket, er det 
 | 7 | Ingen test på `LOG_CHANNEL=stderr` | Container Apps samler logg fra stdout/stderr, ikke fra fil | `StatelessRuntimeContractTest` |
 | 8 | Ingen test på at migrations ikke kjøres ved boot, og at de er idempotente | Hver web-replica ville kappløpt om å migrere ved cold start | `MigrationJobAndPgvectorContractTest` |
 | 9 | Ingen test på at opplastingsgrensene henger sammen på tvers av lag | Feil rekkefølge gir rå 413 fra ingress i stedet for valideringsmelding | `ContainerRuntimeContractTest` |
-| 10 | `procynia:backup` var kjent som et problem, men ikke maskinelt sjekket | Blokkerer Azure-scheduleren | `SchedulerContractTest` + smoke-script |
+| 10 | `procynia:backup` var kjent som et problem, men ikke maskinelt sjekket | Blokkerte Azure-scheduleren | `SchedulerContractTest` + smoke-script — **blokkeren er nå lukket, se seksjon 5** |
 
 ---
 
@@ -131,7 +132,7 @@ Statuskolonnen skiller bevisst mellom fire ting:
 | Migrations som egen jobb | Ingen migrering ved boot; egen prosess migrerer | **BEVIST** | Container Apps Job |
 | Integrasjoner: OpenAI/Doffin/Stripe | Base-URL-er fra config, HTTPS, timeouts | **STATISK** | Ekte utgående HTTPS fra Container Apps |
 | Opplastingsgrenser | App 20 MB ≤ PHP 50 MB ≤ nginx `client_max_body_size` 50 MB | **BEVIST** | **Container Apps ingress-grense** |
-| `procynia:backup` | Krever docker CLI; ingen docker CLI i container; default avslått | **AVVIK — se seksjon 5** | Må være deaktivert/erstattet før scheduler startes |
+| `procynia:backup` | Runtime-guard: scheduler, command og service stopper Compose-scriptet; ekte kjøring i container bekrefter det | **BEVIST — blokker lukket, se seksjon 5** | Bekreft at `PROCYNIA_LEGACY_BACKUP_ENABLED=false` er satt på containerne |
 
 ---
 
@@ -161,33 +162,78 @@ HTTP-siden: PHP kjører med `max_execution_time=0`, så det finnes ingen HTTP-ti
 
 ---
 
-## 5. AVVIK: `procynia:backup` blokkerer Azure-scheduleren
+## 5. LUKKET: `procynia:backup` kan ikke lenger kjøre i Azure
 
-Dette er den eneste harde blokkeren som ble funnet.
+Dette var den eneste harde blokkeren. Den er nå lukket med en eksplisitt runtime-guard.
 
-**Fakta, alle maskinelt verifisert:**
+### Hvorfor den fantes
 
-1. `routes/console.php` kjører `Schedule::command('procynia:backup')->hourly()`.
+1. `routes/console.php` kjørte `Schedule::command('procynia:backup')->hourly()`.
 2. `BackupService::runBackup()` kjører `scripts/backup-production.sh`.
 3. Det scriptet krever `command -v docker` og kjører `docker compose exec -T postgres pg_dump`.
 4. Det finnes ingen docker CLI inne i containeren — smoke-scriptet bekrefter dette.
 5. Det finnes ingen compose-prosjekt å `exec` inn i fra en Container App.
 
-**Formildende, også verifisert:** oppgaven er opt-in via `backup_settings.backup_enabled`, som defaulter til `false`. En nyopprettet Azure-database starter derfor med backup av, og timesjobben er en no-op som logger «Backup is disabled. Skipping.»
+### Hvorfor `backup_enabled` ikke var nok
 
-**Risikoen er dermed presis:** hvis en eksisterende database med `backup_enabled = true` migreres til Azure, vil scheduleren feile hver time.
+Auditen avdekket at databaseflagget aldri beskyttet manuelle kjøringer. `runBackup()` kortsluttet kun
+når `$type === TYPE_SCHEDULED`:
 
-**Precondition før Azure-scheduleren aktiveres — én av disse må være sant:**
+```php
+if (! $setting->backup_enabled && $type === BackupRun::TYPE_SCHEDULED) { ... }
+```
 
-- `backup_settings.backup_enabled = false` i Azure-databasen, **eller**
-- `procynia:backup` er fjernet fra `routes/console.php`, **eller**
-- `BackupService` er skrevet om til Azure-native backup.
+En administrator som trykket «Kjør manuell backup» i Filament ville derfor startet
+`docker compose` uansett hva `backup_enabled` sto på. I tillegg kan en database migrert fra Compose
+ankomme Azure med `backup_enabled = true`.
 
-Smoke-scriptet sjekker punkt 1 og feiler hvis flagget er på. Denne oppgaven har **ikke** endret scheduler-logikken.
+Dette er to forskjellige spørsmål, og de må ikke blandes:
 
-Målarkitekturen er beskrevet i [`infra/README.md`](../infra/README.md): PostgreSQL automated backup med point-in-time restore (7 dager staging / 35 dager production), blob soft delete og versioning, og Azure Files soft delete.
+| Flagg | Spørsmål | Hvor |
+|---|---|---|
+| `backup_settings.backup_enabled` | Har en operatør slått på backup? | Database |
+| `procynia.backup.legacy_enabled` | Kan denne runtime kjøre mekanismen i det hele tatt? | Config |
 
----
+Runtime-guarden vinner alltid, og det er hele poenget med fixen.
+
+### Hvordan den er lukket
+
+Ny config-verdi `procynia.backup.legacy_enabled`, lest fra `PROCYNIA_LEGACY_BACKUP_ENABLED`.
+
+**Default er `true`.** En uspesifisert verdi betyr et eksisterende Compose-miljø, og å stoppe backup
+der i stillhet ville vært verre enn å kreve at Azure er eksplisitt. Azure er eksplisitt:
+`infra/main.bicep` har `param legacyBackupEnabled bool = false`, begge `.bicepparam` setter den
+eksplisitt til `false`, og verdien deles ut til **alle** containere — ikke bare scheduleren — fordi en
+manuell kjøring ellers kunne nå scriptet fra web eller en worker.
+
+Guarden ligger på tre nivåer:
+
+| Nivå | Effekt når deaktivert |
+|---|---|
+| `routes/console.php` | `procynia:backup` blir ikke registrert i scheduleren i det hele tatt |
+| `RunBackup` (`php artisan procynia:backup`) | Skriver en tydelig melding og returnerer exit 0 |
+| `BackupService::runBackup()` | Returnerer en `skipped` `BackupRun` og starter aldri prosessen — gjelder **alle** trigger-typer |
+
+`BackupService::evaluateStatus()` rapporterer i tillegg `legacy_backup_disabled` i stedet for
+`backup_overdue`/`no_scheduler_heartbeat`, slik at en migrert database med `backup_enabled = true`
+ikke gir falsk alarm i Azure. Filament-siden skjuler knappen for manuell backup og viser en `skipped`
+kjøring som advarsel, ikke som feil.
+
+### Hva som ikke er gjort
+
+Det er **ikke** bygget noen ny Laravel-basert backup-jobb for Azure. Scriptet er ikke fjernet, og
+eksisterende Compose-miljøer er uendret. Målarkitekturen står i [`infra/README.md`](../infra/README.md):
+Azure PostgreSQL automated backup med point-in-time restore (7 dager staging / 35 dager production),
+blob soft delete og versioning, og Azure Files soft delete.
+
+### Gjenværende backup-risiko i Azure
+
+| Risiko | Status |
+|---|---|
+| En Azure-container mangler `PROCYNIA_LEGACY_BACKUP_ENABLED` | Lav — IaC setter den på alle containere, og `SchedulerContractTest` sjekker det. Skulle den likevel mangle, faller den tilbake til `true` og en manuell kjøring ville feile med «docker: not found» — synlig, ikke stille |
+| Azure PostgreSQL PITR er ikke verifisert | Åpen — krever staging. Restore-øvelse er ikke gjennomført |
+| Ingen backup av Azure Files-innholdet utover soft delete | Åpen — akseptert i denne fasen; Blob med versioning er target state |
+| Restore-prosedyre for Azure er ikke skrevet | Åpen — `docs/operations/backup-restore.md` beskriver Compose-prosedyren |
 
 ## 6. Hva som ikke kan bevises før Azure staging
 
@@ -251,7 +297,10 @@ Kjør i denne rekkefølgen. Stopp ved første feil.
 24. Last opp en fil rett under 20 MB og bekreft at den går gjennom ingress (dekker gap 5).
 25. Bekreft at logger fra web, en worker og scheduleren dukker opp i Log Analytics (dekker gap 9).
 26. Bekreft at et OpenAI- og et Doffin-kall lykkes fra en worker (dekker gap 10).
-27. **Bekreft at `backup_settings.backup_enabled = false` før scheduleren har kjørt i en time** (seksjon 5).
+27. **Bekreft at `PROCYNIA_LEGACY_BACKUP_ENABLED=false` er satt på web, workers og scheduler**, og at
+    `php artisan procynia:backup` i en container svarer «Legacy Compose backup is disabled» (seksjon 5).
+28. Bekreft at Azure PostgreSQL point-in-time restore faktisk fungerer med en restore-øvelse mot en
+    engangsserver. Dette er den eneste gjenværende backup-risikoen som krever staging.
 
 ---
 

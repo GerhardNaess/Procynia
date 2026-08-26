@@ -22,7 +22,13 @@ if (config('doffin.watch_inbox_discovery_enabled')) {
 }
 
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
-Schedule::command('procynia:backup')->hourly()->withoutOverlapping();
+// Legacy Compose backup. Only scheduled where the runtime can actually execute it: the command ends
+// in scripts/backup-production.sh, which needs a Docker CLI and a Compose project. Azure Container
+// Apps has neither and sets PROCYNIA_LEGACY_BACKUP_ENABLED=false, where Azure PostgreSQL automated
+// backup and point-in-time restore apply instead. RunBackup and BackupService guard this too.
+if (config('procynia.backup.legacy_enabled')) {
+    Schedule::command('procynia:backup')->hourly()->withoutOverlapping();
+}
 Schedule::job(new OpsQueueHeartbeatJob('supplier-harvests'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('supplier-lookups'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('ai-requirements'))->everyMinute();
