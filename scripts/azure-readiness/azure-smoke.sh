@@ -325,15 +325,50 @@ fi
 # procynia:backup precondition
 # ---------------------------------------------------------------------------
 
-section "procynia:backup precondition for Azure"
+section "procynia:backup runtime guard"
 
 # scripts/backup-production.sh runs `docker compose exec -T postgres pg_dump`. There is no docker
-# CLI inside an Azure Container App, so this task must be disabled or replaced before the Azure
-# scheduler is switched on.
+# CLI inside an Azure Container App, which is why the legacy mechanism is gated behind an explicit
+# runtime guard rather than behind the database flag alone.
 if docker exec "${WORKER_CONTAINER}" sh -c 'command -v docker' >/dev/null 2>&1; then
     fail "a docker CLI is present in the container — unexpected, re-check the backup assumption"
 else
     pass "no docker CLI inside the container, confirming procynia:backup cannot work in Azure"
+fi
+
+# The guard itself: with PROCYNIA_LEGACY_BACKUP_ENABLED=false the scheduler must not register the
+# backup command, no matter what backup_settings.backup_enabled says.
+GUARD_RESULT="$(docker exec \
+    -e PROCYNIA_LEGACY_BACKUP_ENABLED=false \
+    "${APP_CONTAINER}" php -r '
+require "/var/www/html/vendor/autoload.php";
+$app = require "/var/www/html/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$scheduled = false;
+foreach ($app->make(Illuminate\Console\Scheduling\Schedule::class)->events() as $event) {
+    if (str_contains((string) $event->command, "procynia:backup")) { $scheduled = true; }
+}
+printf("%s|%s", config("procynia.backup.legacy_enabled") ? "enabled" : "disabled", $scheduled ? "scheduled" : "not-scheduled");
+' 2>/dev/null || echo "ERROR|ERROR")"
+
+if [ "${GUARD_RESULT}" = "disabled|not-scheduled" ]; then
+    pass "with PROCYNIA_LEGACY_BACKUP_ENABLED=false the scheduler does not register procynia:backup"
+else
+    fail "runtime guard did not take effect (got [${GUARD_RESULT}], expected [disabled|not-scheduled])"
+fi
+
+# And the default must still preserve existing Compose behaviour.
+DEFAULT_RESULT="$(docker exec "${APP_CONTAINER}" php -r '
+require "/var/www/html/vendor/autoload.php";
+$app = require "/var/www/html/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+echo config("procynia.backup.legacy_enabled") ? "enabled" : "disabled";
+' 2>/dev/null || echo ERROR)"
+
+if [ "${DEFAULT_RESULT}" = "enabled" ]; then
+    pass "this Compose runtime still permits the legacy backup (existing behaviour unchanged)"
+else
+    skip "this runtime reports legacy backup [${DEFAULT_RESULT}] — expected 'enabled' in Compose"
 fi
 
 BACKUP_ENABLED="$(docker exec "${POSTGRES_CONTAINER}" psql -U gehard -d "${TEST_DATABASE}" -tAc \
@@ -341,11 +376,12 @@ BACKUP_ENABLED="$(docker exec "${POSTGRES_CONTAINER}" psql -U gehard -d "${TEST_
 
 case "${BACKUP_ENABLED}" in
     f|false)
-        pass "backup_enabled is false in ${TEST_DATABASE}: the hourly task is a no-op"
+        pass "backup_enabled is false in ${TEST_DATABASE}"
         ;;
     t|true)
-        fail "backup_enabled is TRUE. Disable it, or replace procynia:backup with Azure-native backup,"
-        note "before enabling the Azure scheduler — otherwise it will fail hourly in Container Apps."
+        # No longer a failure: the runtime guard above stops the Compose script regardless of this
+        # flag, which is exactly the migrated-database case it was built for.
+        pass "backup_enabled is true, and the runtime guard above is what keeps that safe in Azure"
         ;;
     *)
         skip "could not read backup_settings (${BACKUP_ENABLED})"

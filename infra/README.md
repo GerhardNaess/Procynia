@@ -313,11 +313,10 @@ RBAC-propagering kan ta et halvt minutt; får du 403 rett etter fase 1, prøv ig
 - **`CREATE EXTENSION vector`.** Kjøres av Laravel-migreringen, ikke av Bicep.
 - **Datamigrering og filmigrering.** Punkt 11 og 12.
 - **DNS og custom domain.** Container Apps default-hostname brukes.
-- **`procynia:backup`.** `routes/console.php` kjører `Schedule::command('procynia:backup')->hourly()`.
-  Det er en container-lokal backup laget for Compose-oppsettet, og skal deaktiveres
-  eller erstattes før scheduleren kjører i Azure. Azure-native PostgreSQL-backup med
-  point-in-time restore, blob soft delete/versioning og Azure Files soft delete er
-  målarkitekturen. Denne oppgaven endrer ikke scheduler-logikken.
+- **Ny Laravel-basert backup-jobb for Azure.** Det finnes ingen, og det skal ikke lages en.
+  Backup i Azure er PostgreSQL automated backup med point-in-time restore
+  (`postgresBackupRetentionDays`: 7 dager staging / 35 dager production), blob soft delete og
+  versioning, og Azure Files soft delete — alt konfigurert deklarativt i denne Bicep-en.
 - **Private endpoints / VNet / Front Door / WAF.** Se «Nettverk» under.
 - **App Insights-instrumentering.** Komponenten opprettes, men ingenting i
   applikasjonen rapporterer til den ennå.
@@ -352,6 +351,32 @@ Bicep bygger ingen images. To repositories forventes i ACR:
 Alle env-variabler og secrets settes av Container Apps. Imaget skal ikke inneholde
 en `.env` med miljøverdier.
 
+### Legacy Compose-backup er deaktivert i Azure
+
+`procynia:backup` kjøres fra Laravel-scheduleren og ender i `scripts/backup-production.sh`, som kjører
+`docker compose exec -T postgres pg_dump`. Container Apps har verken Docker CLI eller et
+compose-prosjekt, så mekanismen kan ikke fungere her.
+
+Den er derfor slått av med en eksplisitt applikasjonskontrakt, ikke med heuristikk:
+
+```
+PROCYNIA_LEGACY_BACKUP_ENABLED=false
+```
+
+Verdien settes av `param legacyBackupEnabled` (default `false`), og er en del av den **delte**
+env-var-kontrakten — altså satt på web, alle workers og scheduleren. Grunnen til at den ikke bare
+settes på scheduleren: en manuell `php artisan procynia:backup`, eller knappen «Kjør manuell backup» i
+admin-panelet, ville ellers nådd scriptet fra hvilken som helst container.
+
+Dette er bevisst **ikke** det samme som `backup_settings.backup_enabled` i databasen. Det flagget sier
+om en operatør har slått på backup; dette sier om runtime i det hele tatt kan kjøre mekanismen. En
+database migrert fra Compose kan ankomme Azure med `backup_enabled = true`, og runtime-guarden stopper
+den uansett.
+
+Utenfor Azure er default `true`, slik at eksisterende Compose-miljøer er uendret.
+
+Se `docs/azure-migration-test-readiness.md` seksjon 5 for verifiseringen.
+
 ### Runtime env-var-kontrakt
 
 Settes på web, alle workers og scheduler:
@@ -369,6 +394,7 @@ TZ=Europe/Oslo
 PDFTOTEXT_BINARY, PDFTOHTML_BINARY, PDFIMAGES_BINARY, PDFINFO_BINARY  (/usr/bin/...)
 DOFFIN_BASE_URL, DOFFIN_SCHEDULED_IMPORT_ENABLED, DOFFIN_WATCH_INBOX_DISCOVERY_ENABLED
 ENTERPRISE_WIKI_AI_ENABLED
+PROCYNIA_LEGACY_BACKUP_ENABLED=false  (se eget avsnitt over)
 PROCYNIA_ROLE  (web | queue-worker | scheduler)
 ```
 

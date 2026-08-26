@@ -101,6 +101,9 @@ class BackupRecovery extends Page
                 ->label((string) __('procynia.backup_recovery.actions.manual_backup'))
                 ->icon(Heroicon::OutlinedArrowDownTray)
                 ->color('primary')
+                // Not offered where the runtime cannot execute the Compose script. BackupService
+                // refuses it regardless; this just avoids showing a button that cannot work.
+                ->visible(fn (): bool => app(BackupService::class)->legacyBackupIsSupported())
                 ->requiresConfirmation()
                 ->modalHeading((string) __('procynia.backup_recovery.actions.manual_heading'))
                 ->modalDescription((string) __('procynia.backup_recovery.actions.manual_description'))
@@ -157,6 +160,13 @@ class BackupRecovery extends Page
                 Notification::make()
                     ->title((string) __('procynia.backup_recovery.messages.manual_success'))
                     ->success()
+                    ->send();
+            } elseif ($run->status === BackupRun::STATUS_SKIPPED) {
+                // Nothing ran and nothing broke — reporting this in red would be wrong.
+                Notification::make()
+                    ->title((string) __('procynia.backup_recovery.messages.manual_skipped'))
+                    ->body(Str::limit((string) ($run->error_message ?? ''), 300))
+                    ->warning()
                     ->send();
             } else {
                 Notification::make()

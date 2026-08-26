@@ -8,11 +8,20 @@ use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Symfony\Component\Process\Process;
 use Throwable;
 
 class BackupService
 {
+    /**
+     * Recorded on a BackupRun that was skipped because this runtime does not support the legacy
+     * Compose mechanism. Not an error: the run never started.
+     */
+    public const LEGACY_DISABLED_REASON = 'Legacy Compose backup is disabled for this runtime (PROCYNIA_LEGACY_BACKUP_ENABLED=false). Azure PostgreSQL automated backup and point-in-time restore apply instead.';
+
+    public function __construct(
+        private readonly LegacyBackupProcessRunner $processRunner = new LegacyBackupProcessRunner,
+    ) {}
+
     public function getSetting(): BackupSetting
     {
         $setting = BackupSetting::first();
@@ -24,9 +33,25 @@ class BackupService
         return $setting;
     }
 
+    /**
+     * Has an operator switched backup on? This is the database flag, and it says nothing about
+     * whether this runtime can actually execute a backup.
+     */
     public function isEnabled(): bool
     {
         return $this->getSetting()->backup_enabled;
+    }
+
+    /**
+     * Does this runtime support the legacy Compose backup mechanism at all?
+     *
+     * Separate from isEnabled() on purpose: a database migrated to Azure can carry
+     * backup_enabled = true, and this guard has to stop the Compose script regardless.
+     * See config/procynia.php for the full rationale.
+     */
+    public function legacyBackupIsSupported(): bool
+    {
+        return (bool) config('procynia.backup.legacy_enabled', true);
     }
 
     public function enableBackup(User $user): void
@@ -64,6 +89,27 @@ class BackupService
      */
     public function runBackup(string $type = BackupRun::TYPE_SCHEDULED, ?User $user = null): BackupRun
     {
+        // The runtime guard comes first, and applies to every trigger type. The database flag below
+        // only short-circuits scheduled runs, so without this a manual backup from the admin panel
+        // would still shell out to `docker compose` in a runtime that has no Docker.
+        if (! $this->legacyBackupIsSupported()) {
+            Log::info('[Procynia][Backup] Legacy Compose backup is disabled for this runtime. Skipping.', [
+                'type' => $type,
+                'triggered_by_user_id' => $user?->id,
+            ]);
+
+            return BackupRun::create([
+                'type' => $type,
+                'status' => BackupRun::STATUS_SKIPPED,
+                'started_at' => now(),
+                'finished_at' => now(),
+                'duration_seconds' => 0,
+                'error_message' => self::LEGACY_DISABLED_REASON,
+                'triggered_by' => $user !== null ? ($user->name ?: 'admin') : 'runtime-guard',
+                'triggered_by_user_id' => $user?->id,
+            ]);
+        }
+
         $setting = $this->getSetting();
 
         if (! $setting->backup_enabled && $type === BackupRun::TYPE_SCHEDULED) {
@@ -95,15 +141,7 @@ class BackupService
         try {
             $scriptPath = base_path('scripts/backup-production.sh');
 
-            $process = new Process(
-                ['bash', $scriptPath, $directory],
-                base_path(),
-                null,
-                null,
-                600,
-            );
-
-            $process->run();
+            $process = $this->processRunner->run($scriptPath, $directory, base_path());
 
             $finished = now();
             $duration = (int) max(0, $run->started_at->diffInSeconds($finished));
@@ -248,7 +286,12 @@ class BackupService
 
             $warnings = [];
 
-            if (! $setting->backup_enabled) {
+            if (! $this->legacyBackupIsSupported()) {
+                // A database migrated to Azure can still carry backup_enabled = true. Reporting it as
+                // "overdue" or "no heartbeat" would be misleading: nothing is broken, this runtime
+                // simply does not run the legacy mechanism. Say that once, and say nothing else.
+                $warnings[] = 'legacy_backup_disabled';
+            } elseif (! $setting->backup_enabled) {
                 $warnings[] = 'backup_stopped';
             } else {
                 if ($noHeartbeat) {
@@ -272,6 +315,7 @@ class BackupService
 
             return [
                 'enabled' => $setting->backup_enabled,
+                'legacy_backup_supported' => $this->legacyBackupIsSupported(),
                 'directory' => $directory,
                 'directory_exists' => $directoryExists,
                 'last_success_at' => $lastSuccessAt?->toIso8601String(),
@@ -287,6 +331,7 @@ class BackupService
         } catch (Throwable) {
             return [
                 'enabled' => false,
+                'legacy_backup_supported' => $this->legacyBackupIsSupported(),
                 'directory' => '',
                 'directory_exists' => false,
                 'last_success_at' => null,

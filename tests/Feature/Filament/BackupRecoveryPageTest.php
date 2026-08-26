@@ -171,11 +171,30 @@ class BackupRecoveryPageTest extends TestCase
             'ok' => true,
         ]);
         $mock->shouldReceive('listBackupFiles')->andReturn([]);
+        // The manual action is only offered where the runtime can execute the Compose script.
+        $mock->shouldReceive('legacyBackupIsSupported')->andReturn(true);
         $mock->shouldReceive('runBackup')->with(BackupRun::TYPE_MANUAL, \Mockery::any())->andReturn($fakeRun);
 
         Livewire::actingAs($admin)
             ->test(BackupRecovery::class)
             ->callAction('manualBackup');
+    }
+
+    /**
+     * In a runtime that cannot execute the legacy Compose script — Azure Container Apps — the manual
+     * backup button must not be offered. BackupService refuses the run regardless; this keeps the
+     * admin panel from showing an action that cannot work.
+     */
+    public function test_manual_backup_action_is_hidden_when_the_runtime_cannot_run_the_legacy_backup(): void
+    {
+        $admin = $this->internalAdmin();
+
+        config(['procynia.backup.legacy_enabled' => false]);
+
+        Livewire::actingAs($admin)
+            ->test(BackupRecovery::class)
+            ->assertActionHidden('manualBackup')
+            ->assertActionVisible('refresh');
     }
 
     public function test_backup_service_enable_disable_persists(): void

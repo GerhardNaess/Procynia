@@ -18,6 +18,17 @@ class RunBackup extends Command
         try {
             $service->registerSchedulerHeartbeat();
 
+            // Defence in depth. routes/console.php already declines to schedule this command when the
+            // legacy mechanism is unsupported, but `php artisan procynia:backup` can be run by hand.
+            // Without this, a manual invocation inside an Azure container would reach the Compose
+            // script. Skipping is a controlled outcome, not a failure, so the exit code stays 0.
+            if (! $service->legacyBackupIsSupported()) {
+                $this->line('[Procynia][Backup] Legacy Compose backup is disabled for this runtime. Skipping.');
+                $this->line('[Procynia][Backup] Azure PostgreSQL automated backup and point-in-time restore apply instead.');
+
+                return self::SUCCESS;
+            }
+
             if (! $service->isEnabled()) {
                 $this->line('[Procynia][Backup] Backup is disabled. Skipping.');
 

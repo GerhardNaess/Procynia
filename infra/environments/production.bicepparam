@@ -94,6 +94,11 @@ param logLevel = 'info'
 param mailMailer = 'log'
 param filesystemDisk = 'local'
 param enterpriseWikiAiEnabled = false
+// The legacy Compose backup can never work in Container Apps: no Docker CLI, no Compose
+// project. Azure PostgreSQL automated backup and point-in-time restore apply instead
+// (see postgresBackupRetentionDays above). This also protects a database migrated from
+// Compose that still carries backup_settings.backup_enabled = true.
+param legacyBackupEnabled = false
 param doffinScheduledImportEnabled = true
 param doffinWatchInboxDiscoveryEnabled = true
 param doffinBaseUrl = 'https://api.doffin.no'

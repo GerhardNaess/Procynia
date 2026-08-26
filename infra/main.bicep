@@ -283,6 +283,9 @@ param filesystemDisk string = 'local'
 @description('ENTERPRISE_WIKI_AI_ENABLED.')
 param enterpriseWikiAiEnabled bool = false
 
+@description('PROCYNIA_LEGACY_BACKUP_ENABLED. The legacy backup command ends in scripts/backup-production.sh, which runs "docker compose exec -T postgres pg_dump". Container Apps has no Docker CLI and no Compose project, so this stays false in every Azure environment: Azure PostgreSQL automated backup and point-in-time restore replace it. Set on every container, not just the scheduler, because a manual "php artisan procynia:backup" would otherwise reach the script from any of them.')
+param legacyBackupEnabled bool = false
+
 @description('DOFFIN_SCHEDULED_IMPORT_ENABLED.')
 param doffinScheduledImportEnabled bool = false
 
@@ -681,6 +684,10 @@ var sharedEnvironmentVariables = [
     name: 'ENTERPRISE_WIKI_AI_ENABLED'
     value: string(enterpriseWikiAiEnabled)
   }
+  {
+    name: 'PROCYNIA_LEGACY_BACKUP_ENABLED'
+    value: string(legacyBackupEnabled)
+  }
 ]
 
 var resolvedWebImage = empty(webImage)
@@ -766,6 +773,9 @@ output postgresAdministratorLogin string = postgres.outputs.administratorLogin
 
 @description('Extensions allowed at server level. "vector" still has to be created by a migration.')
 output postgresAllowedExtensions string = postgresAllowedExtensions
+
+@description('Whether the legacy Compose backup command is permitted in this environment. Always false in Azure; backup is Azure PostgreSQL automated backup plus point-in-time restore.')
+output legacyBackupEnabled bool = legacyBackupEnabled
 
 @description('Azure Managed Redis hostname.')
 output redisHostName string = redis.outputs.hostName
