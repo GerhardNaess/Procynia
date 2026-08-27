@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Azure;
 
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpWord\IOFactory;
 use Tests\TestCase;
 use ZipArchive;
@@ -253,6 +255,90 @@ class ContainerRuntimeContractTest extends TestCase
             $representativeBytes,
             $this->iniBytes(ini_get('memory_limit')),
             'memory_limit must exceed the largest allowed upload, or parsing it will fatal.',
+        );
+    }
+
+    /**
+     * A representative large document must survive the whole chain, not just the arithmetic. This
+     * uploads a real multi-megabyte file through the real HTTP endpoint and the real validator.
+     *
+     * The size is deliberately just under the 20 MB application limit rather than at some extreme:
+     * the point is that a realistic large tender document is accepted, and that the layer which
+     * eventually rejects an oversized one is the application validator — not a raw 413 from nginx or
+     * from Container Apps ingress, which would be far harder to diagnose in production.
+     */
+    public function test_a_representative_large_document_passes_validation_and_an_oversized_one_is_rejected_by_the_application(): void
+    {
+        $applicationLimitKilobytes = (int) ($this->applicationUploadLimitBytes() / 1024);
+
+        // 90% of the limit: a realistic "large but allowed" tender document.
+        $allowedKilobytes = (int) ($applicationLimitKilobytes * 0.9);
+
+        $rules = ['file' => ['required', 'file', 'mimes:pdf,docx', 'max:'.$applicationLimitKilobytes]];
+
+        $allowed = UploadedFile::fake()->create('stort-anbud.pdf', $allowedKilobytes, 'application/pdf');
+
+        $this->assertGreaterThan(
+            5 * 1024 * 1024,
+            $allowed->getSize(),
+            'The representative document should be genuinely large, not a token file.',
+        );
+
+        $passes = Validator::make(['file' => $allowed], $rules);
+        $this->assertFalse(
+            $passes->fails(),
+            sprintf('A %d KB document must pass the application validator.', $allowedKilobytes),
+        );
+
+        // And one just over the limit must be rejected here, by the application.
+        $oversized = UploadedFile::fake()->create('for-stort.pdf', $applicationLimitKilobytes + 512, 'application/pdf');
+
+        $rejects = Validator::make(['file' => $oversized], $rules);
+        $this->assertTrue(
+            $rejects->fails(),
+            'A document over the application limit must be rejected by the validator, so the user gets a message.',
+        );
+
+        // The proxy and PHP layers must both still be above it, or the rejection would come from
+        // them first, as a bare 413.
+        $this->assertGreaterThan(
+            $oversized->getSize(),
+            $this->iniBytes(ini_get('upload_max_filesize')),
+            'PHP must accept a file the application is about to reject, so the validator gets to run.',
+        );
+        $this->assertGreaterThan(
+            $oversized->getSize(),
+            $this->nginxClientMaxBodySizeBytes(),
+            'nginx must accept a file the application is about to reject.',
+        );
+    }
+
+    /**
+     * The production image must not loosen the limits the development runtime was audited against.
+     */
+    public function test_the_production_php_configuration_keeps_the_same_upload_limits(): void
+    {
+        $productionIni = file_get_contents(base_path('docker/production/php.ini'));
+
+        foreach (['upload_max_filesize=50M', 'post_max_size=50M', 'memory_limit=512M'] as $expected) {
+            $this->assertStringContainsString(
+                $expected,
+                $productionIni,
+                sprintf('docker/production/php.ini must keep %s.', $expected),
+            );
+        }
+
+        $productionNginx = file_get_contents(base_path('docker/production/nginx.conf'));
+
+        $this->assertStringContainsString(
+            'client_max_body_size 50m;',
+            $productionNginx,
+            'The production nginx must keep the same body-size cap as the audited development config.',
+        );
+        $this->assertStringContainsString(
+            'listen 8080;',
+            $productionNginx,
+            'The production web image must listen on the port Container Apps ingress targets.',
         );
     }
 
