@@ -124,9 +124,16 @@ class QueueSchedulerHealthTest extends TestCase
         $heartbeatJobs = array_values(array_filter($tasks, static fn ($task): bool => ($task['command'] ?? null) === 'App\\Jobs\\OpsQueueHeartbeatJob'));
 
         // One per queue a dedicated Docker worker service actually listens on (see
-        // docker-compose.yml): supplier-harvests, supplier-lookups, ai-requirements,
-        // enterprise-wiki, enterprise-wiki-reconciliation, enterprise-wiki-pages, default.
-        $this->assertCount(7, $heartbeatJobs);
+        // docker-compose.yml): default, supplier-harvests, supplier-lookups, ai-requirements,
+        // enterprise-wiki, enterprise-wiki-reconciliation, enterprise-wiki-claim-verification,
+        // enterprise-wiki-maintainer-batches, enterprise-wiki-pages.
+        //
+        // This count was 7 and had fallen behind: the claim-verification and maintainer-batches
+        // workers were added later without updating it. In Azure a queue with no heartbeat is a
+        // queue whose worker liveness cannot be observed at all, because Container Apps probes
+        // cannot run `php artisan`. Tests\Feature\Azure\QueueTopologyContractTest asserts the same
+        // nine queues from the other direction — job classes, Compose and the Bicep worker array.
+        $this->assertCount(9, $heartbeatJobs);
     }
 
     public function test_endpoint_requires_token_and_returns_403_without_it(): void

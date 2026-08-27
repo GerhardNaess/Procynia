@@ -1,11 +1,55 @@
+# Build context exclusions.
+#
+# Two rules are load-bearing for the production images:
+#
+#   * .env must never enter the image. Configuration arrives as container environment variables;
+#     a baked .env would silently win over a Key Vault secret for any value the platform does not set.
+#   * public/build and node_modules must never enter the image. The frontend is built inside the
+#     build (see docker/production/Dockerfile), so a stale or macOS-specific host artifact cannot leak
+#     into a Linux image.
+#
+# storage/ is excluded and recreated in the Dockerfile: the writable tree belongs to the runtime, and
+# storage/app is an Azure Files mount point at runtime anyway.
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Local-only working directories that must never be shipped or committed
+.claude
+backups
+recovery-backups
+
+# Dependencies — resolved inside the build
+node_modules
+vendor
+
+# Runtime state — recreated by the Dockerfile and the entrypoint
+storage
+bootstrap/cache
+
+# Frontend output — rebuilt inside the build
+public/build
+public/hot
+
+# Developer tooling and metadata
 .git
+.github
 .idea
 .vscode
 .DS_Store
-.env
-node_modules
-vendor
-storage
-public/build
-public/hot
+.editorconfig
+.phpunit.result.cache
+phpunit.xml
+playwright.config.cjs
+
+# Not part of the runtime
+tests
+docs
+infra
+deployment
+scripts/azure-readiness
+
+# Logs
 *.log

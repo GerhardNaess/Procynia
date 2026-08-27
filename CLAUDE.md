@@ -54,12 +54,12 @@ Typical users are bid managers, sellers, presales resources, technical contribut
 
 ## Stack
 
-- **Backend**: Laravel 13, PHP 8.3
+- **Backend**: Laravel 13, PHP 8.4 (`docker/php/Dockerfile` builds on `php:8.4-fpm-bookworm`; the running container reports 8.4.23. `composer.json` still allows `^8.3`, but no supported runtime uses it.)
 - **Frontend**: Inertia.js + React 19 + Tailwind CSS 4
 - **Admin panel**: Filament 5 (internal admin only, at `/admin`)
-- **Database**: PostgreSQL 14.14 (Homebrew, local). Embeddings are stored as `json` in `knowledge_item_chunks.embedding_vector` — pgvector is not installed and not currently in use despite being mentioned in `docs/readme-ai.md`.
+- **Database**: PostgreSQL 16 (`pgvector/pgvector:0.8.2-pg16` in `docker-compose.yml`). pgvector **is** installed and in use: `database/migrations/2026_05_21_000001_add_pgvector_embedding_column_to_knowledge_item_chunks_table.php` creates the `vector` extension and adds `knowledge_item_chunks.embedding_vector_pgvector vector(1536)` with an ivfflat index. The older `json` column `embedding_vector` still exists alongside it. In Azure the extension must be allowlisted server-side via `azure.extensions=VECTOR` before the migration can create it — see `infra/README.md`.
 - **AI**: OpenAI API via `app/Services/OpenAi/OpenAiClient.php`. Model split: `gpt-4.1-mini` for extraction/metadata/classification, `gpt-5` for answer draft generation.
-- **Queue**: Named queues — `ai-requirements`, `default`, `supplier-harvests`
+- **Queue**: Nine named queues, each with a dedicated worker in `docker-compose.yml`: `default`, `supplier-harvests`, `supplier-lookups`, `ai-requirements`, `enterprise-wiki`, `enterprise-wiki-reconciliation`, `enterprise-wiki-claim-verification`, `enterprise-wiki-maintainer-batches`, `enterprise-wiki-pages`. Each worker sets its own `REDIS_QUEUE_RETRY_AFTER`, which is why they cannot be consolidated. `tests/Feature/Azure/QueueTopologyContractTest.php` keeps the job classes, Compose and the Azure IaC in agreement.
 
 ## Commands
 
