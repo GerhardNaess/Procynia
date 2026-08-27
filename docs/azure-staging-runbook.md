@@ -13,6 +13,94 @@ Forutsetninger: [`infra/README.md`](../infra/README.md) og
 
 ---
 
+## GO / NO-GO før første `--apply`
+
+Alt under må være **GO** før `./infra/deploy.sh staging --apply` kjøres for første gang. Ett eneste
+NO-GO betyr NO-GO for hele deployen — ikke «vi tar det etterpå».
+
+Status per **2026-08-27**. Oppdater kolonnen når hvert punkt faktisk er verifisert.
+
+### Azure-side — krever tenant og subscription
+
+| # | Krav | Hvordan verifisere | Status |
+|---|---|---|---|
+| A1 | Azure tenant opprettet/identifisert | `docs/azure-bootstrap.md` §1 | **NO-GO** — finnes ikke ennå |
+| A2 | Subscription opprettet og valgt eksplisitt | `check-azure-context.sh` | **NO-GO** — blokkert av A1 |
+| A3 | Billing aktiv (`state: Enabled`) | `check-azure-context.sh` | **NO-GO** — blokkert av A2 |
+| A4 | Azure CLI + Bicep installert | `az version`, `az bicep version` | **NO-GO** — `az` er ikke installert lokalt |
+| A5 | Ni resource providers registrert | `check-azure-context.sh` | **NO-GO** — blokkert av A2 |
+| A6 | Owner, eller Contributor + User Access Administrator | `check-azure-context.sh` | **NO-GO** — blokkert av A2 |
+| A7 | Region kontrollert og tjenester tilgjengelige der | `verify-azure-prerequisites.sh` | **NO-GO** — blokkert av A2 |
+| A8 | PostgreSQL `Standard_B1ms` + v16 tilgjengelig i regionen | `verify-azure-prerequisites.sh` | **NO-GO** — blokkert av A2 |
+| A9 | Managed Redis `Balanced_B0` tilgjengelig i regionen | `verify-azure-prerequisites.sh` + what-if | **NO-GO** — blokkert av A2 |
+| A10 | Azure-side template validate PASS | `./infra/deploy.sh staging` | **NO-GO** — blokkert av A2 |
+| A11 | What-if gjennomgått og godkjent | `./infra/deploy.sh staging` | **NO-GO** — blokkert av A2 |
+
+### Lokal side — verifisert
+
+| # | Krav | Hvordan verifisert | Status |
+|---|---|---|---|
+| L1 | Bicep bygger, begge miljøfiler | `./infra/validate.sh` | **GO** |
+| L2 | Container Apps CPU/minne-par gyldige for Azure | `ContainerAppsSizingContractTest` | **GO** |
+| L3 | Container App-navn innenfor 32 tegn | samme | **GO** |
+| L4 | Replica-kontrakt: scheduler = 1, ingen worker på 0 | samme | **GO** |
+| L5 | `terminationGracePeriodSeconds` ≤ 600 | samme | **GO** |
+| L6 | Ingress-port = porten web-imaget lytter på (8080) | samme | **GO** |
+| L7 | Storage mount path konsistent IaC ↔ image ↔ entrypoint | samme | **GO** |
+| L8 | ACR pull og secrets via managed identity, ingen lagrede credentials | samme | **GO** |
+| L9 | Health probes mot `/up` | samme | **GO** |
+| L10 | Production-images bygget | `production-image-smoke.sh` | **GO** |
+| L11 | Runtime smoke 30/30 grønn | `production-image-smoke.sh` | **GO** |
+| L12 | Legacy backup deaktivert i Azure-parametrene | `SchedulerContractTest` | **GO** |
+| L13 | Køtopologi konsistent job ↔ Compose ↔ Bicep | `QueueTopologyContractTest` | **GO** |
+| L14 | Secrets-inventar klart (hvilke, ikke verdiene) | denne seksjonen, under | **GO** |
+| L15 | Migration job-plan klar | Fase 5 | **GO** |
+| L16 | Storage copy-plan klar | Fase 6 | **GO** |
+| L17 | Rollback-plan godkjent | [Rollback](#rollback) | **GO** — mangler formell godkjenning |
+| L18 | Kostnadsestimat gjennomgått | `docs/azure-staging-cost-estimate.md` | **GO** |
+
+### Samlet status: **NO-GO**
+
+Eneste blocker er at det ikke finnes en Azure tenant/subscription ennå. Alt som kan verifiseres uten
+Azure er verifisert.
+
+Så snart A1–A3 er på plass, kjøres A4–A11 i rekkefølge. Ingen kodeendring kreves for å komme videre.
+
+---
+
+## Secrets-inventar
+
+Hvilke secrets som må finnes. **Verdiene skal aldri stå i dette repoet, i en `.bicepparam`, eller i
+terminalhistorikk som beholdes.**
+
+### Må finnes før workloads deployes (fase 7)
+
+| Key Vault-secret | Kilde | Uten den |
+|---|---|---|
+| `APP-KEY` | `php artisan key:generate --show` | Sesjoner og krypterte kolonner virker ikke |
+| `DB-PASSWORD` | `PROCYNIA_PG_ADMIN_PASSWORD` — **legges inn av Bicep** | PostgreSQL kan ikke opprettes i det hele tatt |
+| `REDIS-URL` | **legges inn av Bicep** fra Redis-nøkkelen | Ingen kø, cache eller sesjon |
+| `OPENAI-API-KEY` | Eksisterende OpenAI-konto | All AI-funksjonalitet feiler (nødvendig hvis fase 9.9 skal kjøres) |
+| `DOFFIN-API-KEY` | Eksisterende Doffin-tilgang | Doffin-import feiler (nødvendig hvis Doffin skal testes) |
+| `PROCYNIA-HEALTH-TOKEN` | `openssl rand -hex 32` | `/health/*` og `/ops/health/*` svarer 503, så fase 8.6–8.7 kan ikke kjøres |
+
+To av seks provisjoneres av Bicep selv. De fire andre settes med `az keyvault secret set` i fase 3.
+
+### Senere — bevisst utsatt
+
+| Secret | Slås på med |
+|---|---|
+| `STRIPE-KEY`, `STRIPE-SECRET`, `STRIPE-WEBHOOK-SECRET` | `includeStripeSecrets = true` når fakturering faktisk bygges |
+| `MAIL-USERNAME`, `MAIL-PASSWORD` | `includeMailSecrets = true` når en reell mailer erstatter `MAIL_MAILER=log` |
+
+Begge er `false` i dag. Container Appene refererer ikke secrets som ikke er slått på, så en manglende
+Stripe-secret kan ikke velte en deploy.
+
+**APP-KEY skrives ned ett trygt sted.** Mistes den, er alle krypterte kolonner tapt — den kan ikke
+regenereres uten datatap, og applikasjonen genererer den aldri automatisk.
+
+---
+
 ## Fase 1 — Azure-forutsetninger
 
 | # | Handling | Forventet | STOPP hvis |
