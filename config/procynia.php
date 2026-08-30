@@ -172,6 +172,56 @@ return [
             'max_attempts' => 5,
             'decay_seconds' => 60,
         ],
+
+        /*
+         * Microsoft Entra ID / SSO.
+         *
+         * Two independent switches, deliberately not one mode enum. A customer migrating to SSO
+         * needs a window where both work, and Procynia must keep supporting customers who have no
+         * Entra tenant at all.
+         *
+         *   entra_enabled = false, local_login_enabled = true   today's behaviour, local dev
+         *   entra_enabled = true,  local_login_enabled = true   migration window
+         *   entra_enabled = true,  local_login_enabled = false  SSO only
+         *   entra_enabled = false, local_login_enabled = false  refused — see below
+         *
+         * Turning both off would lock everyone out, so App\Services\Auth\EntraConfig treats that
+         * as a configuration error rather than silently applying it.
+         *
+         * Neither is derived from app()->environment(): production must be able to run either mode,
+         * and a developer must be able to exercise the Entra path locally against a test tenant.
+         */
+        'entra_enabled' => (bool) env('AUTH_ENTRA_ENABLED', false),
+        'local_login_enabled' => (bool) env('AUTH_LOCAL_LOGIN_ENABLED', true),
+
+        'entra' => [
+            /*
+             * The client secret. The only secret here — tenant id, client id and issuer are
+             * configuration and live in the identity_providers table.
+             *
+             * Read through config rather than env() at the point of use, so a Key Vault or other
+             * secret injector can supply it later without touching the OIDC code.
+             */
+            'client_secret' => env('AUTH_ENTRA_CLIENT_SECRET'),
+
+            /*
+             * Absolute callback URL registered in the Entra app registration. Must be HTTPS outside
+             * local development; RuntimePreflightService enforces that.
+             */
+            'redirect_uri' => env('AUTH_ENTRA_REDIRECT_URI'),
+
+            /*
+             * openid: authenticate at all. profile: display name. email: the address used for the
+             * one-time linking decision. Nothing beyond that — Procynia reads no directory data and
+             * calls no Graph endpoint, so a wider scope would be permission it never uses.
+             */
+            'scopes' => ['openid', 'profile', 'email'],
+
+            /*
+             * Clock skew allowed when validating `exp`/`nbf`, in seconds. Small on purpose.
+             */
+            'leeway_seconds' => 60,
+        ],
     ],
 
     'backup' => [

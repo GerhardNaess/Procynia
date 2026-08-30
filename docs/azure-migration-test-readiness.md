@@ -313,3 +313,23 @@ Sagt rett ut, slik at ingen leser mer trygghet inn i den enn den gir:
 - `RedisManager`-testene beviser at Laravel tolker en `tls://`-URL riktig. De beviser ingenting om Azure Managed Redis.
 - Databaseskrivingen i `SharedStorageHandoffTest` skjer i testprosessen, ikke i worker-prosessen, fordi suiten kjører i en `RefreshDatabase`-transaksjon som en barneprosess ikke kan se. Det som verifiseres på tvers av prosesser er **filsystemet**, som er det Azure Files faktisk endrer.
 - Restart-testene er opt-in og kjøres ikke som standard, fordi de avbryter det lokale utviklingsmiljøet.
+
+---
+
+## Entra ID / SSO
+
+Implementert som applikasjonsfunksjonalitet, uavhengig av Azure-infrastrukturen — se
+[`docs/operations/entra-sso.md`](operations/entra-sso.md).
+
+| Forhold | Status |
+|---|---|
+| OIDC Authorization Code + token-validering | **BEVIST** — `tests/Feature/Security/EntraAuthenticationTest.php` (25 tester, ingen eksterne kall) |
+| Kundeisolasjon på tvers av tenants | **BEVIST** — provider utledes fra signert `tid`; kunde re-verifiseres ved hver innlogging |
+| Procynia eier roller/autorisasjon | **BEVIST** — claims med `roles`/`groups`/`wids` gir ingenting |
+| Lokal utvikling uten Azure | **BEVIST** — Entra av som standard; E2E og lokal innlogging grønn |
+| App-registrering i en ekte tenant | **GJENSTÅR** — krever tenant, client secret og registrert redirect-URI |
+
+Det eneste som gjenstår før produksjon er konfigurasjon i en ekte tenant, ikke kode: registrer
+applikasjonen, sett `AUTH_ENTRA_CLIENT_SECRET` og `AUTH_ENTRA_REDIRECT_URI`, og legg inn
+`identity_providers`-raden for kundens tenant. `ops:runtime-check` feiler tydelig hvis noe av dette
+mangler.

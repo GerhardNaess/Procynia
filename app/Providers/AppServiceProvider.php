@@ -46,6 +46,13 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($key);
         });
+
+        // Entra sign-in start and callback. Not the F-01 password throttle — there is no credential
+        // to guess here — but both endpoints are unauthenticated and do real work (a token exchange,
+        // a signing-key fetch), so they get an abuse limit keyed on the client IP.
+        RateLimiter::for('entra-auth', function (Request $request): Limit {
+            return Limit::perMinute(20)->by($request->ip() ?? 'unknown');
+        });
     }
 
     /**

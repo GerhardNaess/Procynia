@@ -166,6 +166,16 @@ QUEUE_CONNECTION=redis
 CACHE_STORE=redis
 SESSION_DRIVER=redis
 
+# Microsoft Entra ID (SSO). Av som standard — dagens lokale innlogging fortsetter å virke.
+# Slå på per miljø når kundens tenant er registrert i identity_providers.
+# Se docs/operations/entra-sso.md.
+AUTH_ENTRA_ENABLED=false
+AUTH_LOCAL_LOGIN_ENABLED=true
+# Kun nødvendig når AUTH_ENTRA_ENABLED=true. Må være HTTPS utenfor lokal utvikling.
+AUTH_ENTRA_REDIRECT_URI=
+# SECRET. Settes i serverens .env eller Key Vault — aldri i repoet.
+AUTH_ENTRA_CLIENT_SECRET=
+
 # REDIS_PASSWORD er OBLIGATORISK (security finding F-08). Redis holder sesjoner, alle ni
 # køer og cache. docker-compose starter Redis med --requirepass fra denne verdien og
 # NEKTER Å STARTE hvis den er tom. Generer én per miljø: openssl rand -base64 32

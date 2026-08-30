@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\Auth\EntraConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class AuthenticatedSessionController extends Controller
 {
@@ -54,11 +56,23 @@ class AuthenticatedSessionController extends Controller
                 : redirect()->route('filament.admin.pages.dashboard');
         }
 
-        return Inertia::render('Auth/Login');
+        $entra = app(EntraConfig::class);
+
+        return Inertia::render('Auth/Login', [
+            'authOptions' => [
+                'localLoginEnabled' => $entra->localLoginEnabled(),
+                'entraEnabled' => $entra->entraEnabled(),
+                'entraUrl' => $entra->entraEnabled() ? route('login.entra') : null,
+            ],
+        ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
+        // When a deployment has turned local password login off, the route must actually refuse —
+        // hiding the form in the UI would leave the endpoint reachable by anyone who posts to it.
+        $this->assertLocalLoginEnabled();
+
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
@@ -131,6 +145,19 @@ class AuthenticatedSessionController extends Controller
      * Scoped by address and client IP together, so that guessing one account from one origin cannot
      * lock out that account from every other origin. The password is never part of the key.
      */
+    /**
+     * Local password login can be switched off per deployment (SSO-only customers).
+     *
+     * 404 rather than 403: a deployment that does not offer password login should not advertise
+     * that the endpoint exists.
+     */
+    private function assertLocalLoginEnabled(): void
+    {
+        if (! app(EntraConfig::class)->localLoginEnabled()) {
+            abort(HttpResponse::HTTP_NOT_FOUND);
+        }
+    }
+
     private function throttleKey(Request $request, string $email): string
     {
         return 'login:'.Str::transliterate(Str::lower(trim($email)).'|'.$this->clientIp($request));

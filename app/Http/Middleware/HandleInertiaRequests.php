@@ -15,8 +15,7 @@ class HandleInertiaRequests extends Middleware
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly UserNotificationService $notificationService,
-    ) {
-    }
+    ) {}
 
     public function version(Request $request): ?string
     {
@@ -488,6 +487,8 @@ class HandleInertiaRequests extends Middleware
                     'sign_in' => __('procynia.frontend.sign_in'),
                     'title' => __('procynia.frontend.sign_in_title'),
                     'subtitle' => __('procynia.frontend.sign_in_subtitle'),
+                    'entra_sign_in' => __('procynia.auth.entra_sign_in'),
+                    'or' => __('procynia.auth.or'),
                 ],
             ],
         ]);

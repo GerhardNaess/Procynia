@@ -2,6 +2,8 @@
 
 namespace App\Services\Operations;
 
+use App\Models\IdentityProvider;
+use App\Services\Auth\EntraConfig;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -67,6 +69,7 @@ class RuntimePreflightService
                 $this->checkVectorExtension(),
                 $this->checkRedis(),
                 $this->checkRedisAuthentication(),
+                $this->checkEntraAuthentication(),
                 $this->checkStorageDisk(),
                 $this->checkSharedStoragePath(),
             ],
@@ -297,6 +300,50 @@ class RuntimePreflightService
         }
 
         return $this->pass('Redis auth', 'password configured for both the default and cache connections');
+    }
+
+    /**
+     * Entra ID configuration, when SSO is switched on.
+     *
+     * A deployment that enables Entra but is missing the secret or the callback URL must stop here.
+     * The alternative — starting anyway — leaves an SSO-only customer with an OIDC route that throws
+     * and, if local login was also disabled, no way in at all.
+     *
+     * Also flags the state where every login method is off, which is a lockout rather than a
+     * configuration preference.
+     *
+     * Never returns the client secret.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkEntraAuthentication(): array
+    {
+        $config = app(EntraConfig::class);
+        $problems = $config->problems();
+
+        if ($problems !== []) {
+            return $this->fail('Entra auth', implode('; ', $problems));
+        }
+
+        if (! $config->entraEnabled()) {
+            return $this->skip('Entra auth', 'disabled; local login is the only method');
+        }
+
+        $providers = IdentityProvider::query()
+            ->enabled()
+            ->where('provider', IdentityProvider::PROVIDER_ENTRA)
+            ->count();
+
+        if ($providers === 0) {
+            // Enabled with nothing to sign in against: every attempt would fail at the redirect.
+            return $this->fail('Entra auth', 'enabled, but no identity provider is configured');
+        }
+
+        return $this->pass('Entra auth', sprintf(
+            'enabled; %d provider(s); local login %s',
+            $providers,
+            $config->localLoginEnabled() ? 'also available' : 'disabled',
+        ));
     }
 
     // -----------------------------------------------------------------------

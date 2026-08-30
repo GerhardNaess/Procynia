@@ -27,6 +27,7 @@ use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\EntraAuthController;
 use App\Http\Controllers\Health\DocumentHealthController;
 use App\Http\Controllers\Health\IntegrationHealthController;
 use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
@@ -134,6 +135,19 @@ Route::name('public.')->group(function (): void {
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
+
+    // Microsoft Entra ID sign-in. Both routes 404 when Entra is disabled, so a deployment without
+    // SSO does not expose an OIDC surface at all.
+    //
+    // Rate limited on the same principle as F-01: starting a flow and returning from one are both
+    // unauthenticated endpoints that do real work (a token exchange, a JWKS fetch). This is not the
+    // password throttle — there is no credential here to guess — it is abuse protection.
+    Route::get('/login/entra', [EntraAuthController::class, 'redirect'])
+        ->middleware('throttle:entra-auth')
+        ->name('login.entra');
+    Route::get('/login/entra/callback', [EntraAuthController::class, 'callback'])
+        ->middleware('throttle:entra-auth')
+        ->name('login.entra.callback');
 });
 
 Route::middleware('auth')->group(function (): void {
