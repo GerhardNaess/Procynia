@@ -167,9 +167,36 @@ return [
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
     |
+    | Procynia hardening (security finding F-06). Laravel ships this as a bare
+    | env() with no default, which resolves to null. null is not "insecure" —
+    | Symfony reads it as "match the request", so the cookie is Secure over
+    | HTTPS and not over HTTP. The problem is what "the request" means in
+    | production: TLS terminates at nginx or Container Apps ingress and the app
+    | is reached over plain HTTP with X-Forwarded-Proto: https. Laravel only
+    | believes that header for proxies in the trusted list, and that list is
+    | deliberately empty by default (finding F-01). So on a deployment where
+    | TRUSTED_PROXIES has not been set, the session cookie would ship WITHOUT
+    | Secure even though the browser connection is HTTPS — verified, not assumed.
+    |
+    | Defaulting to true outside local removes that coupling entirely: the flag
+    | no longer depends on runtime HTTPS detection, so a missing TRUSTED_PROXIES
+    | can no longer downgrade the cookie.
+    |
+    | Local development keeps null rather than false, which preserves the useful
+    | half of the old behaviour: plain http://localhost works, and a developer
+    | running HTTPS locally still gets a Secure cookie.
+    |
+    | An explicit SESSION_SECURE_COOKIE still wins, including false. That is
+    | deliberate: an operator debugging an unusual ingress may need it, and it is
+    | a conscious act. What F-06 was actually about is the variable being
+    | forgotten, and a forgotten variable now lands on the safe side.
+    |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env(
+        'SESSION_SECURE_COOKIE',
+        env('APP_ENV') === 'local' ? null : true,
+    ),
 
     /*
     |--------------------------------------------------------------------------

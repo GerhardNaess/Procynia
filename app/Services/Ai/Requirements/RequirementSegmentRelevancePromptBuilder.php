@@ -3,9 +3,8 @@
 namespace App\Services\Ai\Requirements;
 
 use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
-use App\Data\Ai\Requirements\DocumentRequirementSegmentRelevanceData;
 use App\Models\SavedNoticeAiDocument;
-use Illuminate\Support\Str;
+use App\Services\Ai\AiPromptSecurity;
 use JsonException;
 use RuntimeException;
 
@@ -96,6 +95,8 @@ class RequirementSegmentRelevancePromptBuilder
             'Relevant segments contain procurement requirements, obligations, deadlines, document requests, evaluation criteria tied to compliance, attachments, or contractual duties.',
             'Irrelevant segments are cover pages, boilerplate, tables of contents, signatures, and general background text.',
             'Return only JSON that matches the schema.',
+            '',
+            AiPromptSecurity::systemClause('DOCUMENT SEGMENT'),
         ]);
     }
 

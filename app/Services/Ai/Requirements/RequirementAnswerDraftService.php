@@ -2,15 +2,16 @@
 
 namespace App\Services\Ai\Requirements;
 
-use App\Models\User;
 use App\Models\KnowledgeItem;
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
-use App\Models\SavedNotice;
-use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
+use App\Models\User;
+use App\Services\Ai\AiPromptSecurity;
 use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -33,10 +34,9 @@ class RequirementAnswerDraftService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
-        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
-        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
-    ) {
-    }
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
+        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger,
+    ) {}
 
     /**
      * Purpose: Generate and persist one canonical editable answer draft for a requirement.
@@ -55,8 +55,7 @@ class RequirementAnswerDraftService
         string $languageCode = 'no',
         ?int $customerId = null,
         ?int $userId = null,
-    ): SavedNoticeAiRequirement
-    {
+    ): SavedNoticeAiRequirement {
         $requirement->loadMissing([
             'evidence.knowledgeItem',
             'evidence.knowledgeItemChunk',
@@ -123,8 +122,7 @@ class RequirementAnswerDraftService
     private function recordAiCaseUsageAfterSuccessfulAnswerDraft(
         SavedNoticeAiRequirement $requirement,
         ?int $userId,
-    ): void
-    {
+    ): void {
         try {
             $savedNotice = $requirement->savedNotice;
 
@@ -185,8 +183,7 @@ class RequirementAnswerDraftService
         string $languageCode = 'no',
         ?int $customerId = null,
         ?int $userId = null,
-    ): string
-    {
+    ): string {
         $answerLengthGuidance = $this->extractAnswerLengthGuidance(implode("\n", array_filter([
             $requirement->requirement_text,
             $requirementUserPrompt,
@@ -296,8 +293,7 @@ class RequirementAnswerDraftService
         string $languageCode = 'no',
         ?int $customerId = null,
         ?int $userId = null,
-    ): string
-    {
+    ): string {
         $draftSections = [];
 
         foreach ($this->longFormSections($answerLengthGuidance) as $section) {
@@ -400,8 +396,7 @@ class RequirementAnswerDraftService
         string $languageCode = 'no',
         ?int $customerId = null,
         ?int $userId = null,
-    ): string
-    {
+    ): string {
         $response = $this->openAiClient->createResponse(
             $this->openAiRequestPayload(
                 $requirement,
@@ -486,8 +481,7 @@ class RequirementAnswerDraftService
         bool $isLengthRetry,
         ?array $longFormSection = null,
         string $languageCode = 'no',
-    ): array
-    {
+    ): array {
         $model = $this->openAiModel();
 
         $payload = [
@@ -567,7 +561,7 @@ class RequirementAnswerDraftService
             'If requirement-specific user instructions conflict with grounded facts, selected sources, or the JSON schema, keep the facts, selected sources, and schema.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
-            'Write all string values in ' . $this->languageName($languageCode) . '.',
+            'Write all string values in '.$this->languageName($languageCode).'.',
             'Do not write an assessment, critique, or coverage commentary.',
             'Do not invent facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
@@ -580,6 +574,8 @@ class RequirementAnswerDraftService
             'Do not silently produce a very short answer when the customer explicitly requests a long answer.',
             'For long target-length answers, the service may ask for one section at a time. In that case, write only the requested section and meet the local section target.',
             'Keep the answer practical, complete, and suitable for direct editing by the user.',
+            '',
+            AiPromptSecurity::systemClause('KNOWLEDGE CONTENT'),
         ]);
     }
 
@@ -610,8 +606,7 @@ class RequirementAnswerDraftService
         array $answerLengthGuidance,
         bool $isLengthRetry,
         ?array $longFormSection = null,
-    ): string
-    {
+    ): string {
         $payload = [
             'instruction' => is_array($longFormSection)
                 ? 'Generate exactly one section of a longer editable supplier answer draft for this requirement.'
@@ -755,8 +750,8 @@ class RequirementAnswerDraftService
             $minimumTargetWordCount = (int) ($answerLengthGuidance['minimum_target_word_count'] ?? floor($targetWordCount * 0.85));
 
             return implode(' ', [
-                'The customer explicitly requested an answer close to ' . $targetWordCount . ' words.',
-                'When enough grounded knowledge is available, the draft must be at least ' . $minimumTargetWordCount . ' words and should aim close to ' . $targetWordCount . ' words.',
+                'The customer explicitly requested an answer close to '.$targetWordCount.' words.',
+                'When enough grounded knowledge is available, the draft must be at least '.$minimumTargetWordCount.' words and should aim close to '.$targetWordCount.' words.',
                 'A 250-600 word summary does not satisfy this requirement.',
                 'Write a complete, structured supplier answer using only grounded knowledge.',
                 'If this is a sectioned long-form request, meet the local section target because the sections are combined into the final answer.',
@@ -765,7 +760,7 @@ class RequirementAnswerDraftService
 
         if (is_int($maxWordCount) && $maxWordCount > 0) {
             return implode(' ', [
-                'The customer explicitly requested a maximum answer length of ' . $maxWordCount . ' words.',
+                'The customer explicitly requested a maximum answer length of '.$maxWordCount.' words.',
                 'Do not exceed that limit.',
                 'Use the available grounded knowledge efficiently and avoid unnecessary repetition.',
             ]);
@@ -864,8 +859,8 @@ class RequirementAnswerDraftService
         $minimumWordCount = (int) ($section['minimum_word_count'] ?? floor($targetWordCount * 0.75));
 
         return implode(' ', array_filter([
-            'Write this section close to ' . $targetWordCount . ' words.',
-            'The section must normally be at least ' . $minimumWordCount . ' words when the grounded context supports it.',
+            'Write this section close to '.$targetWordCount.' words.',
+            'The section must normally be at least '.$minimumWordCount.' words when the grounded context supports it.',
             'This local target is part of the total answer length requirement.',
             'Do not compress this section into a short summary.',
             $isLengthRetry ? 'This is a retry because the previous section draft was too short; expand supported details without adding unsupported claims.' : null,
@@ -1475,18 +1470,18 @@ class RequirementAnswerDraftService
     {
         try {
             $this->tokenLogger->record([
-                'customer_id'     => $customerId,
-                'user_id'         => $userId,
-                'operation_key'   => AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
-                'model'           => $this->openAiModel(),
-                'provider'        => data_get($response, '_meta.provider'),
+                'customer_id' => $customerId,
+                'user_id' => $userId,
+                'operation_key' => AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+                'model' => $this->openAiModel(),
+                'provider' => data_get($response, '_meta.provider'),
                 'deployment_name' => data_get($response, '_meta.deployment_name'),
                 'provider_region' => data_get($response, '_meta.provider_region'),
-                'input_tokens'    => data_get($response, 'usage.input_tokens', 0),
-                'output_tokens'   => data_get($response, 'usage.output_tokens', 0),
-                'total_tokens'    => data_get($response, 'usage.total_tokens', 0),
+                'input_tokens' => data_get($response, 'usage.input_tokens', 0),
+                'output_tokens' => data_get($response, 'usage.output_tokens', 0),
+                'total_tokens' => data_get($response, 'usage.total_tokens', 0),
                 'saved_notice_id' => $requirement->saved_notice_id,
-                'request_id'      => data_get($response, '_meta.request_id'),
+                'request_id' => data_get($response, '_meta.request_id'),
             ]);
         } catch (Throwable) {
             // Token logging failures must never block answer draft generation.

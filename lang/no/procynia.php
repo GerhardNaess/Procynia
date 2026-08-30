@@ -378,6 +378,7 @@ return [
         'file_size' => 'Filstørrelse',
         'file_type' => 'Filtype',
         'invalid_credentials' => 'Ugyldig e-post eller passord.',
+        'too_many_login_attempts' => 'For mange innloggingsforsøk. Prøv igjen om :seconds sekunder.',
         'loading' => 'Laster inn',
         'logout' => 'Logg ut',
         'matched_for_customer' => 'Hvorfor denne notisen er relevant',

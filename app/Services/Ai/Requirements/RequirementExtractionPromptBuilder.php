@@ -6,6 +6,7 @@ use App\Data\Ai\Requirements\RequirementExtractionBlockData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\AiPromptSecurity;
 use Illuminate\Support\Collection;
 use JsonException;
 use RuntimeException;
@@ -98,6 +99,8 @@ class RequirementExtractionPromptBuilder
             'If a block contains multiple separable requirements, return multiple candidates.',
             'If no real requirement is present, return an empty candidates array.',
             'Write explanatory fields in Norwegian when possible.',
+            '',
+            AiPromptSecurity::systemClause('DOCUMENT BLOCKS'),
         ]);
     }
 

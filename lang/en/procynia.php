@@ -378,6 +378,7 @@ return [
         'file_size' => 'File size',
         'file_type' => 'File type',
         'invalid_credentials' => 'Invalid email or password.',
+        'too_many_login_attempts' => 'Too many login attempts. Please try again in :seconds seconds.',
         'loading' => 'Loading',
         'logout' => 'Log out',
         'matched_for_customer' => 'Why this notice matters',

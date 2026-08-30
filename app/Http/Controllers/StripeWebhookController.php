@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Middleware\VerifyStripeWebhookSignature;
 use App\Models\Customer;
 use App\Models\InvoiceLog;
 use App\Notifications\SubscriptionPaymentFailedNotification;
@@ -14,6 +15,21 @@ use Symfony\Component\HttpFoundation\Response;
 
 class StripeWebhookController extends WebhookController
 {
+    /**
+     * Register signature verification unconditionally.
+     *
+     * parent::__construct() is deliberately not called: Cashier only registers its verification
+     * middleware when a webhook secret happens to be configured, so a missing secret left this
+     * unauthenticated, CSRF-exempt endpoint accepting arbitrary payloads (security finding F-02).
+     *
+     * VerifyStripeWebhookSignature refuses the request when no secret is set, and otherwise delegates
+     * the actual check to Cashier and the Stripe SDK.
+     */
+    public function __construct()
+    {
+        $this->middleware(VerifyStripeWebhookSignature::class);
+    }
+
     public function handleWebhook(Request $request): Response
     {
         return parent::handleWebhook($request);

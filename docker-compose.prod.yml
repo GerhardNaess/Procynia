@@ -11,6 +11,12 @@
 # Alle sensitive verdier settes i .env på serveren.
 
 services:
+    # Redis is reachable only on the internal compose network in production. Authentication
+    # (see docker-compose.yml) is a second layer, not a reason to publish the port — an
+    # exposed 6379 invites credential-guessing that never has to happen.
+    redis:
+        ports: !override []
+
     app:
         environment:
             APP_ENV: production

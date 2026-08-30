@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\AvatarProviders\LocalInitialsAvatarProvider;
 use App\Http\Middleware\SetCustomerLocale;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -28,6 +29,10 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            // Local SVG initials instead of Filament's ui-avatars.com default: that sent internal
+            // user names to a third party on every admin page load, and was the only reason the CSP
+            // had to allow an external image origin (findings F-05 / closure round).
+            ->defaultAvatarProvider(LocalInitialsAvatarProvider::class)
             ->brandName('Procynia')
             ->login()
             ->viteTheme('resources/css/filament/admin/theme.css')

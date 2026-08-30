@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Support\CustomerContext;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -108,9 +109,33 @@ class User extends Authenticatable implements FilamentUser
         ];
     }
 
+    /**
+     * Central access gate for the Filament admin panel (security finding F-03).
+     *
+     * Filament is Procynia's internal administration surface — it is not a customer portal. Only
+     * active internal administrators may open it.
+     *
+     * This previously checked is_active alone, which let every active user through, and then briefly
+     * admitted customer admins as well so that UserResource kept working for them. That second step
+     * has been reversed as a deliberate product decision: a customer administrator is a
+     * customer-scoped role, not an internal system administrator. They administer their own users
+     * through the customer frontend (App\Http\Controllers\App\UserController, /app/users), which is
+     * tenant-scoped by construction and covered by CustomerUserManagementTest.
+     *
+     * isInternalAdmin() is the authoritative definition and is reused rather than re-expressed here:
+     * super_admin AND customer_id === null. A super_admin that somehow carries a customer_id is not
+     * an internal administrator and is refused too.
+     *
+     * This is the first layer only. Every resource, page and widget keeps its own canAccess() /
+     * canView(), and record-level canEdit() / canDelete() stay in place beneath that.
+     */
     public function canAccessPanel(Panel $panel): bool
     {
-        return (bool) $this->is_active;
+        if (! $this->is_active) {
+            return false;
+        }
+
+        return app(CustomerContext::class)->isInternalAdmin($this);
     }
 
     public function department(): BelongsTo

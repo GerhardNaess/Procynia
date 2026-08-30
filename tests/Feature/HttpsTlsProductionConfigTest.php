@@ -83,14 +83,46 @@ class HttpsTlsProductionConfigTest extends TestCase
         );
     }
 
-    public function test_bootstrap_trusts_proxy_forwarded_headers(): void
+    /**
+     * Trusted proxies are configuration, not a hardcoded wildcard.
+     *
+     * This assertion used to look for the string "trustProxies" anywhere in bootstrap/app.php. After
+     * the trusted-proxy fix that file no longer configures trusted proxies at all — it only explains
+     * in a comment why trustProxies(at: '*') was removed — so the old check stayed green while
+     * verifying nothing. Comment lines are therefore stripped before anything is asserted.
+     */
+    public function test_trusted_proxies_come_from_configuration_and_not_from_a_wildcard(): void
     {
-        $source = file_get_contents(base_path('bootstrap/app.php'));
+        $executable = implode("\n", array_filter(
+            explode("\n", file_get_contents(base_path('bootstrap/app.php'))),
+            static fn (string $line): bool => ! str_starts_with(ltrim($line), '//')
+                && ! str_starts_with(ltrim($line), '*')
+                && ! str_starts_with(ltrim($line), '/*'),
+        ));
+
+        $this->assertStringNotContainsString(
+            'trustProxies(',
+            $executable,
+            'bootstrap/app.php must not configure trusted proxies directly; the wildcard it used to '
+            .'set made the client IP forgeable.',
+        );
+
+        $this->assertContains(
+            'trusted_proxies',
+            array_keys(config('procynia.security')),
+            'Trusted proxies must be configurable through procynia.security.trusted_proxies.',
+        );
 
         $this->assertStringContainsString(
-            'trustProxies',
-            $source,
-            'bootstrap/app.php must configure trustProxies so the app recognises HTTPS behind a reverse proxy',
+            "env('TRUSTED_PROXIES'",
+            file_get_contents(config_path('procynia.php')),
+            'The trusted proxy list must be settable per environment via TRUSTED_PROXIES.',
+        );
+
+        $this->assertStringContainsString(
+            'TrustProxies::at(',
+            file_get_contents(app_path('Providers/AppServiceProvider.php')),
+            'The configured list must actually be applied to the TrustProxies middleware.',
         );
     }
 

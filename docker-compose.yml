@@ -77,13 +77,39 @@ services:
     redis:
         image: redis:7-alpine
         container_name: procynia-redis
-        command: ["redis-server", "--appendonly", "yes"]
+        # Redis holds sessions, every queue and the cache, so it requires a password
+        # (security finding F-08). Before this it answered PING from anyone who could reach
+        # the port.
+        #
+        # ${REDIS_PASSWORD:?...} makes this fail-closed: compose refuses to start rather than
+        # silently bringing up an open Redis if the variable is missing or empty. The same
+        # value reaches every app/queue/scheduler container through `env_file: .env`, so
+        # Laravel authenticates with it automatically.
+        #
+        # Trade-off (deliberate): the password is passed as a redis-server argument, so it is
+        # visible in the process list *inside the container*. Reading it therefore requires
+        # exec access to the container, which is a far higher privilege than the network reach
+        # F-08 is about. A config-file indirection would hide it from `ps` but adds an
+        # entrypoint and a rendered file for no gain against that threat model.
+        environment:
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+        command:
+            - sh
+            - -c
+            - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+        # Loopback-only, and only in local development: handy for redis-cli while debugging.
+        # docker-compose.prod.yml removes this publish entirely — authentication is not a
+        # substitute for not exposing the port.
         ports:
             - "127.0.0.1:6380:6379"
         volumes:
             - procynia_redis_data:/data
+        # Must authenticate, or the container reports unhealthy even though Redis is fine.
+        # --no-auth-warning keeps the password out of the healthcheck output.
         healthcheck:
-            test: ["CMD", "redis-cli", "ping"]
+            test:
+                - CMD-SHELL
+                - redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG
             interval: 10s
             timeout: 5s
             retries: 5

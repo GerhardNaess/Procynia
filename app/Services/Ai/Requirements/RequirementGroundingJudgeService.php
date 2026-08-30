@@ -3,6 +3,7 @@
 namespace App\Services\Ai\Requirements;
 
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\AiPromptSecurity;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -18,8 +19,7 @@ class RequirementGroundingJudgeService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Evaluate whether the retrieved knowledge supports generating an answer draft.
@@ -153,7 +153,9 @@ class RequirementGroundingJudgeService
             'Return recommended_document_title and suggested_filename based on the requirement-specific subject matter when documentation is missing or only partially documented.',
             'Do not return generic document names such as Dokumentasjon for udekket krav when the requirement text contains usable context.',
             'Return only JSON that matches the schema.',
-            'Write all string values in ' . $this->languageName($languageCode) . '.',
+            'Write all string values in '.$this->languageName($languageCode).'.',
+            '',
+            AiPromptSecurity::systemClause('KNOWLEDGE CONTENT'),
         ]);
     }
 
@@ -748,6 +750,7 @@ class RequirementGroundingJudgeService
 
         return 'Dokumentasjon for kravkontekst';
     }
+
     /**
      * Purpose: Keep suggested document names short and useful without trying to mirror the whole requirement.
      * Inputs: A candidate title phrase and the raw requirement text.
@@ -819,6 +822,7 @@ class RequirementGroundingJudgeService
 
         return Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
     }
+
     /**
      * Purpose: Remove dangling connector words after title shortening.
      * Inputs: A shortened title subject phrase.
@@ -836,7 +840,9 @@ class RequirementGroundingJudgeService
         } while ($subject !== $previous);
 
         return $subject;
-    }    /**
+    }
+
+    /**
      * Purpose: Build a broad requirement-specific title phrase from the actual requirement wording.
      * Inputs: The raw requirement text.
      * Returns: A short phrase that represents the main requirement context, or null when no safe phrase exists.
@@ -1050,6 +1056,7 @@ class RequirementGroundingJudgeService
 
         return implode('-', $selected);
     }
+
     /**
      * Purpose: Decide whether a recommended document title is missing or only a generic fallback.
      * Inputs: A nullable model-produced title.
@@ -1225,6 +1232,7 @@ class RequirementGroundingJudgeService
 
         return implode(', ', $terms).' og '.$last;
     }
+
     /**
      * Purpose: Remove related-but-insufficient points that only match generic vocabulary and not the requirement-specific subject matter.
      * Inputs: Model-produced related points and the raw requirement text.

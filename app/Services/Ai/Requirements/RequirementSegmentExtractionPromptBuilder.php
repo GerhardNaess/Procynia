@@ -6,6 +6,7 @@ use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\AiPromptSecurity;
 use JsonException;
 use RuntimeException;
 
@@ -98,6 +99,8 @@ class RequirementSegmentExtractionPromptBuilder
             'Keep original_text exact and normalized_text compact.',
             'If no real requirement is present, return an empty candidates array.',
             'Do not invent identifiers or provenance.',
+            '',
+            AiPromptSecurity::systemClause('DOCUMENT SEGMENT'),
         ]);
     }
 

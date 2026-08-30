@@ -66,6 +66,7 @@ class RuntimePreflightService
                 $this->checkDatabase(),
                 $this->checkVectorExtension(),
                 $this->checkRedis(),
+                $this->checkRedisAuthentication(),
                 $this->checkStorageDisk(),
                 $this->checkSharedStoragePath(),
             ],
@@ -245,6 +246,57 @@ class RuntimePreflightService
         } catch (Throwable $e) {
             return $this->fail('Redis', 'cannot connect: '.$this->redact($e->getMessage()));
         }
+    }
+
+    /**
+     * Redis must be authenticated outside local development (security finding F-08).
+     *
+     * Redis holds sessions, every queue and the cache. Before F-08 it answered PING to anyone who
+     * could reach the port, so a foothold on the network meant readable session ids and writable
+     * queue payloads.
+     *
+     * This is deliberately a hard failure rather than a warning: a deployment that reaches
+     * production without a Redis credential should stop here instead of quietly running an open
+     * Redis. Compose already refuses to start Redis without REDIS_PASSWORD, but a deployment may
+     * point at an external Redis, and then this is the only gate.
+     *
+     * "null" and "true"/"false" are rejected explicitly: they are what a copied .env line leaves
+     * behind, and Redis would happily accept the literal string as the password.
+     *
+     * Never returns the credential itself.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkRedisAuthentication(): array
+    {
+        $password = (string) config('database.redis.default.password', '');
+        $usesUrl = filled(config('database.redis.default.url'));
+
+        // A REDIS_URL can carry the credential in the userinfo part, so an empty password field is
+        // not proof of an unauthenticated connection there.
+        if ($usesUrl && $password === '') {
+            return $this->warn('Redis auth', 'credential expected inside REDIS_URL — not verifiable from config alone');
+        }
+
+        $placeholders = ['', 'null', 'nil', 'none', 'true', 'false'];
+
+        if (in_array(mb_strtolower(trim($password)), $placeholders, true)) {
+            if (app()->environment('local')) {
+                return $this->warn('Redis auth', 'no password set — acceptable locally, never in production');
+            }
+
+            return $this->fail('Redis auth', 'REDIS_PASSWORD is missing or a placeholder; Redis holds sessions and queues and must require authentication');
+        }
+
+        $cachePassword = (string) config('database.redis.cache.password', '');
+
+        // Both connections point at the same instance, so a mismatch means one of them is
+        // unauthenticated or simply broken.
+        if ($cachePassword !== $password) {
+            return $this->fail('Redis auth', 'the default and cache connections use different credentials for the same instance');
+        }
+
+        return $this->pass('Redis auth', 'password configured for both the default and cache connections');
     }
 
     // -----------------------------------------------------------------------

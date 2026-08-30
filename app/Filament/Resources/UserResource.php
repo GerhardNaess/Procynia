@@ -12,13 +12,13 @@ use App\Models\Nationality;
 use App\Models\User;
 use App\Support\CustomerContext;
 use BackedEnum;
-use UnitEnum;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -29,6 +29,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
+use UnitEnum;
 
 class UserResource extends Resource
 {
@@ -160,13 +161,22 @@ class UserResource extends Resource
                     ->boolean(),
             ])
             ->recordActions([
-                \Filament\Actions\EditAction::make(),
+                EditAction::make(),
             ]);
     }
 
+    /**
+     * Filament is the internal administration surface, so this resource follows the same internal
+     * admin rule as every other resource and page.
+     *
+     * It used to return canManageUsers(), which also admitted customer administrators. That was a
+     * deliberate second path into the panel, and it has been removed as a product decision: customer
+     * administrators manage their own users through the customer frontend (/app/users), which is
+     * tenant-scoped by construction. See docs/operations/security.md §2.1.
+     */
     public static function canAccess(): bool
     {
-        return app(CustomerContext::class)->canManageUsers();
+        return app(CustomerContext::class)->isInternalAdmin();
     }
 
     public static function canCreate(): bool
