@@ -1,7 +1,21 @@
-# AI Usage Guard and cost telemetry
+# AI-kostnadskontroll
+
+Arkitektur og begrunnelser. For hendelseshåndtering, se
+[`ai-cost-control-runbook.md`](ai-cost-control-runbook.md).
 
 ## Formål
-Procynia logger AI-operasjoner for intern innsikt og varsler om uvanlig høyt tempo før en AI-operasjon starter. Fase 1 har i tillegg et append-only attempt-ledger (`ai_usage_attempts`) for faktiske providerforsøk. Dette er fortsatt ikke kommersiell stopp, full AI-credit-måling eller fakturering.
+
+Procynia håndhever AI-kostnad i to lag, server-side, umiddelbart før hvert providerkall:
+
+- **Kommersiell kvote** — AI-saker/credits per kunde og kalendermåned. Kundevendt. Hard stop.
+- **Operasjonelt budsjett** — faktisk providerkostnad i NOK, per kunde og globalt. Intern
+  sikkerhetsmekanisme. Hard stop.
+
+I tillegg: runtime kill switches (kunde og globalt), entitlement, betalingsstatus og en hard stop
+ved ukjent modellpris. Ingenting av dette er fakturering; Stripe eier abonnementet, Procynia eier
+håndhevingen.
+
+Kapitlene under er skrevet fase for fase og beskriver hvordan hvert lag kom på plass.
 
 ## Fase 1: provider attempts
 
@@ -9,7 +23,7 @@ Procynia logger AI-operasjoner for intern innsikt og varsler om uvanlig høyt te
 
 Responses API-kall måles sentralt i `OpenAiClient`; eldre kall som trenger rå HTTP-respons går gjennom samme meter. `EmbeddingService` måler embedding-kall separat fordi den trenger å beholde sin eksisterende kontrollerte feilrespons. Enterprise Wiki sine kapasitet/retry-forsøk scopes med ingest-run og kunde, slik at hvert retry blir en separat attempt. `enterprise_wiki_ingest_runs.input_tokens` og `output_tokens` summeres fra vellykkede, scoped Wiki-forsøk.
 
-Dette dekker requirements og requirement answers, grounding/judge, assessment, knowledge summary/metadata/vocabulary, metadata-retrieval, Excel-struktur, Enterprise Wiki-klientene, Wiki Ask og response-baserte queue-/scheduler-flows fordi de alle går via `OpenAiClient`. Embeddings fra AI- og Knowledge-base-flows går via `EmbeddingService`. Forsøk uten en eksplisitt `AiCallContext` er fortsatt synlige som `unclassified`; Fase 2 skal gjøre kontekstattribusjon obligatorisk ved en felles provider-gateway.
+Dette dekker requirements og requirement answers, grounding/judge, assessment, knowledge summary/metadata/vocabulary, metadata-retrieval, Excel-struktur, Enterprise Wiki-klientene, Wiki Ask og response-baserte queue-/scheduler-flows fordi de alle går via `OpenAiClient`. Embeddings fra AI- og Knowledge-base-flows går via `EmbeddingService`. Forsøk uten en eksplisitt `AiCallContext` var på dette tidspunktet synlige som `unclassified`. Fase 2 og 4 lukket det: kontekst settes nå ved hvert inngangspunkt — controller, queue job, scheduler og operatørkommando — og ingen kjente produksjonsflows er uklassifiserte.
 
 `ai_token_events` beholdes som eksisterende suksessbaserte token-ledger for rapportering. Det erstattes ikke av attempt-ledgeret, fordi failed, timeout og uncertain-forsøk er en annen operasjonell sannhet.
 
@@ -64,7 +78,7 @@ Hvis referanseverdi ikke er definert, vises dette eksplisitt som `Ikke definert`
 Dette er intern styring og bruksmønsteroppfølging, ikke fakturagrunnlag og ikke Stripe usage billing.
 
 ## AVVIK-010
-Full AI-credit- og bruksmønsteroppfølging hører til AVVIK-010. Denne delen av systemet viser faktisk AI-bruk, høy aktivitet og historiske varsler. Systemet lagrer fortsatt kun trygge bruksdata som grunnlag for senere vurdering.
+Bruksmønsteroppfølging hører til AVVIK-010. Denne delen av systemet viser faktisk AI-bruk, høy aktivitet og historiske varsler, og lagrer kun trygge bruksdata. Selve credit-håndhevingen er ikke lenger en del av AVVIK-010 — den kom med Fase 2 og er beskrevet under.
 
 ## Fase 2: commercial quota og runtime stop
 
@@ -360,3 +374,57 @@ Plattformnivået er kodet som `AiCostControlException::PLATFORM_REASONS` og avvi
 ### Ikke del av Fase 5
 
 Stripe metered billing, automatisk overage, kundevendt NOK-faktura, forecasting, anomali-deteksjon, self-service kjøp, full reconciliation av usikre reservasjoner, Azure-kostnadsintegrasjon og provider-budsjett-API.
+
+## Fase 6: sluttverifisering og rollout
+
+### Deploy-forutsetninger
+
+`ops:runtime-check` blokkerer nå oppstart på konfigurasjoner der kostnadskontrollen ikke kan gjøre jobben sin:
+
+| Sjekk | Blokkerer | Hvorfor |
+| --- | --- | --- |
+| kostnadskontroll-skjema | ja | uten tabellene feiler guarden med en databasefeil i stedet for en kontrollert stopp |
+| runtime control-rad | ja | mangler singletonen, fail-closer guarden og all AI stopper |
+| priskatalog + budsjett-håndheving på | ja | budsjettet kan ikke prise noe, så håndhevingen ser aktiv ut uten å være det |
+| tom priskatalog uten budsjett-håndheving | advarsel | ukjent-pris-stoppet er inert til katalogen fylles |
+| USD/NOK-kurs mangler eller er gammel | advarsel | konservativ fallback brukes; AI stoppes aldri av FX alene |
+| terskler, marginer og fallback-verdier | ja | en kritisk terskel under sin warning, eller en fallback-kurs på 0, ville priset alt til ingenting |
+
+En tom priskatalog i produksjon med operasjonell håndheving aktivert er altså en **deploy blocker**, ikke en advarsel.
+
+### Rulleringsrekkefølge
+
+Kostnadskontrollen trenger ingen egen shadow-modus: håndhevingen er allerede opt-in per scope, og det gir samme trygghet uten å risikere regnskapet. Et ekte shadow-lag måtte enten reservere uten å frigi, eller simulere i en parallell sti — begge deler kan gjøre budsjett-tallene usanne, og det er en dårligere bytte enn å skru på ett scope om gangen.
+
+1. Deploy kode og migrasjoner. `operational_budget_enabled = false` og ingen kundegrenser: alt av Fase 5 er da inaktivt.
+2. `php artisan ops:runtime-check` — skal være grønn.
+3. `php artisan ai:sync-model-prices` og `php artisan exchange-rates:sync`.
+4. Verifiser kommersiell kvote per kunde i admin. Den er deterministisk og håndheves fra dag én.
+5. Observer faktisk forbruk read-only: `ai_usage_attempts.cost_nok` aggregert per kunde per døgn viser hva en grense *ville* blokkert, uten å blokkere noe.
+6. Sett kundegrense for én intern eller frivillig kunde. Observer et døgn.
+7. Utvid til flere kunder.
+8. Sett globalt tak, med god margin over observert toppdøgn.
+9. Følg `admin_notifications` av typene `ai_*_budget_*`, `ai_model_price_*`, `ai_fx_*` og `ai_payment_*`, samt `ai:cost-control-health` hver time.
+10. Rollback: sett grensen tilbake eller slå av `operational_budget_enabled`. Ingen deploy, ingen omstart.
+
+### Baseline og backfill
+
+| Kilde | Kan brukes til | Kan ikke brukes til |
+| --- | --- | --- |
+| `customer_ai_case_usages` | kommersiell kvote — komplett siden den ble innført, unik per kunde/sak/periode | — |
+| `ai_token_events` | etterprising av *vellykkede* kall som gikk via `AiTokenLogger` | totalt forbruk: den er suksess-basert og dekker bare noen tjenester |
+| `ai_usage_attempts` | komplett operasjonelt forbruk **fra Fase 1 og framover** | tiden før Fase 1 |
+| `enterprise_wiki_ingest_runs` | tokenaggregat per run fra Fase 1 | historikk før Fase 1: kolonnene er tomme |
+| `ai_usage_events` | operasjonstelling | kostnad — raden har verken tokens eller modell |
+
+**Kommersiell kvote:** `customer_ai_case_usages` er pålitelig for håndheving som den er. Ingen cutoff, ingen stille nullstilling.
+
+**Operasjonelt budsjett:** historikken er ufullstendig før Fase 1 og prisløs før Fase 5. Den brukes derfor **ikke** som om den var komplett. Håndheving starter fra det tidspunktet en grense settes, med nullstilt periode-aggregat. Eldre kostnadstall vises kun som rapportering. Alternativet — verifisert backfill — er forkastet fordi datagrunnlaget ikke støtter det.
+
+### Usikre reservasjoner
+
+Policyen er uendret og bevisst: et hold som kan ha kostet penger frigis aldri automatisk. Fase 6 legger til at det ikke kan bli glemt — `ai:cost-control-health` kjører hver time og varsler intern admin når et usikkert hold er eldre enn 24 timer, eller når kall ikke kunne prises. Kommandoen er read-only; hva et usikkert kall faktisk kostet er en menneskelig vurdering, beskrevet i runbooken.
+
+### Gratis providerkall
+
+`OpenAiClient::get()` brukes kun til `GET /models` i helsesjekk og preflight. Den er bevisst utenfor kostnadskontrollen: den koster ingenting, og en operatør må kunne verifisere leverandørforbindelsen under en hendelse — også mens en global stopp er aktiv.

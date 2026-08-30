@@ -8,6 +8,7 @@ use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
@@ -80,7 +81,234 @@ class RuntimePreflightService
                 $this->checkQueueConnection(),
                 $withOpenAi ? $this->checkOpenAi() : $this->skip('OpenAI connectivity', 'not requested (pass --with-openai)'),
             ],
+            $this->checkAiCostControl(),
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // AI cost control
+    // -----------------------------------------------------------------------
+
+    /**
+     * Verify that the cost-control chain can actually run in this environment.
+     *
+     * The guards are designed to fail closed, but that design assumes their own schema exists. On a
+     * runtime where the migrations have not been applied, the first guard raises a raw database
+     * error instead of a controlled stop — no money is spent, but nobody can tell why AI is broken.
+     * Preflight is where that should surface, not a customer's first AI request.
+     *
+     * @return list<array{name: string, status: string, detail: string, critical: bool}>
+     */
+    private function checkAiCostControl(): array
+    {
+        return [
+            $this->checkAiCostControlSchema(),
+            $this->checkAiCostControlRuntimeSingleton(),
+            $this->checkAiPricingReadiness(),
+            $this->checkAiExchangeRateReadiness(),
+            $this->checkAiCostControlConfiguration(),
+        ];
+    }
+
+    /** @return array{name: string, status: string, detail: string, critical: bool} */
+    private function checkAiCostControlSchema(): array
+    {
+        $required = [
+            'ai_usage_attempts',
+            'ai_runtime_controls',
+            'customer_ai_quota_periods',
+            'customer_ai_usage_reservations',
+            'customer_ai_notification_states',
+            'customer_ai_credit_adjustments',
+            'customer_ai_operational_limits',
+            'ai_operational_budget_periods',
+        ];
+
+        try {
+            $missing = array_values(array_filter($required, fn (string $table): bool => ! Schema::hasTable($table)));
+
+            if ($missing === []) {
+                return $this->pass('AI cost control schema', 'all cost-control tables present');
+            }
+
+            return $this->fail(
+                'AI cost control schema',
+                sprintf(
+                    'missing %d cost-control table(s): %s. Run the migrations before serving AI traffic.',
+                    count($missing),
+                    implode(', ', $missing),
+                ),
+            );
+        } catch (Throwable $e) {
+            return $this->fail('AI cost control schema', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * The global runtime control is a singleton the guard reads on every call. A missing row makes
+     * the guard fail closed — correct, but a total AI outage that preflight should announce first.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiCostControlRuntimeSingleton(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_runtime_controls')) {
+                return $this->skip('AI runtime control row', 'cost-control schema not migrated yet');
+            }
+
+            $control = DB::table('ai_runtime_controls')->orderBy('id')->first();
+
+            if ($control === null) {
+                return $this->fail(
+                    'AI runtime control row',
+                    'no runtime control row exists; the guard fails closed and every AI call will be refused',
+                );
+            }
+
+            if ((bool) $control->global_ai_stop) {
+                return $this->warn('AI runtime control row', 'global AI stop is currently ACTIVE — no AI calls will run');
+            }
+
+            return $this->pass('AI runtime control row', 'present, global stop is off');
+        } catch (Throwable $e) {
+            return $this->fail('AI runtime control row', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * Operational NOK enforcement prices every call before it runs. With an empty price catalogue
+     * it can price nothing, so the budgets silently have nothing to charge — enforcement that looks
+     * active but is not. That combination must not reach production.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiPricingReadiness(): array
+    {
+        try {
+            if (! Schema::hasTable('ai_model_prices') || ! Schema::hasTable('ai_runtime_controls')) {
+                return $this->skip('AI model pricing', 'cost-control schema not migrated yet');
+            }
+
+            $priceCount = DB::table('ai_model_prices')->count();
+            $control = DB::table('ai_runtime_controls')->orderBy('id')->first();
+            $budgetEnforcing = $control !== null && (bool) ($control->operational_budget_enabled ?? false);
+
+            if ($priceCount === 0 && $budgetEnforcing) {
+                return $this->fail(
+                    'AI model pricing',
+                    'operational budget enforcement is enabled but no model prices exist; budgets cannot price any call. Run ai:sync-model-prices.',
+                );
+            }
+
+            if ($priceCount === 0) {
+                return $this->warn(
+                    'AI model pricing',
+                    'no model prices registered; unknown-price enforcement is inert until the catalogue is populated',
+                );
+            }
+
+            return $this->pass('AI model pricing', sprintf('%d model price(s) registered', $priceCount));
+        } catch (Throwable $e) {
+            return $this->fail('AI model pricing', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * A missing rate never prices a call at zero — a conservative fallback is used instead — so this
+     * is a warning, not a deploy blocker. It still needs to be visible: the fallback is a safety
+     * value, not a reporting truth.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiExchangeRateReadiness(): array
+    {
+        try {
+            if (! Schema::hasTable('exchange_rates')) {
+                return $this->skip('AI exchange rates', 'exchange rate table not migrated yet');
+            }
+
+            $latest = DB::table('exchange_rates')
+                ->where('base_currency', 'USD')
+                ->where('quote_currency', 'NOK')
+                ->orderByDesc('rate_date')
+                ->first();
+
+            if ($latest === null) {
+                return $this->warn(
+                    'AI exchange rates',
+                    'no USD/NOK rate recorded; costs fall back to a conservative fixed rate. Run exchange-rates:sync.',
+                );
+            }
+
+            $ageDays = (int) now()->startOfDay()->diffInDays($latest->rate_date, absolute: true);
+            $criticalAge = max(1, (int) config('procynia.ai.fx.critical_age_days', 14));
+
+            if ($ageDays >= $criticalAge) {
+                return $this->warn(
+                    'AI exchange rates',
+                    sprintf('latest USD/NOK rate is %d days old; estimates use a safety margin', $ageDays),
+                );
+            }
+
+            return $this->pass('AI exchange rates', sprintf('latest USD/NOK rate is %d day(s) old', $ageDays));
+        } catch (Throwable $e) {
+            return $this->warn('AI exchange rates', 'could not be determined: '.$this->redact($e->getMessage()));
+        }
+    }
+
+    /**
+     * Catch policy values that cannot mean what they say — a critical threshold below its warning,
+     * a negative margin, a zero fallback rate that would silently price everything at nothing.
+     *
+     * @return array{name: string, status: string, detail: string, critical: bool}
+     */
+    private function checkAiCostControlConfiguration(): array
+    {
+        $problems = [];
+
+        $quotaWarning = (int) config('procynia.ai.quota.warning_percent', 80);
+        $quotaCritical = (int) config('procynia.ai.quota.critical_percent', 90);
+
+        if ($quotaWarning < 1 || $quotaWarning > 99 || $quotaCritical < $quotaWarning || $quotaCritical > 99) {
+            $problems[] = sprintf('quota thresholds are inconsistent (warning %d, critical %d)', $quotaWarning, $quotaCritical);
+        }
+
+        $priceWarning = (int) config('procynia.ai.pricing.warning_age_days', 90);
+        $priceCritical = (int) config('procynia.ai.pricing.critical_age_days', 180);
+
+        if ($priceWarning < 1 || $priceCritical < $priceWarning) {
+            $problems[] = sprintf('model price ages are inconsistent (warning %d, critical %d)', $priceWarning, $priceCritical);
+        }
+
+        $fxWarning = (int) config('procynia.ai.fx.warning_age_days', 3);
+        $fxCritical = (int) config('procynia.ai.fx.critical_age_days', 14);
+
+        if ($fxWarning < 1 || $fxCritical < $fxWarning) {
+            $problems[] = sprintf('FX ages are inconsistent (warning %d, critical %d)', $fxWarning, $fxCritical);
+        }
+
+        if ((float) config('procynia.ai.fx.fallback_usd_nok_rate', 12.0) <= 0) {
+            $problems[] = 'FX fallback rate must be greater than zero, or an unpriced call would cost nothing';
+        }
+
+        foreach ([
+            'procynia.ai.fx.safety_margin_percent',
+            'procynia.ai.pricing.stale_safety_margin_percent',
+            'procynia.ai.operational_budget.reservation_safety_margin_percent',
+        ] as $key) {
+            if ((float) config($key, 0) < 0) {
+                $problems[] = $key.' must not be negative';
+            }
+        }
+
+        if ((int) config('procynia.ai.payment.past_due_grace_days', 7) < 0) {
+            $problems[] = 'past-due grace days must not be negative';
+        }
+
+        return $problems === []
+            ? $this->pass('AI cost control configuration', 'thresholds, margins and fallbacks are consistent')
+            : $this->fail('AI cost control configuration', implode('; ', $problems));
     }
 
     /**

@@ -25,6 +25,12 @@ class OpenAiClient
      * Inputs: The endpoint path and timeout in seconds.
      * Returns: The raw HTTP response.
      * Side effects: Issues one network request and logs failed responses.
+     *
+     * Deliberately outside cost control. This is only used for `GET /models` by the health check
+     * and the runtime preflight: it consumes no tokens and costs nothing, and an operator has to be
+     * able to verify provider connectivity during an incident — including while a global stop is
+     * active. Every call that can actually spend money goes through createResponse(), post() or
+     * createEmbedding(), all of which authorise first.
      */
     public function get(string $endpoint, int $timeoutSeconds = 180): Response
     {

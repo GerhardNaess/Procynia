@@ -63,3 +63,10 @@ Schedule::command('wiki:run-post-ingest-qa --all-pending')
 Schedule::command('wiki:maintenance-cycle')
     ->everyThirtyMinutes()
     ->withoutOverlapping();
+
+// Uncertain reservations and unpriced attempts hold capacity on purpose and are never released
+// automatically. Hourly is often enough to notice them the same working day, and cheap enough that
+// it costs nothing when there is nothing to report.
+Schedule::command('ai:cost-control-health')
+    ->hourly()
+    ->withoutOverlapping();
