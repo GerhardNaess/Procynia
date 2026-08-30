@@ -229,4 +229,134 @@ Kunder med `uncertain`-reservasjoner får dette synliggjort på AI-kontroll-side
 
 ### Ikke del av Fase 4
 
-Global og per-kunde NOK-budsjett, ukjent-pris-policy, stale FX-policy, betalingsstatus-policy (`past_due`/`unpaid`), Stripe metered billing, automatisk overage, anomali-deteksjon, forecasting og reconciliation av usikre reservasjoner.
+Stripe metered billing, automatisk overage, anomali-deteksjon, forecasting og reconciliation av usikre reservasjoner.
+
+## Fase 5: operasjonell NOK-beskyttelse, pris/FX-policy og betalingsstatus
+
+### To lag, ikke ett tall
+
+| | Kommersiell kvote | Operasjonelt budsjett |
+| --- | --- | --- |
+| Enhet | AI-saker (credits) | NOK providerkostnad |
+| Beskytter | kunden fikk det de kjøpte | Procynias egen økonomi |
+| Synlig for | kunden og admin | **kun** intern admin |
+| Kan stoppe unlimited-plan | nei | **ja** |
+| Kan stoppe allerede aktivert sak | nei | **ja** |
+
+De to byttes aldri mot hverandre. Et NOK-budsjett er ikke en erstatning for credits, og credits gir ingen rett til ubegrenset providerkostnad. Kunden ser fortsatt bare credits — NOK-tall er driftsdata, ikke fakturagrunnlag.
+
+### Kostnadstilstander
+
+| Status | Betydning |
+| --- | --- |
+| `known` | fersk pris og fersk kurs |
+| `estimated` | priset, men med gammel pris eller kurs — padd med sikkerhetsmargin |
+| `unknown` | modellen kan ikke prises. **Aldri 0 kr** |
+| `uncertain` | leverandøren kan ha utført arbeidet (timeout/5xx) |
+
+`unknown` og `uncertain` er forskjellige problemer: det første er et prisproblem, det andre et utfallsproblem.
+
+### Prissnapshot
+
+Kostnaden fryses på `ai_usage_attempts` — samme rad som allerede har modell, tokens og utfall. Valgt framfor en parallell kostnadsledger fordi en andre tabell bare ville vært et join unna de samme fakta og kunne drifte fra dem. Snapshotet lagrer pris-id, pris per 1M inn/ut, valuta, FX-kurs og kursdato, slik at en senere priskorreksjon ikke kan skrive om grunnlaget for en beslutning som allerede er tatt.
+
+`ai_token_events` og `AiTokenCostEstimator` er urørt og priser fortsatt den eldre rapporteringsledgeren. Historiske rader uten snapshot beregnes som før.
+
+### Ukjent modellpris
+
+Mangler modellen pris, blokkeres kallet **før** leverandøren kontaktes, forbruket registreres som `unknown`, og intern admin varsles (dedupet per modell per dag).
+
+Ett unntak, bevisst: er priskatalogen **helt tom**, er prisbasert håndheving ikke konfigurert i det hele tatt. Å tolke det som «alle modeller mangler pris» ville gjort et nytt eller feilkonfigurert miljø til full AI-nedetid. Den tilstanden varsles i stedet, kritisk og separat (`ai_model_price_catalogue_empty`). Så snart katalogen har minst én pris, er ukjent modell en hard stop.
+
+### Prisalder
+
+`AI_MODEL_PRICE_WARNING_AGE_DAYS` (90) og `AI_MODEL_PRICE_CRITICAL_AGE_DAYS` (180). Priser vedlikeholdes bevisst, ikke skrapes daglig — et kvartal uten endring er normalt. Gammel pris blokkerer ikke, men padder estimatet med `AI_MODEL_PRICE_STALE_SAFETY_MARGIN_PERCENT` (20 %) før det belastes et sikkerhetsbudsjett.
+
+### FX-policy
+
+`ExchangeRate::findForDate()` bruker historisk kurs på hendelsesdato og faller tilbake til siste kjente. Fase 5 legger friskhet på toppen:
+
+| Tilstand | Terskel | Handling |
+| --- | --- | --- |
+| fersk | < `AI_FX_WARNING_AGE_DAYS` (3) | kurs brukes som den er |
+| stale warning | ≥ 3 dager | kurs brukes, padd med `AI_FX_SAFETY_MARGIN_PERCENT` (10 %) |
+| stale critical | ≥ `AI_FX_CRITICAL_AGE_DAYS` (14) | som over, pluss adminvarsel |
+| mangler helt | ingen kurs registrert | konservativ `AI_FX_FALLBACK_USD_NOK_RATE` (12,0) + margin, kritisk varsel |
+
+Tre dager absorberer en normal helg pluss en helligdag — Norges Bank publiserer ikke daglig. AI stoppes aldri fordi dagens kurs ikke er hentet når en nylig gyldig kurs finnes. Manglende kurs gir aldri 0 kr.
+
+### Sikkerhetsbudsjetter
+
+Fire vinduer: kunde daglig, kunde månedlig, global daglig, global månedlig. Ingen er obligatoriske — uten grense gjelder ingen operasjonell stopp for det vinduet.
+
+Grensene er runtime-innstillinger i databasen, ikke env: en operatør må kunne endre dem midt i en hendelse uten deploy. Kundegrenser i `customer_ai_operational_limits`, globale på den eksisterende `ai_runtime_controls`-raden — samme sted som nødstoppen, fordi begge ender alle AI-kall.
+
+Løpende forbruk holdes i `ai_operational_budget_periods` (scope × vindu × periode) med `committed_nok`, `reserved_nok` og `unknown_cost_count`. Et aggregat framfor en SUM over `ai_usage_attempts` fordi håndheving må kunne låses: ti samtidige kall skal ikke kunne lese samme saldo og alle konkludere med at det er plass. Attempt-ledgeren er fortsatt den reviderbare detaljen bak totalene.
+
+Egne årsakskoder, aldri commercial quota-koden: `AI_CUSTOMER_DAILY_BUDGET_EXHAUSTED`, `AI_CUSTOMER_MONTHLY_BUDGET_EXHAUSTED`, `AI_GLOBAL_DAILY_BUDGET_EXHAUSTED`, `AI_GLOBAL_MONTHLY_BUDGET_EXHAUSTED`.
+
+### Reservasjon
+
+Før kallet kjennes ikke tokenforbruket. Derfor reserveres et bevisst pessimistisk estimat: tokentak per operasjon fra ett register (`procynia.ai.operation_estimates`), ganget med pris og kurs, padd med `AI_OPERATIONAL_RESERVATION_SAFETY_MARGIN_PERCENT` (25 %). Målet er ikke presisjon, men at ett enkelt kall ikke kan lande langt over grensen fordi vi bare teller etterpå.
+
+Livssyklus: **reserved** → **committed** (faktisk kostnad fra snapshotet), **released** (sikker feil før eller uten leverandørarbeid), eller **uncertain** (timeout/5xx → reservasjonen beholdes som påløpt). En usikker kostnad frigis aldri automatisk.
+
+### Manuell nødstopp vs budsjettstopp
+
+| | Manuell global stopp | Global budsjettstopp |
+| --- | --- | --- |
+| Utløses av | operatør | systemet selv |
+| Betyr | «vi stopper nå» | «planlagt forbruk er brukt opp» |
+| Kan omgås | nei | nei |
+| Kundemelding | «AI er midlertidig utilgjengelig» | samme |
+
+Begge finnes, begge stopper alt, og intern admin ser hvilken som gjelder. Kunden ser samme nøytrale melding for begge — det er driftsstatus, ikke noe om kundens konto.
+
+### Betalingsstatus
+
+Leses fra Cashiers `subscriptions.stripe_status` rett før hvert providerkall, ikke fra et snapshot tatt ved dispatch. Webhooken holder tilstanden fersk, men håndhevingen slår opp selv.
+
+| Stripe-status | AI-policy |
+| --- | --- |
+| `active` | tillatt |
+| `trialing` | tillatt |
+| `past_due` | tillatt i `AI_PAYMENT_PAST_DUE_GRACE_DAYS` (7) fra faktisk overgang, deretter blokkert |
+| `unpaid` | blokkert (`AI_PAYMENT_UNPAID`) |
+| `incomplete` / `incomplete_expired` | blokkert (`AI_PAYMENT_INCOMPLETE`) |
+| `canceled` | ingen betalingsblokk — plan/entitlement avgjør som før |
+| ingen Stripe-kobling | ingen betalingsblokk — lokal plan avgjør som før |
+
+Grace-vinduet måles fra da abonnementet faktisk gikk til `past_due`, ikke «nå minus sju dager» — ellers ville klokka startet på nytt ved hvert kall. Mangler tidsstempelet, velges fail-safe: kunden får grace, fordi å stenge en betalende kunde på et manglende felt er den verre feilen.
+
+System Owner varsles allerede av `invoice.payment_failed`-webhooken. Fase 5 legger ikke en andre kunde-e-post på samme hendelse; betalingsblokkeringen varsles internt, dedupet per kunde per dag.
+
+### Interne varsler
+
+| Hendelse | Mottaker | Kanal | Dedupe |
+| --- | --- | --- | --- |
+| kunde-/globalt budsjett 80 % og 90 % | intern admin | AdminNotification | scope + vindu + periode |
+| kunde-/globalt budsjett brukt opp | intern admin | AdminNotification | årsak + scope + periode |
+| ukjent modellpris | intern admin | AdminNotification | provider + modell + dag |
+| tom priskatalog | intern admin | AdminNotification | dag |
+| kritisk gammel pris | intern admin | AdminNotification | provider + modell + dag |
+| kritisk gammel / manglende FX | intern admin | AdminNotification | valuta + dag |
+| betalingsfrist og betalingsblokk | intern admin | AdminNotification | kunde + tilstand + dag |
+
+Alle er tilstandsvarsler, ikke ett per avvist kall: en kunde som prøver i loop gir ett varsel.
+
+### Override-presedens
+
+| Guard | Operatøroverstyring |
+| --- | --- |
+| manuell global stopp | **aldri** |
+| globalt budsjett (daglig/månedlig) | **aldri** |
+| kundens operasjonelle budsjett | nei — hev grensen i admin i stedet |
+| ukjent modellpris | ja, auditert (`cost_status` forblir `unknown`) |
+| betalingsblokk | ja, kun for recovery-kjøringer |
+| kundesuspensjon, entitlement, kvote | ja, som i Fase 4 |
+
+Plattformnivået er kodet som `AiCostControlException::PLATFORM_REASONS` og avvises i selve override-stien, uansett hvor den kalles fra.
+
+### Ikke del av Fase 5
+
+Stripe metered billing, automatisk overage, kundevendt NOK-faktura, forecasting, anomali-deteksjon, self-service kjøp, full reconciliation av usikre reservasjoner, Azure-kostnadsintegrasjon og provider-budsjett-API.

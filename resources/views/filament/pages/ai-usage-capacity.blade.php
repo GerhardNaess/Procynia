@@ -26,6 +26,39 @@
             </section>
         @endif
 
+        @if (($globalBudget['is_enabled'] ?? false))
+            @php($daily = $globalBudget['daily'] ?? [])
+            @php($monthly = $globalBudget['monthly'] ?? [])
+            @php($blocked = (($daily['percentage'] ?? 0) >= 100) || (($monthly['percentage'] ?? 0) >= 100))
+            {{-- The automatic ceiling, kept visually next to the manual stop: both end every AI
+                 call, and an operator must be able to see which one is in force. --}}
+            <section @class([
+                'max-w-6xl rounded-2xl border p-6',
+                'border-danger-400 bg-danger-50 dark:border-danger-600 dark:bg-danger-950' => $blocked,
+                'border-gray-200 bg-white' => ! $blocked,
+            ])>
+                <p class="text-base font-semibold uppercase tracking-[0.16em] text-gray-600">
+                    {{ $blocked ? __('procynia.ai_admin.global.budget_stop_active') : __('procynia.ai_admin.global.budget_heading') }}
+                </p>
+                <div class="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    @foreach (['daily' => $daily, 'monthly' => $monthly] as $window => $budget)
+                        <dl class="grid grid-cols-2 gap-x-6 gap-y-1 text-base">
+                            <dt class="font-medium text-gray-700">{{ __('procynia.ai_admin.operational.' . $window) }}</dt>
+                            <dd class="text-gray-700">
+                                {{ ($budget['limit'] ?? null) === null ? __('procynia.ai_admin.operational.no_limit') : number_format((float) $budget['limit'], 2, ',', ' ') . ' kr' }}
+                            </dd>
+                            <dt class="text-gray-600">{{ __('procynia.ai_admin.operational.committed') }}</dt>
+                            <dd class="text-gray-700">{{ number_format((float) ($budget['committed'] ?? 0), 2, ',', ' ') }} kr</dd>
+                            <dt class="text-gray-600">{{ __('procynia.ai_admin.operational.reserved') }}</dt>
+                            <dd class="text-gray-700">{{ number_format((float) ($budget['reserved'] ?? 0), 2, ',', ' ') }} kr</dd>
+                            <dt class="text-gray-600">{{ __('procynia.ai_admin.operational.status') }}</dt>
+                            <dd class="text-gray-700">{{ ($budget['percentage'] ?? null) === null ? __('procynia.ai_admin.operational.no_limit') : $budget['percentage'] . ' %' }}</dd>
+                        </dl>
+                    @endforeach
+                </div>
+            </section>
+        @endif
+
         <section class="max-w-6xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div class="space-y-1">

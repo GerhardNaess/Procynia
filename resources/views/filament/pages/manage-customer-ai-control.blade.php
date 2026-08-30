@@ -87,6 +87,71 @@
 
     <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {{ __('procynia.ai_admin.sections.operational') }}
+        </h2>
+        <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">
+            {{ __('procynia.ai_admin.sections.operational_help') }}
+        </p>
+
+        @if (! ($operationalBudget['is_enabled'] ?? false))
+            <p class="mt-4 text-base text-gray-600 dark:text-gray-400">
+                {{ __('procynia.ai_admin.operational.disabled') }}
+            </p>
+        @endif
+
+        <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            @foreach (['daily', 'monthly'] as $window)
+                @php($budget = $operationalBudget[$window] ?? [])
+                <div class="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+                    <div class="text-base font-semibold text-gray-900 dark:text-gray-100">
+                        {{ __('procynia.ai_admin.operational.' . $window) }}
+                    </div>
+                    <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-base">
+                        <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.limit') }}</dt>
+                        <dd class="font-medium text-gray-900 dark:text-gray-100">
+                            {{ ($budget['limit'] ?? null) === null ? __('procynia.ai_admin.operational.no_limit') : number_format((float) $budget['limit'], 2, ',', ' ') . ' kr' }}
+                        </dd>
+                        <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.committed') }}</dt>
+                        <dd class="font-medium text-gray-900 dark:text-gray-100">{{ number_format((float) ($budget['committed'] ?? 0), 2, ',', ' ') }} kr</dd>
+                        <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.reserved') }}</dt>
+                        <dd class="font-medium text-gray-900 dark:text-gray-100">{{ number_format((float) ($budget['reserved'] ?? 0), 2, ',', ' ') }} kr</dd>
+                        <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.unknown_count') }}</dt>
+                        <dd class="font-medium text-gray-900 dark:text-gray-100">{{ (int) ($budget['unknown_count'] ?? 0) }}</dd>
+                        <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.status') }}</dt>
+                        <dd>
+                            @php($percentage = $budget['percentage'] ?? null)
+                            <span @class([
+                                'inline-flex items-center rounded-full px-2 py-1 text-base font-medium leading-6',
+                                'bg-gray-100 text-gray-700' => $percentage === null,
+                                'bg-success-100 text-success-800' => $percentage !== null && $percentage < 80,
+                                'bg-warning-100 text-warning-800' => $percentage !== null && $percentage >= 80 && $percentage < 100,
+                                'bg-danger-100 text-danger-800' => $percentage !== null && $percentage >= 100,
+                            ])>
+                                {{ $percentage === null ? __('procynia.ai_admin.operational.no_limit') : $percentage . ' %' }}
+                            </span>
+                        </dd>
+                    </dl>
+                </div>
+            @endforeach
+        </div>
+
+        <dl class="mt-5 grid grid-cols-1 gap-x-8 gap-y-2 text-base sm:grid-cols-2">
+            <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.payment_state') }}</dt>
+            <dd class="font-medium text-gray-900 dark:text-gray-100">
+                {{ $paymentState['state'] ?? '—' }}
+                @if (($paymentState['grace_ends_at'] ?? null) !== null)
+                    ({{ __('procynia.ai_admin.operational.grace_until', ['time' => $paymentState['grace_ends_at']]) }})
+                @endif
+            </dd>
+            <dt class="text-gray-600 dark:text-gray-400">{{ __('procynia.ai_admin.operational.payment_decision') }}</dt>
+            <dd class="font-medium text-gray-900 dark:text-gray-100">
+                {{ __('procynia.ai_admin.payment_decisions.' . ($paymentState['decision'] ?? 'allow')) }}
+            </dd>
+        </dl>
+    </section>
+
+    <section class="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-gray-100">
             {{ __('procynia.ai_admin.sections.adjustments') }}
         </h2>
         <p class="mt-1 text-base leading-6 text-gray-600 dark:text-gray-400">

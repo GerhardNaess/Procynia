@@ -23,6 +23,77 @@ return [
             'warning_percent' => env('AI_QUOTA_WARNING_PERCENT', 80),
             'critical_percent' => env('AI_QUOTA_CRITICAL_PERCENT', 90),
         ],
+
+        /*
+         * Operational cost protection. This is Procynia's own economic safety net, expressed in
+         * NOK — a different thing from the commercial AI-case quota above, which is what the
+         * customer bought. The two are never traded against each other.
+         *
+         * Only policy lives here. The budget amounts themselves are runtime settings in the
+         * database, so an operator can change them during an incident without a deploy.
+         */
+        'pricing' => [
+            // Model prices are maintained deliberately, not scraped daily, so "old" is not the
+            // same as "wrong". A quarter without a price change is ordinary; half a year without
+            // one is a signal that the catalogue has stopped tracking reality.
+            'warning_age_days' => env('AI_MODEL_PRICE_WARNING_AGE_DAYS', 90),
+            'critical_age_days' => env('AI_MODEL_PRICE_CRITICAL_AGE_DAYS', 180),
+
+            // A price this old still prices the call, but the estimate is padded before it is
+            // charged against a safety budget.
+            'stale_safety_margin_percent' => env('AI_MODEL_PRICE_STALE_SAFETY_MARGIN_PERCENT', 20),
+        ],
+
+        'fx' => [
+            // Norges Bank publishes on business days, so a Monday morning legitimately reads a
+            // Friday rate. Three days absorbs a normal weekend plus a public holiday.
+            'warning_age_days' => env('AI_FX_WARNING_AGE_DAYS', 3),
+            'critical_age_days' => env('AI_FX_CRITICAL_AGE_DAYS', 14),
+
+            // Applied when a stale rate has to be used for enforcement: the true rate has drifted
+            // by an unknown amount, and for a safety budget the conservative direction is up.
+            'safety_margin_percent' => env('AI_FX_SAFETY_MARGIN_PERCENT', 10),
+
+            // Only used when no rate has ever been recorded, which is a misconfiguration rather
+            // than a market event. Deliberately pessimistic.
+            'fallback_usd_nok_rate' => env('AI_FX_FALLBACK_USD_NOK_RATE', 12.0),
+        ],
+
+        'operational_budget' => [
+            'warning_percent' => env('AI_OPERATIONAL_BUDGET_WARNING_PERCENT', 80),
+            'critical_percent' => env('AI_OPERATIONAL_BUDGET_CRITICAL_PERCENT', 90),
+
+            // Pre-call reservations are estimates, so they are padded: the point is that one call
+            // cannot land far past a hard limit just because we only counted afterwards.
+            'reservation_safety_margin_percent' => env('AI_OPERATIONAL_RESERVATION_SAFETY_MARGIN_PERCENT', 25),
+        ],
+
+        /*
+         * Conservative token ceilings per operation, used only to price a reservation before the
+         * call. They are not limits on the call itself. Kept in one registry so an estimate is
+         * never invented ad hoc inside a service.
+         */
+        'operation_estimates' => [
+            'default' => ['input_tokens' => 40000, 'output_tokens' => 8000],
+            'embeddings' => ['input_tokens' => 8000, 'output_tokens' => 0],
+            'wiki.ask.retrieval_plan' => ['input_tokens' => 12000, 'output_tokens' => 2000],
+            'wiki.ask.answer' => ['input_tokens' => 40000, 'output_tokens' => 4000],
+            'saved_notice.requirement_extraction.segment' => ['input_tokens' => 40000, 'output_tokens' => 16000],
+            'saved_notice.requirement_extraction.document' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'saved_notice.requirement_extraction.block' => ['input_tokens' => 40000, 'output_tokens' => 16000],
+            'saved_notice.requirement_answer_draft' => ['input_tokens' => 40000, 'output_tokens' => 8000],
+            'saved_notice.requirement_wiki_answer' => ['input_tokens' => 60000, 'output_tokens' => 8000],
+            'saved_notice.requirement_assessment' => ['input_tokens' => 40000, 'output_tokens' => 6000],
+            'enterprise_wiki.ingest' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'enterprise_wiki.maintenance' => ['input_tokens' => 60000, 'output_tokens' => 16000],
+            'knowledge.chunk_metadata_batch' => ['input_tokens' => 20000, 'output_tokens' => 4000],
+        ],
+
+        'payment' => [
+            // A failed card should not take a customer's AI away the same afternoon; a week is
+            // enough for a finance department to react before enforcement bites.
+            'past_due_grace_days' => env('AI_PAYMENT_PAST_DUE_GRACE_DAYS', 7),
+        ],
     ],
 
     'security' => [

@@ -3,17 +3,23 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Concerns\HasAdminPageHelp;
+use App\Models\AiOperationalBudgetPeriod;
 use App\Models\AiRuntimeControl;
+use App\Models\BillingEvent;
 use App\Models\User;
 use App\Services\Ai\AiUsageReportingService;
 use App\Services\Ai\Commercial\AiRuntimeControlService;
+use App\Services\Ai\Operational\AiOperationalBudgetService;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
 use Throwable;
@@ -42,6 +48,9 @@ class AiUsageCapacity extends Page
     public ?string $globalStopChangedBy = null;
 
     public ?string $globalStopChangedAt = null;
+
+    /** @var array<string, mixed> */
+    public array $globalBudget = [];
 
     /**
      * @var array<int, array<string, mixed>>
@@ -160,10 +169,109 @@ class AiUsageCapacity extends Page
                 ->action(fn (array $data) => $this->setGlobalStop(false, (string) $data['reason']))
                 ->visible(fn (): bool => $this->globalStopActive),
 
+            Action::make('set_global_operational_limits')
+                ->label(__('procynia.ai_admin.global.set_budget'))
+                ->icon('heroicon-o-banknotes')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.global.set_budget_confirm'))
+                ->fillForm(fn (): array => [
+                    'operational_budget_enabled' => (bool) ($this->globalBudget['is_enabled'] ?? false),
+                    'global_daily_nok_limit' => $this->globalBudget['daily']['limit'] ?? null,
+                    'global_monthly_nok_limit' => $this->globalBudget['monthly']['limit'] ?? null,
+                ])
+                ->form([
+                    Toggle::make('operational_budget_enabled')
+                        ->label(__('procynia.ai_admin.fields.operational_enabled'))
+                        ->helperText(__('procynia.ai_admin.global.budget_enabled_help')),
+                    TextInput::make('global_daily_nok_limit')
+                        ->label(__('procynia.ai_admin.fields.daily_nok_limit'))
+                        ->numeric()->minValue(0)->nullable(),
+                    TextInput::make('global_monthly_nok_limit')
+                        ->label(__('procynia.ai_admin.fields.monthly_nok_limit'))
+                        ->numeric()->minValue(0)->nullable(),
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()->minLength(3)->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->saveGlobalOperationalLimits($data)),
+
             $this->buildPageHelpAction(
                 static::fetchPageHelp('admin.ai_usage_capacity')
             ),
         ];
+    }
+
+    /**
+     * Set the platform's own NOK ceiling.
+     *
+     * Distinct from the manual emergency stop above it: that is an operator deciding to stop, this
+     * is the system stopping itself once planned spend is reached. Both live here because both end
+     * every AI call, and an operator needs to see at a glance which one is in force.
+     */
+    private function saveGlobalOperationalLimits(array $data): void
+    {
+        $context = app(CustomerContext::class);
+        $actor = $context->currentUser();
+
+        if (! $context->isInternalAdmin($actor instanceof User ? $actor : null) || ! $actor instanceof User) {
+            Notification::make()->title(__('procynia.ai_admin.notifications.not_authorised'))->danger()->send();
+
+            return;
+        }
+
+        $reason = trim((string) ($data['reason'] ?? ''));
+
+        if ($reason === '') {
+            Notification::make()->title(__('procynia.ai_admin.notifications.reason_required'))->danger()->send();
+
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($data, $reason, $actor): void {
+                $control = AiRuntimeControl::query()->lockForUpdate()->orderBy('id')->firstOrFail();
+                $before = [
+                    'operational_budget_enabled' => (bool) $control->operational_budget_enabled,
+                    'global_daily_nok_limit' => $control->global_daily_nok_limit,
+                    'global_monthly_nok_limit' => $control->global_monthly_nok_limit,
+                ];
+
+                $after = [
+                    'operational_budget_enabled' => (bool) ($data['operational_budget_enabled'] ?? false),
+                    'global_daily_nok_limit' => $this->positiveOrNull($data['global_daily_nok_limit'] ?? null),
+                    'global_monthly_nok_limit' => $this->positiveOrNull($data['global_monthly_nok_limit'] ?? null),
+                ];
+
+                $control->forceFill($after + ['changed_by_user_id' => $actor->id, 'reason' => $reason])->save();
+
+                BillingEvent::query()->create([
+                    'customer_id' => null,
+                    'user_id' => $actor->id,
+                    'event_type' => 'ai_global_operational_limits_updated',
+                    'source' => 'ai_cost_control',
+                    'description' => $reason,
+                    'before' => $before,
+                    'after' => $after,
+                ]);
+            });
+        } catch (Throwable $throwable) {
+            Notification::make()->title($throwable->getMessage())->danger()->send();
+
+            return;
+        }
+
+        $this->loadGlobalStopState();
+
+        Notification::make()->title(__('procynia.ai_admin.notifications.operational_limits_updated'))->success()->send();
+    }
+
+    private function positiveOrNull(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return max(0.0, (float) $value);
     }
 
     /**
@@ -210,6 +318,13 @@ class AiUsageCapacity extends Page
         $this->globalStopReason = $control?->reason;
         $this->globalStopChangedBy = $control?->changedByUser?->name;
         $this->globalStopChangedAt = $control?->updated_at?->format('Y-m-d H:i');
+
+        $budgets = app(AiOperationalBudgetService::class);
+        $this->globalBudget = [
+            'is_enabled' => (bool) ($control?->operational_budget_enabled ?? false),
+            'daily' => $budgets->status(AiOperationalBudgetPeriod::SCOPE_GLOBAL, null, AiOperationalBudgetPeriod::WINDOW_DAILY),
+            'monthly' => $budgets->status(AiOperationalBudgetPeriod::SCOPE_GLOBAL, null, AiOperationalBudgetPeriod::WINDOW_MONTHLY),
+        ];
     }
 
     public function mount(AiUsageReportingService $service): void

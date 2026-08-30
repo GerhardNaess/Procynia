@@ -43,6 +43,10 @@ final readonly class AiCallContext implements JsonSerializable
         public bool $operatorOverride = false,
         public ?int $operatorActorUserId = null,
         public ?string $operatorOverrideReason = null,
+        // Set by the provider boundary just before authorising: the guard cannot price a call it
+        // does not know the model of, and an unpriceable model is a hard stop in its own right.
+        public ?string $model = null,
+        public ?string $endpoint = null,
     ) {}
 
     public static function none(): self
@@ -88,6 +92,34 @@ final readonly class AiCallContext implements JsonSerializable
             operatorOverride: $this->operatorOverride,
             operatorActorUserId: $this->operatorActorUserId,
             operatorOverrideReason: $this->operatorOverrideReason,
+            model: $this->model,
+            endpoint: $this->endpoint,
+        );
+    }
+
+    /** Returns a copy that knows which model and endpoint the imminent call will use. */
+    public function forProviderCall(string $model, string $endpoint): self
+    {
+        return new self(
+            runId: $this->runId,
+            documentId: $this->documentId,
+            remainingJobBudgetSeconds: $this->remainingJobBudgetSeconds,
+            customerId: $this->customerId,
+            userId: $this->userId,
+            feature: $this->feature,
+            operation: $this->operation,
+            resourceType: $this->resourceType,
+            resourceId: $this->resourceId,
+            jobId: $this->jobId,
+            requestCorrelationId: $this->requestCorrelationId,
+            provider: $this->provider,
+            savedNoticeId: $this->savedNoticeId,
+            commercialCredit: $this->commercialCredit,
+            operatorOverride: $this->operatorOverride,
+            operatorActorUserId: $this->operatorActorUserId,
+            operatorOverrideReason: $this->operatorOverrideReason,
+            model: $model,
+            endpoint: $endpoint,
         );
     }
 
@@ -110,6 +142,8 @@ final readonly class AiCallContext implements JsonSerializable
             'commercial_credit' => $this->commercialCredit,
             'operator_override' => $this->operatorOverride,
             'operator_actor_user_id' => $this->operatorActorUserId,
+            'model' => $this->model,
+            'endpoint' => $this->endpoint,
         ];
     }
 

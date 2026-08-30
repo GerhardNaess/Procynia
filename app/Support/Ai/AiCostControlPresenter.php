@@ -24,6 +24,15 @@ class AiCostControlPresenter
             AiCostControlException::QUOTA_EXHAUSTED => $this->quotaExhaustedMessage($customer),
             AiCostControlException::NOT_INCLUDED => __('procynia.ai_quota.hard_stop.not_included'),
             AiCostControlException::CUSTOMER_SUSPENDED => __('procynia.ai_quota.hard_stop.customer_suspended'),
+
+            // Payment is the customer's to resolve, so it gets its own wording pointing at the
+            // subscription page — without exposing any Stripe internals.
+            AiCostControlException::PAYMENT_UNPAID,
+            AiCostControlException::PAYMENT_INCOMPLETE => __('procynia.ai_quota.hard_stop.payment'),
+
+            // An operational safety budget, a missing model price and a platform stop are all
+            // Procynia's own operational state. The customer is told AI is unavailable and no
+            // more: none of them are facts about their account, and the detail belongs internally.
             default => __('procynia.ai_quota.hard_stop.global_stop'),
         };
     }

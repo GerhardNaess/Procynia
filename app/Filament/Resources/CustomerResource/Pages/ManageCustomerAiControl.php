@@ -3,19 +3,25 @@
 namespace App\Filament\Resources\CustomerResource\Pages;
 
 use App\Filament\Resources\CustomerResource;
+use App\Models\AiOperationalBudgetPeriod;
 use App\Models\BillingEvent;
 use App\Models\Customer;
+use App\Models\CustomerAiOperationalLimit;
 use App\Models\CustomerAiUsageReservation;
 use App\Models\User;
 use App\Services\Ai\Commercial\AiCreditAdjustmentService;
 use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Ai\Commercial\AiRuntimeControlService;
+use App\Services\Ai\Operational\AiOperationalBudgetService;
+use App\Services\Ai\Operational\AiPaymentPolicyService;
 use App\Support\CustomerContext;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
 
@@ -45,6 +51,12 @@ class ManageCustomerAiControl extends Page
     public array $adjustments = [];
 
     public int $uncertainReservations = 0;
+
+    /** @var array<string, mixed> */
+    public array $operationalBudget = [];
+
+    /** @var array<string, mixed> */
+    public array $paymentState = [];
 
     public bool $globalStopActive = false;
 
@@ -126,6 +138,32 @@ class ManageCustomerAiControl extends Page
                         ->maxLength(500),
                 ])
                 ->action(fn (array $data) => $this->adjustCredits((int) $data['amount'], (string) $data['reason'])),
+
+            Action::make('set_operational_limits')
+                ->label(__('procynia.ai_admin.actions.set_operational_limits'))
+                ->icon('heroicon-o-banknotes')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.actions.set_operational_limits_confirm'))
+                ->fillForm(fn (): array => [
+                    'is_enabled' => (bool) ($this->operationalBudget['is_enabled'] ?? false),
+                    'daily_nok_limit' => $this->operationalBudget['daily']['limit'] ?? null,
+                    'monthly_nok_limit' => $this->operationalBudget['monthly']['limit'] ?? null,
+                ])
+                ->form([
+                    Toggle::make('is_enabled')
+                        ->label(__('procynia.ai_admin.fields.operational_enabled'))
+                        ->helperText(__('procynia.ai_admin.fields.operational_enabled_help')),
+                    TextInput::make('daily_nok_limit')
+                        ->label(__('procynia.ai_admin.fields.daily_nok_limit'))
+                        ->numeric()->minValue(0)->nullable(),
+                    TextInput::make('monthly_nok_limit')
+                        ->label(__('procynia.ai_admin.fields.monthly_nok_limit'))
+                        ->numeric()->minValue(0)->nullable(),
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()->minLength(3)->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->saveOperationalLimits($data)),
 
             Action::make('back_to_billing')
                 ->label(__('procynia.ai_admin.actions.back_to_billing'))
@@ -216,10 +254,89 @@ class ManageCustomerAiControl extends Page
         Notification::make()->title($message)->danger()->send();
     }
 
+    /**
+     * Persist this customer's NOK safety ceiling.
+     *
+     * A limit is a runtime setting, not a plan entitlement: it takes effect on the next provider
+     * call with no deploy, and it is recorded with actor, reason and before/after like every other
+     * cost-control change.
+     */
+    private function saveOperationalLimits(array $data): void
+    {
+        $actor = $this->internalActor();
+
+        if (! $actor instanceof User) {
+            return;
+        }
+
+        $reason = trim((string) ($data['reason'] ?? ''));
+
+        if ($reason === '') {
+            $this->failure(__('procynia.ai_admin.notifications.reason_required'));
+
+            return;
+        }
+
+        $daily = $this->positiveOrNull($data['daily_nok_limit'] ?? null);
+        $monthly = $this->positiveOrNull($data['monthly_nok_limit'] ?? null);
+
+        try {
+            DB::transaction(function () use ($daily, $monthly, $data, $reason, $actor): void {
+                $limit = CustomerAiOperationalLimit::query()->firstOrNew(['customer_id' => $this->record->id]);
+                $before = [
+                    'is_enabled' => (bool) ($limit->is_enabled ?? false),
+                    'daily_nok_limit' => $limit->daily_nok_limit,
+                    'monthly_nok_limit' => $limit->monthly_nok_limit,
+                ];
+
+                $limit->forceFill([
+                    'customer_id' => $this->record->id,
+                    'is_enabled' => (bool) ($data['is_enabled'] ?? false),
+                    'daily_nok_limit' => $daily,
+                    'monthly_nok_limit' => $monthly,
+                    'changed_by_user_id' => $actor->id,
+                    'reason' => $reason,
+                ])->save();
+
+                BillingEvent::query()->create([
+                    'customer_id' => $this->record->id,
+                    'user_id' => $actor->id,
+                    'event_type' => 'ai_customer_operational_limits_updated',
+                    'source' => 'ai_cost_control',
+                    'description' => $reason,
+                    'before' => $before,
+                    'after' => [
+                        'is_enabled' => (bool) ($data['is_enabled'] ?? false),
+                        'daily_nok_limit' => $daily,
+                        'monthly_nok_limit' => $monthly,
+                    ],
+                ]);
+            });
+        } catch (Throwable $throwable) {
+            $this->failure($throwable->getMessage());
+
+            return;
+        }
+
+        $this->loadState();
+
+        Notification::make()->title(__('procynia.ai_admin.notifications.operational_limits_updated'))->success()->send();
+    }
+
+    private function positiveOrNull(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return max(0.0, (float) $value);
+    }
+
     private function loadState(): void
     {
         $status = app(AiQuotaStatusService::class)->forCustomer($this->record);
         $this->quota = $status->toArray();
+        $this->loadOperationalState();
         $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
 
         // Surfaced because an uncertain reservation still holds a credit: an admin looking at a
@@ -260,6 +377,24 @@ class ManageCustomerAiControl extends Page
                 'actor' => $adjustment->actor?->name ?? __('procynia.ai_admin.actor_system'),
             ])
             ->all();
+    }
+
+    /**
+     * The operational picture: NOK spent against Procynia's own safety ceilings, kept visually and
+     * conceptually separate from the commercial quota above it. The two answer different questions.
+     */
+    private function loadOperationalState(): void
+    {
+        $budgets = app(AiOperationalBudgetService::class);
+        $limit = CustomerAiOperationalLimit::query()->where('customer_id', $this->record->id)->first();
+
+        $this->operationalBudget = [
+            'is_enabled' => (bool) ($limit->is_enabled ?? false),
+            'daily' => $budgets->status(AiOperationalBudgetPeriod::SCOPE_CUSTOMER, (int) $this->record->id, AiOperationalBudgetPeriod::WINDOW_DAILY),
+            'monthly' => $budgets->status(AiOperationalBudgetPeriod::SCOPE_CUSTOMER, (int) $this->record->id, AiOperationalBudgetPeriod::WINDOW_MONTHLY),
+        ];
+
+        $this->paymentState = app(AiPaymentPolicyService::class)->evaluate($this->record);
     }
 
     /**

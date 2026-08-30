@@ -2,15 +2,18 @@
 
 namespace App\Services\Operations;
 
-use App\Services\Operations\BackupService;
-use Illuminate\Support\Carbon;
+use App\Models\AiOperationalBudgetPeriod;
+use App\Models\AiRuntimeControl;
+use App\Services\Ai\Operational\AiOperationalBudgetService;
+use App\Services\Ai\Operational\AiOperationalPricingService;
 use Carbon\CarbonImmutable;
+use Cron\CronExpression;
+use DateTimeZone;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
-use DateTimeZone;
-use Cron\CronExpression;
 use Throwable;
 
 class RuntimeStatusService
@@ -40,7 +43,44 @@ class RuntimeStatusService
             'failed_jobs_count' => $failedJobsCount,
             'scheduler' => $this->schedulerStatus(),
             'backup' => $this->backupStatus(),
+            'ai_cost_control' => $this->aiCostControlStatus(),
         ];
+    }
+
+    /**
+     * Whether AI is currently able to run at all, and why not when it cannot.
+     *
+     * Placed in the existing runtime snapshot rather than a separate health surface: to an
+     * operator, "AI is stopped" belongs beside "the queue is stuck", and the reason — a manual
+     * emergency stop, a spent safety budget, or missing pricing data — determines what to do next.
+     *
+     * @return array{manual_global_stop: bool, budget_enabled: bool, daily: array<string, mixed>, monthly: array<string, mixed>, budget_stop_active: bool, price_catalogue_configured: bool}
+     */
+    private function aiCostControlStatus(): array
+    {
+        return rescue(function (): array {
+            $budgets = app(AiOperationalBudgetService::class);
+            $control = AiRuntimeControl::query()->orderBy('id')->first();
+
+            $daily = $budgets->status(AiOperationalBudgetPeriod::SCOPE_GLOBAL, null, AiOperationalBudgetPeriod::WINDOW_DAILY);
+            $monthly = $budgets->status(AiOperationalBudgetPeriod::SCOPE_GLOBAL, null, AiOperationalBudgetPeriod::WINDOW_MONTHLY);
+
+            return [
+                'manual_global_stop' => (bool) ($control?->global_ai_stop ?? false),
+                'budget_enabled' => (bool) ($control?->operational_budget_enabled ?? false),
+                'daily' => $daily,
+                'monthly' => $monthly,
+                'budget_stop_active' => ($daily['percentage'] ?? 0) >= 100 || ($monthly['percentage'] ?? 0) >= 100,
+                'price_catalogue_configured' => app(AiOperationalPricingService::class)->catalogueIsConfigured(),
+            ];
+        }, [
+            'manual_global_stop' => false,
+            'budget_enabled' => false,
+            'daily' => [],
+            'monthly' => [],
+            'budget_stop_active' => false,
+            'price_catalogue_configured' => false,
+        ], false);
     }
 
     /**
@@ -260,7 +300,7 @@ class RuntimeStatusService
     /**
      * Normalize a single scheduler task into a deterministic runtime payload.
      *
-     * @param array<string, mixed> $task
+     * @param  array<string, mixed>  $task
      * @return array<string, mixed>
      */
     private function normalizeSchedulerTask(array $task, CarbonImmutable $referenceTime): array

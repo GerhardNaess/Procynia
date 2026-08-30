@@ -3,8 +3,11 @@
 namespace App\Services\Ai;
 
 use App\Data\Ai\AiCallContext;
+use App\Data\Ai\Operational\AiCostState;
 use App\Models\AiUsageAttempt;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Services\Ai\Operational\AiOperationalAlertService;
+use App\Services\Ai\Operational\AiOperationalPricingService;
 use App\Support\Ai\AiCallContextScope;
 use Closure;
 use Illuminate\Http\Client\ConnectionException;
@@ -19,7 +22,11 @@ use Throwable;
  */
 class AiUsageMeter
 {
-    public function __construct(private readonly AiCallContextScope $contextScope) {}
+    public function __construct(
+        private readonly AiCallContextScope $contextScope,
+        private readonly AiOperationalPricingService $pricing,
+        private readonly AiOperationalAlertService $operationalAlerts,
+    ) {}
 
     public function within(AiCallContext $context, Closure $callback): mixed
     {
@@ -200,6 +207,8 @@ class AiUsageMeter
                 'finished_at' => now(),
             ]);
 
+            $this->snapshotCost($attempt->refresh(), $status);
+
             if ($status === AiUsageAttempt::STATUS_SUCCESS && $attempt->enterprise_wiki_ingest_run_id !== null) {
                 $inputTokens = $this->integer($usage['input_tokens'] ?? $usage['prompt_tokens'] ?? null) ?? 0;
                 $outputTokens = $this->integer($usage['output_tokens'] ?? null) ?? 0;
@@ -211,6 +220,52 @@ class AiUsageMeter
             }
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][AI_USAGE_METER] Could not finish AI usage attempt.', [
+                'attempt_id' => $attempt->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Freeze what this attempt cost, using the price and rate in force at the time.
+     *
+     * Written onto the attempt itself so a later price correction cannot rewrite the basis of an
+     * operational decision. An attempt that cannot be priced is recorded as `unknown`, never as
+     * zero — a call Procynia cannot cost is a risk to surface, not free work.
+     */
+    private function snapshotCost(AiUsageAttempt $attempt, string $status): void
+    {
+        try {
+            if ($status === AiUsageAttempt::STATUS_UNCERTAIN) {
+                // The provider may or may not have done the work. Cost is unresolved by nature.
+                $attempt->update(['cost_status' => AiCostState::UNCERTAIN]);
+
+                return;
+            }
+
+            if ($status !== AiUsageAttempt::STATUS_SUCCESS) {
+                return;
+            }
+
+            $cost = $this->pricing->costForAttempt($attempt);
+            $attempt->update($cost->toAttemptColumns());
+
+            if ($cost->status === AiCostState::UNKNOWN) {
+                $this->operationalAlerts->reportMissingModelPrice(
+                    (string) $attempt->provider,
+                    (string) $attempt->model,
+                    $this->contextScope->current(),
+                );
+
+                return;
+            }
+
+            $this->operationalAlerts->reportFxState(
+                $this->pricing->fxState((string) $cost->priceCurrency),
+                (string) $cost->priceCurrency,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('[PROCYNIA][AI_USAGE_METER] Could not snapshot AI cost.', [
                 'attempt_id' => $attempt->id,
                 'error' => $exception->getMessage(),
             ]);

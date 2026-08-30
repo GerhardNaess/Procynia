@@ -19,6 +19,7 @@ class OpenAiClient
         private readonly AiCostControlService $costControl,
         private readonly AiCallContextScope $contextScope,
     ) {}
+
     /**
      * Purpose: Send a GET request to the configured OpenAI API.
      * Inputs: The endpoint path and timeout in seconds.
@@ -46,7 +47,7 @@ class OpenAiClient
     public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
         $model = trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown';
-        $decision = $this->costControl->authorize($this->contextScope->current());
+        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'responses'));
 
         try {
             $result = $this->usageMeter->measureResponse(
@@ -66,7 +67,7 @@ class OpenAiClient
     public function createEmbedding(string $input): array
     {
         $model = $this->embeddingModel();
-        $decision = $this->costControl->authorize($this->contextScope->current());
+        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($model, 'embeddings'));
 
         try {
             $result = $this->usageMeter->measureResponse(
@@ -86,7 +87,8 @@ class OpenAiClient
     public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null): Response
     {
         $endpoint = ltrim($endpoint, '/');
-        $decision = $this->costControl->authorize($this->contextScope->current());
+        $postModel = trim((string) ($payload['model'] ?? '')) ?: $this->embeddingModel();
+        $decision = $this->costControl->authorize($this->contextScope->current()->forProviderCall($postModel, $endpoint));
 
         try {
             $response = $endpoint === 'responses'
