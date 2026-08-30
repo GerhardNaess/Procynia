@@ -6,6 +6,8 @@
 |------------|----------------|--------------------------------------|
 | 2026-05-15 | Gerhard Næss   | Første versjon opprettet (AVVIK-005) |
 | 2026-05-15 | Gerhard Næss   | AVVIK-029 lukket: HTTPS/TLS-rutine utvidet med TrustProxies, certbot, konkrete verifikasjonskommandoer og sjekk av interne porter |
+| 2026-08-29 | Sikkerhetsgjennomgang | F-02 Stripe webhook: signaturverifisering er nå fail-closed. `STRIPE_WEBHOOK_SECRET` dokumentert som påkrevd når Stripe er i bruk, med konsekvens og statuskoder |
+| 2026-08-29 | Sikkerhetsgjennomgang | F-01 trusted proxy: `trustProxies(at: '*')` fjernet fra koden. Dokumentasjonen oppdatert til dagens modell — ingen trusted proxies som standard, `TRUSTED_PROXIES` per miljø, nginx normaliserer forwarded headers. Nytt obligatorisk deploy-steg og etterkontroll |
 
 **Neste revisjon:** Før første produksjonsdeploy  
 **Eier:** Teknisk ansvarlig for Procynia
@@ -42,6 +44,12 @@ Følgende skal være på plass før produksjonsdeploy starter:
 - Docker Compose V2 (`docker compose`, ikke `docker-compose`)
 - Git installert på serveren
 - Tilgang til koderepository (SSH-nøkkel eller deploy token)
+
+**Node-versjon:** Procynia er standardisert på **Node 22**. Produksjonsimaget bygger frontend i en
+egen stage på `node:22-bookworm-slim` (`docker/production/Dockerfile`), så en deploy-server trenger
+ikke Node installert lokalt — bygget skjer inne i imaget. Samme versjon brukes av CI
+(`.github/workflows/dependency-audit.yml`) og forventes ved lokal utvikling (`engines` i
+`package.json`, `.nvmrc`). Node 18 er EOL og er ikke lenger en støttet prosjektbaseline.
 
 ### Nettverksoppsett
 
@@ -109,6 +117,14 @@ APP_URL=https://app.procynia.no
 
 `APP_DEBUG=false` er obligatorisk i produksjon. Debug-modus eksponerer stack traces, konfigurasjon og interne detaljer til alle brukere.
 
+#### Trusted proxies
+
+```dotenv
+TRUSTED_PROXIES=<adressen den ytre reverse proxyen har sett fra containeren>
+```
+
+Tom som standard, som betyr at Laravel ikke stoler på noen forwarded headers. Må settes i produksjon når applikasjonen står bak en ytre TLS-terminerende reverse proxy, ellers faller korrekt klient-IP og HTTPS-gjenkjenning bort. Verdien er miljøspesifikk og skal verifiseres på serveren — se §8, «Laravel og forwarded headers».
+
 #### Docker / PostgreSQL-tjeneste
 
 ```dotenv
@@ -149,6 +165,17 @@ Dersom produksjon bruker en ekstern managed Redis, sett `REDIS_HOST` til ekstern
 QUEUE_CONNECTION=redis
 CACHE_STORE=redis
 SESSION_DRIVER=redis
+
+# REDIS_PASSWORD er OBLIGATORISK (security finding F-08). Redis holder sesjoner, alle ni
+# køer og cache. docker-compose starter Redis med --requirepass fra denne verdien og
+# NEKTER Å STARTE hvis den er tom. Generer én per miljø: openssl rand -base64 32
+# Alle ni Redis-brukende tjenester arver den via env_file: .env — sett den ett sted.
+REDIS_PASSWORD=<sett en generert verdi, aldri commit den>
+
+# SESSION_SECURE_COOKIE trengs normalt ikke settes: config/session.php defaulter den til true
+# så lenge APP_ENV ikke er "local" (security finding F-06). Produksjonsimaget setter
+# APP_ENV=production, så sessionscookien får Secure automatisk — også når TRUSTED_PROXIES
+# ikke er satt. Sett den kun eksplisitt hvis du bevisst må overstyre.
 ```
 
 #### Logging
@@ -189,6 +216,19 @@ STRIPE_PRICE_MAX_YEARLY=price_<live-pris-id>
 STRIPE_PRICE_ULTRA_MONTHLY=price_<live-pris-id>
 STRIPE_PRICE_ULTRA_YEARLY=price_<live-pris-id>
 ```
+
+**`STRIPE_WEBHOOK_SECRET` er påkrevd dersom Stripe er i bruk.** Webhook-endepunktet er uautentisert og
+CSRF-unntatt — Stripe har ingen Laravel-sesjon — så Stripe-signaturen er den eneste kontrollen som
+skiller en ekte hendelse fra en forfalsket. Verdien hentes fra webhook-endepunktet i Stripe Dashboard.
+
+Uten den avviser endepunktet alt med **503** og logger `stripe_webhook_rejected`
+(`reason = missing_webhook_secret`). Ingen abonnements- eller fakturahendelser blir behandlet. Det er
+fail-closed og med vilje: Stripe fortsetter å prøve på nytt, så hendelser går ikke tapt når verdien
+settes.
+
+**Ikke nødvendig** i miljøer der Stripe ikke er aktivert. Endepunktet mottar da ingen kall.
+
+Se [`docs/operations/security.md`](security.md) §6.1 for hele oppførselen.
 
 Bruk `pk_live_` og `sk_live_`, ikke testkeys, i produksjon.
 
@@ -281,6 +321,44 @@ Dersom produksjon bruker ekstern managed database eller Redis, kan `postgres`- o
 
 ---
 
+## 4.1 Redis-autentisering
+
+Redis holder sesjoner, alle ni køer og cache. Den kjører **aldri** uautentisert (security finding
+F-08).
+
+- `REDIS_PASSWORD` settes i serverens `.env`. Alle ni Redis-brukende tjenester (`app`, `queue`,
+  de seks `queue-enterprise-wiki*`/`queue-ai-requirements`, og `scheduler`) arver den via
+  `env_file: .env` — den skal settes ett sted, ikke per tjeneste.
+- Mangler den, **nekter stacken å starte**. Det er tilsiktet: en åpen Redis med sesjoner er verre
+  enn en deploy som stopper.
+- Redis-porten publiseres **ikke** i produksjon. `docker-compose.prod.yml` fjerner publiseringen, så
+  Redis er kun tilgjengelig på det interne compose-nettet. Autentisering erstatter ikke
+  nettverksisolasjon.
+
+Verifiser etter deploy:
+
+```bash
+# Uten credentials skal den avvise:
+docker compose exec redis redis-cli PING
+#   -> NOAUTH Authentication required.
+
+# Med credentials skal den svare:
+docker compose exec redis sh -c 'redis-cli --no-auth-warning -a "$REDIS_PASSWORD" PING'
+#   -> PONG
+
+# Og runtime-sjekken skal være grønn på Redis auth:
+docker compose exec app php artisan ops:runtime-check
+```
+
+`ops:runtime-check` feiler kritisk i produksjon hvis `REDIS_PASSWORD` mangler eller er en
+placeholder (`null`, `none`, `false`). Bruk den som deploy-gate.
+
+**Ved oppgradering av en kjørende stack:** credentialen leses inn når containeren starter. En
+`docker compose up -d` som bare recreater `app` etterlater køarbeiderne med gammel konfigurasjon, og
+de havner i restart-loop med `NOAUTH`. Recreat alle Redis-brukende tjenester.
+
+---
+
 ## 5. Første deploy
 
 Følg disse stegene i angitt rekkefølge.
@@ -318,6 +396,31 @@ docker compose run --rm app php artisan key:generate
 ```
 
 Kjøres kun én gang. Kjøres ikke på nytt etter nøkkelen er satt — det ugyldiggjør eksisterende kryptert data.
+
+#### Sett `TRUSTED_PROXIES`
+
+**Obligatorisk ved deploy av trusted-proxy-endringen.** Applikasjonsendringen og miljøvariabelen må settes i samme deploy: koden stoler ikke lenger på noen proxy som standard, så uten variabelen mister Laravel ekte klient-IP og HTTPS-gjenkjenning i samme øyeblikk som den nye koden går live.
+
+Finn adressen den ytre reverse proxyen faktisk har når den når containeren. **Les den observerte verdien — ikke rutetabellen.** Docker-gatewayen og adressen nginx faktisk ser er ikke nødvendigvis den samme: på Docker Desktop er gatewayen `172.20.0.1` mens den observerte avsenderen er `192.168.65.1`. Bare den observerte verdien er riktig her.
+
+Gjør en forespørsel gjennom den ytre proxyen, og les første felt i den indre nginx-loggen — det er `$remote_addr`, altså avsenderen nginx faktisk tok imot:
+
+```bash
+curl -s -o /dev/null https://app.procynia.no/up
+
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=20 web \
+  | grep -oE '[0-9]{1,3}(\.[0-9]{1,3}){3} - -' | tail -1
+```
+
+Forventet: én privat adresse som går igjen for all trafikk gjennom den ytre proxyen. Ser du flere ulike adresser, går ikke all trafikk gjennom samme proxy — avklar det før du setter variabelen.
+
+Sett den deretter i `.env`:
+
+```dotenv
+TRUSTED_PROXIES=<adressen fra kommandoen over>
+```
+
+Verdien er miljøspesifikk og skal ikke kopieres fra lokal Docker. Se §8, «Laravel og forwarded headers», for begrunnelse og for konsekvensen av å la den stå tom.
 
 ### 5.4 Bygg og start containere
 
@@ -528,7 +631,51 @@ server {
 
 ### Laravel og forwarded headers
 
-Procynia er konfigurert til å stole på forwarded headers fra reverse proxy (`bootstrap/app.php` → `trustProxies(at: '*')`). Applikasjonen gjenkjenner korrekt HTTPS-forespørsler og genererer `https://`-URLer når proxyen sender `X-Forwarded-Proto: https`.
+**Laravel stoler som standard på ingen proxyer.** Klient-IP hentes fra `REMOTE_ADDR` — adressen den indre nginx faktisk tok imot forbindelsen fra — og forwarded headers ignoreres helt. Det er en verdi en klient ikke kan forfalske.
+
+Dette erstatter den tidligere `trustProxies(at: '*')`, som gjorde enhver avsender til en trusted proxy og dermed lot en klient bestemme sin egen `X-Forwarded-For`. Se [`docs/operations/security.md`](security.md) §1.2.
+
+#### Hvem Laravel stoler på
+
+Styres av `TRUSTED_PROXIES` i `.env` (kommaseparert IP eller CIDR), tom som standard:
+
+```dotenv
+TRUSTED_PROXIES=<adressen den ytre reverse proxyen har sett fra containeren>
+```
+
+`X-Forwarded-Proto` — og dermed HTTPS-gjenkjenning — brukes **kun** når forespørselen kommer fra en adresse i denne listen. Det samme gjelder `X-Forwarded-For` og `X-Forwarded-Host`.
+
+#### nginx normaliserer headerne
+
+Den indre nginx (`docker/nginx/default.conf`) setter:
+
+```nginx
+fastcgi_param HTTP_X_FORWARDED_FOR $proxy_add_x_forwarded_for;
+fastcgi_param HTTP_X_REAL_IP       $remote_addr;
+```
+
+`$proxy_add_x_forwarded_for` **legger til** den observerte avsenderen bakerst i kjeden i stedet for å overskrive. Det bevarer den ekte klientadressen som den ytre proxyen allerede har lagt inn, samtidig som den siste oppføringen alltid er observert av nginx og aldri påstått av den som ringer.
+
+#### Verdien må verifiseres i det aktuelle miljøet
+
+`TRUSTED_PROXIES` skal **ikke** kopieres fra lokal Docker. Adressen avhenger av verten, og den er ikke nødvendigvis Docker-gatewayen: på Docker Desktop er gatewayen `172.20.0.1` mens nginx faktisk observerer `192.168.65.1`. Les derfor den observerte verdien fra nginx-loggen på produksjonsserveren — se §5.3, «Sett `TRUSTED_PROXIES`».
+
+Bruk eksakt adresse eller et smalt CIDR. Ikke sett et helt RFC1918-område, og aldri `*`: containeren nås gjennom Docker-gatewayen, så et bredt område ville gjort enhver avsender på det nettverket til en trusted proxy — samme hull i mindre form.
+
+#### Konsekvens hvis `TRUSTED_PROXIES` ikke er satt
+
+Systemet er fortsatt trygt, men mindre presist:
+
+| | Effekt |
+|---|---|
+| Spoofede forwarded headers | Fortsatt beskyttet — de ignoreres helt |
+| Klient-IP | Blir proxyens observerte adresse, ikke den ekte klienten |
+| Rate limiting | Blir grovere: alle brukere bak proxyen deler én IP, så innloggingsgrensen virker per e-post framfor per klient |
+| HTTPS-gjenkjenning | Kan falle bort bak en ytre TLS-terminerende proxy — Laravel kan da generere `http://`-URLer og ikke sette secure cookies |
+
+Den siste er den som merkes først. Sett variabelen som del av samme deploy som koden.
+
+> Status i dagens produksjonsmiljø er ikke verifisert fra kodebasen. Bekreft med kommandoene under før deployen regnes som fullført.
 
 ### Sertifikatfornyelse
 
@@ -564,6 +711,36 @@ curl -I http://app.procynia.no
 ```
 
 Forventet: `301 Moved Permanently` med `Location: https://app.procynia.no/...`
+
+**Trusted proxies og klient-IP:**
+
+Tre kontroller som henger sammen. Kjør dem etter at `TRUSTED_PROXIES` er satt.
+
+Reell klient-IP — logg inn med feil passord fra en kjent ekstern adresse og se hva som ble registrert:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=50 app \
+  | grep 'PROCYNIA..AUTH'
+```
+
+Forventet: `ip` i logglinjen er den ekte klientadressen, ikke proxyens interne adresse.
+
+Spoofet header skal ikke vinne — samme forespørsel med en påstått adresse:
+
+```bash
+curl -s -o /dev/null -H 'X-Forwarded-For: 1.2.3.4' https://app.procynia.no/login
+```
+
+Forventet: ingen `authentication_*`-logglinje registrerer `1.2.3.4` som klient-IP. Vinner den påståtte adressen, er `TRUSTED_PROXIES` satt for bredt.
+
+HTTPS oppfattes som secure bak den TLS-terminerende proxyen:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec app \
+  php artisan config:show app.url
+```
+
+Forventet: `https://app.procynia.no`. Genererer applikasjonen `http://`-URLer eller mangler secure cookies, er `TRUSTED_PROXIES` ikke satt eller satt til feil adresse.
 
 **APP_URL samsvarer med faktisk domene:**
 
@@ -693,6 +870,9 @@ Ingen nye failed jobs skal ha oppstått som følge av deploy.
 
 - [ ] Alle Docker-tjenester er oppe og `healthy`
 - [ ] Applikasjonen svarer på HTTPS
+- [ ] `TRUSTED_PROXIES` er verifisert og satt (se §5.3 og §8)
+- [ ] Reell klient-IP registreres i innloggingsloggen, ikke proxyens adresse
+- [ ] Spoofet `X-Forwarded-For` vinner ikke over den observerte adressen
 - [ ] Innlogging fungerer
 - [ ] Adminpanel `/admin` er tilgjengelig
 - [ ] Queue heartbeat er `ok`
@@ -705,6 +885,7 @@ Ingen nye failed jobs skal ha oppstått som følge av deploy.
 - [ ] AI-funksjoner fungerer (dersom aktivert)
 - [ ] Doffin-integrasjon fungerer (dersom aktivert)
 - [ ] Billing/Stripe fungerer (dersom aktivert)
+- [ ] `STRIPE_WEBHOOK_SECRET` er satt (dersom Stripe er aktivert) — uten den avvises alle webhooks med 503
 
 ---
 

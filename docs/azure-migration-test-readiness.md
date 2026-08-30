@@ -53,7 +53,7 @@ docker exec procynia-app php artisan test tests/Feature/Azure
 | Kø-/scheduler-heartbeats og helseendepunkt | `tests/Feature/Ops/*`, `tests/Feature/Health/ProcyniaHealthEndpointsTest.php` |
 | Claim-verification-køens jobbsemantikk | `tests/Feature/App/Wiki/EnterpriseWikiClaimVerificationQueueTest.php` |
 | Doffin-config uten beta-default | `tests/Feature/DoffinProductionConfigTest.php` |
-| HTTPS/proxy-dokumentasjon og `trustProxies` | `tests/Feature/HttpsTlsProductionConfigTest.php` |
+| HTTPS/proxy-dokumentasjon | `tests/Feature/HttpsTlsProductionConfigTest.php` (merk: dens `trustProxies`-assertion er utdatert etter F-01 — se `docs/security/security-audit-2026-08.md`) |
 | Testdatabase-sikkerhet | `tests/TestCase.php`, `tests/Unit/RefreshDatabaseRealLifecycleSafetyTest.php` |
 
 Parser-testene er **ikke** duplisert. Der formatene allerede var dekket, er det lagt til runtime-sjekker for eksterne binærer og extensions i stedet.
@@ -93,7 +93,7 @@ Statuskolonnen skiller bevisst mellom fire ting:
 | Frontend build i image | — | **BLOKKERT** | `public/build/manifest.json` i imaget |
 | Web health `/up` | Ekte HTTP mot web-container | **BEVIST** — 200 | Container Apps readiness/liveness probe |
 | `APP_DEBUG=false` + HTTPS `APP_URL` | Ekte boot uten `.env`, kun env-variabler | **BEVIST** | Ekte ingress-terminert HTTPS |
-| Proxy/forwarded headers | `trustProxies(at: '*')` i `bootstrap/app.php` | **STATISK** (dekket fra før) | Ekte `X-Forwarded-Proto` fra Container Apps ingress |
+| Proxy/forwarded headers | Ingen trusted proxies som standard; `TRUSTED_PROXIES` per miljø. `tests/Feature/Security/TrustedProxyTest.php` | **BEVIST** — spoofet header vinner ikke | **Ingress-området må verifiseres** og settes i `TRUSTED_PROXIES`, ellers løser alle forespørsler til ingress-adressen |
 | `SESSION_SECURE_COOKIE` | Boot-probe leser `session.secure = true` | **BEVIST** | Ekte cookie over HTTPS |
 | PostgreSQL: host fra env | Boot-probe med Azure-lignende hostnavn | **BEVIST** | Ekte Flexible Server-hostnavn |
 | PostgreSQL: ingen lokale antakelser | Skann av `app/` for hardkodet host | **BEVIST** — ingen treff | — |
