@@ -3074,6 +3074,7 @@ return [
         'ask_insufficient_evidence' => 'I cannot find enough documented information in the Wiki to answer this reliably.',
         'ask_conflicting_evidence' => 'The Wiki contains conflicting information about this question.',
         'ask_technical_error' => 'The question could not be processed right now. Please try again shortly.',
+        'ask_rate_limited' => 'You have sent too many Wiki questions in a short time. Please try again shortly.',
         'ask_open_page' => 'Open the Wiki page',
         'ask_no_sources' => 'No Wiki sources were used for this answer.',
         'ask_page_help_button' => 'Help',

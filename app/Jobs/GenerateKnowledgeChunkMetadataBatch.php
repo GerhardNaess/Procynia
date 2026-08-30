@@ -6,6 +6,7 @@ use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -21,19 +22,20 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 2;
+
     public int $timeout = 900;
 
     /**
-     * @param array<int, int> $knowledgeItemChunkIds
+     * @param  array<int, int>  $knowledgeItemChunkIds
      */
     public function __construct(
         public readonly int $knowledgeItemId,
         public readonly array $knowledgeItemChunkIds,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Generate AI metadata for one batch of chunks belonging to a knowledge document.
@@ -42,6 +44,18 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
      * Side effects: Calls the AI metadata service once for the batch, updates chunk metadata fields, and creates vocabulary candidates.
      */
     public function handle(
+        KnowledgeChunkMetadataGenerationService $metadataGenerationService,
+        KnowledgeChunkVocabularyCandidateService $vocabularyCandidateService,
+    ): void {
+        $this->withinAiCallContext(
+            $this->knowledgeItemAiCallContext($this->knowledgeItemId, 'knowledge.chunk_metadata_batch'),
+            function () use ($metadataGenerationService, $vocabularyCandidateService): void {
+                $this->failWithoutRetryOnCostControlBlock(fn (): mixed => $this->handleInAiCallContext($metadataGenerationService, $vocabularyCandidateService));
+            },
+        );
+    }
+
+    private function handleInAiCallContext(
         KnowledgeChunkMetadataGenerationService $metadataGenerationService,
         KnowledgeChunkVocabularyCandidateService $vocabularyCandidateService,
     ): void {
@@ -126,7 +140,7 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
      * Returns: Unique positive integer ids in their original order.
      * Side effects: None.
      *
-     * @param array<int, mixed> $chunkIds
+     * @param  array<int, mixed>  $chunkIds
      * @return array<int, int>
      */
     private function normalizedChunkIds(array $chunkIds): array
@@ -174,7 +188,7 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
      * Returns: The number of chunks that were processed by the batch.
      * Side effects: Calls AI once for the batch, updates chunk metadata columns, writes logs, and syncs vocabulary candidates.
      *
-     * @param array<int, KnowledgeItemChunk> $chunks
+     * @param  array<int, KnowledgeItemChunk>  $chunks
      */
     private function generateChunkMetadataBatch(
         KnowledgeItem $knowledgeDocument,

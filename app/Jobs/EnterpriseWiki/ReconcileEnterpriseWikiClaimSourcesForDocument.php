@@ -4,6 +4,7 @@ namespace App\Jobs\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiDocument;
 use App\Services\EnterpriseWiki\EnterpriseWikiClaimSourceReconciliationService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -27,6 +28,7 @@ class ReconcileEnterpriseWikiClaimSourcesForDocument implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     /**
@@ -51,6 +53,16 @@ class ReconcileEnterpriseWikiClaimSourcesForDocument implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiClaimSourceReconciliationService $service): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiDocumentAiCallContext($this->documentId, 'enterprise_wiki.reconcile_claim_sources'),
+            function () use ($service): void {
+                $this->handleInAiCallContext($service);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiClaimSourceReconciliationService $service): void
     {
         $document = EnterpriseWikiDocument::query()->find($this->documentId);
 

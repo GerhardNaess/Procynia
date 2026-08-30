@@ -2466,6 +2466,8 @@ class RequirementExtractionRunServiceTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
+            // This suite exercises extraction state transitions, not commercial limits.
+            'subscription_plan' => Customer::PLAN_ENTERPRISE,
         ]);
     }
 

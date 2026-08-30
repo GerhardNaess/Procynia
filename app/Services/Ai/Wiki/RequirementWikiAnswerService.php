@@ -2,9 +2,11 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -82,6 +84,7 @@ class RequirementWikiAnswerService
         private readonly RequirementWikiAnswerAiClient $answerAiClient,
         private readonly RequirementWikiAlignmentAiClient $alignmentAiClient,
         private readonly RequirementWikiAnswerRevisionAiClient $revisionAiClient,
+        private readonly AiCallContextScope $contextScope = new AiCallContextScope,
     ) {}
 
     /**
@@ -109,6 +112,16 @@ class RequirementWikiAnswerService
         ?string $caseInstructions = null,
         ?string $requirementUserPrompt = null,
     ): SavedNoticeAiRequirementWikiAnswer {
+        return $this->contextScope->within(new AiCallContext(
+            customerId: $customerId,
+            userId: $userId,
+            feature: 'saved_notice',
+            operation: 'saved_notice.requirement_wiki_answer',
+            resourceType: 'saved_notice_ai_requirement',
+            resourceId: $requirement->id,
+            savedNoticeId: $requirement->saved_notice_id,
+            commercialCredit: true,
+        ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt): SavedNoticeAiRequirementWikiAnswer {
         $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
         $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
@@ -166,6 +179,7 @@ class RequirementWikiAnswerService
             'stale_reason' => null,
             'stale_context' => null,
         ], $userId);
+        });
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki\Responses;
 
+use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseEmptyException;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseException;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseFailedException;
@@ -94,6 +95,8 @@ class EnterpriseWikiResponsesDecoder
 
             return $decoded;
         } catch (EnterpriseWikiResponseException $exception) {
+            app(AiUsageMeter::class)->markCurrentAttemptInvalid($response);
+
             Log::warning('[PROCYNIA][ENTERPRISE_WIKI_RESPONSES] Response rejected.', $diagnostics);
 
             if ($exception->diagnostics === []) {

@@ -247,18 +247,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Manglende rate limiting og kostnadskontroll på AI-kall',
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_CRITICAL,
-            'status' => OperationalDeviation::STATUS_CLOSED,
-            'description' => 'AI-endepunkter har ikke tilstrekkelig begrensning på bruk eller kostnad per kunde.',
+            'status' => OperationalDeviation::STATUS_IN_PROGRESS,
+            'description' => 'Kostnadskontroll er under ny implementering. Fase 2 etablerer atomisk commercial quota, reservasjon og runtime hard stop, men full operasjonell kontroll er ikke ferdig.',
             'impact' => 'Feilaktig loop eller aggressiv bruk kan gi ukontrollerte API-kostnader.',
             'recommended_action' => 'Legg inn rate limiting, kundegrenser og/eller AI credits-måling.',
-            'acceptance_criteria' => 'AI-kall begrenses per kunde/bruker, og kostnadseksponering er kontrollert.',
+            'acceptance_criteria' => 'Alle AI-entrypoints er målt, kommersiell quota håndheves server-side, queue og scheduler respekterer grensen, kunden varsles før stopp og global safeguard er testet.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
             'started_at' => '2026-05-15 22:00:00',
-            'ready_for_verification_at' => '2026-05-15 22:30:00',
-            'verified_at' => '2026-05-15 22:45:00',
-            'closed_at' => '2026-05-15 22:45:00',
-            'verification_notes' => 'Server-side AI rate limiting is implemented. AI operations are limited per user and per customer. Uncontrolled AI volume is stopped before AI call or AI job dispatch starts. Users receive a controlled and understandable message. Non-sensitive usage logging is added as a basis for later limit tuning. The existing entitlement check remains in place.',
+            'ready_for_verification_at' => null,
+            'verified_at' => null,
+            'closed_at' => null,
+            'verification_notes' => 'AVVIKET forblir åpent. Fase 1 la provider-attempt-måling og sikret Wiki Ask. Fase 2 legger commercial quota, reservasjon, customer/global runtime stop og audit. Closure krever fortsatt kundevarsling, bredere context-verifisering og globale operasjonelle safeguards.',
         ]);
 
         $this->seed([
@@ -558,6 +558,18 @@ class OperationalDeviationSeeder extends Seeder
      */
     private function seed(array $attributes): void
     {
+        // AVVIK-009 was incorrectly closed while the acceptance criteria for cost control were no
+        // longer met. Unlike historical seed records, this one must actively reopen existing
+        // installations when the seeder is run.
+        if (($attributes['code'] ?? null) === 'AVVIK-009') {
+            OperationalDeviation::query()->updateOrCreate(
+                ['code' => $attributes['code']],
+                $attributes,
+            );
+
+            return;
+        }
+
         OperationalDeviation::query()->firstOrCreate(
             ['code' => $attributes['code']],
             $attributes,

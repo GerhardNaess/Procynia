@@ -3,14 +3,20 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Exceptions\Ai\AiCostControlException;
+use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
+use App\Services\Billing\BillingEntitlementService;
+use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -26,6 +32,8 @@ class WikiAskController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiQuestionAnswerService $questionAnswerService,
+        private readonly BillingEntitlementService $billingEntitlementService,
+        private readonly AiCostControlService $costControl,
     ) {}
 
     public function index(): Response
@@ -46,19 +54,53 @@ class WikiAskController extends Controller
         $customerId = $this->customerContext->currentCustomerId();
         $user = $this->customerContext->currentUser();
 
+        $customer = $this->customerContext->currentCustomer($user);
+        abort_unless(
+            $customer !== null && $this->billingEntitlementService->canUseAiOffer($customer),
+            403,
+            __('procynia.ai.ai_access_unavailable_message'),
+        );
+
+        $this->assertWithinRateLimits((int) $customerId, $user?->id);
+
         $validated = $request->validate([
             'question' => ['required', 'string', 'min:3', 'max:'.EnterpriseWikiQuestionAnswerService::MAX_QUESTION_CHARS],
         ]);
 
         $question = trim((string) $validated['question']);
+        $requestCorrelationId = trim((string) $request->header('X-Request-Id'));
+        $requestCorrelationId = $requestCorrelationId !== '' ? Str::limit($requestCorrelationId, 128, '') : (string) Str::uuid();
 
         try {
+            // Presentation boundary check gives Wiki Ask a safe hard-stop response. The provider
+            // boundary repeats this immediately before every HTTP call for queue/stale-state safety.
+            $this->costControl->authorize(new AiCallContext(
+                customerId: (int) $customerId,
+                userId: $user?->id,
+                feature: 'wiki',
+                operation: 'wiki.ask',
+                resourceType: 'enterprise_wiki',
+                requestCorrelationId: $requestCorrelationId,
+            ));
             $result = $this->questionAnswerService->ask(
                 $question,
                 $customerId,
                 $this->visibleStatuses($user),
                 $this->customerContext->resolveLanguageCode(),
+                $user?->id,
+                $requestCorrelationId,
             );
+        } catch (AiCostControlException $e) {
+            Log::warning('[WIKI_ASK] Question blocked by AI cost control.', [
+                'customer_id' => $customerId,
+                'user_id' => $user?->id,
+                'reason' => $e->reason,
+                'operation' => 'wiki.ask',
+            ]);
+
+            return back()
+                ->withInput()
+                ->with('error', __('procynia.ai.ai_access_unavailable_message'));
         } catch (Throwable $e) {
             // Never surface an exception message or an upstream response body to the end user.
             Log::error('[WIKI_ASK] Question could not be answered.', [
@@ -89,6 +131,31 @@ class WikiAskController extends Controller
             ],
             'maxQuestionLength' => EnterpriseWikiQuestionAnswerService::MAX_QUESTION_CHARS,
         ]);
+    }
+
+    private function assertWithinRateLimits(int $customerId, ?int $userId): void
+    {
+        $windowSeconds = max(60, (int) config('procynia.ai.wiki_ask.window_seconds', 900));
+        $userLimit = max(1, (int) config('procynia.ai.wiki_ask.user_attempts', 10));
+        $customerLimit = max(1, (int) config('procynia.ai.wiki_ask.customer_attempts', 60));
+        $userKey = sprintf('ai:wiki-ask:user:%d:customer:%d', (int) $userId, $customerId);
+        $customerKey = sprintf('ai:wiki-ask:customer:%d', $customerId);
+
+        foreach ([[$userKey, $userLimit, 'user'], [$customerKey, $customerLimit, 'customer']] as [$key, $limit, $scope]) {
+            if (RateLimiter::tooManyAttempts($key, $limit)) {
+                Log::warning('[WIKI_ASK] AI request rate limited.', [
+                    'reason' => 'rate_limit_'.$scope,
+                    'customer_id' => $customerId,
+                    'user_id' => $userId,
+                    'operation' => 'wiki.ask',
+                ]);
+
+                abort(429, __('procynia.wiki.ask_rate_limited'));
+            }
+        }
+
+        RateLimiter::hit($userKey, $windowSeconds);
+        RateLimiter::hit($customerKey, $windowSeconds);
     }
 
     /**

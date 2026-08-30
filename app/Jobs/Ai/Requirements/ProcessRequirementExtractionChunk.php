@@ -4,6 +4,7 @@ namespace App\Jobs\Ai\Requirements;
 
 use App\Models\RequirementExtractionCall;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,9 +25,11 @@ class ProcessRequirementExtractionChunk implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
+
     /**
      * A chunk can now fan out into up to ~3 sequential OpenAI calls internally (see
      * RequirementCandidateExtractor::splitOversizedSegment(), max chunk size 36,000 chars split
@@ -37,6 +40,7 @@ class ProcessRequirementExtractionChunk implements ShouldQueue
      * running.
      */
     public int $timeout = 2100;
+
     public bool $failOnTimeout = true;
 
     public function __construct(
@@ -47,6 +51,16 @@ class ProcessRequirementExtractionChunk implements ShouldQueue
     }
 
     public function handle(RequirementExtractionRunService $service): void
+    {
+        $this->withinAiCallContext(
+            $this->requirementExtractionCallAiCallContext($this->callId, 'saved_notice.requirement_extraction.chunk', $this->runId),
+            function () use ($service): void {
+                $this->handleInAiCallContext($service);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(RequirementExtractionRunService $service): void
     {
         $service->processRunCall($this->callId);
     }

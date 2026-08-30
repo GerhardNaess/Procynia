@@ -2,6 +2,9 @@
 
 namespace App\Services\OpenAi;
 
+use App\Services\Ai\AiUsageMeter;
+use App\Services\Ai\Commercial\AiCostControlService;
+use App\Support\Ai\AiCallContextScope;
 use GuzzleHttp\TransferStats;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -11,6 +14,11 @@ use RuntimeException;
 
 class OpenAiClient
 {
+    public function __construct(
+        private readonly AiUsageMeter $usageMeter,
+        private readonly AiCostControlService $costControl,
+        private readonly AiCallContextScope $contextScope,
+    ) {}
     /**
      * Purpose: Send a GET request to the configured OpenAI API.
      * Inputs: The endpoint path and timeout in seconds.
@@ -37,20 +45,67 @@ class OpenAiClient
      */
     public function createResponse(array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
-        return $this->send('responses', $payload, $timeoutSeconds, $onStats);
+        $model = trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown';
+        $decision = $this->costControl->authorize($this->contextScope->current());
+
+        try {
+            $result = $this->usageMeter->measureResponse(
+                $model,
+                fn (): array => $this->send('responses', $payload, $timeoutSeconds, $onStats),
+            );
+            $this->costControl->finalize($decision);
+
+            return $result;
+        } catch (\Throwable $exception) {
+            $this->costControl->fail($decision, $exception);
+
+            throw $exception;
+        }
     }
 
     public function createEmbedding(string $input): array
     {
-        return $this->send('embeddings', [
-            'model' => $this->embeddingModel(),
-            'input' => $input,
-        ]);
+        $model = $this->embeddingModel();
+        $decision = $this->costControl->authorize($this->contextScope->current());
+
+        try {
+            $result = $this->usageMeter->measureResponse(
+                $model,
+                fn (): array => $this->send('embeddings', ['model' => $model, 'input' => $input]),
+            );
+            $this->costControl->finalize($decision);
+
+            return $result;
+        } catch (\Throwable $exception) {
+            $this->costControl->fail($decision, $exception);
+
+            throw $exception;
+        }
     }
 
     public function post(string $endpoint, array $payload, int $timeoutSeconds = 180, ?callable $onStats = null): Response
     {
-        $response = $this->pendingRequest($timeoutSeconds, $onStats)->post(ltrim($endpoint, '/'), $payload);
+        $endpoint = ltrim($endpoint, '/');
+        $decision = $this->costControl->authorize($this->contextScope->current());
+
+        try {
+            $response = $endpoint === 'responses'
+                ? $this->usageMeter->measureHttpResponse(
+                    trim((string) ($payload['model'] ?? 'unknown')) ?: 'unknown',
+                    fn (): Response => $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats),
+                )
+                : $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats);
+
+            if ($response->successful()) {
+                $this->costControl->finalize($decision);
+            } else {
+                $this->costControl->failHttp($decision, $response->status());
+            }
+        } catch (\Throwable $exception) {
+            $this->costControl->fail($decision, $exception);
+
+            throw $exception;
+        }
 
         if ($response->failed()) {
             $this->logFailure($endpoint, $response->status(), $this->requestIdFrom($response), $response->body());
@@ -61,10 +116,14 @@ class OpenAiClient
 
     private function send(string $endpoint, array $payload, int $timeoutSeconds = 120, ?callable $onStats = null): array
     {
-        $response = $this->post($endpoint, $payload, $timeoutSeconds, $onStats);
+        // createResponse() has already created its own lifecycle attempt; using the raw transport
+        // here avoids double-counting that one provider call through public post().
+        $response = $this->postRaw($endpoint, $payload, $timeoutSeconds, $onStats);
         $requestId = $this->requestIdFrom($response);
 
         if ($response->failed()) {
+            $this->logFailure($endpoint, $response->status(), $requestId, $response->body());
+
             throw new RuntimeException($this->failureMessageFromResponse($endpoint, $response));
         }
 
@@ -88,6 +147,11 @@ class OpenAiClient
         ];
 
         return $decoded;
+    }
+
+    private function postRaw(string $endpoint, array $payload, int $timeoutSeconds, ?callable $onStats): Response
+    {
+        return $this->pendingRequest($timeoutSeconds, $onStats)->post($endpoint, $payload);
     }
 
     /**

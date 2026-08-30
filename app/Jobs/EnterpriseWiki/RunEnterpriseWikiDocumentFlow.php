@@ -4,6 +4,7 @@ namespace App\Jobs\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Support\Ai\RunsInAiCallContext;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueTrace;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -25,6 +26,7 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public const QUEUE_NAME = 'enterprise-wiki';
@@ -52,6 +54,16 @@ class RunEnterpriseWikiDocumentFlow implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.document_flow'),
+            function () use ($flowService): void {
+                $this->handleInAiCallContext($flowService);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiDocumentFlowService $flowService): void
     {
         $payload = $this->job?->payload() ?? [];
         $delaySeconds = isset($payload['delay']) ? (int) $payload['delay'] : null;

@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Requirements;
 
+use App\Data\Ai\AiCallContext;
 use App\Models\KnowledgeItem;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiAnswerBasisItem;
@@ -13,6 +14,7 @@ use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\OpenAi\OpenAiClient;
+use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -36,6 +38,7 @@ class RequirementAnswerDraftService
         private readonly OpenAiClient $openAiClient,
         private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
         private readonly AiTokenLogger $tokenLogger = new AiTokenLogger,
+        private readonly AiCallContextScope $contextScope = new AiCallContextScope,
     ) {}
 
     /**
@@ -64,7 +67,16 @@ class RequirementAnswerDraftService
         $evidenceRows = $this->answerEvidenceRows($requirement);
         $answerBasisRows = $this->answerBasisRows($answerBasisItems);
         $retrievedKnowledgeRows = $this->retrievedKnowledgeRows($retrievedKnowledgeChunks);
-        $answerDraftText = $this->requestAnswerDraft(
+        $answerDraftText = $this->contextScope->within(new AiCallContext(
+            customerId: $customerId ?? $requirement->savedNotice?->customer_id,
+            userId: $userId,
+            feature: 'saved_notice',
+            operation: 'saved_notice.requirement_answer_draft',
+            resourceType: 'saved_notice_ai_requirement',
+            resourceId: $requirement->id,
+            savedNoticeId: $requirement->saved_notice_id,
+            commercialCredit: true,
+        ), fn (): string => $this->requestAnswerDraft(
             $requirement,
             $evidenceRows,
             $answerBasisRows,
@@ -75,7 +87,7 @@ class RequirementAnswerDraftService
             $languageCode,
             $customerId,
             $userId,
-        );
+        ));
 
         $this->recordAiCaseUsageAfterSuccessfulAnswerDraft($requirement, $userId);
 

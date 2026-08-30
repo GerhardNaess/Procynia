@@ -8,6 +8,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,6 +20,7 @@ use Throwable;
 class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use RunsInAiCallContext;
 
     public const QUEUE = 'enterprise-wiki-maintainer-batches';
 
@@ -32,6 +34,16 @@ class FinalizeEnterpriseWikiMaintainerDecisionBatches implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator, EnterpriseWikiMaintainerDecisionService $decisionService, EnterpriseWikiDocumentFlowService $flow): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_maintainer_batches'),
+            function () use ($state, $coordinator, $decisionService, $flow): void {
+                $this->handleInAiCallContext($state, $coordinator, $decisionService, $flow);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionSplitCoordinator $coordinator, EnterpriseWikiMaintainerDecisionService $decisionService, EnterpriseWikiDocumentFlowService $flow): void
     {
         $run = EnterpriseWikiIngestRun::query()->findOrFail($this->runId);
         if ($run->isTerminal() || $run->maintainer_decision_generated_at !== null) {

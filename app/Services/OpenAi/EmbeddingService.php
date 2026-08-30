@@ -2,6 +2,7 @@
 
 namespace App\Services\OpenAi;
 
+use App\Services\Ai\AiUsageMeter;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Str;
@@ -13,6 +14,7 @@ class EmbeddingService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly AiUsageMeter $usageMeter,
     ) {
     }
 
@@ -71,6 +73,15 @@ class EmbeddingService
             );
         }
 
+        return $this->usageMeter->measureEmbedding(
+            $model,
+            fn (): array => $this->tryEmbedTextForConfiguredModel($text, $model),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function tryEmbedTextForConfiguredModel(string $text, string $model): array
+    {
         $embeddingInputs = $this->splitEmbeddingInput($text);
 
         if ($embeddingInputs === []) {

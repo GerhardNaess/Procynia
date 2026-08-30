@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -29,6 +30,7 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -45,6 +47,16 @@ class GenerateEnterpriseWikiAppliedPage implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiGenerateAppliedPagesService $service): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.generate_page'),
+            function () use ($service): void {
+                $this->handleInAiCallContext($service);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiGenerateAppliedPagesService $service): void
     {
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
         $page = EnterpriseWikiPage::query()->find($this->pageId);

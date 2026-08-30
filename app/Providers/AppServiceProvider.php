@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Customer;
+use App\Support\Ai\AiCallContextScope;
 use App\Support\EnterpriseWiki\EnterpriseWikiQueueReservationTrace;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Middleware\TrustProxies;
@@ -19,7 +20,7 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        $this->app->singleton(AiCallContextScope::class);
     }
 
     public function boot(): void

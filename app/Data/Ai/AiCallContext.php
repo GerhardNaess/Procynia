@@ -2,6 +2,8 @@
 
 namespace App\Data\Ai;
 
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use JsonSerializable;
 
 /**
@@ -24,11 +26,32 @@ final readonly class AiCallContext implements JsonSerializable
         public ?int $runId = null,
         public ?int $documentId = null,
         public ?int $remainingJobBudgetSeconds = null,
+        public ?int $customerId = null,
+        public ?int $userId = null,
+        public ?string $feature = null,
+        public ?string $operation = null,
+        public ?string $resourceType = null,
+        public ?int $resourceId = null,
+        public ?string $jobId = null,
+        public ?string $requestCorrelationId = null,
+        public ?string $provider = null,
+        public ?int $savedNoticeId = null,
+        public bool $commercialCredit = false,
     ) {}
 
     public static function none(): self
     {
         return new self;
+    }
+
+    /** Build the safe ambient context for an authenticated HTTP request, when one exists. */
+    public static function fromAuthenticatedUser(): self
+    {
+        $user = Auth::user();
+
+        return $user instanceof User
+            ? new self(customerId: $user->customer_id, userId: $user->id)
+            : new self;
     }
 
     /**
@@ -45,6 +68,17 @@ final readonly class AiCallContext implements JsonSerializable
             remainingJobBudgetSeconds: $this->remainingJobBudgetSeconds !== null
                 ? max(0, (int) floor($this->remainingJobBudgetSeconds - $elapsedSeconds))
                 : null,
+            customerId: $this->customerId,
+            userId: $this->userId,
+            feature: $this->feature,
+            operation: $this->operation,
+            resourceType: $this->resourceType,
+            resourceId: $this->resourceId,
+            jobId: $this->jobId,
+            requestCorrelationId: $this->requestCorrelationId,
+            provider: $this->provider,
+            savedNoticeId: $this->savedNoticeId,
+            commercialCredit: $this->commercialCredit,
         );
     }
 
@@ -55,6 +89,16 @@ final readonly class AiCallContext implements JsonSerializable
             'run_id' => $this->runId,
             'document_id' => $this->documentId,
             'remaining_job_budget_seconds' => $this->remainingJobBudgetSeconds,
+            'customer_id' => $this->customerId,
+            'user_id' => $this->userId,
+            'feature' => $this->feature,
+            'operation' => $this->operation,
+            'resource_type' => $this->resourceType,
+            'resource_id' => $this->resourceId,
+            'job_id' => $this->jobId,
+            'request_correlation_id' => $this->requestCorrelationId,
+            'saved_notice_id' => $this->savedNoticeId,
+            'commercial_credit' => $this->commercialCredit,
         ];
     }
 

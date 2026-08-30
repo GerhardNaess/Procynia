@@ -3074,6 +3074,7 @@ return [
         'ask_insufficient_evidence' => 'Jeg finner ikke tilstrekkelig dokumentert informasjon i Wiki-en til å svare sikkert på dette.',
         'ask_conflicting_evidence' => 'Wiki-en inneholder motstridende opplysninger om dette spørsmålet.',
         'ask_technical_error' => 'Spørsmålet kunne ikke behandles nå. Prøv igjen om litt.',
+        'ask_rate_limited' => 'Du har sendt for mange Wiki-spørsmål på kort tid. Prøv igjen om litt.',
         'ask_open_page' => 'Åpne Wiki-siden',
         'ask_no_sources' => 'Ingen Wiki-kilder ble brukt for dette svaret.',
         'ask_page_help_button' => 'Hjelp',

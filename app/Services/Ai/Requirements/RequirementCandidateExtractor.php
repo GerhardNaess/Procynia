@@ -8,9 +8,11 @@ use App\Data\Ai\Requirements\RequirementExtractionBlockData;
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Data\Ai\Requirements\RequirementExtractionResultData;
 use App\Data\Ai\Requirements\RequirementSegmentExtractionResultData;
+use App\Data\Ai\AiCallContext;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\OpenAi\OpenAiClient;
 use App\Services\RequirementExtractor;
+use App\Support\Ai\AiCallContextScope;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
@@ -85,6 +87,7 @@ class RequirementCandidateExtractor
         private readonly RequirementExtractor $legacyRequirementExtractor,
         private readonly RequirementSegmentExtractionPromptBuilder $promptBuilder,
         private readonly RequirementExtractionPromptBuilder $blockPromptBuilder,
+        private readonly AiCallContextScope $contextScope,
     ) {}
 
     public function extract(SavedNoticeAiDocument $document, DocumentRequirementSegmentData $segment, ?string $runId = null): RequirementSegmentExtractionResultData
@@ -95,7 +98,7 @@ class RequirementCandidateExtractor
         $model = (string) ($payload['model'] ?? '');
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 450);
+            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.segment');
         } catch (ConnectionException $exception) {
             return $this->failedSegmentResult(
                 document: $document,
@@ -698,7 +701,7 @@ class RequirementCandidateExtractor
         // splitOversizedSegment() below was found to allow up to ~3 sequential calls per chunk —
         // see ProcessRequirementExtractionChunk::$timeout for the corresponding job-level margin).
         try {
-            $response = $this->openAiClient->post('responses', $payload, 450);
+            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.document');
         } catch (ConnectionException $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -1149,7 +1152,7 @@ class RequirementCandidateExtractor
         $promptVersion = $this->blockPromptBuilder->promptVersion();
 
         try {
-            $response = $this->openAiClient->post('responses', $payload, 450);
+            $response = $this->postResponses($document, $payload, 450, 'saved_notice.requirement_extraction.block');
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
@@ -1233,6 +1236,21 @@ class RequirementCandidateExtractor
             'error_type' => $errorType,
             'error_message' => $errorMessage,
         ];
+    }
+
+    private function postResponses(SavedNoticeAiDocument $document, array $payload, int $timeoutSeconds, string $operation): Response
+    {
+        $customerId = $document->savedNotice?->customer_id;
+
+        return $this->contextScope->within(new AiCallContext(
+            customerId: is_numeric($customerId) ? (int) $customerId : null,
+            feature: 'saved_notice',
+            operation: $operation,
+            resourceType: 'saved_notice_ai_document',
+            resourceId: $document->id,
+            savedNoticeId: $document->saved_notice_id,
+            commercialCredit: true,
+        ), fn (): Response => $this->openAiClient->post('responses', $payload, $timeoutSeconds));
     }
 
     private function relevanceModel(): string

@@ -5,6 +5,7 @@ namespace App\Jobs\EnterpriseWiki;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -17,6 +18,7 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public const QUEUE = 'enterprise-wiki-claim-verification';
@@ -35,6 +37,18 @@ class VerifyEnterpriseWikiClaim implements ShouldQueue
     }
 
     public function handle(
+        EnterpriseWikiVerifyPageClaimsService $verificationService,
+        EnterpriseWikiDocumentFlowService $flowService,
+    ): void {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.verify_claim'),
+            function () use ($verificationService, $flowService): void {
+                $this->handleInAiCallContext($verificationService, $flowService);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(
         EnterpriseWikiVerifyPageClaimsService $verificationService,
         EnterpriseWikiDocumentFlowService $flowService,
     ): void {

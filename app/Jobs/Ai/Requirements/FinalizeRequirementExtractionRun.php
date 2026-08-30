@@ -6,6 +6,7 @@ use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,6 +25,7 @@ class FinalizeRequirementExtractionRun implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -34,6 +36,16 @@ class FinalizeRequirementExtractionRun implements ShouldQueue
     }
 
     public function handle(RequirementExtractionRunService $service): void
+    {
+        $this->withinAiCallContext(
+            $this->requirementExtractionRunAiCallContext($this->runId, 'saved_notice.requirement_extraction.finalize'),
+            function () use ($service): void {
+                $this->handleInAiCallContext($service);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(RequirementExtractionRunService $service): void
     {
         DB::transaction(function () use ($service): void {
             $run = RequirementExtractionRun::query()

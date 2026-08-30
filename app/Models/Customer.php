@@ -46,6 +46,10 @@ class Customer extends Model
 
     public const BILLING_YEARLY = 'yearly';
 
+    public const AI_ACCESS_ENABLED = 'enabled';
+
+    public const AI_ACCESS_SUSPENDED = 'suspended';
+
     protected $fillable = [
         'name',
         'slug',
@@ -63,6 +67,7 @@ class Customer extends Model
         'included_users',
         'included_ai_credits',
         'billing_discount_percent',
+        'ai_access_status',
     ];
 
     protected function casts(): array

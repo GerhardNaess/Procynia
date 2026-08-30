@@ -13,9 +13,11 @@ use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
+use App\Services\Ai\Commercial\AiRuntimeControlService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -49,6 +51,7 @@ class WikiAskControllerTest extends TestCase
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
+        $this->clearWikiAskRateLimits($customer, $user);
 
         $response = $this->actingAs($user)->get('/app/wiki/ask');
 
@@ -136,6 +139,69 @@ class WikiAskControllerTest extends TestCase
                 'question' => str_repeat('a', EnterpriseWikiQuestionAnswerService::MAX_QUESTION_CHARS + 1),
             ])
             ->assertSessionHasErrors('question');
+    }
+
+    public function test_a_customer_without_ai_entitlement_is_blocked_before_the_wiki_provider_is_called(): void
+    {
+        $customer = $this->createCustomer();
+        $customer->update(['included_ai_credits' => 0, 'subscription_plan' => Customer::PLAN_FREE]);
+        $user = $this->createUser($customer);
+
+        $this->mock(WikiQuestionAnswerAiClient::class)
+            ->shouldNotReceive('planRetrieval');
+
+        $this->actingAs($user)
+            ->post('/app/wiki/ask', ['question' => 'What is the deadline?'])
+            ->assertForbidden();
+    }
+
+    public function test_a_suspended_customer_is_blocked_before_the_wiki_provider_is_called(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        app(AiRuntimeControlService::class)->setCustomerAccess($customer, Customer::AI_ACCESS_SUSPENDED, reason: 'test');
+        $this->mock(WikiQuestionAnswerAiClient::class)->shouldNotReceive('planRetrieval');
+
+        $this->actingAs($user)->from('/app/wiki/ask')->post('/app/wiki/ask', ['question' => 'What is the deadline?'])
+            ->assertRedirect('/app/wiki/ask')->assertSessionHas('error');
+    }
+
+    public function test_global_stop_is_blocked_before_the_wiki_provider_is_called(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        app(AiRuntimeControlService::class)->setGlobalStop(true, reason: 'test');
+        $this->mock(WikiQuestionAnswerAiClient::class)->shouldNotReceive('planRetrieval');
+
+        $this->actingAs($user)->from('/app/wiki/ask')->post('/app/wiki/ask', ['question' => 'What is the deadline?'])
+            ->assertRedirect('/app/wiki/ask')->assertSessionHas('error');
+    }
+
+    public function test_wiki_ask_enforces_a_server_side_per_user_rate_limit(): void
+    {
+        config()->set('procynia.ai.wiki_ask.user_attempts', 1);
+        config()->set('procynia.ai.wiki_ask.customer_attempts', 10);
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $this->clearWikiAskRateLimits($customer, $user);
+
+        $this->actingAs($user)->post('/app/wiki/ask', ['question' => 'What is the deadline?'])->assertOk();
+        $this->actingAs($user)->post('/app/wiki/ask', ['question' => 'What is the deadline?'])->assertStatus(429);
+    }
+
+    public function test_wiki_ask_enforces_a_server_side_per_customer_rate_limit_across_users(): void
+    {
+        config()->set('procynia.ai.wiki_ask.user_attempts', 10);
+        config()->set('procynia.ai.wiki_ask.customer_attempts', 1);
+
+        $customer = $this->createCustomer();
+        $firstUser = $this->createUser($customer);
+        $secondUser = $this->createUser($customer);
+        $this->clearWikiAskRateLimits($customer, $firstUser, $secondUser);
+
+        $this->actingAs($firstUser)->post('/app/wiki/ask', ['question' => 'What is the deadline?'])->assertOk();
+        $this->actingAs($secondUser)->post('/app/wiki/ask', ['question' => 'What is the deadline?'])->assertStatus(429);
     }
 
     // =========================================================================
@@ -1185,6 +1251,7 @@ class WikiAskControllerTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
+            'included_ai_credits' => 3,
             'is_active' => true,
         ]);
     }
@@ -1200,5 +1267,14 @@ class WikiAskControllerTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
+    }
+
+    private function clearWikiAskRateLimits(Customer $customer, User ...$users): void
+    {
+        RateLimiter::clear(sprintf('ai:wiki-ask:customer:%d', $customer->id));
+
+        foreach ($users as $user) {
+            RateLimiter::clear(sprintf('ai:wiki-ask:user:%d:customer:%d', $user->id, $customer->id));
+        }
     }
 }

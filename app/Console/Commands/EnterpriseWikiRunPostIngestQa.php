@@ -4,11 +4,17 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
+use App\Support\Ai\RunsInAiCallContext;
+use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 
-#[\Illuminate\Console\Attribute\AsCommand(name: 'wiki:run-post-ingest-qa')]
+#[AsCommand(name: 'wiki:run-post-ingest-qa')]
 class EnterpriseWikiRunPostIngestQa extends Command
 {
+    // Scheduled QA calls the service in-process rather than through RunPostIngestQa, so the
+    // customer context the provider guard needs has to be established here as well.
+    use RunsInAiCallContext;
+
     protected $signature = 'wiki:run-post-ingest-qa
                             {--run-id= : Run a specific applied run}
                             {--all-pending : Process all applied runs with null or pending QA status}
@@ -18,7 +24,7 @@ class EnterpriseWikiRunPostIngestQa extends Command
 
     public function handle(EnterpriseWikiPostIngestQaService $qaService): int
     {
-        $runId     = $this->option('run-id');
+        $runId = $this->option('run-id');
         $allPending = $this->option('all-pending');
 
         if (! $runId && ! $allPending) {
@@ -45,7 +51,7 @@ class EnterpriseWikiRunPostIngestQa extends Command
         }
 
         try {
-            $result = $qaService->runForRun($run, retry: $retry);
+            $result = $this->qaInRunContext($qaService, $run, $retry);
         } catch (\InvalidArgumentException $e) {
             $this->error("[WIKI_QA] {$e->getMessage()}");
 
@@ -83,12 +89,12 @@ class EnterpriseWikiRunPostIngestQa extends Command
         $this->line("[WIKI_QA] Found {$runs->count()} run(s) to process.");
 
         $processed = 0;
-        $skipped   = 0;
-        $failed    = 0;
+        $skipped = 0;
+        $failed = 0;
 
         foreach ($runs as $run) {
             try {
-                $result = $qaService->runForRun($run, retry: $retry);
+                $result = $this->qaInRunContext($qaService, $run, $retry);
 
                 if ($result === null) {
                     $skipped++;
@@ -109,15 +115,24 @@ class EnterpriseWikiRunPostIngestQa extends Command
         return self::SUCCESS;
     }
 
+    /** @return array<string, mixed>|null */
+    private function qaInRunContext(EnterpriseWikiPostIngestQaService $qaService, EnterpriseWikiIngestRun $run, bool $retry): ?array
+    {
+        return $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($run->id, 'enterprise_wiki.post_ingest_qa'),
+            fn (): ?array => $qaService->runForRun($run, retry: $retry),
+        );
+    }
+
     private function printResult(int $runId, array $result): void
     {
         $checks = $result['checks'] ?? [];
 
         $this->line("[WIKI_QA] Run [{$runId}] QA complete.");
-        $this->line('[WIKI_QA] Article exists:       ' . ($checks['article_exists']      ? 'yes' : 'no'));
-        $this->line('[WIKI_QA] Summary exists:       ' . ($checks['summary_exists']      ? 'yes' : 'no'));
-        $this->line('[WIKI_QA] Article has content:  ' . ($checks['article_has_content'] ? 'yes' : 'no'));
-        $this->line('[WIKI_QA] Summary has content:  ' . ($checks['summary_has_content'] ? 'yes' : 'no'));
+        $this->line('[WIKI_QA] Article exists:       '.($checks['article_exists'] ? 'yes' : 'no'));
+        $this->line('[WIKI_QA] Summary exists:       '.($checks['summary_exists'] ? 'yes' : 'no'));
+        $this->line('[WIKI_QA] Article has content:  '.($checks['article_has_content'] ? 'yes' : 'no'));
+        $this->line('[WIKI_QA] Summary has content:  '.($checks['summary_has_content'] ? 'yes' : 'no'));
 
         if ($result['repair_attempted'] ?? false) {
             $repaired = ($result['repair_result']['success'] ?? false) ? 'success' : 'failed';

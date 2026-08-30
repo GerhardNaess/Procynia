@@ -5,6 +5,7 @@ namespace App\Jobs\Ai\Requirements;
 use App\Models\RequirementExtractionRun;
 use App\Models\SavedNoticeAiDocument;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,14 +20,17 @@ class ProcessRequirementExtractionRun implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
+
     /**
      * This job now only orchestrates chunk fan-out for large documents, but the higher execution
      * budget remains temporarily while the split workflow is still being completed.
      */
     public int $timeout = 1800;
+
     public bool $failOnTimeout = true;
 
     public function __construct(public readonly int $runId)
@@ -35,6 +39,16 @@ class ProcessRequirementExtractionRun implements ShouldQueue
     }
 
     public function handle(RequirementExtractionRunService $service): void
+    {
+        $this->withinAiCallContext(
+            $this->requirementExtractionRunAiCallContext($this->runId, 'saved_notice.requirement_extraction.run'),
+            function () use ($service): void {
+                $this->handleInAiCallContext($service);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(RequirementExtractionRunService $service): void
     {
         $run = RequirementExtractionRun::query()->find($this->runId);
 

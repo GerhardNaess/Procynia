@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\KnowledgeItem;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -26,6 +27,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -40,6 +42,16 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiIngestService $service, EnterpriseWikiSectionParser $parser): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.process_ingest'),
+            function () use ($service, $parser): void {
+                $this->handleInAiCallContext($service, $parser);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiIngestService $service, EnterpriseWikiSectionParser $parser): void
     {
         // Claim the run atomically: only one worker can transition a queued run to running.
         $run = DB::transaction(function (): ?EnterpriseWikiIngestRun {
@@ -99,7 +111,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
             $sectionIds = DB::transaction(function () use ($run, $sections, $pageTitle): array {
                 $page = EnterpriseWikiPage::query()->create([
                     'customer_id' => $run->customer_id,
-                    'slug' => Str::slug($pageTitle) . '-' . Str::lower(Str::random(6)),
+                    'slug' => Str::slug($pageTitle).'-'.Str::lower(Str::random(6)),
                     'title' => $pageTitle,
                     'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
                     'status' => EnterpriseWikiPage::STATUS_DRAFT,

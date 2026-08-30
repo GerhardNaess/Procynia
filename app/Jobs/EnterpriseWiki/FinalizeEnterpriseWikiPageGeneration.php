@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -49,6 +50,7 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     private const INITIAL_WAVE_TYPES = [
@@ -84,6 +86,16 @@ class FinalizeEnterpriseWikiPageGeneration implements ShouldQueue
     }
 
     public function handle(): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_page_generation'),
+            function (): void {
+                $this->failWithoutRetryOnCostControlBlock(fn (): mixed => $this->handleInAiCallContext());
+            },
+        );
+    }
+
+    private function handleInAiCallContext(): void
     {
         // Resolved via the container rather than a typed handle() parameter — this job is
         // frequently constructed and its handle() called directly in tests (bypassing queue

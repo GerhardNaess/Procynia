@@ -6,6 +6,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchEvaluator;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionBatchStateService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -17,6 +18,7 @@ use Throwable;
 class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use RunsInAiCallContext;
 
     public const QUEUE = 'enterprise-wiki-maintainer-batches';
 
@@ -32,6 +34,16 @@ class RunEnterpriseWikiMaintainerDecisionBatch implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionBatchEvaluator $evaluator): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.maintainer_batch'),
+            function () use ($state, $evaluator): void {
+                $this->handleInAiCallContext($state, $evaluator);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiMaintainerDecisionBatchStateService $state, EnterpriseWikiMaintainerDecisionBatchEvaluator $evaluator): void
     {
         $run = EnterpriseWikiIngestRun::query()->find($this->runId);
 

@@ -152,6 +152,14 @@ class BillingEntitlementService
 
     public function canUseAiOffer(Customer $customer): bool
     {
+        $planConfig = $customer->planConfig();
+
+        // A nullable allowance is the plan catalogue's explicit representation of unlimited AI.
+        // It must not be mistaken for the database's historical/default zero snapshot.
+        if (array_key_exists('included_ai_credits', $planConfig) && $planConfig['included_ai_credits'] === null) {
+            return true;
+        }
+
         return $this->includedAiCredits($customer) > 0 || $this->canUseFeature($customer, 'ai_offer');
     }
 }

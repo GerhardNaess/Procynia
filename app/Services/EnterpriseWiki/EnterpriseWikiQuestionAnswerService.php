@@ -2,6 +2,8 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
+use App\Services\Ai\AiUsageMeter;
 use App\Models\EnterpriseWikiPage;
 use App\Services\Ai\Wiki\EnterpriseWikiSemanticRetrievalService;
 use App\Services\Ai\Wiki\RequirementWikiPageReader;
@@ -52,6 +54,7 @@ class EnterpriseWikiQuestionAnswerService
         private readonly EnterpriseWikiSemanticRetrievalService $semanticRetrieval,
         private readonly RequirementWikiPageReader $pageReader,
         private readonly WikiQuestionAnswerAiClient $aiClient,
+        private readonly AiUsageMeter $usageMeter,
     ) {}
 
     /**
@@ -61,7 +64,7 @@ class EnterpriseWikiQuestionAnswerService
      *   retrieval: array{pages_considered: int, pages_used: int, context_chars: int, question_understanding: array<string, mixed>, ranking: list<array<string, mixed>>}
      * }
      */
-    public function ask(string $question, int $customerId, array $visibleStatuses, string $languageCode): array
+    public function ask(string $question, int $customerId, array $visibleStatuses, string $languageCode, ?int $userId = null, ?string $requestCorrelationId = null): array
     {
         $question = trim($question);
         $queryTokens = RequirementWikiTermNormalizer::tokenize($question);
@@ -73,7 +76,10 @@ class EnterpriseWikiQuestionAnswerService
         $rerankStartedAt = microtime(true);
         $retrievalPlan = $ranked === []
             ? $this->emptyRetrievalPlan()
-            : $this->aiClient->planRetrieval($question, $this->candidateSummaries($ranked), $languageCode);
+            : $this->usageMeter->within(
+                $this->usageContext($customerId, $userId, 'wiki.ask.retrieval_plan', $requestCorrelationId),
+                fn (): array => $this->aiClient->planRetrieval($question, $this->candidateSummaries($ranked), $languageCode),
+            );
         $rerankLatencyMs = (int) round((microtime(true) - $rerankStartedAt) * 1000);
         $selectedPageIds = array_values(array_map(
             static fn (array $assessment): int => (int) $assessment['page_id'],
@@ -109,7 +115,10 @@ class EnterpriseWikiQuestionAnswerService
         }
 
         $answerStartedAt = microtime(true);
-        $result = $this->aiClient->answer($question, $context, $languageCode);
+        $result = $this->usageMeter->within(
+            $this->usageContext($customerId, $userId, 'wiki.ask.answer', $requestCorrelationId),
+            fn (): array => $this->aiClient->answer($question, $context, $languageCode),
+        );
         $answerLatencyMs = (int) round((microtime(true) - $answerStartedAt) * 1000);
 
         $this->logRetrieval(
@@ -131,6 +140,18 @@ class EnterpriseWikiQuestionAnswerService
             'citations' => $this->resolveCitations($result['citations'], $context),
             'retrieval' => $this->retrievalSummary(count($catalog), count($context), $contextChars, $retrievalPlan['question_understanding'], $ranking),
         ];
+    }
+
+    private function usageContext(int $customerId, ?int $userId, string $operation, ?string $requestCorrelationId): AiCallContext
+    {
+        return new AiCallContext(
+            customerId: $customerId,
+            userId: $userId,
+            feature: 'wiki',
+            operation: $operation,
+            resourceType: 'enterprise_wiki',
+            requestCorrelationId: $requestCorrelationId,
+        );
     }
 
     /**

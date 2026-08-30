@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
@@ -9,6 +10,7 @@ use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
+use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -41,6 +43,7 @@ class RequirementWikiAssessmentService
         private readonly RequirementWikiResearchService $researchService,
         private readonly RequirementWikiAssessmentAiClient $assessmentAiClient,
         private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder,
+        private readonly AiCallContextScope $contextScope = new AiCallContextScope,
     ) {}
 
     /**
@@ -67,6 +70,16 @@ class RequirementWikiAssessmentService
         ?string $caseInstructions = null,
         ?string $requirementUserPrompt = null,
     ): SavedNoticeAiRequirementAssessment {
+        return $this->contextScope->within(new AiCallContext(
+            customerId: $customerId,
+            userId: $userId,
+            feature: 'saved_notice',
+            operation: 'saved_notice.requirement_assessment',
+            resourceType: 'saved_notice_ai_requirement',
+            resourceId: $requirement->id,
+            savedNoticeId: $requirement->saved_notice_id,
+            commercialCredit: true,
+        ), function () use ($requirement, $customerId, $languageCode, $userId, $caseInstructions, $requirementUserPrompt): SavedNoticeAiRequirementAssessment {
         $context = $this->researchService->research($requirement, $customerId, $languageCode);
 
         $claimTextsByPageId = $this->claimTextsByPageIdAndOrigin($context['pages']);
@@ -94,6 +107,7 @@ class RequirementWikiAssessmentService
             'wiki_sources_snapshot' => $this->sourcesPayload($context['pages']),
             'engine_version' => self::ENGINE_VERSION,
         ], $userId);
+        });
     }
 
     /**

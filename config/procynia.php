@@ -8,6 +8,14 @@ return [
             'user_per_minute' => env('AI_RATE_LIMIT_USER_PER_MINUTE', 5),
             'user_decay_seconds' => env('AI_RATE_LIMIT_USER_DECAY_SECONDS', 60),
         ],
+        'wiki_ask' => [
+            // A question can result in a retrieval-plan call plus an answer call. Ten questions per
+            // user per 15 minutes prevents accidental loops, while sixty per customer preserves
+            // normal collaboration without permitting an unbounded tenant-wide cost vector.
+            'window_seconds' => env('AI_WIKI_ASK_WINDOW_SECONDS', 900),
+            'user_attempts' => env('AI_WIKI_ASK_USER_ATTEMPTS', 10),
+            'customer_attempts' => env('AI_WIKI_ASK_CUSTOMER_ATTEMPTS', 60),
+        ],
     ],
 
     'security' => [

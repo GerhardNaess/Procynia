@@ -815,6 +815,12 @@ class EnterpriseWikiDocumentFlowService
             runId: $run->id,
             documentId: $run->source_id,
             remainingJobBudgetSeconds: $remainingJobBudgetSeconds,
+            customerId: (int) $run->customer_id,
+            feature: 'enterprise_wiki',
+            operation: 'enterprise_wiki.ingest',
+            resourceType: 'enterprise_wiki_document',
+            resourceId: (int) $run->source_id,
+            jobId: $run->uuid,
         );
     }
 

@@ -4,6 +4,7 @@ namespace App\Jobs\EnterpriseWiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -22,6 +23,7 @@ class RunPostIngestQa implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -36,6 +38,16 @@ class RunPostIngestQa implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiPostIngestQaService $qaService): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.post_ingest_qa'),
+            function () use ($qaService): void {
+                $this->handleInAiCallContext($qaService);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiPostIngestQaService $qaService): void
     {
         $run = EnterpriseWikiIngestRun::find($this->runId);
 

@@ -3,6 +3,7 @@
 namespace App\Jobs\EnterpriseWiki;
 
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -14,6 +15,7 @@ class FinalizeEnterpriseWikiClaimVerification implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -32,6 +34,16 @@ class FinalizeEnterpriseWikiClaimVerification implements ShouldQueue
     }
 
     public function handle(EnterpriseWikiDocumentFlowService $flowService): void
+    {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_claim_verification'),
+            function () use ($flowService): void {
+                $this->handleInAiCallContext($flowService);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(EnterpriseWikiDocumentFlowService $flowService): void
     {
         $flowService->continueAfterClaimVerification($this->runId, $this->recoverUndispatchedClaims);
     }

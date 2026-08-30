@@ -7,6 +7,7 @@ use App\Data\Ai\Capacity\AiCapacityPlan;
 use App\Data\Ai\Capacity\AiTimeoutPlan;
 use App\Exceptions\EnterpriseWikiAiOutputCapacityExceededException;
 use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
+use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Wiki\Responses\Exceptions\EnterpriseWikiResponseIncompleteException;
 use App\Services\OpenAi\OpenAiClient;
 use Closure;
@@ -196,15 +197,16 @@ class EnterpriseWikiAiCapacityRetryExecutor
         AiCallContext $context,
         ?Closure $parse,
     ): array {
-        $timeoutPlan = $timeoutPlanFor($plan, $context->remainingJobBudgetSeconds);
+        return app(AiUsageMeter::class)->within($context, function () use ($payload, $operationLabel, $plan, $inputSizeChars, $timeoutPlanFor, $context, $parse): array {
+            $timeoutPlan = $timeoutPlanFor($plan, $context->remainingJobBudgetSeconds);
+            $response = $this->sendWithNetworkRetry($payload, $timeoutPlan, $operationLabel, $plan, $inputSizeChars, $context);
 
-        $response = $this->sendWithNetworkRetry($payload, $timeoutPlan, $operationLabel, $plan, $inputSizeChars, $context);
+            $this->logCapacityDecision($operationLabel, $plan, $timeoutPlan, $inputSizeChars, $response, $context);
 
-        $this->logCapacityDecision($operationLabel, $plan, $timeoutPlan, $inputSizeChars, $response, $context);
+            $decoded = $this->responsesDecoder->decode($response, $operationLabel);
 
-        $decoded = $this->responsesDecoder->decode($response, $operationLabel);
-
-        return $parse === null ? $decoded : $parse($decoded);
+            return $parse === null ? $decoded : $parse($decoded);
+        });
     }
 
     /**

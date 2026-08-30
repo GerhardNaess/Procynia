@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentWikiAnswerStalenessService;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -24,6 +25,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 3;
@@ -41,8 +43,20 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
         EnterpriseWikiIngestService $service,
         WikiArticleAiClient $articleClient,
         EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
-    ): void
-    {
+    ): void {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiRunAiCallContext($this->runId, 'enterprise_wiki.finalize_ingest'),
+            function () use ($service, $articleClient, $wikiAnswerStalenessService): void {
+                $this->failWithoutRetryOnCostControlBlock(fn (): mixed => $this->handleInAiCallContext($service, $articleClient, $wikiAnswerStalenessService));
+            },
+        );
+    }
+
+    private function handleInAiCallContext(
+        EnterpriseWikiIngestService $service,
+        WikiArticleAiClient $articleClient,
+        EnterpriseWikiDocumentWikiAnswerStalenessService $wikiAnswerStalenessService,
+    ): void {
         // All work — including DB reads and the AI call — happens inside one transaction
         // with the run row locked. This prevents two concurrent finalize instances from both
         // deciding to finalize the same run when the last sections complete at nearly the same time.
@@ -124,10 +138,10 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 ->orderBy('position_order')
                 ->get()
                 ->map(fn (EnterpriseWikiClaim $claim) => [
-                    'text'       => $claim->claim_text,
+                    'text' => $claim->claim_text,
                     'confidence' => $claim->confidence,
-                    'excerpt'    => $claim->sourceReferences->first()?->excerpt ?? '',
-                    'source'     => $claim->sourceReferences->first()?->source_label ?? '',
+                    'excerpt' => $claim->sourceReferences->first()?->excerpt ?? '',
+                    'source' => $claim->sourceReferences->first()?->source_label ?? '',
                 ])
                 ->all();
 

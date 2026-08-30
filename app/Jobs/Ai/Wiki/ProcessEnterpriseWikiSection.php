@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
+use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -25,6 +26,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
     use Dispatchable;
     use InteractsWithQueue;
     use Queueable;
+    use RunsInAiCallContext;
     use SerializesModels;
 
     public int $tries = 1;
@@ -39,6 +41,19 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
     }
 
     public function handle(
+        EnterpriseWikiIngestService $ingestService,
+        EnterpriseWikiSectionParser $parser,
+        WikiSectionAiClient $aiClient,
+    ): void {
+        $this->withinAiCallContext(
+            $this->enterpriseWikiSectionAiCallContext($this->sectionId, 'enterprise_wiki.process_section'),
+            function () use ($ingestService, $parser, $aiClient): void {
+                $this->handleInAiCallContext($ingestService, $parser, $aiClient);
+            },
+        );
+    }
+
+    private function handleInAiCallContext(
         EnterpriseWikiIngestService $ingestService,
         EnterpriseWikiSectionParser $parser,
         WikiSectionAiClient $aiClient,
@@ -125,7 +140,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
             // a traceable source reference. Claims with empty excerpt are dropped silently.
             $validClaims = array_values(array_filter(
                 $parsed,
-                fn(array $c) => $c['excerpt'] !== '',
+                fn (array $c) => $c['excerpt'] !== '',
             ));
 
             DB::transaction(function () use ($run, $pageVersion, $section, $validClaims, $sourceLabel, $refSourceType): void {

@@ -2,8 +2,10 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Support\Ai\AiCallContextScope;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
@@ -38,6 +40,7 @@ class EnterpriseWikiMaintenanceCycleService
         private readonly EnterpriseWikiClaimContentRepairService $claimContentRepairService,
         private readonly EnterpriseWikiQaRegressionService $regressionService,
         private readonly EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
+        private readonly AiCallContextScope $contextScope,
     ) {}
 
     /**
@@ -227,6 +230,19 @@ class EnterpriseWikiMaintenanceCycleService
     }
 
     private function processRun(EnterpriseWikiIngestRun $run): string
+    {
+        return $this->contextScope->within(new AiCallContext(
+            runId: $run->id,
+            documentId: $run->source_id,
+            customerId: $run->customer_id,
+            feature: 'enterprise_wiki',
+            operation: 'enterprise_wiki.maintenance',
+            resourceType: 'enterprise_wiki_document',
+            resourceId: $run->source_id,
+        ), fn (): string => $this->processRunInAiContext($run));
+    }
+
+    private function processRunInAiContext(EnterpriseWikiIngestRun $run): string
     {
         $document = EnterpriseWikiDocument::find($run->source_id);
 
