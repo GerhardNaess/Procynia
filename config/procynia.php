@@ -16,6 +16,13 @@ return [
             'user_attempts' => env('AI_WIKI_ASK_USER_ATTEMPTS', 10),
             'customer_attempts' => env('AI_WIKI_ASK_CUSTOMER_ATTEMPTS', 60),
         ],
+        'quota' => [
+            // Customer-facing warning levels for the commercial AI-case quota. 100% is not
+            // configurable: it is the hard stop the reservation ledger already enforces, so a
+            // separate number here could only ever disagree with what actually blocks the customer.
+            'warning_percent' => env('AI_QUOTA_WARNING_PERCENT', 80),
+            'critical_percent' => env('AI_QUOTA_CRITICAL_PERCENT', 90),
+        ],
     ],
 
     'security' => [

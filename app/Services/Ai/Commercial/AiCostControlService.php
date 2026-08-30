@@ -23,6 +23,7 @@ class AiCostControlService
     public function __construct(
         private readonly AiQuotaPolicyResolver $quotaPolicies,
         private readonly AiRuntimeControlService $runtimeControls,
+        private readonly AiQuotaNotificationService $quotaNotifications,
     ) {}
 
     public function authorize(AiCallContext $context): AiCostControlDecision
@@ -113,10 +114,10 @@ class AiCostControlService
             return;
         }
 
-        DB::transaction(function () use ($decision): void {
+        $committedCustomerId = DB::transaction(function () use ($decision): ?int {
             $reservation = CustomerAiUsageReservation::query()->lockForUpdate()->find($decision->reservationId);
             if (! $reservation || $reservation->status !== CustomerAiUsageReservation::STATUS_RESERVED) {
-                return;
+                return null;
             }
 
             CustomerAiCaseUsage::query()->firstOrCreate([
@@ -127,7 +128,19 @@ class AiCostControlService
                 'source_operation_key' => $reservation->operation,
             ]);
             $reservation->forceFill(['status' => CustomerAiUsageReservation::STATUS_COMMITTED, 'finalized_at' => now()])->save();
+
+            return (int) $reservation->customer_id;
         });
+
+        // Committing a credit is the one true commercial state transition, so threshold evaluation
+        // belongs here — after the transaction, so it reads committed state and holds no lock.
+        if ($committedCustomerId !== null) {
+            $customer = Customer::query()->find($committedCustomerId);
+
+            if ($customer instanceof Customer) {
+                $this->quotaNotifications->evaluate($customer);
+            }
+        }
     }
 
     public function fail(AiCostControlDecision $decision, Throwable $exception): void

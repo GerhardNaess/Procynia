@@ -2,15 +2,16 @@
 
 namespace App\Http\Controllers\App;
 
-use App\Http\Controllers\Controller;
-use App\Exceptions\Ai\AiCostControlException;
 use App\Data\Ai\AiCallContext;
+use App\Exceptions\Ai\AiCostControlException;
+use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
+use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use App\Services\Billing\BillingEntitlementService;
-use App\Services\Ai\Commercial\AiCostControlService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
+use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -98,9 +99,11 @@ class WikiAskController extends Controller
                 'operation' => 'wiki.ask',
             ]);
 
+            // Wiki Ask never spends a SavedNotice credit, so a quota block here can only come from
+            // an entitlement, suspension or platform stop — each of which needs its own wording.
             return back()
                 ->withInput()
-                ->with('error', __('procynia.ai.ai_access_unavailable_message'));
+                ->with('error', app(AiCostControlPresenter::class)->message($e, $customer));
         } catch (Throwable $e) {
             // Never surface an exception message or an upstream response body to the end user.
             Log::error('[WIKI_ASK] Question could not be answered.', [

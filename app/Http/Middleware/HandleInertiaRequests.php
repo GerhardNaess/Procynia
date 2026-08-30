@@ -72,6 +72,9 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn (): ?string => $request->session()->get('success'),
                 'error' => fn (): ?string => $request->session()->get('error'),
+                // Shared because AI cost control needs a level between "went fine" and "failed":
+                // a quota warning is neither, and without this key it never reached the page.
+                'warning' => fn (): ?string => $request->session()->get('warning'),
                 'userCreated' => fn (): ?array => $request->session()->get('userCreated'),
                 'retrievalTest' => fn (): ?array => $request->session()->get('retrievalTest'),
             ],
@@ -98,6 +101,7 @@ class HandleInertiaRequests extends Middleware
                 'knowledge' => __('procynia.knowledge'),
                 'saved_notice' => __('procynia.saved_notice'),
                 'billing' => __('procynia.billing'),
+                'ai_quota' => __('procynia.ai_quota'),
                 'wiki' => __('procynia.wiki'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),

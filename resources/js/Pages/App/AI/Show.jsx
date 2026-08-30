@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
+import AiQuotaCompact from '../../../Components/App/AiQuotaCompact';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import {
     readRememberedAiRequirementId,
@@ -1689,8 +1690,10 @@ export default function AiShow({
         translations = {},
         auth = {},
         can_use_ai_offer: canUseAiOffer = true,
+        ai_quota: aiQuota = null,
     } = usePage().props;
     const tai = translations?.ai ?? {};
+    const aiQuotaText = translations?.ai_quota ?? {};
     const isEnglish = isEnglishLocale(locale);
     const documentListTexts = {
         documentStatusLabel: tai.document_status_label ?? (isEnglish ? 'Document status' : 'Dokumentstatus'),
@@ -3056,6 +3059,10 @@ export default function AiShow({
                                 {tai.case_updated_prefix} {updatedAtLabel}
                             </span>
                         </div>
+
+                        {/* The commercial position, where the customer actually starts AI work on a
+                            case. Kept to one line: the full picture belongs on the subscription page. */}
+                        <AiQuotaCompact quota={aiQuota} texts={aiQuotaText} />
 
                         {exportDocxUrl ? (
                             <div>

@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 /** Runtime switches are database-backed so queue workers and web requests see the same state. */
 class AiRuntimeControlService
 {
+    public function __construct(private readonly AiQuotaNotificationService $quotaNotifications) {}
+
     public function globalStopEnabled(): bool
     {
         $control = AiRuntimeControl::query()->orderBy('id')->first();
@@ -46,9 +48,10 @@ class AiRuntimeControlService
             throw new \InvalidArgumentException('Invalid customer AI access status.');
         }
 
-        return DB::transaction(function () use ($customer, $status, $actor, $reason): Customer {
+        $before = null;
+        $customer = DB::transaction(function () use ($customer, $status, $actor, $reason, &$before): Customer {
             $locked = Customer::query()->lockForUpdate()->findOrFail($customer->id);
-            $before = ['ai_access_status' => $locked->ai_access_status ?? Customer::AI_ACCESS_ENABLED];
+            $before = $locked->ai_access_status ?? Customer::AI_ACCESS_ENABLED;
             $locked->forceFill(['ai_access_status' => $status])->save();
 
             BillingEvent::query()->create([
@@ -57,11 +60,20 @@ class AiRuntimeControlService
                 'event_type' => $status === Customer::AI_ACCESS_SUSPENDED ? 'ai_customer_suspended' : 'ai_customer_resumed',
                 'source' => 'ai_cost_control',
                 'description' => $reason,
-                'before' => $before,
+                'before' => ['ai_access_status' => $before],
                 'after' => ['ai_access_status' => $status],
             ]);
 
             return $locked->refresh();
         });
+
+        // A suspension is something the customer must be able to see and act on, not only an
+        // internal switch. The global stop stays silent to customers on purpose: it is a platform
+        // incident, not a fact about their account.
+        if ($before !== $status) {
+            $this->quotaNotifications->notifyAccessChanged($customer, $status === Customer::AI_ACCESS_SUSPENDED);
+        }
+
+        return $customer;
     }
 }

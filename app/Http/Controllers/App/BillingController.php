@@ -5,13 +5,14 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\BillingProduct;
 use App\Models\Customer;
+use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Billing\BillingService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
-use Illuminate\Validation\Rule;
 use Throwable;
 
 class BillingController extends Controller
@@ -94,6 +95,9 @@ class BillingController extends Controller
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
             'billing_lines' => $billingLines,
+            // The same commercial state the hard stop enforces, so the page can never claim the
+            // customer has capacity that the guard would refuse.
+            'ai_quota' => app(AiQuotaStatusService::class)->forCustomer($customer)->toArray(),
         ]);
     }
 

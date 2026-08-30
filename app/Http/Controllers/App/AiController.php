@@ -5,8 +5,10 @@ namespace App\Http\Controllers\App;
 use App\Data\Ai\Requirements\DocxTableData;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
+use App\Exceptions\Ai\AiCostControlException;
 use App\Exceptions\Ai\XlsxRequirementImportException;
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\RequirementExtractionCall;
@@ -19,6 +21,7 @@ use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Commercial\AiQuotaStatusService;
 use App\Services\Ai\DocumentPreviewService;
 use App\Services\Ai\Requirements\Excel\XlsxRequirementImportPreparer;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
@@ -45,6 +48,7 @@ use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
+use App\Support\Ai\AiCostControlPresenter;
 use App\Support\CustomerContext;
 use App\Support\PgVector;
 use Illuminate\Database\Query\JoinClause;
@@ -188,7 +192,27 @@ class AiController extends Controller
             'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
             'export_docx_url' => route('app.ai.requirements.export.docx', ['savedNotice' => $record->id]),
             'can_use_ai_offer' => $canUseAiOffer,
+            'ai_quota' => $this->aiQuotaPayload($record),
         ]);
+    }
+
+    /**
+     * Purpose: Expose the compact commercial AI-case position for the workspace this case lives in.
+     * Inputs: The visible saved notice.
+     * Returns: The canonical quota payload, or null when the case has no resolvable customer.
+     * Side effects: None.
+     *
+     * This is the same state the hard stop enforces — the workspace never computes its own.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function aiQuotaPayload(SavedNotice $record): ?array
+    {
+        $customer = $record->customer;
+
+        return $customer instanceof Customer
+            ? app(AiQuotaStatusService::class)->forCustomer($customer)->toArray()
+            : null;
     }
 
     /**
@@ -1464,6 +1488,19 @@ class AiController extends Controller
                 $this->customerAiInstructions($record),
                 $userAnswerPrompt,
             );
+        } catch (AiCostControlException $exception) {
+            // A cost-control block is not a technical failure and must not be reported as one: the
+            // customer can act on it, but only if they are told which of the four reasons applies.
+            Log::info('[PROCYNIA][WIKI_ANSWER] Wiki answer blocked by AI cost control.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $ownedRequirement->id,
+                'reason' => $exception->reason,
+            ]);
+
+            return response()->json(array_merge(
+                ['requirement_id' => $ownedRequirement->id],
+                app(AiCostControlPresenter::class)->payload($exception, $record->customer),
+            ), 422);
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][WIKI_ANSWER] Wiki answer generation failed.', [
                 'saved_notice_id' => $record->id,
@@ -1684,6 +1721,15 @@ class AiController extends Controller
                     $userId,
                     $customerAiInstructions,
                 );
+            } catch (AiCostControlException $exception) {
+                // Every remaining requirement would hit the same block, so stop here and report the
+                // real reason once instead of marking the rest as technical failures.
+                Log::info('[PROCYNIA][ASSESSMENT_REFRESH] Assessment blocked by AI cost control.', [
+                    'saved_notice_id' => $record->id,
+                    'reason' => $exception->reason,
+                ]);
+
+                return back()->with('error', app(AiCostControlPresenter::class)->message($exception, $record->customer));
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
                 $failedCount++;

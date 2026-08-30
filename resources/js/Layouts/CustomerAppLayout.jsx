@@ -665,6 +665,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             {flash.error}
                         </div>
                     ) : null}
+                    {flash?.warning ? (
+                        <div
+                            role="status"
+                            className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900 shadow-sm"
+                            data-testid="flash-warning"
+                        >
+                            {flash.warning}
+                        </div>
+                    ) : null}
 
                     {title && showPageTitle ? (
                         <div className="mb-8">

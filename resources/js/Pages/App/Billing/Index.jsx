@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AiQuotaCard from '../../../Components/App/AiQuotaCard';
 import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -99,6 +100,7 @@ export default function BillingIndex() {
         subscription,
         invoices = [],
         billing_lines: billingLines = [],
+        ai_quota: aiQuota = null,
         translations = {},
         errors = {},
         flash,
@@ -106,6 +108,7 @@ export default function BillingIndex() {
     } = page;
 
     const tb = translations.billing ?? {};
+    const aiQuotaText = translations.ai_quota ?? {};
     const planChangeText = tb.plan_change ?? {};
     const summaryText = tb.summary ?? {};
     const alertText = tb.alerts ?? {};
@@ -418,6 +421,8 @@ export default function BillingIndex() {
                         hint={summaryHints.addons}
                     />
                 </section>
+
+                <AiQuotaCard quota={aiQuota} texts={aiQuotaText} locale={locale} />
 
                 {showAddonsWithoutSubscriptionWarning && (
                     <AlertBox>

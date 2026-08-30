@@ -99,6 +99,69 @@ Kontekst settes ved inngangen til arbeidet, ikke ved hvert AI-kall: HTTP-control
 
 `OpenAiClient` logger en driftshendelse for en kallkjede uten customer context og behandler den som eksplisitt systemarbeid. Global stop gjelder likevel alltid, fordi den evalueres før kundeoppslaget.
 
-## Ikke del av Fase 2
+## Fase 3: kundevarsling og kunde-UX
 
-Fase 2 implementerer ikke 80/90/100%-varsler, customer notifications, billing-UX, self-service credits, Stripe metered billing eller global/per-customer NOK-budget. Dette er fortsatt nødvendig før den samlede kostnadskontrollen kan kalles production-ready.
+### Statusnivåer
+
+`AiQuotaStatusService` er den eneste kilden til kundens kommersielle posisjon. Billing-siden, AI-arbeidsflaten og varslingen leser den samme beregningen — ingen av dem regner quota selv.
+
+| Status | Når | Blokkerer AI? |
+| --- | --- | --- |
+| `normal` | under warning-terskelen | nei |
+| `warning` | fra `AI_QUOTA_WARNING_PERCENT` (standard 80 %) | nei |
+| `critical` | fra `AI_QUOTA_CRITICAL_PERCENT` (standard 90 %) | nei |
+| `exhausted` | ingen gjenstående kapasitet | ja, for **nye** AI-saker |
+| `suspended` | `customers.ai_access_status = suspended` | ja, alt |
+
+`warning` og `critical` er varselnivåer, ikke stopp. Ordet «soft stop» brukes ikke i UI, fordi ingenting stoppes der. Tersklene ligger i `config/procynia.php` under `procynia.ai.quota`; 100 % er ikke konfigurerbart, fordi det er reservasjonsledgerens faktiske hard stop.
+
+Prosenten regnes av **AI-saker**, ikke providerkall: unike AI-aktiverte SavedNotices i perioden mot `included_ai_credits` pluss `customer_ai_quota_periods.extra_credits`. `ai_usage_events` og `ai_usage_attempts` er operasjonell telemetri og inngår aldri i dette tallet.
+
+En sak med aktiv reservasjon teller som forbrukt. Ellers ville kunden se «1 igjen» mens en kjørende jobb allerede holder den siste crediten.
+
+`unlimited` får aldri prosent, gjenstående eller `exhausted`. `none` (plan uten AI) vises som «ikke inkludert», ikke som oppbrukt kvote.
+
+### Varsling
+
+| Hendelse | Mottaker | Kanal | Dedupe |
+| --- | --- | --- | --- |
+| 80 % (`quota_warning`) | aktive System Owners | in-app + e-post | kunde + event + periode |
+| 90 % (`quota_critical`) | aktive System Owners | in-app + e-post | kunde + event + periode |
+| 100 % (`quota_exhausted`) | aktive System Owners | in-app + e-post | kunde + event + periode |
+| AI suspendert | aktive System Owners | in-app + e-post | ingen — en reell adminhandling |
+| AI gjenåpnet | aktive System Owners | in-app + e-post | ingen — en reell adminhandling |
+
+Terskelvurdering skjer i `AiCostControlService::finalize()`, rett etter at en credit faktisk er committet — den ene reelle kommersielle tilstandsendringen. Den kjører utenfor transaksjonen og kan aldri kaste tilbake i AI-kallet.
+
+Dedupe er `customer_ai_notification_states` med unik `(customer_id, event_key, period_start)`. Det er en tabell og ikke cache, fordi en deploy eller cache-flush ikke skal kunne sende 80 %-e-posten om igjen. Historikk slettes aldri; ny kalendermåned er ny `period_start` og åpner tersklene på nytt.
+
+Krysser kunden flere terskler i ett hopp, sendes bare det sterkeste nye varselet. De svakere registreres som passert, slik at de ikke kan utløses senere i samme periode. En planendring nullstiller ikke dedupe.
+
+Har kunden ingen aktiv System Owner, registreres varselet **ikke** som sendt. Det logges operasjonelt og gir en intern `AdminNotification` (`ai_quota_no_recipient`, dedupet). Får kunden en System Owner senere i perioden, leveres varselet én gang.
+
+Global stop varsler ikke kunden. Det er en driftshendelse, ikke en opplysning om kundens konto.
+
+### Kunde-UX
+
+`/app/billing` har en egen AI-kapasitet-seksjon med plan, inkludert, ekstra kapasitet, brukt, gjenstående, periode, neste reset og status. Autorisasjonen er uendret (`canManageCustomerBilling()`: System Owner og Bid Manager). AI-arbeidsflaten viser den samme tilstanden som én linje.
+
+Status formidles alltid med tekst og ikke bare farge: badge-etikett, statusbeskrivelse og en tekstlabel til progressbaren. Unlimited får ingen progressbar, fordi en full bar ville si det motsatte av sannheten.
+
+### Hard stop og entitlement
+
+De fire årsakskodene har hver sin melding via `AiCostControlPresenter` — de krever ulik handling og skal ikke kollapse til én generisk tekst:
+
+| Kode | Betydning for kunden |
+| --- | --- |
+| `AI_NOT_INCLUDED` | abonnementet inkluderer ikke funksjonen |
+| `AI_QUOTA_EXHAUSTED` | periodens kapasitet er brukt |
+| `AI_CUSTOMER_SUSPENDED` | tilgangen er midlertidig suspendert |
+| `AI_GLOBAL_STOP` | AI er midlertidig utilgjengelig |
+
+`AI_QUOTA_EXHAUSTED` sier eksplisitt at allerede aktiverte anbud kan arbeides videre med, og at bare **nye** AI-saker er blokkert. Det er Fase 2s faktiske policy, og meldingen må ikke motsi den. Interne exception-meldinger, modellnavn, tokens og providernavn eksponeres aldri.
+
+`warning` deles nå fra `HandleInertiaRequests`. Den ble tidligere flashet i backend og forsvant før frontend.
+
+### Ikke del av Fase 3
+
+Global og per-kunde NOK-budsjett, betalingsstatus-policy (`past_due`/`unpaid`), Stripe metered billing, automatisk overage, self-service kjøp av credits, anomali-deteksjon og full intern adminflate. Den interne `AiUsageCapacity`-siden måler fortsatt operasjonstelling mot AI-saker og bør legges om når adminflaten bygges i Fase 4.

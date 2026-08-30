@@ -248,7 +248,7 @@ class OperationalDeviationSeeder extends Seeder
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_CRITICAL,
             'status' => OperationalDeviation::STATUS_IN_PROGRESS,
-            'description' => 'Kostnadskontroll er under ny implementering. Fase 2 etablerer atomisk commercial quota, reservasjon og runtime hard stop, men full operasjonell kontroll er ikke ferdig.',
+            'description' => 'Kostnadskontroll er under ny implementering. Fase 2 etablerer atomisk commercial quota, reservasjon og runtime hard stop. Fase 3 legger kundevarsling og forståelig quota-UX. Full operasjonell kontroll er fortsatt ikke ferdig.',
             'impact' => 'Feilaktig loop eller aggressiv bruk kan gi ukontrollerte API-kostnader.',
             'recommended_action' => 'Legg inn rate limiting, kundegrenser og/eller AI credits-måling.',
             'acceptance_criteria' => 'Alle AI-entrypoints er målt, kommersiell quota håndheves server-side, queue og scheduler respekterer grensen, kunden varsles før stopp og global safeguard er testet.',
@@ -258,7 +258,7 @@ class OperationalDeviationSeeder extends Seeder
             'ready_for_verification_at' => null,
             'verified_at' => null,
             'closed_at' => null,
-            'verification_notes' => 'AVVIKET forblir åpent. Fase 1 la provider-attempt-måling og sikret Wiki Ask. Fase 2 legger commercial quota, reservasjon, customer/global runtime stop og audit. Closure krever fortsatt kundevarsling, bredere context-verifisering og globale operasjonelle safeguards.',
+            'verification_notes' => 'AVVIKET forblir åpent. Fase 1 la provider-attempt-måling og sikret Wiki Ask. Fase 2 la commercial quota, reservasjon, customer/global runtime stop og audit. Fase 3 la kanonisk quota-status, 80/90/100-varsling til System Owner med varig dedupe per periode, AI-kapasitet på abonnementssiden og klassifiserte hard-stop-meldinger. Closure krever fortsatt intern adminflate, global NOK-safeguard, betalingsstatus-policy og en samlet produksjonsverifisering av hele kjeden.',
         ]);
 
         $this->seed([
