@@ -96,6 +96,17 @@ Volta). After switching, reinstall dependencies so native packages match the run
 npm ci
 ```
 
+Then verify:
+
+```bash
+npm run test:unit   # frontend unit tests (node:test)
+npm run build       # Vite production build
+```
+
+`test:unit` passes its file pattern in quotes so Node does the globbing rather than the shell, which
+keeps the result identical under zsh, bash and CI. Node 22 treats a bare directory argument as a
+file to load, so the older `node --test resources/js` form no longer discovers anything.
+
 ## Procynia Runtime
 
 Docker Compose is the canonical runtime for Procynia.

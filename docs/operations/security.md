@@ -372,6 +372,39 @@ den ingen steder — produksjonsimaget har `APP_ENV=production`, så defaulten s
 terminerte TLS-forespørselen fra utrustet proxy og en strukturell guard mot at Laravels bare
 `env()`-linje gjeninnføres.
 
+### 6.4 Microsoft Entra ID (SSO)
+
+Entra autentiserer identiteten. **Procynia eier fortsatt customer, roller og autorisasjon** — ingen
+Entra-gruppe, app-rolle eller directory-rolle mappes til `role`, `bid_role` eller `is_qa`.
+
+Full beskrivelse: [`docs/operations/entra-sso.md`](entra-sso.md).
+
+Kjernepunkter for drift:
+
+| | |
+|---|---|
+| Flyt | OIDC Authorization Code med confidential client. Ingen implicit flow |
+| Token-validering | signatur (tenant-JWKS), `iss`, `aud`, `exp`, `nonce`, `tid` |
+| Identitetsnøkkel | `oid`-claim + tenant — ikke e-post |
+| Provisjonering | ingen. Brukeren må finnes i Procynia, ellers avvises innlogging |
+| Multi-tenant | én `identity_providers`-rad per (kunde, tenant); `customer_id = null` er Procynias egen |
+| Sesjon | vanlig herdet Laravel-sesjon (F-06), `session()->regenerate()` etter innlogging |
+| Token-lagring | **ingen** — access/refresh token kastes etter identitetsoppslag |
+| Secrets | kun `AUTH_ENTRA_CLIENT_SECRET`; tenant/client id og issuer ligger i databasen |
+
+**Kundeisolasjon:** provideren utledes fra det signerte `tid`-claimet, ikke fra sesjonen eller en
+query-parameter. Førstegangskobling skjer kun innenfor providerens egen kunde, og kunden
+re-verifiseres ved **hver** innlogging — en bruker som flyttes til en annen kunde mister koblingen.
+
+**Login-moduser** styres av `AUTH_ENTRA_ENABLED` og `AUTH_LOCAL_LOGIN_ENABLED`, uavhengig av
+`APP_ENV`. Lokal utvikling trenger ikke Azure: standard er Entra av, lokal login på. Er begge av,
+avvises konfigurasjonen som en utestengning.
+
+**Break-glass:** behold minst én intern administrator med lokal innlogging, slik at en tenant-feil
+eller utløpt client secret ikke stenger ute dem som skal rette den.
+
+**Enumeration:** alle avvisninger gir samme melding til bruker; årsaken logges internt.
+
 ### 6.1 Stripe webhook — fail-closed signaturverifisering
 
 Webhook-endepunktet `POST /stripe/webhook` er uautentisert og CSRF-unntatt av nødvendighet: Stripe har
@@ -662,6 +695,11 @@ Skill mellom to ting:
 - **Denne utviklerhosten:** kjører fortsatt fysisk Node v18.15.0. Den må oppgraderes manuelt av
   utvikleren; det ble bevisst ikke gjort automatisk. Fram til da vil `npm` gi
   `EBADENGINE`-advarsel — det er beviset på at kravet er uttrykt, ikke en feil.
+
+Frontend-testene kjøres med `npm run test:unit`. Kommandoen sender filmønsteret i anførselstegn slik
+at Node — ikke skallet — utfører globbingen; Node 22 tolker et rent katalogargument som en fil som
+skal lastes, så den eldre formen `node --test resources/js` fant ingenting. Verifisert grønn på
+Node 22: 232 tester i 43 suiter.
 
 Node 22 fjerner samtidig den eksisterende advarselen om at `@tailwindcss/oxide@4.2.2` krever
 Node ≥ 20, og er en forutsetning for en eventuell framtidig Vite 8.

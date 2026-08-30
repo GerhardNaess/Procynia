@@ -21,15 +21,32 @@ import {
 const originalNavigator = globalThis.navigator;
 const originalWindow = globalThis.window;
 
+/**
+ * Node 21 added a real global `navigator`, defined as a getter with no setter. Plain assignment —
+ * `globalThis.navigator = {...}` — therefore throws "Cannot set property navigator of #<Object>
+ * which has only a getter", which is what broke this file on the Node 22 baseline while it passed
+ * on Node 18 where no such global existed.
+ *
+ * The descriptor is still configurable, so defineProperty replaces it cleanly. Nothing about the
+ * code under test changes: it reads navigator.clipboard exactly as a browser would.
+ */
+function setNavigator(value) {
+    Object.defineProperty(globalThis, 'navigator', {
+        value,
+        configurable: true,
+        writable: true,
+    });
+}
+
 function installClipboard({ write, writeText, clipboardItem = true } = {}) {
     const calls = { write: [], writeText: [] };
 
-    globalThis.navigator = {
+    setNavigator({
         clipboard: {
             ...(write ? { write: async (items) => { calls.write.push(items); return write(items); } } : {}),
             ...(writeText ? { writeText: async (text) => { calls.writeText.push(text); return writeText(text); } } : {}),
         },
-    };
+    });
 
     globalThis.window = {
         ...(clipboardItem ? { ClipboardItem: class { constructor(payload) { this.payload = payload; } } } : {}),
@@ -40,8 +57,8 @@ function installClipboard({ write, writeText, clipboardItem = true } = {}) {
     return calls;
 }
 
-beforeEach(() => { globalThis.navigator = undefined; globalThis.window = undefined; });
-afterEach(() => { globalThis.navigator = originalNavigator; globalThis.window = originalWindow; });
+beforeEach(() => { setNavigator(undefined); globalThis.window = undefined; });
+afterEach(() => { setNavigator(originalNavigator); globalThis.window = originalWindow; });
 
 describe('writeRichClipboardPayload', () => {
     test('writes both flavours, with the html carried as a promise', async () => {
