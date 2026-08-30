@@ -2,6 +2,9 @@
     "$schema": "https://www.schemastore.org/package.json",
     "private": true,
     "type": "module",
+    "engines": {
+        "node": ">=22 <23"
+    },
     "scripts": {
         "build": "vite build",
         "dev": "vite",
@@ -19,7 +22,7 @@
         "laravel-vite-plugin": "^1.2.0",
         "postcss": "^8.5.6",
         "tailwindcss": "^4.1.18",
-        "vite": "^5.4.14"
+        "vite": "^6.4.3"
     },
     "dependencies": {
         "@inertiajs/react": "^3.0.0",

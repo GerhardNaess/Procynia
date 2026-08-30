@@ -1,0 +1,83 @@
+name: Dependency audit
+
+# Security gate for known vulnerabilities in third-party dependencies.
+#
+# Procynia closed 90 advisories in August 2026 (F-07 Composer, F-11 npm) and both
+# ecosystems are clean today. This workflow is what keeps them clean: a new advisory
+# published against a package we already ship must break the build rather than sit
+# unnoticed until someone runs an audit by hand.
+#
+# Deliberately narrow: no database, no Redis, no frontend build, no application boot.
+# The gate needs only the two lockfiles, so it stays fast and cannot fail for reasons
+# unrelated to dependency security.
+#
+# Policy: any advisory fails the build. There is no ignore list, no severity threshold
+# and no continue-on-error. Accepting a specific advisory must be a documented, explicit
+# risk decision — not a silent default in this file.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # A new advisory can be published against a package we already ship without anyone touching the
+  # code, and the PR/push triggers would never fire. 05:30 UTC daily — cheap job, and dependency
+  # risk is time-dependent rather than change-dependent. GitHub cron is always UTC.
+  schedule:
+    - cron: '30 5 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  composer-audit:
+    name: Composer advisories
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 8.4 is what the app actually runs on (docker/php/Dockerfile). composer.json still
+      # allows ^8.3, but no supported runtime uses it, so the gate tests the real target.
+      # bcmath, gd, intl and zip are not in setup-php's default set but are declared by
+      # locked packages (moneyphp/money, phpoffice/phpword, filament/support,
+      # openspout/openspout). Without them `composer install` refuses on platform
+      # requirements before the audit ever runs.
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, gd, intl, zip
+          coverage: none
+
+      # Installing from the lockfile also proves the lockfile is still installable, which a
+      # bare `composer audit` would not catch. --no-scripts skips package:discover and
+      # filament:upgrade: those boot Laravel and would need an APP_KEY and a writable
+      # storage tree, neither of which a dependency audit should depend on.
+      - name: Install dependencies from composer.lock
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+
+      - name: composer audit
+        run: composer audit
+
+  npm-audit:
+    name: npm advisories
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 matches the frontend stage in docker/production/Dockerfile. The local
+      # developer host still runs Node 18, which is EOL — tracked separately, deliberately
+      # not addressed here.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # --no-audit only suppresses the implicit audit npm runs during install; the explicit
+      # step below is the gate, and it produces its own clear pass/fail output.
+      - name: Install dependencies from package-lock.json
+        run: npm ci --no-audit --no-fund
+
+      - name: npm audit
+        run: npm audit

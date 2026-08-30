@@ -67,6 +67,35 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 - [Queue operations](docs/operations/queues.md)
 - [Production deploy guide](docs/operations/production-deploy.md)
 
+## Procynia Node version
+
+Procynia is standardised on **Node 22**. That is the version CI runs, the version the production
+frontend image builds with, and the version expected for local development. Node 18 is EOL and is
+no longer a supported project baseline.
+
+The requirement is declared in two places: `engines` in `package.json` (npm warns when you are on
+the wrong major) and `.nvmrc` for anyone using nvm.
+
+Check what you are on:
+
+```bash
+node --version   # expect v22.x
+```
+
+If you use nvm, `.nvmrc` activates the right major:
+
+```bash
+nvm install
+nvm use
+```
+
+nvm is not required — any Node 22 install works (Homebrew, the official installer, asdf, mise,
+Volta). After switching, reinstall dependencies so native packages match the runtime:
+
+```bash
+npm ci
+```
+
 ## Procynia Runtime
 
 Docker Compose is the canonical runtime for Procynia.
