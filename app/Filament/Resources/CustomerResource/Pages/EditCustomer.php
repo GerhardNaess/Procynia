@@ -17,6 +17,10 @@ class EditCustomer extends EditRecord
                 ->label('Abonnement og tjenester')
                 ->icon('heroicon-o-credit-card')
                 ->url(fn () => CustomerResource::getUrl('billing', ['record' => $this->record])),
+            Action::make('ai_control')
+                ->label(__('procynia.ai_admin.actions.open'))
+                ->icon('heroicon-o-cpu-chip')
+                ->url(fn () => CustomerResource::getUrl('ai-control', ['record' => $this->record])),
         ];
     }
 }

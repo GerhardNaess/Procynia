@@ -119,6 +119,16 @@ class AiRuntimeControlCommand extends Command
 
         if (! $actor instanceof User) {
             $this->warn('[AI_RUNTIME_CONTROL] --actor did not match a user; the audit event will record no actor.');
+
+            return null;
+        }
+
+        // A customer-scoped identity must never appear as the actor behind a platform control:
+        // the audit trail would then name someone who could not have been authorised to do it.
+        if (! $actor->isSuperAdmin() || $actor->customer_id !== null) {
+            $this->warn('[AI_RUNTIME_CONTROL] --actor is not an internal Procynia super admin; the audit event will record no actor.');
+
+            return null;
         }
 
         return $actor;

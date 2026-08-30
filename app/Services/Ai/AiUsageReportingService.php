@@ -2,11 +2,12 @@
 
 namespace App\Services\Ai;
 
+use App\Data\Ai\AiQuotaPolicy;
+use App\Data\Ai\AiQuotaStatus;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\User;
-use App\Services\Ai\AiUsageGuard;
-use App\Services\Billing\BillingEntitlementService;
+use App\Services\Ai\Commercial\AiQuotaStatusService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -14,9 +15,8 @@ use Illuminate\Support\Str;
 class AiUsageReportingService
 {
     public function __construct(
-        private readonly BillingEntitlementService $billingEntitlementService,
-    ) {
-    }
+        private readonly AiQuotaStatusService $quotaStatus,
+    ) {}
 
     /**
      * Purpose: Build the internal AI usage and capacity report for Filament.
@@ -80,7 +80,7 @@ class AiUsageReportingService
     {
         return AiUsageEvent::query()
             ->with([
-                'customer:id,name,subscription_plan,included_ai_credits',
+                'customer:id,name,subscription_plan,included_ai_credits,ai_access_status',
                 'user:id,name,email,customer_id',
             ])
             ->where('created_at', '>=', $now->copy()->subDays(30))
@@ -151,7 +151,7 @@ class AiUsageReportingService
     {
         $eventsByCustomer = $events->groupBy(fn (AiUsageEvent $event): string => (string) $event->customer_id);
         $customers = Customer::query()
-            ->select(['id', 'name', 'subscription_plan', 'included_ai_credits'])
+            ->select(['id', 'name', 'subscription_plan', 'included_ai_credits', 'ai_access_status'])
             ->orderBy('name')
             ->get();
 
@@ -160,7 +160,7 @@ class AiUsageReportingService
             $events24h = $this->eventsInWindow($customerEvents, $now->copy()->subDay());
             $events7d = $this->eventsInWindow($customerEvents, $now->copy()->subDays(7));
             $events30d = $this->eventsInWindow($customerEvents, $now->copy()->subDays(30));
-            $capacity = $this->capacityInfo($customer, $events30d);
+            $capacity = $this->capacityInfo($customer);
 
             return [
                 'id' => $customer->id,
@@ -216,7 +216,7 @@ class AiUsageReportingService
 
         $users = User::query()
             ->select(['id', 'name', 'email', 'customer_id'])
-            ->with(['customer:id,name,subscription_plan,included_ai_credits'])
+            ->with(['customer:id,name,subscription_plan,included_ai_credits,ai_access_status'])
             ->whereIn('id', $userIds)
             ->orderBy('name')
             ->get();
@@ -348,22 +348,27 @@ class AiUsageReportingService
     }
 
     /**
-     * Purpose: Build capacity information for one customer.
-     * Inputs: A customer and the 30-day event window.
-     * Returns: A structured capacity payload.
-     * Side effects: Reads plan settings and billing entitlement state.
+     * Purpose: Report one customer's commercial AI capacity for the current period.
+     * Inputs: A customer.
+     * Returns: A structured capacity payload for the internal capacity table.
+     * Side effects: Reads the canonical quota state.
+     *
+     * This used to compare a 30-day count of AI *operations* against the number of AI *cases* the
+     * plan includes — two different units over two different windows — so its "80% used" badge did
+     * not describe anything real. It now reports what the hard stop actually enforces, via the one
+     * canonical calculation. Operation volume remains in the activity columns, where it belongs.
      *
      * @return array{defined: bool, value: int|null, label: string, source_label: string, status: string, status_label: string, tone: string}
      */
-    private function capacityInfo(Customer $customer, Collection $events30d): array
+    private function capacityInfo(Customer $customer): array
     {
-        $capacity = $this->includedAiCapacity($customer);
+        $quota = $this->quotaStatus->forCustomer($customer);
 
-        if ($capacity === null) {
+        if ($quota->quotaType === AiQuotaPolicy::NONE) {
             return [
                 'defined' => false,
                 'value' => null,
-                'label' => __('procynia.ai_usage_capacity.capacity.not_defined'),
+                'label' => __('procynia.ai_usage_capacity.capacity.not_included'),
                 'source_label' => '',
                 'status' => 'undefined',
                 'status_label' => __('procynia.ai_usage_capacity.capacity_status.undefined'),
@@ -371,72 +376,57 @@ class AiUsageReportingService
             ];
         }
 
-        $allowedUsage = $this->operationCount($events30d->where('status', AiUsageEvent::STATUS_ALLOWED));
-        $blockedUsage = $this->operationCount($events30d->where('status', AiUsageEvent::STATUS_BLOCKED));
-
-        if ($capacity['value'] === 0) {
-            $status = $allowedUsage > 0 || $blockedUsage > 0 ? 'over' : 'within';
-            $tone = $status === 'over' ? 'danger' : 'success';
-        } elseif ($blockedUsage > 0 || $allowedUsage > $capacity['value']) {
-            $status = 'over';
-            $tone = 'danger';
-        } elseif ($capacity['value'] > 0 && $allowedUsage >= (int) ceil($capacity['value'] * 0.8)) {
-            $status = 'near';
-            $tone = 'warning';
-        } else {
-            $status = 'within';
-            $tone = 'success';
+        if ($quota->isUnlimited) {
+            return [
+                'defined' => true,
+                'value' => null,
+                'label' => __('procynia.ai_quota.unlimited'),
+                'source_label' => $this->capacityPeriodLabel($quota),
+                'status' => $quota->isSuspended ? 'over' : 'within',
+                'status_label' => __('procynia.ai_quota.statuses.'.$quota->status),
+                'tone' => $quota->isSuspended ? 'danger' : 'success',
+            ];
         }
 
         return [
             'defined' => true,
-            'value' => $capacity['value'],
-            'label' => number_format($capacity['value'], 0, ',', ' '),
-            'source_label' => $capacity['source_label'],
-            'status' => $status,
-            'status_label' => __('procynia.ai_usage_capacity.capacity_status.'.$status),
-            'tone' => $tone,
+            'value' => $quota->allowance(),
+            'label' => __('procynia.ai_quota.used_of', [
+                'used' => $quota->used + $quota->reserved,
+                'allowance' => $quota->allowance(),
+            ]),
+            'source_label' => $this->capacityPeriodLabel($quota),
+            'status' => $this->capacityStatusKey($quota),
+            'status_label' => __('procynia.ai_quota.statuses.'.$quota->status),
+            'tone' => match ($this->capacityStatusKey($quota)) {
+                'over' => 'danger',
+                'near' => 'warning',
+                default => 'success',
+            },
         ];
     }
 
     /**
-     * Purpose: Resolve the customer AI capacity without guessing when it is undefined.
-     * Inputs: The customer.
-     * Returns: Capacity metadata or null when the value is not explicitly defined.
+     * Purpose: Map the canonical quota status onto this table's filter/sort vocabulary.
+     * Inputs: The canonical quota status.
+     * Returns: within, near, or over.
      * Side effects: None.
-     *
-     * @return array{value: int, source_label: string}|null
      */
-    private function includedAiCapacity(Customer $customer): ?array
+    private function capacityStatusKey(AiQuotaStatus $quota): string
     {
-        $planConfig = $customer->planConfig();
+        return match ($quota->status) {
+            AiQuotaStatus::STATUS_EXHAUSTED, AiQuotaStatus::STATUS_SUSPENDED => 'over',
+            AiQuotaStatus::STATUS_WARNING, AiQuotaStatus::STATUS_CRITICAL => 'near',
+            default => 'within',
+        };
+    }
 
-        if ($customer->included_ai_credits !== null) {
-            if (
-                (int) $customer->included_ai_credits === 0
-                && (! array_key_exists('included_ai_credits', $planConfig) || $planConfig['included_ai_credits'] === null)
-            ) {
-                return null;
-            }
-
-            return [
-                'value' => $this->billingEntitlementService->includedAiCredits($customer),
-                'source_label' => __('procynia.ai_usage_capacity.capacity.customer_source'),
-            ];
-        }
-
-        if (! array_key_exists('included_ai_credits', $planConfig) || $planConfig['included_ai_credits'] === null) {
-            return null;
-        }
-
-        return [
-            'value' => $this->billingEntitlementService->includedAiCredits($customer),
-            'source_label' => sprintf(
-                '%s: %s',
-                __('procynia.ai_usage_capacity.capacity.plan_source'),
-                $customer->planName(),
-            ),
-        ];
+    private function capacityPeriodLabel(AiQuotaStatus $quota): string
+    {
+        return __('procynia.ai_usage_capacity.capacity.period_source', [
+            'start' => $quota->periodStart,
+            'end' => $quota->periodEnd,
+        ]);
     }
 
     /**

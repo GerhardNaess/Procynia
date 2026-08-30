@@ -111,6 +111,37 @@ class AiQuotaNotificationService
         }
     }
 
+    /**
+     * An administrative capacity change is a discrete act like a suspension, so it carries no
+     * period dedupe either: granting credits twice in a month is two pieces of real news.
+     */
+    public function notifyCreditsAdjusted(Customer $customer, int $amount, AiQuotaStatus $status): void
+    {
+        try {
+            $recipients = $this->systemOwners($customer);
+
+            if ($recipients->isEmpty()) {
+                $this->reportMissingRecipients($customer, CustomerAiNotificationState::EVENT_CREDITS_ADJUSTED, $status);
+
+                return;
+            }
+
+            $this->dispatch(
+                $customer,
+                $recipients,
+                CustomerAiNotificationState::EVENT_CREDITS_ADJUSTED,
+                $status,
+                ['amount' => $amount, 'amount_abs' => abs($amount)],
+            );
+        } catch (Throwable $throwable) {
+            Log::warning('[PROCYNIA][AI_QUOTA_NOTIFICATION] Credit-adjustment notification failed.', [
+                'customer_id' => $customer->id,
+                'amount' => $amount,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
+    }
+
     /** @return list<string> */
     private function qualifiedEvents(AiQuotaStatus $status): array
     {
@@ -180,10 +211,13 @@ class AiQuotaNotificationService
             ->values();
     }
 
-    /** @param Collection<int, User> $recipients */
-    private function dispatch(Customer $customer, Collection $recipients, string $event, AiQuotaStatus $status): void
+    /**
+     * @param  Collection<int, User>  $recipients
+     * @param  array<string, mixed>  $extraReplacements
+     */
+    private function dispatch(Customer $customer, Collection $recipients, string $event, AiQuotaStatus $status, array $extraReplacements = []): void
     {
-        $content = $this->content($event, $status, $customer);
+        $content = $this->content($event, $status, $customer, $extraReplacements);
         $billingUrl = rescue(fn (): string => route('app.billing.index'), null, false);
 
         foreach ($recipients as $recipient) {
@@ -250,13 +284,16 @@ class AiQuotaNotificationService
         return match ($event) {
             CustomerAiNotificationState::EVENT_QUOTA_WARNING => UserNotification::SEVERITY_WARNING,
             CustomerAiNotificationState::EVENT_QUOTA_CRITICAL => UserNotification::SEVERITY_WARNING,
-            CustomerAiNotificationState::EVENT_AI_RESUMED => UserNotification::SEVERITY_INFO,
+            CustomerAiNotificationState::EVENT_AI_RESUMED, CustomerAiNotificationState::EVENT_CREDITS_ADJUSTED => UserNotification::SEVERITY_INFO,
             default => UserNotification::SEVERITY_CRITICAL,
         };
     }
 
-    /** @return array{subject: string, intro: string, lines: list<string>, action: string} */
-    private function content(string $event, AiQuotaStatus $status, Customer $customer): array
+    /**
+     * @param  array<string, mixed>  $extraReplacements
+     * @return array{subject: string, intro: string, lines: list<string>, action: string}
+     */
+    private function content(string $event, AiQuotaStatus $status, Customer $customer, array $extraReplacements = []): array
     {
         $replacements = [
             'customer' => $customer->name,
@@ -265,6 +302,7 @@ class AiQuotaNotificationService
             'remaining' => $status->remaining ?? 0,
             'percent' => $status->percentageUsed ?? 0,
             'period_end' => $status->periodEnd,
+            ...$extraReplacements,
         ];
         $key = 'procynia.ai_quota.notifications.'.$event;
 

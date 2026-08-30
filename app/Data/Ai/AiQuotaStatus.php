@@ -39,9 +39,16 @@ final readonly class AiQuotaStatus
         public bool $isSuspended,
     ) {}
 
+    /**
+     * What the customer may actually spend this period.
+     *
+     * Floored at zero because an administrative withdrawal can take the net below the plan's own
+     * allowance. The signed components stay visible to admins; the spendable figure never goes
+     * negative, in the UI or in the guard.
+     */
     public function allowance(): int
     {
-        return $this->included + $this->extra;
+        return max(0, $this->included + $this->extra);
     }
 
     /** True when a threshold notification could ever be meaningful for this customer. */

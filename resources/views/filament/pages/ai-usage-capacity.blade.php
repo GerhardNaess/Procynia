@@ -1,5 +1,31 @@
 <x-filament-panels::page>
     <div class="space-y-6">
+        @if ($globalStopActive)
+            {{-- A platform-wide stop must be impossible to miss, not tucked away on a sub-page. --}}
+            <section class="max-w-6xl rounded-2xl border-2 border-danger-400 bg-danger-50 p-6 dark:border-danger-600 dark:bg-danger-950">
+                <p class="text-base font-semibold uppercase tracking-[0.16em] text-danger-800 dark:text-danger-200">
+                    {{ __('procynia.ai_admin.global.banner_title') }}
+                </p>
+                <p class="mt-2 max-w-3xl text-base leading-6 text-danger-900 dark:text-danger-200">
+                    {{ __('procynia.ai_admin.global.banner_body') }}
+                </p>
+                <dl class="mt-3 grid grid-cols-1 gap-x-8 gap-y-1 text-base text-danger-900 sm:grid-cols-3 dark:text-danger-200">
+                    <div>
+                        <dt class="font-medium">{{ __('procynia.ai_admin.columns.actor') }}</dt>
+                        <dd>{{ $globalStopChangedBy ?? __('procynia.ai_admin.actor_system') }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-medium">{{ __('procynia.ai_admin.columns.time') }}</dt>
+                        <dd>{{ $globalStopChangedAt ?? '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="font-medium">{{ __('procynia.ai_admin.columns.reason') }}</dt>
+                        <dd>{{ $globalStopReason ?? '—' }}</dd>
+                    </div>
+                </dl>
+            </section>
+        @endif
+
         <section class="max-w-6xl rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div class="space-y-1">
@@ -159,10 +185,10 @@
                                     <td class="py-3 pr-4">
                                         <span @class([
                                             'inline-flex items-center rounded-full px-2 py-1 text-base leading-6 font-medium',
-                                            'bg-success-100 text-success-800' => $row['status'] === 'within',
-                                            'bg-warning-100 text-warning-800' => $row['status'] === 'near',
-                                            'bg-danger-100 text-danger-800' => $row['status'] === 'over',
-                                            'bg-gray-100 text-gray-700' => $row['status'] === 'undefined',
+                                            'bg-success-100 text-success-800' => $row['capacity']['tone'] === 'success',
+                                            'bg-warning-100 text-warning-800' => $row['capacity']['tone'] === 'warning',
+                                            'bg-danger-100 text-danger-800' => $row['capacity']['tone'] === 'danger',
+                                            'bg-gray-100 text-gray-700' => $row['capacity']['tone'] === 'gray',
                                         ])>
                                             {{ $row['capacity']['status_label'] }}
                                         </span>

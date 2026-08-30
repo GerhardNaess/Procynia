@@ -164,4 +164,69 @@ De fire årsakskodene har hver sin melding via `AiCostControlPresenter` — de k
 
 ### Ikke del av Fase 3
 
-Global og per-kunde NOK-budsjett, betalingsstatus-policy (`past_due`/`unpaid`), Stripe metered billing, automatisk overage, self-service kjøp av credits, anomali-deteksjon og full intern adminflate. Den interne `AiUsageCapacity`-siden måler fortsatt operasjonstelling mot AI-saker og bør legges om når adminflaten bygges i Fase 4.
+Global og per-kunde NOK-budsjett, betalingsstatus-policy (`past_due`/`unpaid`), Stripe metered billing, automatisk overage, self-service kjøp av credits og anomali-deteksjon.
+
+## Fase 4: intern adminflate og operatørkontroll
+
+### Adminflater
+
+Per kunde: **Kunder → (kunde) → AI-kontroll** (`ManageCustomerAiControl`). Viser plan, kvotetype, inkludert, ekstra kapasitet, brukt, reservert, gjenstående, periode, AI-tilgangsstatus, usikre reservasjoner, kapasitetshistorikk og revisjonsspor. Handlinger: suspender AI, gjenopprett AI, endre AI-kapasitet.
+
+Globalt: **Drift → AI-bruksmønster og varsler** (`AiUsageCapacity`) eier global AI-stopp. Er stoppen aktiv, vises et rødt banner øverst med hvem som satte den, når og hvorfor — den skal ikke kunne overses.
+
+Adminflatene beregner ingenting selv. De leser `AiQuotaStatusService` og skriver kun gjennom `AiRuntimeControlService` og `AiCreditAdjustmentService`; en handling som gikk utenom disse ville hoppet over både revisjonssporet og kundevarselet.
+
+### Kapasitetsendringer
+
+`customer_ai_credit_adjustments` er append-only. Rader endres eller slettes aldri. `customer_ai_quota_periods.extra_credits` er en projeksjon som skrives om fra summen av ledgeren i samme låste transaksjon — ledgeren er sannheten, kolonnen er hurtigveien for autorisasjonsstien.
+
+Beløpet er fortegnet. En negativ justering reduserer den reelle kapasiteten, ikke bare en «ekstra»-bøtte: base 10 med justering −5 gir kapasitet 5. Selve kapasiteten gulves på 0, aldri negativ. Historisk forbruk (`customer_ai_case_usages`) endres aldri — det finnes ingen CRUD for ledger-rader.
+
+Justeringer gjelder inneværende periode. System Owner varsles gjennom den samme Fase 3-mekanismen.
+
+### Revisjonsspor
+
+`billing_events` med `source = ai_cost_control`. Alle handlinger krever begrunnelse, og aktør registreres.
+
+| Event type | Utløses av |
+| --- | --- |
+| `ai_customer_suspended` / `ai_customer_resumed` | admin-UI eller `ai:runtime-control` |
+| `ai_global_stop_enabled` / `ai_global_stop_disabled` | admin-UI eller `ai:runtime-control` |
+| `ai_credits_adjusted` | `AiCreditAdjustmentService` |
+| `ai_operator_override_used` | en operatørkommando som faktisk omgikk en kommersiell guard |
+
+### Operatørkommandoer
+
+De fem manuelle kommandoene setter nå eksplisitt `AiCallContext` med kunde, feature, operasjon, ressurs og korrelasjon. Ingen av dem er `unclassified`.
+
+| Kommando | Operasjon | Normal guard | Override | Global stop |
+| --- | --- | --- | --- | --- |
+| `wiki:generate-applied-pages` | `operator.wiki.generate_applied_pages` | håndheves | tillatt | stopper alltid |
+| `wiki:verify-page-claims` | `operator.wiki.verify_page_claims` | håndheves | tillatt | stopper alltid |
+| `wiki:recover-document-flow` | `operator.wiki.recover_document_flow` | håndheves | tillatt | stopper alltid |
+| `wiki:maintainer-decision` | `operator.wiki.maintainer_decision` | håndheves | tillatt | stopper alltid |
+| `wiki:inspect-requirement-answer` | `operator.wiki.inspect_requirement_answer` | håndheves | tillatt | stopper alltid |
+
+Standard er å respektere alle guards. Override krever begge deler eksplisitt:
+
+```
+--cost-control-override --actor=<intern super admin> --override-reason="..."
+```
+
+Mangler aktør eller begrunnelse, avvises kjøringen. Aktør må være intern Procynia super admin med `customer_id = null` — en kundebruker kan aldri stå som aktør bak en overstyring, verken her eller i `ai:runtime-control`.
+
+Override slakker på entitlement (`AI_NOT_INCLUDED`), kvote (`AI_QUOTA_EXHAUSTED`) og kundesuspensjon (`AI_CUSTOMER_SUSPENDED`) — de tre kommersielle grensene. Entitlement er tatt med bevisst: uten det ville en gjenoppretting være umulig for en kunde som nedgraderte etter at kjøringen låste seg. Hver bypass skriver `ai_operator_override_used` med aktør, begrunnelse og hvilken guard som ble omgått, og reservasjonen tas fortsatt — en overstyring endrer hva som er tillatt, ikke hva som registreres.
+
+**Global emergency stop kan ikke omgås.** Den evalueres før kundeoppslaget og har ingen override-sti. Et break-glass for global stopp er bevisst ikke bygget; det krever eget design.
+
+### Rettet: intern kapasitetsvisning
+
+Kapasitetskolonnen i `AiUsageCapacity` sammenlignet tidligere en 30-dagers telling av AI-*operasjoner* mot antall AI-*saker* planen inkluderer — ulike enheter over ulike vinduer — slik at vanlig aktivitet kunne få en kunde til å framstå som over grensen. Den leser nå `AiQuotaStatusService` for inneværende kalenderperiode. Operasjonstellingene står igjen som ren aktivitet, og token/NOK-rapporteringen på **AI-forbruk** er urørt: kommersiell kvote og operasjonell tokenkostnad blandes ikke i ett tall.
+
+### Usikre reservasjoner
+
+Kunder med `uncertain`-reservasjoner får dette synliggjort på AI-kontroll-siden med antall og forklaring på at kapasiteten fortsatt holdes fordi providerkallet kan ha blitt utført. Det finnes bevisst ingen «frigi»-knapp: full reconciliation krever egen policy og hører til en senere fase.
+
+### Ikke del av Fase 4
+
+Global og per-kunde NOK-budsjett, ukjent-pris-policy, stale FX-policy, betalingsstatus-policy (`past_due`/`unpaid`), Stripe metered billing, automatisk overage, anomali-deteksjon, forecasting og reconciliation av usikre reservasjoner.

@@ -4,15 +4,18 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
+use App\Support\Ai\RunsOperatorAiCommand;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Throwable;
 
-#[Signature('wiki:verify-page-claims {--run-id=}')]
+#[Signature('wiki:verify-page-claims {--run-id=} {--actor=} {--cost-control-override} {--override-reason=}')]
 #[Description('Verify claims extracted from wiki page versions against the originating source document and write supporting source references.')]
 class EnterpriseWikiVerifyPageClaims extends Command
 {
+    use RunsOperatorAiCommand;
+
     public function handle(EnterpriseWikiVerifyPageClaimsService $service): int
     {
         $runId = (int) $this->option('run-id');
@@ -31,14 +34,25 @@ class EnterpriseWikiVerifyPageClaims extends Command
             return self::FAILURE;
         }
 
+        $context = $this->operatorAiCallContext([
+            'customerId' => (int) $run->customer_id,
+            'operation' => 'operator.wiki.verify_page_claims',
+            'resourceType' => 'enterprise_wiki_document',
+            'resourceId' => (int) $run->source_id,
+        ]);
+
+        if ($context === null) {
+            return self::FAILURE;
+        }
+
         try {
-            $result = $service->verify($run);
+            $result = $this->withinOperatorAiCallContext($context, fn (): array => $service->verify($run));
         } catch (\InvalidArgumentException $e) {
-            $this->error('[WIKI_VERIFY] ' . $e->getMessage());
+            $this->error('[WIKI_VERIFY] '.$e->getMessage());
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('[WIKI_VERIFY] Unexpected error: ' . $e->getMessage());
+            $this->error('[WIKI_VERIFY] Unexpected error: '.$e->getMessage());
 
             return self::FAILURE;
         }

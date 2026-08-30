@@ -6,6 +6,7 @@ use App\Data\Ai\AiCallContext;
 use App\Data\Ai\AiCostControlDecision;
 use App\Data\Ai\AiQuotaPolicy;
 use App\Exceptions\Ai\AiCostControlException;
+use App\Models\BillingEvent;
 use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
 use App\Models\CustomerAiQuotaPeriod;
@@ -43,12 +44,15 @@ class AiCostControlService
         return DB::transaction(function () use ($context): AiCostControlDecision {
             $customer = Customer::query()->lockForUpdate()->findOrFail($context->customerId);
             if (($customer->ai_access_status ?? Customer::AI_ACCESS_ENABLED) === Customer::AI_ACCESS_SUSPENDED) {
-                throw new AiCostControlException(AiCostControlException::CUSTOMER_SUSPENDED);
+                $this->assertOverrideMayBypass($context, AiCostControlException::CUSTOMER_SUSPENDED, $customer);
             }
 
             $policy = $this->quotaPolicies->resolve($customer);
             if ($policy->type === AiQuotaPolicy::NONE) {
-                throw new AiCostControlException(AiCostControlException::NOT_INCLUDED);
+                $this->assertOverrideMayBypass($context, AiCostControlException::NOT_INCLUDED, $customer);
+
+                // Nothing commercial left to meter once entitlement itself was overridden.
+                return new AiCostControlDecision($context, AiQuotaPolicy::NONE, null, 0, 0, 0, null, null, 'exhausted');
             }
 
             if (! $context->commercialCredit || ($context->savedNoticeId ?? 0) <= 0) {
@@ -74,7 +78,11 @@ class AiCostControlService
                 ->pluck('saved_notice_id')->map(fn ($id): int => (int) $id)->all();
             $used = in_array((int) $context->savedNoticeId, $committedNoticeIds, true);
             $committed = count($committedNoticeIds);
-            $included = $policy->type === AiQuotaPolicy::FINITE ? $policy->includedCredits + (int) $period->extra_credits : null;
+            // An administrative withdrawal can push the net below the plan; the allowance floors at
+            // zero so the comparison below stays meaningful.
+            $included = $policy->type === AiQuotaPolicy::FINITE
+                ? max(0, $policy->includedCredits + (int) $period->extra_credits)
+                : null;
             $remaining = $included !== null ? max(0, $included - $committed) : null;
 
             if ($used) {
@@ -93,7 +101,9 @@ class AiCostControlService
             $occupied = count(array_unique(array_merge($committedNoticeIds, $reservedNoticeIds)));
 
             if ($occupied + 1 > $included) {
-                throw new AiCostControlException(AiCostControlException::QUOTA_EXHAUSTED);
+                // An override still takes a reservation and still commits the credit: the ledger
+                // must record that the work happened, even when the allowance was exceeded.
+                $this->assertOverrideMayBypass($context, AiCostControlException::QUOTA_EXHAUSTED, $customer);
             }
 
             $reservation = CustomerAiUsageReservation::query()->create([
@@ -106,6 +116,49 @@ class AiCostControlService
 
             return new AiCostControlDecision($context, $policy->type, $reservation->id, $committed, $included, max(0, $included - $occupied - 1), $periodStart, $periodEnd, $this->status($occupied + 1, $included));
         });
+    }
+
+    /**
+     * A commercial guard just refused this call. Either an authorised operator override is present
+     * — in which case the bypass is audited and the call proceeds — or the block stands.
+     *
+     * The global emergency stop never reaches this method: it is evaluated before any customer
+     * lookup and has no override path at all, which is the whole point of an emergency stop.
+     */
+    private function assertOverrideMayBypass(AiCallContext $context, string $reason, Customer $customer): void
+    {
+        if (! $context->operatorOverride || ($context->operatorActorUserId ?? 0) <= 0 || trim((string) $context->operatorOverrideReason) === '') {
+            throw new AiCostControlException($reason);
+        }
+
+        $this->recordOverride($context, $reason, $customer);
+    }
+
+    private function recordOverride(AiCallContext $context, string $bypassedReason, Customer $customer): void
+    {
+        Log::warning('[AI_COST_CONTROL] Commercial guard bypassed by an operator override.', [
+            'customer_id' => $customer->id,
+            'bypassed' => $bypassedReason,
+            'operation' => $context->operation,
+            'actor_user_id' => $context->operatorActorUserId,
+        ]);
+
+        // Written inside the authorising transaction on purpose: a bypass that is not recorded
+        // did not happen as far as the audit trail is concerned.
+        rescue(fn () => BillingEvent::query()->create([
+            'customer_id' => $customer->id,
+            'user_id' => $context->operatorActorUserId,
+            'event_type' => 'ai_operator_override_used',
+            'source' => 'ai_cost_control',
+            'description' => $context->operatorOverrideReason,
+            'before' => ['blocked_by' => $bypassedReason],
+            'after' => [
+                'operation' => $context->operation,
+                'feature' => $context->feature,
+                'resource_type' => $context->resourceType,
+                'resource_id' => $context->resourceId,
+            ],
+        ]), null, false);
     }
 
     public function finalize(AiCostControlDecision $decision): void

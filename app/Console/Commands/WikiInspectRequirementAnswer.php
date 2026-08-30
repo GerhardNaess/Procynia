@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNoticeAiRequirement;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiResearchService;
+use App\Support\Ai\RunsOperatorAiCommand;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -23,10 +25,15 @@ use Throwable;
  * unless --dry-run is passed; the final answer is only generated (still never persisted) when
  * --generate-answer is explicitly passed.
  */
-#[Signature('wiki:inspect-requirement-answer {--requirement-id=} {--generate-answer} {--dry-run}')]
+#[Signature('wiki:inspect-requirement-answer {--requirement-id=} {--generate-answer} {--dry-run} {--actor=} {--cost-control-override} {--override-reason=}')]
 #[Description('Read-only: show the Wiki-research trace (and optionally the answer it would produce) for one requirement, without persisting anything.')]
 class WikiInspectRequirementAnswer extends Command
 {
+    use RunsOperatorAiCommand;
+
+    /** Held so the optional answer-generation step runs under the same classified context. */
+    private ?AiCallContext $aiCallContext = null;
+
     public function handle(
         RequirementWikiResearchService $researchService,
         RequirementWikiAnswerAiClient $answerAiClient,
@@ -65,10 +72,29 @@ class WikiInspectRequirementAnswer extends Command
             return self::SUCCESS;
         }
 
+        // Diagnostics still spend real provider budget, so this command is attributed and guarded
+        // exactly like the flows it inspects.
+        $aiCallContext = $this->operatorAiCallContext([
+            'customerId' => $customerId,
+            'feature' => 'saved_notice',
+            'operation' => 'operator.wiki.inspect_requirement_answer',
+            'resourceType' => 'saved_notice_ai_requirement',
+            'resourceId' => (int) $requirement->id,
+            'savedNoticeId' => (int) ($requirement->saved_notice_id ?? 0) ?: null,
+        ]);
+
+        if ($aiCallContext === null) {
+            return self::FAILURE;
+        }
+
+        $this->aiCallContext = $aiCallContext;
         $languageCode = $requirement->savedNotice?->customer?->language?->code ?? 'no';
 
         try {
-            $context = $researchService->research($requirement, $customerId, $languageCode);
+            $context = $this->withinOperatorAiCallContext(
+                $aiCallContext,
+                fn (): array => $researchService->research($requirement, $customerId, $languageCode),
+            );
         } catch (Throwable $exception) {
             $this->error('Research failed: '.$exception->getMessage());
 
@@ -203,11 +229,14 @@ class WikiInspectRequirementAnswer extends Command
         );
 
         try {
-            $result = $answerAiClient->generateAnswer(
-                (string) ($requirement->requirement_identifier ?? ''),
-                (string) $requirement->requirement_text,
-                $pagesForAnswer,
-                $languageCode,
+            $result = $this->withinOperatorAiCallContext(
+                $this->aiCallContext ?? AiCallContext::none(),
+                fn (): array => $answerAiClient->generateAnswer(
+                    (string) ($requirement->requirement_identifier ?? ''),
+                    (string) $requirement->requirement_text,
+                    $pagesForAnswer,
+                    $languageCode,
+                ),
             );
         } catch (Throwable $exception) {
             $this->newLine();

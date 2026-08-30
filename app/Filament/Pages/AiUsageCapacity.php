@@ -3,13 +3,20 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Concerns\HasAdminPageHelp;
+use App\Models\AiRuntimeControl;
+use App\Models\User;
 use App\Services\Ai\AiUsageReportingService;
+use App\Services\Ai\Commercial\AiRuntimeControlService;
 use App\Support\CustomerContext;
 use BackedEnum;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
+use Throwable;
 use UnitEnum;
 
 class AiUsageCapacity extends Page
@@ -27,6 +34,14 @@ class AiUsageCapacity extends Page
     protected static ?int $navigationSort = 5;
 
     public string $generatedAt = '';
+
+    public bool $globalStopActive = false;
+
+    public ?string $globalStopReason = null;
+
+    public ?string $globalStopChangedBy = null;
+
+    public ?string $globalStopChangedAt = null;
 
     /**
      * @var array<int, array<string, mixed>>
@@ -113,14 +128,94 @@ class AiUsageCapacity extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('enable_global_stop')
+                ->label(__('procynia.ai_admin.global.stop'))
+                ->icon('heroicon-o-exclamation-triangle')
+                ->color('danger')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.global.stop_confirm'))
+                ->form([
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()
+                        ->minLength(3)
+                        ->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->setGlobalStop(true, (string) $data['reason']))
+                ->visible(fn (): bool => ! $this->globalStopActive),
+
+            Action::make('disable_global_stop')
+                ->label(__('procynia.ai_admin.global.resume'))
+                ->icon('heroicon-o-play')
+                ->color('success')
+                ->requiresConfirmation()
+                ->modalDescription(__('procynia.ai_admin.global.resume_confirm'))
+                ->form([
+                    Textarea::make('reason')
+                        ->label(__('procynia.ai_admin.fields.reason'))
+                        ->required()
+                        ->minLength(3)
+                        ->maxLength(500),
+                ])
+                ->action(fn (array $data) => $this->setGlobalStop(false, (string) $data['reason']))
+                ->visible(fn (): bool => $this->globalStopActive),
+
             $this->buildPageHelpAction(
                 static::fetchPageHelp('admin.ai_usage_capacity')
             ),
         ];
     }
 
+    /**
+     * Flip the platform-wide emergency stop.
+     *
+     * Runtime and database-backed, so it takes effect for web requests, queue workers and the
+     * scheduler without a deploy, a restart or an API-key change. The service owns the audit event;
+     * this method only decides who is allowed to ask.
+     */
+    private function setGlobalStop(bool $enabled, string $reason): void
+    {
+        $context = app(CustomerContext::class);
+        $actor = $context->currentUser();
+
+        if (! $context->isInternalAdmin($actor instanceof User ? $actor : null) || ! $actor instanceof User) {
+            Notification::make()->title(__('procynia.ai_admin.notifications.not_authorised'))->danger()->send();
+
+            return;
+        }
+
+        try {
+            app(AiRuntimeControlService::class)->setGlobalStop($enabled, $actor, trim($reason));
+        } catch (Throwable $throwable) {
+            Notification::make()->title($throwable->getMessage())->danger()->send();
+
+            return;
+        }
+
+        $this->loadGlobalStopState();
+
+        Notification::make()
+            ->title($enabled
+                ? __('procynia.ai_admin.notifications.global_stopped')
+                : __('procynia.ai_admin.notifications.global_resumed'))
+            ->success()
+            ->send();
+    }
+
+    private function loadGlobalStopState(): void
+    {
+        $control = AiRuntimeControl::query()->with('changedByUser:id,name')->orderBy('id')->first();
+
+        $this->globalStopActive = app(AiRuntimeControlService::class)->globalStopEnabled();
+        $this->globalStopReason = $control?->reason;
+        $this->globalStopChangedBy = $control?->changedByUser?->name;
+        $this->globalStopChangedAt = $control?->updated_at?->format('Y-m-d H:i');
+    }
+
     public function mount(AiUsageReportingService $service): void
     {
+        $this->loadGlobalStopState();
+
         $report = $service->report();
 
         $this->generatedAt = (string) $report['generated_at'];
@@ -304,7 +399,7 @@ class AiUsageCapacity extends Page
      * Returns: Normalized customer rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function prepareCustomerRows(array $rows): array
@@ -323,7 +418,7 @@ class AiUsageCapacity extends Page
      * Returns: A map from customer id to status key.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<string, string>
      */
     private function customerStatusById(array $rows): array
@@ -349,8 +444,8 @@ class AiUsageCapacity extends Page
      * Returns: Normalized user rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
-     * @param array<string, string> $customerStatusById
+     * @param  array<int, array<string, mixed>>  $rows
+     * @param  array<string, string>  $customerStatusById
      * @return array<int, array<string, mixed>>
      */
     private function prepareUserRows(array $rows, array $customerStatusById): array
@@ -382,7 +477,7 @@ class AiUsageCapacity extends Page
      * Returns: None.
      * Side effects: Updates the public customer table state.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      */
     private function applyCustomerTableState(array $rows): void
     {
@@ -406,7 +501,7 @@ class AiUsageCapacity extends Page
      * Returns: None.
      * Side effects: Updates the public user table state.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      */
     private function applyUserTableState(array $rows): void
     {
@@ -548,7 +643,7 @@ class AiUsageCapacity extends Page
      * Returns: The filtered rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function filterCustomerRows(array $rows): array
@@ -580,7 +675,7 @@ class AiUsageCapacity extends Page
      * Returns: The filtered rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function filterUserRows(array $rows): array
@@ -619,7 +714,7 @@ class AiUsageCapacity extends Page
      * Returns: The sorted rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function sortCustomerRows(array $rows): array
@@ -643,7 +738,7 @@ class AiUsageCapacity extends Page
      * Returns: The sorted rows.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      * @return array<int, array<string, mixed>>
      */
     private function sortUserRows(array $rows): array
@@ -673,8 +768,8 @@ class AiUsageCapacity extends Page
      * Returns: A three-way comparison result.
      * Side effects: None.
      *
-     * @param array<string, mixed> $left
-     * @param array<string, mixed> $right
+     * @param  array<string, mixed>  $left
+     * @param  array<string, mixed>  $right
      */
     private function compareCustomerRows(array $left, array $right, string $field): int
     {
@@ -701,8 +796,8 @@ class AiUsageCapacity extends Page
      * Returns: A three-way comparison result.
      * Side effects: None.
      *
-     * @param array<string, mixed> $left
-     * @param array<string, mixed> $right
+     * @param  array<string, mixed>  $left
+     * @param  array<string, mixed>  $right
      */
     private function compareUserRows(array $left, array $right, string $field): int
     {
@@ -782,7 +877,7 @@ class AiUsageCapacity extends Page
 
         try {
             return Carbon::createFromFormat('d.m.Y H:i', $value)?->getTimestamp() ?? 0;
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return 0;
         }
     }

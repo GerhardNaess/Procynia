@@ -280,11 +280,14 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik008->closed_at);
         $this->assertNotNull($avvik008->verified_at);
 
-        // AVVIK-009 must be closed (AI rate limiting and cost control implemented)
+        // AVVIK-009 must stay open: it was closed once on a rate-limiting acceptance criterion that
+        // no longer describes the deviation. Cost control is being rebuilt in phases, and the
+        // register must keep saying so until the whole chain is verified in production.
         $avvik009 = OperationalDeviation::query()->where('code', 'AVVIK-009')->firstOrFail();
-        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik009->status);
-        $this->assertNotNull($avvik009->closed_at);
-        $this->assertNotNull($avvik009->verified_at);
+        $this->assertNotSame(OperationalDeviation::STATUS_CLOSED, $avvik009->status);
+        $this->assertNull($avvik009->closed_at);
+        $this->assertNull($avvik009->verified_at);
+        $this->assertNotNull($avvik009->started_at);
 
         // AVVIK-015 must be closed (pdftotext-sti miljøstyrt)
         $avvik015 = OperationalDeviation::query()->where('code', 'AVVIK-015')->firstOrFail();

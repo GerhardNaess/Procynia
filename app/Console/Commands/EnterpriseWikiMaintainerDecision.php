@@ -6,16 +6,19 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
+use App\Support\Ai\RunsOperatorAiCommand;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Throwable;
 
-#[Signature('wiki:maintainer-decision {--customer=} {--document-id=} {--persist}')]
+#[Signature('wiki:maintainer-decision {--customer=} {--document-id=} {--persist} {--actor=} {--cost-control-override} {--override-reason=}')]
 #[Description('Maintainer decision for a wiki document. Default: dry-run only. Use --persist to store the decision on an ingest run without creating pages.')]
 class EnterpriseWikiMaintainerDecision extends Command
 {
+    use RunsOperatorAiCommand;
+
     public function handle(EnterpriseWikiMaintainerDecisionService $service): int
     {
         if (! EnterpriseWikiMaintainerDecisionAiClient::isAvailable()) {
@@ -43,14 +46,28 @@ class EnterpriseWikiMaintainerDecision extends Command
 
         $languageCode = $customer->language?->code ?? 'no';
 
+        $context = $this->operatorAiCallContext([
+            'customerId' => $customerId,
+            'operation' => 'operator.wiki.maintainer_decision',
+            'resourceType' => 'enterprise_wiki_document',
+            'resourceId' => $documentId,
+        ]);
+
+        if ($context === null) {
+            return self::FAILURE;
+        }
+
         try {
-            $decision = $service->runForDocument($customerId, $documentId, $languageCode);
+            $decision = $this->withinOperatorAiCallContext(
+                $context,
+                fn (): array => $service->runForDocument($customerId, $documentId, $languageCode),
+            );
         } catch (\InvalidArgumentException $e) {
-            $this->error('[WIKI_MAINTAINER] ' . $e->getMessage());
+            $this->error('[WIKI_MAINTAINER] '.$e->getMessage());
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('[WIKI_MAINTAINER] Unexpected error: ' . $e->getMessage());
+            $this->error('[WIKI_MAINTAINER] Unexpected error: '.$e->getMessage());
 
             return self::FAILURE;
         }
@@ -65,15 +82,15 @@ class EnterpriseWikiMaintainerDecision extends Command
         }
 
         $run = EnterpriseWikiIngestRun::query()->create([
-            'uuid'                              => Str::uuid()->toString(),
-            'customer_id'                       => $customerId,
-            'trigger_type'                      => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
-            'source_type'                       => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
-            'source_id'                         => $documentId,
-            'status'                            => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
-            'maintainer_decision_json'          => $decision,
-            'maintainer_decision_status'        => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
-            'maintainer_decision_generated_at'  => now(),
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customerId,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $documentId,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_json' => $decision,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            'maintainer_decision_generated_at' => now(),
         ]);
 
         $this->info(sprintf(

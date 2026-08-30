@@ -4,15 +4,18 @@ namespace App\Console\Commands;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Support\Ai\RunsOperatorAiCommand;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Throwable;
 
-#[Signature('wiki:generate-applied-pages {--run-id=}')]
+#[Signature('wiki:generate-applied-pages {--run-id=} {--actor=} {--cost-control-override} {--override-reason=}')]
 #[Description('Generate content_markdown and page versions for all page types (article, summary, concept, entity) linked to an applied maintainer decision run.')]
 class EnterpriseWikiGenerateAppliedPages extends Command
 {
+    use RunsOperatorAiCommand;
+
     public function handle(EnterpriseWikiGenerateAppliedPagesService $service): int
     {
         $runId = (int) $this->option('run-id');
@@ -31,14 +34,25 @@ class EnterpriseWikiGenerateAppliedPages extends Command
             return self::FAILURE;
         }
 
+        $context = $this->operatorAiCallContext([
+            'customerId' => (int) $run->customer_id,
+            'operation' => 'operator.wiki.generate_applied_pages',
+            'resourceType' => 'enterprise_wiki_document',
+            'resourceId' => (int) $run->source_id,
+        ]);
+
+        if ($context === null) {
+            return self::FAILURE;
+        }
+
         try {
-            $result = $service->generate($run);
+            $result = $this->withinOperatorAiCallContext($context, fn (): array => $service->generate($run));
         } catch (\InvalidArgumentException $e) {
-            $this->error('[WIKI_GENERATE] ' . $e->getMessage());
+            $this->error('[WIKI_GENERATE] '.$e->getMessage());
 
             return self::FAILURE;
         } catch (Throwable $e) {
-            $this->error('[WIKI_GENERATE] Unexpected error: ' . $e->getMessage());
+            $this->error('[WIKI_GENERATE] Unexpected error: '.$e->getMessage());
 
             return self::FAILURE;
         }

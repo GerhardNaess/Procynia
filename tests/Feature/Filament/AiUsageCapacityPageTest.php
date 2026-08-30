@@ -6,8 +6,10 @@ use App\Filament\Pages\AiUsageCapacity;
 use App\Models\AdminPageHelp;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\SavedNotice;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -344,6 +346,12 @@ class AiUsageCapacityPageTest extends TestCase
         $userB1 = $this->createUser($customerB, 'Bruker B1', 'bruker.b1@example.test');
         $userC1 = $this->createUser($customerC, 'Bruker C1', 'bruker.c1@example.test');
 
+        // Capacity status is commercial usage — AI-activated cases in the calendar period — not a
+        // count of AI operations. The two used to be compared against each other, which is why a
+        // customer with eight ordinary operations once appeared to have spent 80% of ten AI cases.
+        $this->activateAiCases($customerA, 10);
+        $this->activateAiCases($customerC, 8);
+
         $this->createUsageEvent(
             $customerA,
             $userA1,
@@ -496,6 +504,30 @@ class AiUsageCapacityPageTest extends TestCase
      * Returns: The persisted customer model.
      * Side effects: Writes customer, language and nationality rows when needed.
      */
+    /** Activate $count distinct AI cases for the customer in the current calendar period. */
+    private function activateAiCases(Customer $customer, int $count): void
+    {
+        $periodStart = Carbon::now()->startOfMonth()->toDateString();
+        $periodEnd = Carbon::now()->endOfMonth()->toDateString();
+
+        for ($index = 0; $index < $count; $index++) {
+            CustomerAiCaseUsage::query()->create([
+                'customer_id' => $customer->id,
+                'saved_notice_id' => SavedNotice::query()->create([
+                    'customer_id' => $customer->id,
+                    'external_id' => 'CAP-'.$customer->id.'-'.$index.'-'.Str::random(6),
+                    'title' => 'Kapasitetssak',
+                    'buyer_name' => 'Procynia',
+                    'status' => 'ACTIVE',
+                ])->id,
+                'activated_at' => Carbon::now(),
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'source_operation_key' => 'test',
+            ]);
+        }
+    }
+
     private function createCustomer(
         string $name,
         string $plan = Customer::PLAN_PRO,

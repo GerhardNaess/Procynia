@@ -18,6 +18,8 @@ class CustomerAiNotificationState extends Model
 
     public const EVENT_AI_RESUMED = 'ai_resumed';
 
+    public const EVENT_CREDITS_ADJUSTED = 'credits_adjusted';
+
     protected $fillable = [
         'customer_id', 'event_key', 'period_start', 'period_end',
         'threshold_percent', 'recipient_count', 'notified_at',

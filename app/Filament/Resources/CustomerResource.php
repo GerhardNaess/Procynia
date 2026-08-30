@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\CustomerResource\Pages\CreateCustomer;
 use App\Filament\Resources\CustomerResource\Pages\EditCustomer;
 use App\Filament\Resources\CustomerResource\Pages\ListCustomers;
+use App\Filament\Resources\CustomerResource\Pages\ManageCustomerAiControl;
 use App\Filament\Resources\CustomerResource\Pages\ManageCustomerBilling;
 use App\Models\Customer;
 use App\Models\Language;
@@ -12,7 +13,8 @@ use App\Models\Nationality;
 use App\Models\User;
 use App\Support\CustomerContext;
 use BackedEnum;
-use UnitEnum;
+use Filament\Actions\Action;
+use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -23,6 +25,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 class CustomerResource extends Resource
 {
@@ -118,11 +121,15 @@ class CustomerResource extends Resource
                     ->sortable(),
             ])
             ->recordActions([
-                \Filament\Actions\EditAction::make(),
-                \Filament\Actions\Action::make('billing')
+                EditAction::make(),
+                Action::make('billing')
                     ->label('Abonnement og tjenester')
                     ->icon('heroicon-o-credit-card')
                     ->url(fn (Customer $record) => static::getUrl('billing', ['record' => $record])),
+                Action::make('ai_control')
+                    ->label(__('procynia.ai_admin.actions.open'))
+                    ->icon('heroicon-o-cpu-chip')
+                    ->url(fn (Customer $record) => static::getUrl('ai-control', ['record' => $record])),
             ]);
     }
 
@@ -150,6 +157,7 @@ class CustomerResource extends Resource
             'create' => CreateCustomer::route('/create'),
             'edit' => EditCustomer::route('/{record}/edit'),
             'billing' => ManageCustomerBilling::route('/{record}/billing'),
+            'ai-control' => ManageCustomerAiControl::route('/{record}/ai-control'),
         ];
     }
 

@@ -10,6 +10,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiEscalatedRunRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunRecoveryResult;
+use App\Support\Ai\RunsOperatorAiCommand;
 use Illuminate\Console\Attribute\AsCommand;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -53,9 +54,14 @@ use Illuminate\Support\Facades\Log;
 #[AsCommand(name: 'wiki:recover-document-flow')]
 class EnterpriseWikiRecoverDocumentFlow extends Command
 {
+    use RunsOperatorAiCommand;
+
     protected $signature = 'wiki:recover-document-flow
                             {--run-id= : The ingest run to recover}
-                            {--dry-run : Report the observed checkpoints and resume plan without changing anything}';
+                            {--dry-run : Report the observed checkpoints and resume plan without changing anything}
+                            {--actor= : Internal Procynia super admin (id or e-mail) responsible for this recovery}
+                            {--cost-control-override : Recover a customer that is suspended or out of AI capacity}
+                            {--override-reason= : Why the override is justified. Required with --cost-control-override}';
 
     protected $description = 'Recover an Enterprise Wiki ingest run stuck at status=failed or status=escalated, deterministically from its already-recorded artifacts.';
 
@@ -84,6 +90,40 @@ class EnterpriseWikiRecoverDocumentFlow extends Command
             return self::FAILURE;
         }
 
+        // Recovery is often needed *because* the customer is suspended or out of capacity, so the
+        // context is built here and the operator decides explicitly whether it may bypass those.
+        // The global emergency stop is not part of that decision and still stops every call.
+        $aiCallContext = $this->operatorAiCallContext([
+            'customerId' => (int) $run->customer_id,
+            'operation' => 'operator.wiki.recover_document_flow',
+            'resourceType' => 'enterprise_wiki_document',
+            'resourceId' => (int) $run->source_id,
+        ]);
+
+        if ($aiCallContext === null) {
+            return self::FAILURE;
+        }
+
+        return $this->withinOperatorAiCallContext($aiCallContext, fn (): int => $this->recover(
+            $run,
+            $runId,
+            $dryRun,
+            $flowService,
+            $qaService,
+            $lintService,
+            $recoveryService,
+        ));
+    }
+
+    private function recover(
+        EnterpriseWikiIngestRun $run,
+        int $runId,
+        bool $dryRun,
+        EnterpriseWikiDocumentFlowService $flowService,
+        EnterpriseWikiPostIngestQaService $qaService,
+        EnterpriseWikiAppliedRunLintService $lintService,
+        EnterpriseWikiEscalatedRunRecoveryService $recoveryService,
+    ): int {
         if ($run->status === EnterpriseWikiIngestRun::STATUS_ESCALATED) {
             return $this->handleEscalatedRun($runId, $dryRun, $recoveryService);
         }

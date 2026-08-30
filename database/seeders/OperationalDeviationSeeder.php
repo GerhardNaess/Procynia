@@ -248,7 +248,7 @@ class OperationalDeviationSeeder extends Seeder
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_CRITICAL,
             'status' => OperationalDeviation::STATUS_IN_PROGRESS,
-            'description' => 'Kostnadskontroll er under ny implementering. Fase 2 etablerer atomisk commercial quota, reservasjon og runtime hard stop. Fase 3 legger kundevarsling og forståelig quota-UX. Full operasjonell kontroll er fortsatt ikke ferdig.',
+            'description' => 'Kostnadskontroll er under ny implementering. Fase 2 etablerer atomisk commercial quota, reservasjon og runtime hard stop. Fase 3 legger kundevarsling og forståelig quota-UX. Fase 4 legger intern adminflate, auditert operatøroverstyring og full context-dekning. Global kostnadseksponering i NOK er fortsatt ikke håndhevet.',
             'impact' => 'Feilaktig loop eller aggressiv bruk kan gi ukontrollerte API-kostnader.',
             'recommended_action' => 'Legg inn rate limiting, kundegrenser og/eller AI credits-måling.',
             'acceptance_criteria' => 'Alle AI-entrypoints er målt, kommersiell quota håndheves server-side, queue og scheduler respekterer grensen, kunden varsles før stopp og global safeguard er testet.',
@@ -258,7 +258,7 @@ class OperationalDeviationSeeder extends Seeder
             'ready_for_verification_at' => null,
             'verified_at' => null,
             'closed_at' => null,
-            'verification_notes' => 'AVVIKET forblir åpent. Fase 1 la provider-attempt-måling og sikret Wiki Ask. Fase 2 la commercial quota, reservasjon, customer/global runtime stop og audit. Fase 3 la kanonisk quota-status, 80/90/100-varsling til System Owner med varig dedupe per periode, AI-kapasitet på abonnementssiden og klassifiserte hard-stop-meldinger. Closure krever fortsatt intern adminflate, global NOK-safeguard, betalingsstatus-policy og en samlet produksjonsverifisering av hele kjeden.',
+            'verification_notes' => 'AVVIKET forblir åpent. Fase 1 la provider-attempt-måling og sikret Wiki Ask. Fase 2 la commercial quota, reservasjon, customer/global runtime stop og audit. Fase 3 la kanonisk quota-status, 80/90/100-varsling til System Owner med varig dedupe per periode, AI-kapasitet på abonnementssiden og klassifiserte hard-stop-meldinger. Fase 4 la intern adminflate for suspend/resume, global stopp og append-only kapasitetsjusteringer, rettet den misvisende interne kapasitetsvisningen og ga alle fem manuelle operatørkommandoer eksplisitt kontekst og auditert overstyring som aldri kan omgå global emergency stop. Closure krever fortsatt global NOK-safeguard, ukjent-pris- og FX-policy, betalingsstatus-policy og en samlet produksjonsverifisering av hele kjeden.',
         ]);
 
         $this->seed([

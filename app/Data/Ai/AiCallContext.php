@@ -37,6 +37,12 @@ final readonly class AiCallContext implements JsonSerializable
         public ?string $provider = null,
         public ?int $savedNoticeId = null,
         public bool $commercialCredit = false,
+        // Set only by an internal operator running a recovery command with an explicit flag. It
+        // relaxes the commercial guards (entitlement, quota, customer suspension) and never the
+        // global emergency stop — see AiCostControlService::authorize().
+        public bool $operatorOverride = false,
+        public ?int $operatorActorUserId = null,
+        public ?string $operatorOverrideReason = null,
     ) {}
 
     public static function none(): self
@@ -79,6 +85,9 @@ final readonly class AiCallContext implements JsonSerializable
             provider: $this->provider,
             savedNoticeId: $this->savedNoticeId,
             commercialCredit: $this->commercialCredit,
+            operatorOverride: $this->operatorOverride,
+            operatorActorUserId: $this->operatorActorUserId,
+            operatorOverrideReason: $this->operatorOverrideReason,
         );
     }
 
@@ -99,6 +108,8 @@ final readonly class AiCallContext implements JsonSerializable
             'request_correlation_id' => $this->requestCorrelationId,
             'saved_notice_id' => $this->savedNoticeId,
             'commercial_credit' => $this->commercialCredit,
+            'operator_override' => $this->operatorOverride,
+            'operator_actor_user_id' => $this->operatorActorUserId,
         ];
     }
 
