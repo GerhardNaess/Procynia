@@ -8,8 +8,12 @@ name: Dependency audit
 # unnoticed until someone runs an audit by hand.
 #
 # Deliberately narrow: no database, no Redis, no frontend build, no application boot.
-# The gate needs only the two lockfiles, so it stays fast and cannot fail for reasons
-# unrelated to dependency security.
+# The gate needs only the two lockfiles plus the frontend unit tests, so it stays fast and
+# cannot fail for reasons unrelated to the code and its dependencies.
+#
+# The npm job also runs the frontend unit tests. They need nothing the job does not already
+# have — the same npm ci, no services, about a second of runtime — so giving them their own
+# job would cost a second checkout and install for no isolation benefit.
 #
 # Policy: any advisory fails the build. There is no ignore list, no severity threshold
 # and no continue-on-error. Accepting a specific advisory must be a documented, explicit
@@ -78,6 +82,18 @@ jobs:
       # step below is the gate, and it produces its own clear pass/fail output.
       - name: Install dependencies from package-lock.json
         run: npm ci --no-audit --no-fund
+
+      # Reuses the install above rather than a separate job: a second job would repeat
+      # checkout + setup-node + npm ci for a suite that takes about a second.
+      #
+      # The command lives in package.json, not here. Node 22 treats a bare directory
+      # argument as a file to load, so the pattern has to be quoted and passed to Node —
+      # duplicating that here would give two places to get it wrong.
+      #
+      # A failing test fails the job. No continue-on-error: a frontend regression that only
+      # produces a warning is a frontend regression nobody acts on.
+      - name: Frontend unit tests
+        run: npm run test:unit
 
       - name: npm audit
         run: npm audit
