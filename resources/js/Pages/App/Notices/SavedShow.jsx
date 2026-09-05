@@ -37,14 +37,6 @@ function formatFileSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function dateInputValue(value) {
-    if (!value) {
-        return '';
-    }
-
-    return String(value).slice(0, 10);
-}
-
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
@@ -492,18 +484,6 @@ export default function SavedNoticeShow({ notice }) {
     const bidManagerForm = useForm({
         bid_manager_user_id: notice.bid_manager?.id ? String(notice.bid_manager.id) : '',
     });
-    const deadlineForm = useForm({
-        questions_deadline_at: '',
-        questions_rfi_deadline_at: '',
-        rfi_submission_deadline_at: '',
-        questions_rfp_deadline_at: '',
-        award_date_at: '',
-        reference_number: '',
-        contact_person_name: '',
-        contact_person_email: '',
-        notes: '',
-        business_reviews: [],
-    });
     const phaseCommentForm = useForm({
         comment: '',
     });
@@ -525,7 +505,6 @@ export default function SavedNoticeShow({ notice }) {
         user_id: '',
         access_role: notice.actions?.case_access?.access_role_options?.[0]?.value ?? 'contributor',
     });
-    const [isEditingDeadlines, setIsEditingDeadlines] = useState(false);
     const [isCreatingInfoItem, setIsCreatingInfoItem] = useState(false);
     const [closingInfoItemId, setClosingInfoItemId] = useState(null);
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
@@ -587,7 +566,6 @@ export default function SavedNoticeShow({ notice }) {
     const isOpportunityOwnerDirty = opportunityOwnerForm.data.opportunity_owner_user_id !== currentOpportunityOwnerId;
     const isBidManagerDirty = bidManagerForm.data.bid_manager_user_id !== currentBidManagerId;
     const isCaseAccessDirty = caseAccessForm.data.user_id !== '';
-    const isDeadlineDirty = deadlineForm.isDirty;
     const csrfToken = typeof document !== 'undefined'
         ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
         : '';
@@ -677,68 +655,6 @@ export default function SavedNoticeShow({ notice }) {
                 caseAccessForm.reset('user_id');
                 caseAccessForm.setData('access_role', caseAccessRoleOptions[0]?.value ?? 'contributor');
                 caseAccessForm.clearErrors();
-            },
-        });
-    };
-
-    const openDeadlineEditor = () => {
-        setIsEditingDeadlines(true);
-        deadlineForm.clearErrors();
-        deadlineForm.setData({
-            questions_deadline_at: dateInputValue(notice.questions_deadline_at),
-            questions_rfi_deadline_at: dateInputValue(notice.questions_rfi_deadline_at),
-            rfi_submission_deadline_at: dateInputValue(notice.rfi_submission_deadline_at),
-            questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
-            award_date_at: dateInputValue(notice.award_date_at),
-            reference_number: notice.reference_number ?? '',
-            contact_person_name: notice.contact_person_name ?? '',
-            contact_person_email: notice.contact_person_email ?? '',
-            notes: notice.notes ?? '',
-            business_reviews: (notice.business_reviews ?? []).map((review) => ({
-                id: review.id,
-                business_review_at: dateInputValue(review.business_review_at),
-            })),
-        });
-    };
-
-    const cancelDeadlineEditor = () => {
-        setIsEditingDeadlines(false);
-        deadlineForm.reset();
-        deadlineForm.clearErrors();
-    };
-
-    const addBusinessReview = () => {
-        deadlineForm.setData('business_reviews', [
-            ...deadlineForm.data.business_reviews,
-            { id: null, business_review_at: '' },
-        ]);
-    };
-
-    const updateBusinessReviewAt = (index, value) => {
-        deadlineForm.setData(
-            'business_reviews',
-            deadlineForm.data.business_reviews.map((review, currentIndex) => (
-                currentIndex === index
-                    ? { ...review, business_review_at: value }
-                    : review
-            )),
-        );
-    };
-
-    const removeBusinessReview = (index) => {
-        deadlineForm.setData(
-            'business_reviews',
-            deadlineForm.data.business_reviews.filter((_, currentIndex) => currentIndex !== index),
-        );
-    };
-
-    const submitDeadlineEditor = () => {
-        deadlineForm.patch(`/app/notices/saved/${notice.id}/deadlines`, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setIsEditingDeadlines(false);
-                deadlineForm.reset();
-                deadlineForm.clearErrors();
             },
         });
     };
@@ -1129,144 +1045,49 @@ export default function SavedNoticeShow({ notice }) {
                                 </div>
 
                                 {isPrivateRequest ? (
-                                    isEditingDeadlines ? (
-                                        <div className="grid gap-4 md:grid-cols-2">
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.registered}</div>
-                                                <div className="text-base font-medium text-slate-900">
-                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.deadline}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="reference_number">
-                                                    {tsn.reference}
-                                                </label>
-                                                <input
-                                                    id="reference_number"
-                                                    type="text"
-                                                    value={deadlineForm.data.reference_number}
-                                                    onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                />
-                                                {deadlineForm.errors.reference_number ? (
-                                                    <p className="text-base text-rose-700">{deadlineForm.errors.reference_number}</p>
-                                                ) : null}
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="contact_person_name">
-                                                    {tsn.contact_person}
-                                                </label>
-                                                <input
-                                                    id="contact_person_name"
-                                                    type="text"
-                                                    value={deadlineForm.data.contact_person_name}
-                                                    onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                />
-                                                {deadlineForm.errors.contact_person_name ? (
-                                                    <p className="text-base text-rose-700">{deadlineForm.errors.contact_person_name}</p>
-                                                ) : null}
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="contact_person_email">
-                                                    {tsn.contact_email}
-                                                </label>
-                                                <input
-                                                    id="contact_person_email"
-                                                    type="email"
-                                                    value={deadlineForm.data.contact_person_email}
-                                                    onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                />
-                                                {deadlineForm.errors.contact_person_email ? (
-                                                    <p className="text-base text-rose-700">{deadlineForm.errors.contact_person_email}</p>
-                                                ) : null}
-                                            </div>
-                                            <div className="space-y-1 md:col-span-2">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.external_link}</div>
-                                                <div className="text-base font-medium text-slate-900">
-                                                    {notice.external_url ? (
-                                                        <a
-                                                            href={notice.external_url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="font-semibold text-violet-700 transition hover:text-violet-800"
-                                                        >
-                                                            {externalLinkLabel}
-                                                        </a>
-                                                    ) : tsn.not_registered}
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1.5 md:col-span-2">
-                                                <label className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600" htmlFor="notes">
-                                                    {tsn.notes}
-                                                </label>
-                                                <textarea
-                                                    id="notes"
-                                                    value={deadlineForm.data.notes}
-                                                    onChange={(event) => deadlineForm.setData('notes', event.target.value)}
-                                                    rows={4}
-                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                    placeholder={tsn.notes_placeholder}
-                                                />
-                                                {deadlineForm.errors.notes ? (
-                                                    <p className="text-base text-rose-700">{deadlineForm.errors.notes}</p>
-                                                ) : null}
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.registered}</div>
+                                            <div className="text-base font-medium text-slate-900">
+                                                {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                             </div>
                                         </div>
-                                    ) : (
-                                        <div className="grid gap-4 md:grid-cols-2">
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.registered}</div>
-                                                <div className="text-base font-medium text-slate-900">
-                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.deadline}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.reference}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.reference_number || tsn.not_registered}</div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_person}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.contact_person_name || tsn.not_registered}</div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_email}</div>
-                                                <div className="text-base font-medium text-slate-900">{notice.contact_person_email || tsn.not_registered}</div>
-                                            </div>
-                                            <div className="space-y-1 md:col-span-2">
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.external_link}</div>
-                                                <div className="text-base font-medium text-slate-900">
-                                                    {notice.external_url ? (
-                                                        <a
-                                                            href={notice.external_url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="font-semibold text-violet-700 transition hover:text-violet-800"
-                                                        >
-                                                            {externalLinkLabel}
-                                                        </a>
-                                                    ) : tsn.not_registered}
-                                                </div>
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contracting_authority}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.deadline}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.reference}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.reference_number || tsn.not_registered}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_person}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.contact_person_name || tsn.not_registered}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.contact_email}</div>
+                                            <div className="text-base font-medium text-slate-900">{notice.contact_person_email || tsn.not_registered}</div>
+                                        </div>
+                                        <div className="space-y-1 md:col-span-2">
+                                            <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.external_link}</div>
+                                            <div className="text-base font-medium text-slate-900">
+                                                {notice.external_url ? (
+                                                    <a
+                                                        href={notice.external_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="font-semibold text-violet-700 transition hover:text-violet-800"
+                                                    >
+                                                        {externalLinkLabel}
+                                                    </a>
+                                                ) : tsn.not_registered}
                                             </div>
                                         </div>
-                                    )
+                                    </div>
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-1">
@@ -1292,70 +1113,7 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
                                 )}
 
-                                {isEditingDeadlines ? (
-                                    <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
-                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                            <div>
-                                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-blue-700">
-                                                    {tsn.business_review_title}
-                                                </div>
-                                                <p className="mt-1 text-base text-blue-950/75">
-                                                    {tsn.business_review_description}
-                                                </p>
-                                            </div>
-
-                                            <button
-                                                type="button"
-                                                onClick={addBusinessReview}
-                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-base font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-                                            >
-                                                {tsn.business_review_add}
-                                            </button>
-                                        </div>
-
-                                        <div className="mt-4 space-y-3">
-                                            {businessReviews.length > 0 ? (
-                                                businessReviews.map((review, index) => (
-                                                    <div
-                                                        key={review.id ?? `business-review-${index}`}
-                                                        className="rounded-2xl border border-blue-200 bg-white px-4 py-4"
-                                                    >
-                                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                                                            <label className="min-w-0 flex-1 space-y-2">
-                                                                <span className="text-base font-medium text-slate-700">
-                                                                    {tsn.business_review_item_label} {index + 1}
-                                                                </span>
-                                                                <input
-                                                                    type="date"
-                                                                    value={review.business_review_at}
-                                                                    onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
-                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                                                                />
-                                                                {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
-                                                                    <p className="text-base text-rose-700">
-                                                                        {deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
-                                                                    </p>
-                                                                ) : null}
-                                                            </label>
-
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeBusinessReview(index)}
-                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                                                            >
-                                                                {tsn.delete}
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-base text-blue-900/70">
-                                                    {tsn.business_review_empty}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                ) : businessReviews.length > 0 ? (
+                                {businessReviews.length > 0 ? (
                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-blue-700">
                                             {tsn.business_review_title}
@@ -1385,7 +1143,7 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
                                 </div>
 
-                                {isPrivateRequest && notice.notes && !isEditingDeadlines ? (
+                                {isPrivateRequest && notice.notes ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.notes}</div>
                                         <div className="mt-2 text-base leading-7 text-slate-700 whitespace-pre-line">
