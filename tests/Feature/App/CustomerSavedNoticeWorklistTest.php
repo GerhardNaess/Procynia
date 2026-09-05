@@ -2969,9 +2969,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $primary = $this->customerAdminContext('Procynia AS');
         $secondary = $this->customerAdminContext('Annen Kunde AS');
 
-        $savedNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006', 'Slett meg');
-        $archivedNotice = $this->createSavedNotice($primary['customer']->id, '2026-1007', 'Historikkpost', archived: true);
-        $foreignNotice = $this->createSavedNotice($secondary['customer']->id, '2026-1008', 'Annen kunde');
+        $savedNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006', 'Slett meg', savedByUserId: $primary['admin']->id);
+        $archivedNotice = $this->createSavedNotice($primary['customer']->id, '2026-1007', 'Historikkpost', archived: true, savedByUserId: $primary['admin']->id);
+        $foreignNotice = $this->createSavedNotice($secondary['customer']->id, '2026-1008', 'Annen kunde', savedByUserId: $secondary['admin']->id);
 
         $this->actingAs($primary['admin'])
             ->withSession(['_token' => 'test-token'])
@@ -3007,9 +3007,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $primary = $this->customerAdminContext('Procynia AS');
         $secondary = $this->customerAdminContext('Annen Kunde AS');
 
-        $historyNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006-h', 'Historikk som slettes', archived: true);
-        $activeNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006-a', 'Aktiv notice');
-        $foreignHistoryNotice = $this->createSavedNotice($secondary['customer']->id, '2026-1006-f', 'Fremmed historikk', archived: true);
+        $historyNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006-h', 'Historikk som slettes', archived: true, savedByUserId: $primary['admin']->id);
+        $activeNotice = $this->createSavedNotice($primary['customer']->id, '2026-1006-a', 'Aktiv notice', savedByUserId: $primary['admin']->id);
+        $foreignHistoryNotice = $this->createSavedNotice($secondary['customer']->id, '2026-1006-f', 'Fremmed historikk', archived: true, savedByUserId: $secondary['admin']->id);
 
         $this->actingAs($primary['admin'])
             ->withSession(['_token' => 'test-token'])
@@ -3798,6 +3798,15 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             bidManagerUserId: $assignedBidManager->id,
         );
 
+        // A viewer only reaches a case they are involved in, so grant the explicit access the
+        // scenario assumes: they can open the case, but must not see the access controls.
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $viewer->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+        ]);
+
         $page = $this->inertiaPage(
             $this->actingAs($viewer)->get("/app/notices/saved/{$savedNotice->id}"),
         );
@@ -3864,6 +3873,15 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'Phase comments viewer case',
             bidStatus: SavedNotice::BID_STATUS_IN_PROGRESS,
         );
+
+        // The viewer must be able to open the case for the test to prove anything about
+        // commenting — otherwise the case is simply invisible to them.
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $viewer->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+        ]);
 
         $this->actingAs($viewer)
             ->withSession(['_token' => 'test-token'])
@@ -4806,13 +4824,16 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $context = $this->customerAdminContext();
         $sales = $this->createDepartment($context['customer']->id, 'Sales');
         $delivery = $this->createDepartment($context['customer']->id, 'Delivery');
+        // A company-wide primary affiliation grants management of every case in the customer,
+        // which would mask the department scoping this test exists to check.
         $manager = User::factory()->create([
-            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'role' => User::ROLE_USER,
             'bid_role' => User::BID_ROLE_BID_MANAGER,
             'bid_manager_scope' => User::BID_MANAGER_SCOPE_DEPARTMENTS,
             'customer_id' => $context['customer']->id,
             'is_active' => true,
-            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+            'primary_department_id' => $sales->id,
         ]);
         $manager->managedDepartments()->sync([$sales->id]);
 
