@@ -490,13 +490,15 @@ class DashboardController extends Controller
      */
     private function deadlineEntriesForNotice(SavedNotice $notice): array
     {
+        // The official deadline IS the RFP submission deadline, so it is listed once, as "Frist".
+        // The legacy rfp_submission_deadline_at column is deliberately absent: it would produce a
+        // second entry for the same deadline, and nothing can edit it any more.
         $definitions = [
             'deadline' => 'Frist',
             'questions_deadline_at' => 'Spørsmålsfrist',
             'questions_rfi_deadline_at' => 'Spørsmål / RFI',
             'rfi_submission_deadline_at' => 'RFI-innlevering',
             'questions_rfp_deadline_at' => 'Spørsmål / RFP',
-            'rfp_submission_deadline_at' => 'RFP-innlevering',
             'award_date_at' => 'Tildeling',
         ];
 

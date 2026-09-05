@@ -219,6 +219,179 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(0, $page['props']['watchProfileSummary']['active_department_count']);
     }
 
+    public function test_dashboard_calendar_shows_the_official_deadline_as_the_operative_rfp_deadline(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.rfp-official@procynia.test');
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-600100',
+                'Offisiell frist',
+                organizationalDepartmentId: $department->id,
+                deadlineAt: now()->addDays(20)->toDateTimeString(),
+                opportunityOwnerUserId: $user->id,
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $items = collect($page['props']['cockpit']['deadlines']['items'])
+                ->where('title', 'Offisiell frist');
+
+            $deadlineEntry = $items->firstWhere('deadline_type', 'deadline');
+            $this->assertNotNull($deadlineEntry);
+            $this->assertSame('Frist', $deadlineEntry['deadline_type_label']);
+            $this->assertSame(now()->addDays(20)->toDateString(), substr((string) $deadlineEntry['date'], 0, 10));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_calendar_ignores_the_legacy_rfp_submission_field(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.rfp-legacy@procynia.test');
+
+            $savedNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-600101',
+                'Kun legacy RFP',
+                organizationalDepartmentId: $department->id,
+                deadlineAt: now()->addDays(20)->toDateTimeString(),
+                rfpSubmissionDeadlineAt: now()->addDays(9)->toDateTimeString(),
+                opportunityOwnerUserId: $user->id,
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $items = collect($page['props']['cockpit']['deadlines']['items'])
+                ->where('saved_notice_id', $savedNotice->id);
+
+            // The case must be in the calendar at all, or the absence below proves nothing.
+            $this->assertNotNull($items->firstWhere('deadline_type', 'deadline'));
+            $this->assertNull($items->firstWhere('deadline_type', 'rfp_submission_deadline_at'));
+            $this->assertNotContains('RFP-innlevering', $items->pluck('deadline_type_label')->all());
+            $this->assertNotContains(
+                now()->addDays(9)->toDateString(),
+                $items->map(fn (array $item): string => substr((string) $item['date'], 0, 10))->all(),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_calendar_lists_one_rfp_style_entry_when_both_deadline_fields_are_set(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.rfp-both@procynia.test');
+
+            $savedNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-600102',
+                'Begge RFP-felt',
+                organizationalDepartmentId: $department->id,
+                deadlineAt: now()->addDays(20)->toDateTimeString(),
+                rfpSubmissionDeadlineAt: now()->addDays(21)->toDateTimeString(),
+                opportunityOwnerUserId: $user->id,
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $types = collect($page['props']['cockpit']['deadlines']['items'])
+                ->where('saved_notice_id', $savedNotice->id)
+                ->pluck('deadline_type');
+
+            // Both columns describe the same submission deadline; only the canonical one appears.
+            $this->assertSame(1, $types->filter(fn (string $type): bool => in_array(
+                $type,
+                ['deadline', 'rfp_submission_deadline_at'],
+                true,
+            ))->count());
+            $this->assertContains('deadline', $types->all());
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_attention_does_not_use_the_legacy_rfp_submission_field(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.rfp-attention@procynia.test');
+
+            // The legacy field falls inside the five-day attention window; the real deadline does not.
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-600103',
+                'Legacy varsler ikke',
+                organizationalDepartmentId: $department->id,
+                deadlineAt: now()->addDays(30)->toDateTimeString(),
+                rfpSubmissionDeadlineAt: now()->addDays(2)->toDateTimeString(),
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $attention = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $titles = array_column($attention['deadline-soon']['items'] ?? [], 'title');
+            $this->assertNotContains('Legacy varsler ikke', $titles);
+            $this->assertSame(0, $attention['deadline-soon']['count']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_calendar_still_lists_the_other_recorded_deadlines(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.rfp-others@procynia.test');
+
+            $savedNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-600104',
+                'Alle øvrige frister',
+                organizationalDepartmentId: $department->id,
+                deadlineAt: now()->addDays(20)->toDateTimeString(),
+                questionsRfiDeadlineAt: now()->addDays(4)->toDateTimeString(),
+                rfiSubmissionDeadlineAt: now()->addDays(6)->toDateTimeString(),
+                questionsRfpDeadlineAt: now()->addDays(10)->toDateTimeString(),
+                awardDateAt: now()->addDays(25)->toDateTimeString(),
+                opportunityOwnerUserId: $user->id,
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $entries = collect($page['props']['cockpit']['deadlines']['items'])
+                ->where('saved_notice_id', $savedNotice->id)
+                ->pluck('deadline_type_label', 'deadline_type');
+
+            $this->assertSame('Frist', $entries['deadline']);
+            $this->assertSame('Spørsmål / RFI', $entries['questions_rfi_deadline_at']);
+            $this->assertSame('RFI-innlevering', $entries['rfi_submission_deadline_at']);
+            $this->assertSame('Spørsmål / RFP', $entries['questions_rfp_deadline_at']);
+            $this->assertSame('Tildeling', $entries['award_date_at']);
+            $this->assertCount(5, $entries);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_dashboard_deadlines_include_business_reviews_in_calendar(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
