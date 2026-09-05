@@ -389,7 +389,6 @@ class NoticeController extends Controller
                 'status' => ['nullable', 'string', 'max:255'],
                 'cpv_code' => ['nullable', 'string', 'max:255'],
                 'rfi_submission_deadline_at' => ['nullable', 'date'],
-                'rfp_submission_deadline_at' => ['nullable', 'date'],
                 'reference_number' => ['nullable', 'string', 'max:255'],
                 'contact_person_name' => ['nullable', 'string', 'max:255'],
                 'contact_person_email' => ['nullable', 'email', 'max:255'],
@@ -429,7 +428,6 @@ class NoticeController extends Controller
             'contact_person_email' => $validated['contact_person_email'] ?? null,
             'notes' => $validated['notes'] ?? null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
-            'rfp_submission_deadline_at' => $validated['rfp_submission_deadline_at'] ?? null,
         ]);
 
         if ($isNewRecord) {
@@ -474,7 +472,6 @@ class NoticeController extends Controller
             'questions_rfi_deadline_at' => ['nullable', 'date'],
             'rfi_submission_deadline_at' => ['nullable', 'date'],
             'questions_rfp_deadline_at' => ['nullable', 'date'],
-            'rfp_submission_deadline_at' => ['nullable', 'date'],
             'award_date_at' => ['nullable', 'date'],
             'reference_number' => ['nullable', 'string', 'max:255'],
             'contact_person_name' => ['nullable', 'string', 'max:255'],
@@ -497,7 +494,6 @@ class NoticeController extends Controller
             'questions_rfi_deadline_at',
             'rfi_submission_deadline_at',
             'questions_rfp_deadline_at',
-            'rfp_submission_deadline_at',
             'award_date_at',
             'reference_number',
             'contact_person_name',

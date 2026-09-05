@@ -1199,7 +1199,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 'questions_rfi_deadline_at' => $questionsRfiDeadline,
                 'rfi_submission_deadline_at' => $rfiDeadline,
                 'questions_rfp_deadline_at' => $questionsRfpDeadline,
-                'rfp_submission_deadline_at' => $rfpDeadline,
                 'award_date_at' => $awardDate,
                 'reference_number' => $referenceNumber,
                 'contact_person_name' => $contactPersonName,
@@ -1214,7 +1213,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame($questionsRfiDeadline, $savedNotice->questions_rfi_deadline_at?->toDateString());
         $this->assertSame($rfiDeadline, $savedNotice->rfi_submission_deadline_at?->toDateString());
         $this->assertSame($questionsRfpDeadline, $savedNotice->questions_rfp_deadline_at?->toDateString());
-        $this->assertSame($rfpDeadline, $savedNotice->rfp_submission_deadline_at?->toDateString());
         $this->assertSame($awardDate, $savedNotice->award_date_at?->toDateString());
         $this->assertSame($referenceNumber, $savedNotice->reference_number);
         $this->assertSame($contactPersonName, $savedNotice->contact_person_name);
@@ -2650,7 +2648,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                     'questions_rfi_deadline_at' => '2026-04-09',
                     'rfi_submission_deadline_at' => '2026-04-12',
                     'questions_rfp_deadline_at' => '2026-04-16',
-                    'rfp_submission_deadline_at' => '2026-04-21',
                     'award_date_at' => '2026-04-29',
                     'business_reviews' => [
                         [
@@ -2670,7 +2667,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $this->assertSame('2026-04-09', $savedNotice->questions_rfi_deadline_at?->toDateString());
             $this->assertSame('2026-04-12', $savedNotice->rfi_submission_deadline_at?->toDateString());
             $this->assertSame('2026-04-16', $savedNotice->questions_rfp_deadline_at?->toDateString());
-            $this->assertSame('2026-04-21', $savedNotice->rfp_submission_deadline_at?->toDateString());
             $this->assertSame('2026-04-29', $savedNotice->award_date_at?->toDateString());
 
             $businessReviews = $savedNotice->businessReviews()
@@ -2744,7 +2740,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $questionsRfiDeadline = now()->addDays(2)->toDateString();
         $rfiDeadline = now()->addDays(5)->toDateString();
         $questionsRfpDeadline = now()->addDays(7)->toDateString();
-        $rfpDeadline = now()->addDays(11)->toDateString();
         $awardDate = now()->addDays(18)->toDateString();
 
         $response = $this->actingAs($context['admin'])
@@ -2755,7 +2750,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 'questions_rfi_deadline_at' => $questionsRfiDeadline,
                 'rfi_submission_deadline_at' => $rfiDeadline,
                 'questions_rfp_deadline_at' => $questionsRfpDeadline,
-                'rfp_submission_deadline_at' => $rfpDeadline,
                 'award_date_at' => $awardDate,
             ]);
 
@@ -2766,8 +2760,123 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame($questionsRfiDeadline, $savedNotice->questions_rfi_deadline_at?->toDateString());
         $this->assertSame($rfiDeadline, $savedNotice->rfi_submission_deadline_at?->toDateString());
         $this->assertSame($questionsRfpDeadline, $savedNotice->questions_rfp_deadline_at?->toDateString());
-        $this->assertSame($rfpDeadline, $savedNotice->rfp_submission_deadline_at?->toDateString());
         $this->assertSame($awardDate, $savedNotice->award_date_at?->toDateString());
+    }
+
+    public function test_deadline_update_ignores_the_legacy_rfp_submission_field(): void
+    {
+        // Unlisted keys are dropped by the request validator — the project's normal behaviour for
+        // fields an endpoint does not accept. The legacy column is simply no longer writable here.
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-legacy-patch-ignored',
+            'Legacy ignoreres av deadline-endepunktet',
+            savedByUserId: $context['admin']->id,
+        );
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=saved')
+            ->patch("/app/notices/saved/{$savedNotice->id}/deadlines", [
+                'rfi_submission_deadline_at' => now()->addDays(5)->toDateString(),
+                'rfp_submission_deadline_at' => now()->addDays(9)->toDateString(),
+            ])
+            ->assertRedirect('/app/notices?mode=saved');
+
+        $savedNotice->refresh();
+
+        $this->assertSame(now()->addDays(5)->toDateString(), $savedNotice->rfi_submission_deadline_at?->toDateString());
+        $this->assertNull($savedNotice->rfp_submission_deadline_at);
+    }
+
+    public function test_deadline_update_leaves_an_existing_legacy_rfp_value_untouched(): void
+    {
+        $context = $this->customerAdminContext();
+        $legacyValue = now()->addDays(40)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-legacy-patch-preserved',
+            'Legacy-verdi bevares',
+            savedByUserId: $context['admin']->id,
+            rfpSubmissionDeadlineAt: $legacyValue->toDateTimeString(),
+        );
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=saved')
+            ->patch("/app/notices/saved/{$savedNotice->id}/deadlines", [
+                'rfi_submission_deadline_at' => now()->addDays(5)->toDateString(),
+                'award_date_at' => now()->addDays(20)->toDateString(),
+            ])
+            ->assertRedirect('/app/notices?mode=saved');
+
+        $savedNotice->refresh();
+
+        // Historic rows keep their data; this step removes write support, it does not clear anything.
+        $this->assertSame($legacyValue->toDateString(), $savedNotice->rfp_submission_deadline_at?->toDateString());
+        $this->assertSame(now()->addDays(5)->toDateString(), $savedNotice->rfi_submission_deadline_at?->toDateString());
+    }
+
+    public function test_saving_a_notice_ignores_the_legacy_rfp_submission_field_but_stores_the_official_deadline(): void
+    {
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(25)->startOfDay();
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=live')
+            ->post('/app/notices/save', [
+                'notice_id' => '2026-legacy-store-ignored',
+                'title' => 'Lagring ignorerer legacy-felt',
+                'buyer_name' => 'Procynia',
+                'external_url' => 'https://doffin.no/notices/2026-legacy-store-ignored',
+                'summary' => 'Oppsummering',
+                'publication_date' => now()->subDay()->toDateString(),
+                'deadline' => $officialDeadline->toDateString(),
+                'status' => 'ACTIVE',
+                'cpv_code' => '72000000',
+                'rfp_submission_deadline_at' => now()->addDays(9)->toDateString(),
+            ])
+            ->assertRedirect();
+
+        $savedNotice = SavedNotice::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('external_id', '2026-legacy-store-ignored')
+            ->firstOrFail();
+
+        // The official deadline is the canonical RFP submission deadline and is still written.
+        $this->assertSame($officialDeadline->toDateString(), $savedNotice->deadline?->toDateString());
+        $this->assertNull($savedNotice->rfp_submission_deadline_at);
+    }
+
+    public function test_a_legacy_rfp_value_still_does_not_influence_the_next_deadline(): void
+    {
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(12)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-legacy-resolver',
+            'Legacy påvirker ikke resolveren',
+            deadline: $officialDeadline->toDateTimeString(),
+            rfpSubmissionDeadlineAt: now()->addDays(3)->startOfDay()->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFP', $payload['next_deadline_type']);
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+
+        // The value is still readable for historic rows, it just drives nothing.
+        $this->assertSame(
+            now()->addDays(3)->format('Y-m-d'),
+            substr((string) $payload['rfp_submission_deadline_at'], 0, 10),
+        );
     }
 
     public function test_customer_cannot_update_deadlines_for_foreign_or_archived_saved_notice(): void
@@ -2794,7 +2903,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
             ->patch("/app/notices/saved/{$foreignNotice->id}/deadlines", [
                 'questions_rfi_deadline_at' => now()->addDays(1)->toDateString(),
-                'rfp_submission_deadline_at' => now()->addDays(4)->toDateString(),
                 'questions_rfp_deadline_at' => now()->addDays(3)->toDateString(),
                 'award_date_at' => now()->addDays(5)->toDateString(),
             ])
@@ -2805,7 +2913,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertNull($archivedNotice->fresh()->questions_rfp_deadline_at);
         $this->assertNull($archivedNotice->fresh()->award_date_at);
         $this->assertNull($foreignNotice->fresh()->questions_rfi_deadline_at);
-        $this->assertNull($foreignNotice->fresh()->rfp_submission_deadline_at);
         $this->assertNull($foreignNotice->fresh()->questions_rfp_deadline_at);
         $this->assertNull($foreignNotice->fresh()->award_date_at);
     }
