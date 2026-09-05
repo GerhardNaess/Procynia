@@ -3,39 +3,40 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\GoNoGoAssessment;
+use App\Models\GoNoGoAssessmentCriterion;
 use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticeInfoItem;
+use App\Models\SavedNoticeNoGoDecision;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
-use App\Models\GoNoGoAssessment;
-use App\Models\GoNoGoAssessmentCriterion;
-use App\Models\GoNoGoAssessmentTemplate;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
 use App\Services\SavedNoticeAccessService;
+use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
-use Illuminate\Support\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
-use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class NoticeController extends Controller
 {
@@ -45,9 +46,9 @@ class NoticeController extends Controller
         private readonly DoffinLiveSearchService $liveSearchService,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
+        private readonly SavedNoticeNoGoDecisionService $savedNoticeNoGoDecisionService,
         private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): HttpResponse
     {
@@ -246,14 +247,20 @@ class NoticeController extends Controller
             ->values();
         $accessibleTotal = (int) ($searchResponse['numHitsAccessible'] ?? $searchResponse['numHitsTotal'] ?? $hits->count());
         $total = (int) ($searchResponse['numHitsTotal'] ?? $accessibleTotal);
+        $hitExternalIds = $hits->pluck('id')->filter()->map(fn (mixed $id): string => (string) $id)->all();
         $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user)
-            ->whereIn('external_id', $hits->pluck('id')->filter()->map(fn (mixed $id): string => (string) $id)->all())
+            ->whereIn('external_id', $hitExternalIds)
+            ->pluck('external_id')
+            ->map(fn (mixed $id): string => (string) $id)
+            ->all();
+        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user)
+            ->whereIn('external_id', $hitExternalIds)
             ->pluck('external_id')
             ->map(fn (mixed $id): string => (string) $id)
             ->all();
 
         $items = $hits
-            ->map(fn (array $hit): array => $this->liveNoticeListItem($hit, $savedExternalIds))
+            ->map(fn (array $hit): array => $this->liveNoticeListItem($hit, $savedExternalIds, $archivedExternalIds))
             ->all();
 
         Log::debug('[DOFFIN][ui-contract] Outgoing notice payload ready for frontend.', [
@@ -328,7 +335,6 @@ class NoticeController extends Controller
             ->with('success', 'Varsel slettet.');
     }
 
-
     public function storeSavedNotice(Request $request): RedirectResponse
     {
         /** @var User $user */
@@ -361,7 +367,7 @@ class NoticeController extends Controller
                 'status' => ['nullable', 'string', 'max:255'],
             ]);
 
-            $record = new SavedNotice();
+            $record = new SavedNotice;
             $record->customer_id = $customerId;
             $record->source_type = SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST;
             $record->external_id = sprintf(
@@ -396,6 +402,15 @@ class NoticeController extends Controller
             ]);
         }
 
+        // Moving a case to history is final: an archived case is never brought back by saving the
+        // same notice again. Bail out before fill() so no case data is overwritten either. A No-Go
+        // case has its own explicit, audited reopening flow — it does not go through here.
+        if ($record->exists && $record->archived_at !== null) {
+            return redirect()
+                ->back()
+                ->with('error', __('procynia.notices.save_already_in_history'));
+        }
+
         $isNewRecord = ! $record->exists;
         $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
 
@@ -413,8 +428,6 @@ class NoticeController extends Controller
             'contact_person_name' => $validated['contact_person_name'] ?? null,
             'contact_person_email' => $validated['contact_person_email'] ?? null,
             'notes' => $validated['notes'] ?? null,
-            'archived_at' => null,
-            'history_type' => null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
             'rfp_submission_deadline_at' => $validated['rfp_submission_deadline_at'] ?? null,
         ]);
@@ -687,6 +700,11 @@ class NoticeController extends Controller
                 'phaseComments' => fn ($query) => $query
                     ->with(['user:id,name,email,bid_role'])
                     ->orderBy('created_at'),
+                'noGoDecisions' => fn ($query) => $query
+                    ->with([
+                        'closedBy:id,name,email,bid_role',
+                        'reopenedBy:id,name,email,bid_role',
+                    ]),
                 'userAccesses' => fn ($query) => $query
                     ->active()
                     ->with([
@@ -700,10 +718,11 @@ class NoticeController extends Controller
         $canManageContributorAccess = $this->savedNoticeAccess->canManageContributorAccess($user, $record);
         $canComment = $this->savedNoticeAccess->canComment($user, $record);
         $canArchive = $this->savedNoticeAccess->canArchive($user, $record);
+        $canReopenAfterNoGo = $this->savedNoticeAccess->canReopenAfterNoGo($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice'      => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive),
-            'goNoGoData'  => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
+            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive, $canReopenAfterNoGo),
+            'goNoGoData' => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
                 ? $this->buildGoNoGoData($record, $customerId, $user)
                 : null,
         ]);
@@ -720,18 +739,18 @@ class NoticeController extends Controller
             ->orderBy('id')
             ->get()
             ->map(fn (GoNoGoAssessmentCriterion $c): array => [
-                'id'                       => $c->id,
-                'title'                    => $c->title,
-                'short_description'        => $c->short_description,
-                'weight'                   => $c->weight,
-                'is_score_reversed'        => $c->is_score_reversed,
-                'sort_order'               => $c->sort_order,
-                'help_what_is_assessed'    => $c->help_what_is_assessed,
-                'help_why_it_matters'      => $c->help_why_it_matters,
+                'id' => $c->id,
+                'title' => $c->title,
+                'short_description' => $c->short_description,
+                'weight' => $c->weight,
+                'is_score_reversed' => $c->is_score_reversed,
+                'sort_order' => $c->sort_order,
+                'help_what_is_assessed' => $c->help_what_is_assessed,
+                'help_why_it_matters' => $c->help_why_it_matters,
                 'help_what_to_investigate' => $c->help_what_to_investigate,
                 'help_positive_indicators' => $c->help_positive_indicators,
-                'help_warning_signs'       => $c->help_warning_signs,
-                'help_example_assessment'  => $c->help_example_assessment,
+                'help_warning_signs' => $c->help_warning_signs,
+                'help_example_assessment' => $c->help_example_assessment,
             ])
             ->all();
 
@@ -743,28 +762,28 @@ class NoticeController extends Controller
 
         $answers = $assessment
             ? $assessment->answers->map(fn ($a) => [
-                'criterion_id'   => $a->criterion_id,
+                'criterion_id' => $a->criterion_id,
                 'selected_value' => $a->selected_value,
-                'comment'        => $a->comment,
+                'comment' => $a->comment,
             ])->all()
             : [];
 
         return [
-            'template'   => [
-                'id'       => $template->id,
-                'name'     => $template->name,
+            'template' => [
+                'id' => $template->id,
+                'name' => $template->name,
                 'criteria' => $criteria,
             ],
             'assessment' => $assessment ? [
-                'id'             => $assessment->id,
+                'id' => $assessment->id,
                 'recommendation' => $assessment->recommendation,
-                'total_score'    => $assessment->total_score,
-                'max_score'      => $assessment->max_score,
-                'completed_at'   => $assessment->completed_at?->toIso8601String(),
-                'updated_at'     => $assessment->updated_at?->toIso8601String(),
-                'answers'        => $answers,
+                'total_score' => $assessment->total_score,
+                'max_score' => $assessment->max_score,
+                'completed_at' => $assessment->completed_at?->toIso8601String(),
+                'updated_at' => $assessment->updated_at?->toIso8601String(),
+                'answers' => $answers,
             ] : null,
-            'save_url'   => route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id]),
+            'save_url' => route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id]),
         ];
     }
 
@@ -1069,11 +1088,20 @@ class NoticeController extends Controller
             ->firstOrFail();
 
         try {
-            $record->transitionBidStatus(
-                (string) $validated['status'],
-                $validated['bid_closure_reason'] ?? null,
-                $validated['bid_closure_note'] ?? null,
-            )->save();
+            if ((string) $validated['status'] === SavedNotice::BID_STATUS_NO_GO) {
+                $this->savedNoticeNoGoDecisionService->closeAsNoGo(
+                    $record,
+                    $user,
+                    (string) ($validated['bid_closure_reason'] ?? ''),
+                    $validated['bid_closure_note'] ?? null,
+                );
+            } else {
+                $record->transitionBidStatus(
+                    (string) $validated['status'],
+                    $validated['bid_closure_reason'] ?? null,
+                    $validated['bid_closure_note'] ?? null,
+                )->save();
+            }
         } catch (\InvalidArgumentException $exception) {
             throw ValidationException::withMessages([
                 'status' => 'Statusendringen er ikke tillatt for denne saken.',
@@ -1083,6 +1111,45 @@ class NoticeController extends Controller
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
             ->with('success', 'Saksstatus ble oppdatert.');
+    }
+
+    public function reopenSavedNoticeAfterNoGo(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            abort(HttpResponse::HTTP_NOT_FOUND);
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canReopenAfterNoGo($user, $record), 403);
+
+        $validated = $request->validate([
+            'reopen_reason' => ['required', 'string', 'max:4000'],
+            'confirm_reopen' => ['accepted'],
+        ]);
+
+        try {
+            $record = $this->savedNoticeNoGoDecisionService->reopenAfterNoGo(
+                $record,
+                $user,
+                (string) $validated['reopen_reason'],
+                (bool) $validated['confirm_reopen'],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages([
+                'reopen_reason' => 'Saken kan ikke gjenåpnes fordi den ikke lenger er No-Go.',
+            ]);
+        }
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'No-Go-beslutningen ble omgjort. Saken er tilbake i Go / No-Go.');
     }
 
     public function updateSavedNoticeOpportunityOwner(Request $request, SavedNotice $savedNotice): RedirectResponse
@@ -1339,15 +1406,21 @@ class NoticeController extends Controller
             return $this->emptyWatchAlertsPayload();
         }
 
+        $alertExternalIds = $records->pluck('doffin_notice_id')->filter()->map(fn (mixed $value): string => (string) $value)->all();
         $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user, $customerId)
-            ->whereIn('external_id', $records->pluck('doffin_notice_id')->filter()->map(fn (mixed $value): string => (string) $value)->all())
+            ->whereIn('external_id', $alertExternalIds)
+            ->pluck('external_id')
+            ->map(fn (mixed $value): string => (string) $value)
+            ->all();
+        $archivedExternalIds = $this->archivedSavedNoticeVisibleQuery($user, $customerId)
+            ->whereIn('external_id', $alertExternalIds)
             ->pluck('external_id')
             ->map(fn (mixed $value): string => (string) $value)
             ->all();
 
         return [
             'data' => $records
-                ->map(fn (WatchProfileInboxRecord $record): array => $this->watchAlertListItem($record, $savedExternalIds))
+                ->map(fn (WatchProfileInboxRecord $record): array => $this->watchAlertListItem($record, $savedExternalIds, $archivedExternalIds))
                 ->all(),
             'meta' => [
                 'total' => $records->count(),
@@ -1355,7 +1428,7 @@ class NoticeController extends Controller
         ];
     }
 
-    private function watchAlertListItem(WatchProfileInboxRecord $record, array $savedExternalIds = []): array
+    private function watchAlertListItem(WatchProfileInboxRecord $record, array $savedExternalIds = [], array $archivedExternalIds = []): array
     {
         $rawPayload = is_array($record->raw_payload) ? $record->raw_payload : [];
         $cpvCodes = collect(data_get($rawPayload, 'cpvCodes', []))
@@ -1391,6 +1464,7 @@ class NoticeController extends Controller
             'is_new' => false,
             'external_url' => $record->external_url ?: $this->publicNoticeUrl($record->doffin_notice_id),
             'is_saved' => in_array($record->doffin_notice_id, $savedExternalIds, true),
+            'is_in_history' => in_array($record->doffin_notice_id, $archivedExternalIds, true),
             'watch_profile_name' => $record->watchProfile?->name,
             'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
             'delete_url' => route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => $record->id]),
@@ -1523,8 +1597,8 @@ class NoticeController extends Controller
         bool $canManageContributorAccess,
         bool $canComment,
         bool $canArchive,
-    ): array
-    {
+        bool $canReopenAfterNoGo,
+    ): array {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
         $isMutableCase = $notice->archived_at === null && $canManageCase;
         $canCreateSubmission = $isMutableCase && $notice->canCreateSubmission();
@@ -1694,6 +1768,29 @@ class NoticeController extends Controller
                     ])
                     ->all(),
             ],
+            'no_go_decisions' => $notice->noGoDecisions
+                ->map(fn (SavedNoticeNoGoDecision $decision): array => [
+                    'id' => $decision->id,
+                    'closure_reason' => $decision->closure_reason,
+                    'closure_reason_label' => $decision->closure_reason
+                        ? SavedNotice::BID_CLOSURE_REASON_LABELS[$decision->closure_reason] ?? $decision->closure_reason
+                        : null,
+                    'closure_note' => $decision->closure_note,
+                    'closed_at' => optional($decision->closed_at)?->toIso8601String(),
+                    'closed_by' => $decision->closedBy ? [
+                        'id' => $decision->closedBy->id,
+                        'name' => $decision->closedBy->name,
+                    ] : null,
+                    'reopen_reason' => $decision->reopen_reason,
+                    'reopened_at' => optional($decision->reopened_at)?->toIso8601String(),
+                    'reopened_by' => $decision->reopenedBy ? [
+                        'id' => $decision->reopenedBy->id,
+                        'name' => $decision->reopenedBy->name,
+                    ] : null,
+                    'reopened_from_archived_at' => optional($decision->reopened_from_archived_at)?->toIso8601String(),
+                    'reopened_from_history_type' => $decision->reopened_from_history_type,
+                ])
+                ->all(),
             'back_url' => route('app.notices.index', ['mode' => $notice->archived_at ? 'history' : 'saved']),
             'back_label' => $notice->archived_at ? 'Tilbake til historikk' : 'Tilbake til arbeidsliste',
             'actions' => [
@@ -1701,6 +1798,10 @@ class NoticeController extends Controller
                     ? route('app.notices.saved.status.update', ['savedNotice' => $notice->id])
                     : null,
                 'status_actions' => $statusActions,
+                'can_reopen_after_no_go' => $canReopenAfterNoGo,
+                'reopen_after_no_go_url' => $canReopenAfterNoGo
+                    ? route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $notice->id])
+                    : null,
                 'closure_reasons' => SavedNotice::bidClosureReasonOptions(),
                 'update_opportunity_owner_url' => $canManageCase
                     ? route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id])
@@ -1917,8 +2018,7 @@ class NoticeController extends Controller
     private function calculateHistoryNextProcessDate(
         string $followUpMode,
         ?int $followUpOffsetMonths,
-    ): ?CarbonInterface
-    {
+    ): ?CarbonInterface {
         return match ($followUpMode) {
             SavedNotice::FOLLOW_UP_MODE_NONE => null,
             SavedNotice::FOLLOW_UP_MODE_MANUAL_OFFSET => $followUpOffsetMonths !== null
@@ -2019,7 +2119,7 @@ class NoticeController extends Controller
         ];
     }
 
-    private function liveNoticeListItem(array $hit, array $savedExternalIds = []): array
+    private function liveNoticeListItem(array $hit, array $savedExternalIds = [], array $archivedExternalIds = []): array
     {
         $buyers = collect($hit['buyer'] ?? [])
             ->filter(fn (mixed $buyer): bool => is_array($buyer))
@@ -2051,6 +2151,7 @@ class NoticeController extends Controller
             'is_new' => false,
             'external_url' => $this->publicNoticeUrl($noticeId),
             'is_saved' => in_array($noticeId, $savedExternalIds, true),
+            'is_in_history' => in_array($noticeId, $archivedExternalIds, true),
         ];
     }
 
@@ -2292,7 +2393,7 @@ class NoticeController extends Controller
             ->values();
 
         if ($cpvCodes->isNotEmpty()) {
-            return 'CPV ' . $cpvCodes->take(3)->implode(', ');
+            return 'CPV '.$cpvCodes->take(3)->implode(', ');
         }
 
         $description = trim(Str::squish((string) $profile->description));
@@ -2302,7 +2403,7 @@ class NoticeController extends Controller
         }
 
         if ($profile->department?->name) {
-            return 'Avdeling: ' . $profile->department->name;
+            return 'Avdeling: '.$profile->department->name;
         }
 
         return 'Kriterier definert for dette lagrede søket.';

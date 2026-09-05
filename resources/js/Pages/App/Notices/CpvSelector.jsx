@@ -1,4 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import {
+    cpvSelectionSummary,
+    shouldOfferCpvToggle,
+    shouldShowCpvChips,
+} from './filterPanelLogic';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -15,15 +20,20 @@ export default function CpvSelector({
     selectedItems,
     onSelectedItemsChange,
     popularItems = [],
+    texts = {},
 }) {
     const inputId = useId();
     const listboxId = useId();
+    const chipsId = useId();
     const inputRef = useRef(null);
     const [inputValue, setInputValue] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [suggestions, setSuggestions] = useState(() => filterSelected(popularItems, selectedItems));
     const [activeIndex, setActiveIndex] = useState(-1);
+    // Chip visibility only. The codes stay in `selectedItems` either way, so a collapsed list
+    // filters exactly like an open one.
+    const [areChipsExpanded, setAreChipsExpanded] = useState(false);
 
     useEffect(() => {
         if (selectedItems.length === 0) {
@@ -144,14 +154,38 @@ export default function CpvSelector({
     };
 
     const showEmptyState = isOpen && !isLoading && suggestions.length === 0;
+    const showChips = shouldShowCpvChips(selectedItems.length, areChipsExpanded);
+    const offerChipToggle = shouldOfferCpvToggle(selectedItems.length);
+    const selectionSummary = cpvSelectionSummary(selectedItems.length, {
+        one: texts.cpv_selected_one,
+        many: texts.cpv_selected_many,
+    });
 
     return (
-        <label className="space-y-2">
-            <span className="text-base font-medium text-slate-700">CPV</span>
+        <div className="space-y-2">
+            <div className="flex h-9 items-center justify-between gap-3">
+                <label className="text-base font-medium text-slate-700" htmlFor={inputId}>CPV</label>
+                {offerChipToggle ? (
+                    <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-base text-slate-600">{selectionSummary}</span>
+                        <button
+                            type="button"
+                            onClick={() => setAreChipsExpanded((current) => !current)}
+                            aria-expanded={showChips}
+                            aria-controls={chipsId}
+                            className="shrink-0 rounded-lg px-2 py-1 text-base font-semibold text-violet-700 underline underline-offset-2 transition hover:bg-violet-50 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                        >
+                            {showChips
+                                ? (texts.cpv_hide_codes ?? 'Skjul koder')
+                                : (texts.cpv_show_codes ?? 'Vis koder')}
+                        </button>
+                    </div>
+                ) : null}
+            </div>
             <div className="relative">
                 <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        {selectedItems.map((item) => (
+                    <div id={chipsId} className="flex flex-wrap items-center gap-1.5">
+                        {showChips ? selectedItems.map((item) => (
                             <span
                                 key={item.code}
                                 className="inline-flex max-w-full items-center gap-2 rounded-full bg-violet-100 px-3 py-1.5 text-base font-medium leading-6 text-violet-800 ring-1 ring-inset ring-violet-200"
@@ -169,7 +203,7 @@ export default function CpvSelector({
                                     x
                                 </button>
                             </span>
-                        ))}
+                        )) : null}
 
                         <div className="flex min-w-[120px] flex-1 items-center py-1">
                             <input
@@ -243,6 +277,6 @@ export default function CpvSelector({
                 ) : null}
             </div>
             <p className="text-base leading-6 text-slate-600">Velg ett eller flere CPV-områder med vanlig språk eller kode.</p>
-        </label>
+        </div>
     );
 }

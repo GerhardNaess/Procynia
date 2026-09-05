@@ -277,6 +277,8 @@ Route::prefix('app')
         Route::patch('/notices/saved/{savedNotice}/info-items/{infoItem}/close', [NoticeController::class, 'closeSavedNoticeInfoItem'])->name('notices.saved.info-items.close');
         Route::post('/notices/saved/{savedNotice}/submissions', [NoticeController::class, 'storeSavedNoticeSubmission'])->name('notices.saved.submissions.store');
         Route::patch('/notices/saved/{savedNotice}/status', [NoticeController::class, 'updateSavedNoticeStatus'])->name('notices.saved.status.update');
+        Route::patch('/notices/saved/{savedNotice}/reopen-after-no-go', [NoticeController::class, 'reopenSavedNoticeAfterNoGo'])
+            ->name('notices.saved.reopen-after-no-go');
         Route::patch('/notices/saved/{savedNotice}/opportunity-owner', [NoticeController::class, 'updateSavedNoticeOpportunityOwner'])->name('notices.saved.opportunity-owner.update');
         Route::patch('/notices/saved/{savedNotice}/bid-manager', [NoticeController::class, 'updateSavedNoticeBidManager'])->name('notices.saved.bid-manager.update');
         Route::patch('/notices/saved/{savedNotice}/deadlines', [NoticeController::class, 'updateSavedNoticeDeadlines'])->name('notices.saved.deadlines.update');

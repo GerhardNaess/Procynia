@@ -1,10 +1,11 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import BidStatusPipeline from '../../../Components/App/BidStatusPipeline';
 import GoNoGoAssessment from './GoNoGoAssessment';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ActionDialog from '../../../Components/App/ActionDialog';
 import StatusBadge from '../../../Components/App/StatusBadge';
 
 function formatDate(value, locale, options = {}) {
@@ -352,6 +353,83 @@ function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle,
     );
 }
 
+function getSavedNoticeHelpSections(tsn) {
+    return [
+        {
+            title: tsn.page_help_section_overview ?? 'Hva siden brukes til',
+            items: [
+                {
+                    title: tsn.page_help_item_status_title ?? 'Status og ansvar',
+                    text: tsn.page_help_item_status_text ?? 'Statuspanelet viser hvor saken står nå, og handlingene ved siden av viser hva du kan gjøre videre. Her tilordner du også bid-manager og kommersiell eier.',
+                },
+                {
+                    title: tsn.page_help_item_documents_title ?? 'Dokumenter',
+                    text: tsn.page_help_item_documents_text ?? 'Kunngjøringens dokumenter er listet opp for nedlasting, enkeltvis eller samlet. Opplasting og AI-arbeid med dokumentene skjer bak «Åpne saksdokumenter og AI».',
+                },
+                {
+                    title: tsn.page_help_item_comments_title ?? 'Fasekommentarer',
+                    text: tsn.page_help_item_comments_text ?? 'Notater knyttet til fasen saken var i da de ble skrevet. Bruk dem til kontekst og begrunnelser underveis, ikke til å beskrive statusen på nytt.',
+                },
+            ],
+        },
+        {
+            title: tsn.page_help_section_go_no_go ?? 'Go / No-Go-fasen',
+            items: [
+                {
+                    title: tsn.page_help_item_go_no_go_phase_title ?? 'Beslutningsfasen',
+                    text: tsn.page_help_item_go_no_go_phase_text ?? 'I Go / No-Go avgjør dere om saken skal tas videre. Du har to veier: gå videre til arbeid, eller sette saken som No-Go.',
+                },
+                {
+                    title: tsn.page_help_item_go_no_go_set_title ?? 'Sett som No-Go',
+                    text: tsn.page_help_item_go_no_go_set_text ?? 'Handlingen åpner et lite skjema der du velger årsak til at saken stoppes. Årsak må velges. Du kan i tillegg skrive et avslutningsnotat, men det er valgfritt. Saken avsluttes først når du bekrefter.',
+                },
+                {
+                    title: tsn.page_help_item_go_no_go_meaning_title ?? 'Hva No-Go betyr',
+                    text: tsn.page_help_item_go_no_go_meaning_text ?? 'Saken avsluttes som No-Go, og det ordinære tilbudsarbeidet stopper. Etter No-Go finnes det ingen vanlige neste statusvalg – saken går ikke videre av seg selv.',
+                },
+            ],
+        },
+        {
+            title: tsn.page_help_section_no_go_decision ?? 'No-Go-beslutning og gjenåpning',
+            items: [
+                {
+                    title: tsn.page_help_item_no_go_decision_title ?? 'Seksjonen «No-Go-beslutning»',
+                    text: tsn.page_help_item_no_go_decision_text ?? 'Seksjonen vises bare når saken faktisk er satt til No-Go. Der finner du årsak, avslutningsnotat, hvem som tok beslutningen, og eventuelle tidligere gjenåpninger.',
+                },
+                {
+                    title: tsn.page_help_item_reopen_when_title ?? 'Når forutsetningene endrer seg',
+                    text: tsn.page_help_item_reopen_when_text ?? 'En No-Go-beslutning kan omgjøres hvis bildet endrer seg. «Gjenåpne sak» er en bevisst handling utenfor den vanlige statusflyten: du skriver en begrunnelse og bekrefter, og saken går tilbake til Go / No-Go slik at beslutningen tas på nytt.',
+                },
+                {
+                    title: tsn.page_help_item_reopen_history_title ?? 'Historikken beholdes',
+                    text: tsn.page_help_item_reopen_history_text ?? 'Den opprinnelige No-Go-beslutningen slettes ikke. Årsak, notat og begrunnelsen for gjenåpning blir liggende som beslutningshistorikk på saken.',
+                },
+                {
+                    title: tsn.page_help_item_reopen_access_title ?? 'Hvem kan gjenåpne',
+                    text: tsn.page_help_item_reopen_access_text ?? 'Gjenåpning krever ansvar for saken. System Owner kan gjenåpne saker de har innsyn i, og bid-manager kan gjenåpne saker de har ansvar for. Andre ser beslutningen, men uten gjenåpningshandlingen.',
+                },
+            ],
+        },
+        {
+            title: tsn.page_help_section_archiving ?? 'Historikk og No-Go',
+            items: [
+                {
+                    title: tsn.page_help_item_archiving_move_title ?? '«Flytt til historikk»',
+                    text: tsn.page_help_item_archiving_move_text ?? 'Flytter saken ut av den aktive arbeidslisten. Saken beholdes og kan fortsatt åpnes og leses i Historikk, men den kan ikke flyttes tilbake til den aktive arbeidslisten. Du må bekrefte handlingen i en dialog først.',
+                },
+                {
+                    title: tsn.page_help_item_archiving_difference_title ?? 'No-Go og Historikk',
+                    text: tsn.page_help_item_archiving_difference_text ?? 'No-Go er en tilbudsfaglig beslutning om å stoppe tilbudsarbeidet. Historikk er endelig arkivering av saken i den vanlige arbeidsflyten. En sak kan være satt til No-Go uten å ligge i Historikk, og den kan ligge i Historikk uten å være No-Go.',
+                },
+                {
+                    title: tsn.page_help_item_archiving_no_go_title ?? 'Arkivert No-Go',
+                    text: tsn.page_help_item_archiving_no_go_text ?? 'En arkivert No-Go-sak er unntaket. Blir No-Go-beslutningen senere omgjort, kan en bruker med nødvendig tilgang bruke «Gjenåpne sak». Det er en egen, sporbar beslutning med begrunnelse – ikke vanlig gjenoppretting fra Historikk.',
+                },
+            ],
+        },
+    ];
+}
+
 function PhaseCommentCard({ comment, locale, text }) {
     return (
         <article className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
@@ -404,6 +482,10 @@ export default function SavedNoticeShow({ notice }) {
     const archiveHistoryForm = useForm({
         history_type: '',
     });
+    const reopenNoGoForm = useForm({
+        reopen_reason: '',
+        confirm_reopen: false,
+    });
     const opportunityOwnerForm = useForm({
         opportunity_owner_user_id: notice.opportunity_owner?.id ? String(notice.opportunity_owner.id) : '',
     });
@@ -452,6 +534,14 @@ export default function SavedNoticeShow({ notice }) {
     const [isActivePhaseExpanded, setIsActivePhaseExpanded] = useState(true);
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
     const [isArchiveHistoryFormOpen, setIsArchiveHistoryFormOpen] = useState(false);
+    const [isReopenNoGoDialogOpen, setIsReopenNoGoDialogOpen] = useState(false);
+    const [isNoGoDialogOpen, setIsNoGoDialogOpen] = useState(false);
+    const reopenNoGoTriggerRef = useRef(null);
+    const reopenNoGoReasonRef = useRef(null);
+    const noGoTriggerRef = useRef(null);
+    const noGoClosureReasonRef = useRef(null);
+    const archiveTriggerRef = useRef(null);
+    const archiveTypeRef = useRef(null);
     const shouldShowSubmissions = notice.submissions.length > 0
         || notice.bid_status === 'submitted'
         || notice.bid_status === 'negotiation';
@@ -462,6 +552,13 @@ export default function SavedNoticeShow({ notice }) {
     const historyTypeOptions = notice.actions?.history_type_options ?? [];
     const archiveUrl = notice.actions?.archive_url ?? null;
     const canArchiveNotice = notice.actions?.can_archive ?? Boolean(archiveUrl);
+    const canReopenAfterNoGo = Boolean(notice.actions?.can_reopen_after_no_go);
+    const reopenAfterNoGoUrl = notice.actions?.reopen_after_no_go_url ?? null;
+    const isNoGoCase = notice.bid_status === 'no_go';
+    const isGoNoGoCase = notice.bid_status === 'go_no_go';
+    const canShowReopenAfterNoGo = isNoGoCase && canReopenAfterNoGo && Boolean(reopenAfterNoGoUrl);
+    const noGoDecisions = notice.no_go_decisions ?? [];
+    const currentNoGoDecision = noGoDecisions.find((decision) => !decision.reopened_at) ?? noGoDecisions[0] ?? null;
     const caseAccess = notice.actions?.case_access ?? {};
     const caseAccessUserOptions = caseAccess.user_options ?? [];
     const caseAccessRoleOptions = caseAccess.access_role_options ?? [];
@@ -478,7 +575,10 @@ export default function SavedNoticeShow({ notice }) {
             )
         );
     const activeClosureAction = statusActions.find((action) => action.status === openClosureStatus) ?? null;
-    const noStatusActionsMessage = notice.archived_at
+    const noGoClosureAction = statusActions.find((action) => action.status === 'no_go') ?? null;
+    const noStatusActionsMessage = isNoGoCase
+        ? tsn.no_go_no_ordinary_actions
+        : notice.archived_at
         ? tsn.no_more_actions_archived
         : tsn.no_more_actions;
     const currentUserBidRoleLabel = bidRoleLabel(auth?.user?.bid_role, tsn);
@@ -536,7 +636,19 @@ export default function SavedNoticeShow({ notice }) {
     const bidManagerSummary = notice.bid_manager?.name || tsn.not_set;
     const opportunityOwnerSummary = notice.opportunity_owner?.name || tsn.not_set;
     const administrationSummary = notice.archived_at ? tsn.archived_case_summary : tsn.secondary_actions;
-    const nextDecisionSummary = primaryAction ? statusActionLabel(primaryAction.status, tsn) : noStatusActionsMessage;
+    const nextDecisionSummary = primaryAction
+        ? statusActionLabel(primaryAction.status, tsn)
+        : canShowReopenAfterNoGo
+            ? tsn.no_go_reopen_available_summary
+            : noStatusActionsMessage;
+    const conciseNextDecisionSummary = isGoNoGoCase
+        ? tsn.go_no_go_next_decision_summary
+        : nextDecisionSummary;
+    const nextDecisionDescription = isGoNoGoCase
+        ? null
+        : canShowReopenAfterNoGo
+        ? tsn.no_go_reopen_available_next_step
+        : guidance.nextStepDescription;
     const activeCommentPhaseLabel = activeCommentPhaseOption
         ? `${activeCommentPhaseOption.number} ${activeCommentPhaseOption.label}`
         : guidance.phaseTitle;
@@ -652,6 +764,10 @@ export default function SavedNoticeShow({ notice }) {
     };
 
     const cancelArchiveSavedNoticeForm = () => {
+        if (archiveHistoryForm.processing) {
+            return;
+        }
+
         setIsArchiveHistoryFormOpen(false);
         archiveHistoryForm.reset();
         archiveHistoryForm.clearErrors();
@@ -668,8 +784,53 @@ export default function SavedNoticeShow({ notice }) {
         archiveHistoryForm.patch(archiveUrl, {
             preserveScroll: true,
             onSuccess: () => {
-                cancelArchiveSavedNoticeForm();
+                setIsArchiveHistoryFormOpen(false);
+                archiveHistoryForm.reset();
+                archiveHistoryForm.clearErrors();
             },
+        });
+    };
+
+    const closeReopenNoGoDialog = () => {
+        setIsReopenNoGoDialogOpen(false);
+        reopenNoGoForm.reset();
+        reopenNoGoForm.clearErrors();
+    };
+
+    const openNoGoDialog = (action) => {
+        if (!action || action.status !== 'no_go') {
+            return;
+        }
+
+        statusForm.reset();
+        statusForm.clearErrors();
+        statusForm.setData({
+            status: action.status,
+            bid_closure_reason: '',
+            bid_closure_note: '',
+        });
+        setIsNoGoDialogOpen(true);
+    };
+
+    const closeNoGoDialog = () => {
+        if (isStatusActionProcessing) {
+            return;
+        }
+
+        setIsNoGoDialogOpen(false);
+        resetStatusForm();
+    };
+
+    const submitReopenAfterNoGo = (event) => {
+        event.preventDefault();
+
+        if (!reopenAfterNoGoUrl) {
+            return;
+        }
+
+        reopenNoGoForm.patch(reopenAfterNoGoUrl, {
+            preserveScroll: true,
+            onSuccess: closeReopenNoGoDialog,
         });
     };
 
@@ -711,6 +872,10 @@ export default function SavedNoticeShow({ notice }) {
             },
             onSuccess: () => {
                 resetStatusForm();
+
+                if (action.status === 'no_go') {
+                    setIsNoGoDialogOpen(false);
+                }
             },
             onFinish: () => {
                 setIsStatusActionProcessing(false);
@@ -720,6 +885,12 @@ export default function SavedNoticeShow({ notice }) {
 
     const triggerStatusAction = (action) => {
         if (!action) {
+            return;
+        }
+
+        if (action.status === 'no_go') {
+            openNoGoDialog(action);
+
             return;
         }
 
@@ -915,25 +1086,7 @@ export default function SavedNoticeShow({ notice }) {
                                 buttonLabel={tsn.page_help_button ?? 'Hjelp'}
                                 title={tsn.page_help_title ?? 'Om denne saken'}
                                 intro={tsn.page_help_intro ?? 'Dette er arbeidsrommet for én lagret kunngjøring.'}
-                                sections={[
-                                    {
-                                        title: tsn.page_help_section_overview ?? 'Hva siden brukes til',
-                                        items: [
-                                            {
-                                                title: tsn.page_help_item_status_title ?? 'Status og ansvar',
-                                                text: tsn.page_help_item_status_text ?? 'Sett bid-status, tilordne bid-manager og kommersiell eier, og registrer sentrale datoer.',
-                                            },
-                                            {
-                                                title: tsn.page_help_item_documents_title ?? 'Dokumenter og AI',
-                                                text: tsn.page_help_item_documents_text ?? 'Last opp anbudsdokumenter og start AI-analyse for å ekstrahere krav og generere svarutkast.',
-                                            },
-                                            {
-                                                title: tsn.page_help_item_review_title ?? 'Business Review',
-                                                text: tsn.page_help_item_review_text ?? 'Opprett Business Review for formell go/no-go-beslutning.',
-                                            },
-                                        ],
-                                    },
-                                ]}
+                                sections={getSavedNoticeHelpSections(tsn)}
                             />
                         </div>
                     </div>
@@ -955,7 +1108,7 @@ export default function SavedNoticeShow({ notice }) {
                                         <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">{tsn.current_status}</div>
                                         <div className="mt-1 text-base font-semibold text-slate-950">{notice.bid_status_label}</div>
                                         <p className="mt-1 text-base leading-6 text-slate-600">{guidance.description}</p>
-                                        <div className="mt-3 text-base leading-6 text-slate-600">{guidance.closureRule}</div>
+                                        {!isGoNoGoCase ? <div className="mt-3 text-base leading-6 text-slate-600">{guidance.closureRule}</div> : null}
                                     </div>
 
                                 </div>
@@ -1364,11 +1517,6 @@ export default function SavedNoticeShow({ notice }) {
 
                                     {isActivePhaseExpanded && (
                                         <div className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4">
-                                            <div>
-                                                <p className="text-base leading-6 text-slate-600">{guidance.description}</p>
-                                                <div className="mt-2 text-base leading-6 text-slate-600">{guidance.closureRule}</div>
-                                            </div>
-
                                             <div className="space-y-3">
                                                 {activePhaseCommentEntries.length > 0 ? (
                                                     activePhaseCommentEntries.map((comment) => (
@@ -1899,14 +2047,38 @@ export default function SavedNoticeShow({ notice }) {
                                 </div>
 
                                 <div className="space-y-3">
+                                    {isNoGoCase ? (
+                                        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="min-w-0">
+                                                    <div className="text-base font-semibold uppercase tracking-[0.12em] text-amber-800">{tsn.no_go_reopen_action_title}</div>
+                                                    <p className="mt-1 text-base leading-6 text-amber-950">
+                                                        {canShowReopenAfterNoGo ? tsn.no_go_reopen_available_description : tsn.no_go_reopen_requires_access}
+                                                    </p>
+                                                </div>
+
+                                                {canShowReopenAfterNoGo ? (
+                                                    <button
+                                                        ref={reopenNoGoTriggerRef}
+                                                        type="button"
+                                                        onClick={() => setIsReopenNoGoDialogOpen(true)}
+                                                        className="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 sm:w-auto"
+                                                    >
+                                                        {tsn.reopen_no_go_action}
+                                                    </button>
+                                                ) : null}
+                                            </div>
+                                        </section>
+                                    ) : null}
+
                                     <ActionAccordionSection
                                         title={tsn.next_decision_title}
-                                        summary={nextDecisionSummary}
-                                        hint={guidance.phaseTitle}
+                                        summary={conciseNextDecisionSummary}
+                                        hint={isGoNoGoCase ? null : guidance.phaseTitle}
                                         isOpen={openActionSection === 'decision'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'decision' ? null : 'decision'))}
                                     >
-                                        <p className="text-base leading-6 text-slate-600">{guidance.nextStepDescription}</p>
+                                        {nextDecisionDescription ? <p className="text-base leading-6 text-slate-600">{nextDecisionDescription}</p> : null}
 
                                         {statusForm.errors.status ? (
                                             <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
@@ -1934,6 +2106,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     {secondaryActions.map((action) => (
                                                         <button
                                                             key={action.status}
+                                                            ref={action.status === 'no_go' ? noGoTriggerRef : null}
                                                             type="button"
                                                             onClick={() => triggerStatusAction(action)}
                                                             disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
@@ -1955,7 +2128,7 @@ export default function SavedNoticeShow({ notice }) {
                                             ) : null}
                                         </div>
 
-                                        {activeClosureAction ? (
+                                        {activeClosureAction && activeClosureAction.status !== 'no_go' ? (
                                             <form
                                                 onSubmit={(event) => {
                                                     event.preventDefault();
@@ -2036,6 +2209,45 @@ export default function SavedNoticeShow({ notice }) {
                                             </button>
                                         ) : null}
                                     </ActionAccordionSection>
+
+                                    {isNoGoCase ? (
+                                        <ActionAccordionSection
+                                            title={tsn.no_go_decision_title}
+                                            summary={tsn.no_go_decision_summary}
+                                            hint={tsn.no_go_decision_hint}
+                                            isOpen={openActionSection === 'no-go-decision'}
+                                            onToggle={() => setOpenActionSection((current) => (current === 'no-go-decision' ? null : 'no-go-decision'))}
+                                        >
+                                            <div className="space-y-3 text-base text-slate-700">
+                                                {isNoGoCase ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+                                                    <div className="font-semibold text-amber-900">{currentNoGoDecision?.closure_reason_label ?? notice.bid_closure_reason_label ?? tsn.notRegistered}</div>
+                                                    <div className="mt-1 text-amber-800">
+                                                        {currentNoGoDecision?.closed_at || notice.bid_closed_at
+                                                            ? formatDate(currentNoGoDecision?.closed_at ?? notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })
+                                                            : tsn.notRegistered}
+                                                        {' · '}{currentNoGoDecision?.closed_by?.name ?? tsn.notRegistered}
+                                                    </div>
+                                                    {(currentNoGoDecision?.closure_note ?? notice.bid_closure_note) ? <p className="mt-2 whitespace-pre-wrap text-amber-900">{currentNoGoDecision?.closure_note ?? notice.bid_closure_note}</p> : null}
+                                                </div> : null}
+
+                                                {noGoDecisions.length > 0 ? (
+                                                    <div className="border-t border-slate-200 pt-3">
+                                                        <div className="text-base font-semibold text-slate-900">{tsn.no_go_history_title}</div>
+                                                        <div className="mt-2 space-y-2">
+                                                            {noGoDecisions.map((decision) => (
+                                                                <div key={decision.id} className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                                                                    <div className="font-medium text-slate-900">{tsn.no_go_history_closed.replace(':reason', decision.closure_reason_label ?? tsn.notRegistered)}</div>
+                                                                    <div className="mt-1 text-slate-600">{decision.closed_at ? formatDate(decision.closed_at, locale, { hour: '2-digit', minute: '2-digit' }) : tsn.notRegistered} · {decision.closed_by?.name ?? tsn.notRegistered}</div>
+                                                                    {decision.closure_note ? <p className="mt-2 whitespace-pre-wrap text-slate-700">{decision.closure_note}</p> : null}
+                                                                    {decision.reopened_at ? <div className="mt-3 border-t border-slate-100 pt-3"><div className="font-medium text-emerald-800">{tsn.no_go_history_reopened}</div><div className="mt-1 text-slate-600">{formatDate(decision.reopened_at, locale, { hour: '2-digit', minute: '2-digit' })} · {decision.reopened_by?.name ?? tsn.notRegistered}</div><p className="mt-2 whitespace-pre-wrap text-slate-700">{decision.reopen_reason}</p>{decision.reopened_from_archived_at ? <div className="mt-2 text-slate-600">{tsn.no_go_reopened_from_archive}</div> : null}</div> : null}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        </ActionAccordionSection>
+                                    ) : null}
 
                                     <ActionAccordionSection
                                         title={tsn.bid_manager_section_title}
@@ -2274,71 +2486,16 @@ export default function SavedNoticeShow({ notice }) {
                                         onToggle={() => setOpenActionSection((current) => (current === 'administration' ? null : 'administration'))}
                                     >
                                         {!notice.archived_at && canArchiveNotice ? (
-                                            isArchiveHistoryFormOpen ? (
-                                                <form
-                                                    onSubmit={submitArchiveSavedNotice}
-                                                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                            <div className="flex flex-wrap gap-3">
+                                                <button
+                                                    ref={archiveTriggerRef}
+                                                    type="button"
+                                                    onClick={openArchiveSavedNoticeForm}
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                 >
-                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                        <div>
-                                                            <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                                                                {tsn.archive_move_title}
-                                                            </div>
-                                                            <p className="mt-1 text-base text-slate-600">
-                                                                {tsn.archive_move_help}
-                                                            </p>
-                                                        </div>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={cancelArchiveSavedNoticeForm}
-                                                            className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                                        >
-                                                            {common.cancel}
-                                                        </button>
-                                                    </div>
-
-                                                    <label className="mt-4 block space-y-2">
-                                                        <span className="text-base font-medium text-slate-700">{tsn.archive_type_label}</span>
-                                                        <select
-                                                            value={archiveHistoryForm.data.history_type}
-                                                            onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
-                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        >
-                                                            <option value="">{tsn.archive_type_placeholder}</option>
-                                                            {historyTypeOptions.map((option) => (
-                                                                <option key={option.value} value={option.value}>
-                                                                    {option.label}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        {archiveHistoryForm.errors.history_type ? (
-                                                            <p className="text-base text-rose-700">{archiveHistoryForm.errors.history_type}</p>
-                                                        ) : null}
-                                                    </label>
-
-                                                    <div className="mt-4 flex flex-wrap gap-3">
-                                                        <button
-                                                            type="button"
-                                                            onClick={submitArchiveSavedNotice}
-                                                            disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        >
-                                                            {archiveHistoryForm.processing ? tsn.archive_saving : tsn.archive_save}
-                                                        </button>
-                                                    </div>
-                                                </form>
-                                            ) : (
-                                                <div className="flex flex-wrap gap-3">
-                                                    <button
-                                                        type="button"
-                                                        onClick={openArchiveSavedNoticeForm}
-                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                                    >
-                                                        {tsn.archive_case_action}
-                                                    </button>
-                                                </div>
-                                            )
+                                                    {tsn.archive_case_action}
+                                                </button>
+                                            </div>
                                         ) : !notice.archived_at ? (
                                             <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-base text-slate-600">
                                                 {tsn.archive_not_allowed}
@@ -2350,6 +2507,169 @@ export default function SavedNoticeShow({ notice }) {
                         </section>
                     </aside>
                 </div>
+
+                <ActionDialog
+                    isOpen={isReopenNoGoDialogOpen}
+                    onClose={closeReopenNoGoDialog}
+                    closeDisabled={reopenNoGoForm.processing}
+                    titleId="reopen-no-go-title"
+                    initialFocusRef={reopenNoGoReasonRef}
+                    returnFocusRef={reopenNoGoTriggerRef}
+                >
+                    <form onSubmit={submitReopenAfterNoGo}>
+                        <h2 id="reopen-no-go-title" className="text-xl font-semibold tracking-tight text-slate-950">{tsn.reopen_no_go_title}</h2>
+                        <p className="mt-2 text-base leading-6 text-slate-600">{tsn.reopen_no_go_description}</p>
+                        <p className="mt-2 text-base leading-6 text-slate-600">{tsn.reopen_no_go_history_notice}</p>
+                        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base text-amber-900">
+                            <div className="font-semibold">{currentNoGoDecision?.closure_reason_label ?? notice.bid_closure_reason_label ?? tsn.notRegistered}</div>
+                            {(currentNoGoDecision?.closure_note ?? notice.bid_closure_note) ? <p className="mt-1 whitespace-pre-wrap">{currentNoGoDecision?.closure_note ?? notice.bid_closure_note}</p> : null}
+                        </div>
+                        <label className="mt-4 block space-y-1.5">
+                            <span className="text-base font-medium text-slate-800">{tsn.reopen_no_go_reason_label}</span>
+                            <textarea ref={reopenNoGoReasonRef} value={reopenNoGoForm.data.reopen_reason} onChange={(event) => reopenNoGoForm.setData('reopen_reason', event.target.value)} rows={4} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100" placeholder={tsn.reopen_no_go_reason_placeholder} />
+                            {reopenNoGoForm.errors.reopen_reason ? <p className="text-base text-rose-700">{reopenNoGoForm.errors.reopen_reason}</p> : null}
+                        </label>
+                        <label className="mt-4 flex items-start gap-3 text-base text-slate-700">
+                            <input type="checkbox" checked={reopenNoGoForm.data.confirm_reopen} onChange={(event) => reopenNoGoForm.setData('confirm_reopen', event.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500" />
+                            <span>{tsn.reopen_no_go_confirm}</span>
+                        </label>
+                        {reopenNoGoForm.errors.confirm_reopen ? <p className="mt-2 text-base text-rose-700">{reopenNoGoForm.errors.confirm_reopen}</p> : null}
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <button type="submit" disabled={reopenNoGoForm.processing || reopenNoGoForm.data.reopen_reason.trim() === '' || !reopenNoGoForm.data.confirm_reopen} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60">{reopenNoGoForm.processing ? tsn.reopening_no_go : tsn.reopen_no_go_action}</button>
+                            <button type="button" onClick={closeReopenNoGoDialog} disabled={reopenNoGoForm.processing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">{common.cancel}</button>
+                        </div>
+                    </form>
+                </ActionDialog>
+
+                <ActionDialog
+                    isOpen={isNoGoDialogOpen && noGoClosureAction !== null}
+                    onClose={closeNoGoDialog}
+                    closeDisabled={isStatusActionProcessing}
+                    titleId="set-no-go-title"
+                    initialFocusRef={noGoClosureReasonRef}
+                    returnFocusRef={noGoTriggerRef}
+                >
+                    <form
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            submitStatusAction(noGoClosureAction, true);
+                        }}
+                    >
+                        <h2 id="set-no-go-title" className="text-xl font-semibold tracking-tight text-slate-950">{tsn.set_no_go_dialog_title}</h2>
+                        <p className="mt-2 text-base leading-6 text-slate-600">{tsn.closureNoGo}</p>
+
+                        {statusForm.errors.status ? (
+                            <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-base font-medium text-rose-700">
+                                {statusForm.errors.status}
+                            </div>
+                        ) : null}
+
+                        <label className="mt-5 block space-y-1.5" htmlFor="no_go_closure_reason">
+                            <span className="text-base font-medium text-slate-800">{tsn.close_reason_label}</span>
+                            <select
+                                ref={noGoClosureReasonRef}
+                                id="no_go_closure_reason"
+                                value={statusForm.data.bid_closure_reason}
+                                onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
+                                aria-describedby={statusForm.errors.bid_closure_reason ? 'no_go_closure_reason_error' : undefined}
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                            >
+                                <option value="">{tsn.close_reason_placeholder}</option>
+                                {closureReasonOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            {statusForm.errors.bid_closure_reason ? <p id="no_go_closure_reason_error" className="text-base text-rose-700">{statusForm.errors.bid_closure_reason}</p> : null}
+                        </label>
+
+                        <label className="mt-4 block space-y-1.5" htmlFor="no_go_closure_note">
+                            <span className="text-base font-medium text-slate-800">{tsn.close_note_label}</span>
+                            <textarea
+                                id="no_go_closure_note"
+                                value={statusForm.data.bid_closure_note}
+                                onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
+                                rows={4}
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                placeholder={tsn.close_note_placeholder}
+                            />
+                        </label>
+
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <button type="submit" disabled={isStatusActionProcessing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60">
+                                {isStatusActionProcessing ? tsn.updating : tsn.setNoGo}
+                            </button>
+                            <button type="button" onClick={closeNoGoDialog} disabled={isStatusActionProcessing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
+                                {common.cancel}
+                            </button>
+                        </div>
+                    </form>
+                </ActionDialog>
+
+                <ActionDialog
+                    isOpen={isArchiveHistoryFormOpen}
+                    onClose={cancelArchiveSavedNoticeForm}
+                    closeDisabled={archiveHistoryForm.processing}
+                    titleId="archive-case-title"
+                    initialFocusRef={archiveTypeRef}
+                    returnFocusRef={archiveTriggerRef}
+                >
+                    <form onSubmit={submitArchiveSavedNotice}>
+                        <h2 id="archive-case-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                            {tsn.archive_dialog_title}
+                        </h2>
+                        <p className="mt-3 text-base leading-6 text-slate-600">{tsn.archive_dialog_description}</p>
+
+                        {isNoGoCase ? (
+                            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base leading-6 text-amber-900">
+                                {tsn.archive_dialog_no_go_note}
+                            </p>
+                        ) : null}
+
+                        <label className="mt-5 block space-y-1.5" htmlFor="archive_case_history_type">
+                            <span className="text-base font-medium text-slate-800">{tsn.archive_type_label}</span>
+                            <select
+                                ref={archiveTypeRef}
+                                id="archive_case_history_type"
+                                value={archiveHistoryForm.data.history_type}
+                                onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
+                                aria-describedby={archiveHistoryForm.errors.history_type ? 'archive_case_history_type_error' : 'archive_case_history_type_help'}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                <option value="">{tsn.archive_type_placeholder}</option>
+                                {historyTypeOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            {archiveHistoryForm.errors.history_type ? (
+                                <p id="archive_case_history_type_error" className="text-base text-rose-700">{archiveHistoryForm.errors.history_type}</p>
+                            ) : (
+                                <p id="archive_case_history_type_help" className="text-base text-slate-600">{tsn.archive_dialog_type_help}</p>
+                            )}
+                        </label>
+
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <button
+                                type="submit"
+                                disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-base font-semibold text-amber-800 transition hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {archiveHistoryForm.processing ? tsn.archive_saving : tsn.archive_dialog_confirm}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={cancelArchiveSavedNoticeForm}
+                                disabled={archiveHistoryForm.processing}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {common.cancel}
+                            </button>
+                        </div>
+                    </form>
+                </ActionDialog>
             </div>
         </CustomerAppLayout>
     );

@@ -3,18 +3,21 @@
 namespace Tests\Unit;
 
 use App\Http\Controllers\App\NoticeController;
-use App\Models\WatchProfileInboxRecord;
 use App\Models\User;
+use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
 use App\Services\SavedNoticeAccessService;
+use App\Services\SavedNoticeNoGoDecisionService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class NoticeControllerLiveSearchContractTest extends TestCase
@@ -102,6 +105,15 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->timestamps();
         });
 
+        // Case visibility resolves the acting user's customer to read its permission settings.
+        Schema::dropIfExists('customers');
+        Schema::create('customers', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->json('permission_settings')->nullable();
+            $table->timestamps();
+        });
+
         Schema::dropIfExists('watch_profile_cpv_codes');
         Schema::create('watch_profile_cpv_codes', function (Blueprint $table): void {
             $table->id();
@@ -152,6 +164,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         Schema::dropIfExists('saved_notice_user_access');
         Schema::dropIfExists('watch_profile_cpv_codes');
         Schema::dropIfExists('departments');
+        Schema::dropIfExists('customers');
         Schema::dropIfExists('users');
         Schema::dropIfExists('saved_notices');
         Mockery::close();
@@ -162,7 +175,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     public function test_index_returns_a_notice_payload_the_frontend_can_render(): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
-        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $cpvSearchService = new CustomerNoticeCpvSearchService;
         $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
         $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
 
@@ -367,7 +380,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $cpvSearchService,
             $liveSearchService,
             $documentService,
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -407,7 +422,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     public function test_index_uses_publication_period_as_a_fallback_date_range_when_explicit_dates_are_missing(): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
-        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $cpvSearchService = new CustomerNoticeCpvSearchService;
         $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
         $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
 
@@ -453,7 +468,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $cpvSearchService,
             $liveSearchService,
             $documentService,
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -467,7 +484,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     public function test_index_exposes_true_doffin_total_and_clamps_live_pagination_to_the_accessible_window(): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
-        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $cpvSearchService = new CustomerNoticeCpvSearchService;
         $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
         $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
 
@@ -519,7 +536,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $cpvSearchService,
             $liveSearchService,
             $documentService,
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -540,7 +559,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     public function test_index_returns_zero_monitoring_hits_for_the_current_customer_when_service_reports_zero(): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
-        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $cpvSearchService = new CustomerNoticeCpvSearchService;
         $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
         $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
 
@@ -575,7 +594,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $cpvSearchService,
             $liveSearchService,
             $documentService,
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -588,7 +609,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     public function test_alerts_tab_returns_alerts_only_payload_without_running_live_search(): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
-        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $cpvSearchService = new CustomerNoticeCpvSearchService;
         $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
         $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
 
@@ -661,7 +682,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $cpvSearchService,
             $liveSearchService,
             $documentService,
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
         $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
@@ -709,10 +732,12 @@ class NoticeControllerLiveSearchContractTest extends TestCase
 
         $controller = new NoticeController(
             $customerContext,
-            new CustomerNoticeCpvSearchService(),
+            new CustomerNoticeCpvSearchService,
             Mockery::mock(DoffinLiveSearchService::class),
             Mockery::mock(DoffinNoticeDocumentService::class),
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
 
         $request = Request::create('/app/notices/watch-alerts/1', 'DELETE');
@@ -735,7 +760,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         ]);
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('liveSearchErrorCases')]
+    #[DataProvider('liveSearchErrorCases')]
     public function test_index_maps_controlled_live_search_errors_to_http_status_and_safe_message(array $serviceResponse, int $expectedStatus, string $expectedMessage): void
     {
         $customerContext = Mockery::mock(CustomerContext::class);
@@ -947,10 +972,12 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     {
         return new NoticeController(
             $customerContext,
-            new CustomerNoticeCpvSearchService(),
+            new CustomerNoticeCpvSearchService,
             $liveSearchService,
             Mockery::mock(DoffinNoticeDocumentService::class),
-            new SavedNoticeAccessService(),
+            new SavedNoticeAccessService,
+            new SavedNoticeNoGoDecisionService,
+            new GoNoGoDefaultTemplateService,
         );
     }
 

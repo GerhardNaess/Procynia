@@ -134,7 +134,7 @@ export default function DiscoveryNoticeCard({
     const descriptionStyle = shouldCollapseDescription && !isDescriptionExpanded ? DESCRIPTION_COLLAPSED_STYLE : undefined;
 
     const saveNoticeToWorklist = () => {
-        if (!canRenderSaveAction || notice.is_saved) {
+        if (!canRenderSaveAction || notice.is_saved || notice.is_in_history) {
             return;
         }
 
@@ -239,15 +239,22 @@ export default function DiscoveryNoticeCard({
                             <button
                                 type="button"
                                 onClick={saveNoticeToWorklist}
-                                disabled={notice.is_saved}
+                                disabled={notice.is_saved || notice.is_in_history}
+                                title={notice.is_in_history ? texts.save_already_in_history : undefined}
                                 className={classNames(
                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
                                     notice.is_saved
                                         ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
-                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                        : notice.is_in_history
+                                            ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
+                                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                 )}
                             >
-                                {notice.is_saved ? texts.saved_label : saveLabel}
+                                {notice.is_saved
+                                    ? texts.saved_label
+                                    : notice.is_in_history
+                                        ? texts.in_history_label
+                                        : saveLabel}
                             </button>
                         ) : null}
                         {canDelete ? (

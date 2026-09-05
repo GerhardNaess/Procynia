@@ -392,6 +392,13 @@ class SavedNotice extends Model
         return $this->hasMany(SavedNoticePhaseComment::class)->orderBy('created_at');
     }
 
+    public function noGoDecisions(): HasMany
+    {
+        return $this->hasMany(SavedNoticeNoGoDecision::class)
+            ->orderByDesc('closed_at')
+            ->orderByDesc('id');
+    }
+
     public function aiDocuments(): HasMany
     {
         return $this->hasMany(SavedNoticeAiDocument::class)
@@ -533,8 +540,7 @@ class SavedNotice extends Model
         string $fromStatus,
         string $toStatus,
         ?string $closureReason = null,
-    ): void
-    {
+    ): void {
         if (! in_array($toStatus, self::BID_STATUSES, true)) {
             throw new \InvalidArgumentException("Unsupported bid status [{$toStatus}].");
         }
@@ -568,8 +574,7 @@ class SavedNotice extends Model
         string $toStatus,
         ?string $closureReason = null,
         ?string $closureNote = null,
-    ): self
-    {
+    ): self {
         $fromStatus = (string) ($this->bid_status ?: self::BID_STATUS_DISCOVERED);
         $normalizedClosureReason = self::normalizeBidClosureReason($closureReason);
         $normalizedClosureNote = self::normalizeBidClosureNote($closureNote);

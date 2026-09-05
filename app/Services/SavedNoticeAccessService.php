@@ -53,6 +53,48 @@ class SavedNoticeAccessService
         return $this->canView($actor, $notice);
     }
 
+    public function canReopenAfterNoGo(User $actor, SavedNotice $notice): bool
+    {
+        if ($notice->bid_status !== SavedNotice::BID_STATUS_NO_GO) {
+            return false;
+        }
+
+        if (! $actor->canAccessCustomerFrontend() || $actor->customer_id === null) {
+            return false;
+        }
+
+        if ($actor->isSystemOwner()) {
+            return $this->canView($actor, $notice);
+        }
+
+        if (! $actor->isBidManager() || ! $this->canManage($actor, $notice)) {
+            return false;
+        }
+
+        if ($actor->hasCompanyWideBidManagementScope()) {
+            return true;
+        }
+
+        if ($actor->managedDepartmentIds() !== []
+            && in_array($notice->organizational_department_id, $actor->managedDepartmentIds(), true)) {
+            return true;
+        }
+
+        if (in_array($actor->id, [
+            $notice->saved_by_user_id,
+            $notice->opportunity_owner_user_id,
+            $notice->bid_manager_user_id,
+        ], true)) {
+            return true;
+        }
+
+        return $notice->userAccesses()
+            ->active()
+            ->where('user_id', $actor->id)
+            ->where('access_role', SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR)
+            ->exists();
+    }
+
     public function visibleQueryFor(User $user): Builder
     {
         $query = SavedNotice::query();

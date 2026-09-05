@@ -1,10 +1,12 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CpvSelector from './CpvSelector';
+import { filterPanelSummary } from './filterPanelLogic';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import ActionDialog from '../../../Components/App/ActionDialog';
 
 
 const noticeSummaryPreviewLimit = 280;
@@ -17,6 +19,94 @@ const noticeSummaryCollapsedStyle = {
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
+}
+
+/**
+ * Every filter label sits on a row of the same height, so the inputs beneath them line up across
+ * the grid even where a label carries extra controls — the CPV field's count and show/hide toggle.
+ */
+export const FILTER_LABEL_ROW = 'flex h-9 items-center text-base font-medium text-slate-700';
+
+function getNoticesHelpSections(nt) {
+    return [
+        {
+            title: nt.page_help_section_find ?? 'Finne og registrere saker',
+            items: [
+                {
+                    title: nt.page_help_item_live_title ?? 'Live-søk',
+                    text: nt.page_help_item_live_text ?? 'Søk direkte mot Doffin med filtre på frist, CPV, nøkkelord og relevans. Resultater oppdateres per filter.',
+                },
+                {
+                    title: nt.page_help_item_alerts_title ?? 'Varsler',
+                    text: nt.page_help_item_alerts_text ?? 'Varsler-fanen viser treff bevakningsprofilene har fanget opp. Du lagrer et treff til arbeidslisten eller fjerner varselet derfra.',
+                },
+                {
+                    title: nt.page_help_item_private_request_title ?? 'Privat forespørsel',
+                    text: nt.page_help_item_private_request_text ?? 'Muligheter som ikke kommer fra Doffin registrerer du selv som privat forespørsel. De følges opp på samme måte som offentlige kunngjøringer.',
+                },
+                {
+                    title: nt.page_help_item_save_title ?? 'Lagre en kunngjøring',
+                    text: nt.page_help_item_save_text ?? 'Lagring flytter kunngjøringen fra live-søket til arbeidslisten, der den følges opp som en sak.',
+                },
+            ],
+        },
+        {
+            title: nt.page_help_section_worklist ?? 'Arbeidslisten',
+            items: [
+                {
+                    title: nt.page_help_item_saved_title ?? 'Slik finner du riktig sak',
+                    text: nt.page_help_item_saved_text ?? 'Arbeidslisten viser sakene dere jobber aktivt med. Filteret på fase snevrer listen inn til saker i samme del av løpet, for eksempel kvalifisering eller Go / No-Go.',
+                },
+                {
+                    title: nt.page_help_item_open_case_title ?? 'Åpne sak',
+                    text: nt.page_help_item_open_case_text ?? 'Åpner saksvisningen for den enkelte saken. Videre arbeid med saken foregår der, ikke i listen.',
+                },
+            ],
+        },
+        {
+            title: nt.page_help_section_deadlines ?? 'Frister og Business Review',
+            items: [
+                {
+                    title: nt.page_help_item_deadlines_title ?? 'Rediger frister',
+                    text: nt.page_help_item_deadlines_text ?? 'Her vedlikeholder du de sentrale datoene i saken: spørsmåls- og innleveringsfrister for RFI og RFP, og forventet tildeling. Datoene vises på saken og brukes til å følge opp hva som forfaller.',
+                },
+                {
+                    title: nt.page_help_item_business_review_title ?? 'Business Review',
+                    text: nt.page_help_item_business_review_text ?? 'Registrer ett eller flere Business Review-tidspunkter under «Rediger frister». Bruk dem som planlagte beslutnings- og forankringspunkter mellom RFI og RFP, før videre arbeid eller ressursbruk. Tidspunktene er planlagte møtepunkter – de endrer ikke statusen på saken.',
+                },
+            ],
+        },
+        {
+            title: nt.page_help_section_history ?? 'Historikk',
+            items: [
+                {
+                    title: nt.page_help_item_history_move_title ?? 'Flytt til historikk',
+                    text: nt.page_help_item_history_move_text ?? 'Du velger en type – for eksempel vunnet, tapt eller avbrutt – og saken flyttes ut av arbeidslisten og over i historikkvisningen. Handlingen er endelig i den vanlige arbeidsflyten, så du må bekrefte den i en dialog først.',
+                },
+                {
+                    title: nt.page_help_item_history_readable_title ?? 'Saken beholdes i Historikk',
+                    text: nt.page_help_item_history_readable_text ?? 'Du kan fortsatt åpne og lese saken i Historikk med alt som er registrert på den. Den kan ikke flyttes tilbake til den aktive arbeidslisten – det gjelder både offentlige kunngjøringer og private forespørsler.',
+                },
+                {
+                    title: nt.page_help_item_history_resave_title ?? 'Ikke lagre kunngjøringen på nytt',
+                    text: nt.page_help_item_history_resave_text ?? 'Ligger en offentlig kunngjøring allerede som en sak i Historikk, viser Live-søk og Varsler «I historikk» i stedet for Lagre. Å lagre den på nytt gir verken en ny sak eller en aktiv sak – saken blir liggende i Historikk med saksdataene sine.',
+                },
+                {
+                    title: nt.page_help_item_history_scope_title ?? 'Plassering, ikke faglig beslutning',
+                    text: nt.page_help_item_history_scope_text ?? 'Historikk sier hvor saken ligger, ikke hva som ble besluttet underveis. Selve tilbudsbeslutningene, blant annet No-Go, tas i saksvisningen.',
+                },
+            ],
+        },
+        {
+            title: nt.page_help_section_doffin ?? 'Doffin',
+            items: [
+                {
+                    title: nt.page_help_item_doffin_title ?? 'Åpne i Doffin',
+                    text: nt.page_help_item_doffin_text ?? 'Åpner den originale kunngjøringen hos kilden, slik at du kan sjekke fullstendig tekst og vedlegg.',
+                },
+            ],
+        },
+    ];
 }
 
 function bidStatusBadgeClassName(status) {
@@ -652,6 +742,9 @@ export default function NoticeIndex({
         watchListActiveDescription: nt.watch_list_active_description,
         watchListEmptyHelp: nt.watch_list_empty_help,
         watchListHelp: nt.watch_list_help,
+        filterPanelCollapse: nt.filter_panel_collapse ?? 'Skjul filtre',
+        filterPanelExpand: nt.filter_panel_expand ?? 'Vis filtre',
+        filterPanelNoWatchList: nt.filter_panel_no_watch_list ?? 'Ingen bevakningsliste valgt',
         organizationPlaceholder: nt.organization_placeholder,
         keywordsPlaceholder: nt.keywords_placeholder,
         keywordsHelp: nt.keywords_help,
@@ -701,12 +794,18 @@ export default function NoticeIndex({
         procurementTypeRecurring: nt.procurement_type_recurring,
         followUpNone: nt.follow_up_none,
         followUpManualOffset: nt.follow_up_manual_offset,
-        archiveToHistoryHelp: nt.archive_to_history_help,
-        saveAndMoveToHistory: nt.save_and_move_to_history,
         moving: nt.moving,
         addInformation: nt.add_information,
-        hideMove: nt.hide_move,
         moveToHistory: nt.move_to_history,
+        inHistoryLabel: nt.in_history_label ?? 'I historikk',
+        saveAlreadyInHistory: nt.save_already_in_history ?? 'Denne kunngjøringen ligger allerede som en sak i Historikk.',
+        archiveDialogTitle: nt.archive_dialog_title ?? 'Flytt saken til historikk?',
+        archiveDialogDescription: nt.archive_dialog_description ?? 'Saken fjernes fra den aktive arbeidslisten og kan ikke flyttes tilbake. Du kan fortsatt åpne og lese saken i Historikk.',
+        archiveDialogNoGoNote: nt.archive_dialog_no_go_note ?? 'Saken er satt til No-Go. En No-Go-beslutning kan fortsatt omgjøres med «Gjenåpne sak» i saksvisningen – det er en egen, sporbar handling og ikke en vanlig flytting tilbake fra Historikk.',
+        archiveDialogTypeLabel: nt.archive_dialog_type_label ?? 'Type',
+        archiveDialogTypePlaceholder: nt.archive_dialog_type_placeholder ?? 'Velg type',
+        archiveDialogTypeHelp: nt.archive_dialog_type_help ?? 'Typen bestemmer hvordan saken vises i Historikk.',
+        archiveDialogConfirm: nt.archive_dialog_confirm ?? 'Flytt til historikk',
         historyNeedsSelection: nt.history_needs_selection,
         savingLabel: nt.saving,
         saveLabel: nt.save,
@@ -777,8 +876,12 @@ export default function NoticeIndex({
     const [expandedNoticeSummaryIds, setExpandedNoticeSummaryIds] = useState({});
     const [editingSavedNoticeId, setEditingSavedNoticeId] = useState(null);
     const [editingHistoryNoticeId, setEditingHistoryNoticeId] = useState(null);
-    const [archivingSavedNoticeId, setArchivingSavedNoticeId] = useState(null);
+    const [archivingNotice, setArchivingNotice] = useState(null);
     const [isPrivateRequestFormOpen, setIsPrivateRequestFormOpen] = useState(false);
+    // Presentation only — the filter values live in their own state and keep applying either way.
+    const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(true);
+    const archiveTriggerRef = useRef(null);
+    const archiveTypeRef = useRef(null);
     const deadlineForm = useForm({
         questions_rfi_deadline_at: '',
         rfi_submission_deadline_at: '',
@@ -1260,18 +1363,19 @@ export default function NoticeIndex({
         );
     };
 
-    const openArchiveSavedNoticeForm = (notice) => {
-        setExpandedSavedNoticeIds((current) => ({
-            ...current,
-            [notice.id]: true,
-        }));
-        setArchivingSavedNoticeId(notice.id);
+    const openArchiveSavedNoticeForm = (notice, event = null) => {
+        archiveTriggerRef.current = event?.currentTarget ?? null;
+        setArchivingNotice(notice);
         archiveHistoryForm.clearErrors();
         archiveHistoryForm.setData('history_type', '');
     };
 
     const cancelArchiveSavedNoticeForm = () => {
-        setArchivingSavedNoticeId(null);
+        if (archiveHistoryForm.processing) {
+            return;
+        }
+
+        setArchivingNotice(null);
         archiveHistoryForm.reset();
         archiveHistoryForm.clearErrors();
     };
@@ -1279,7 +1383,7 @@ export default function NoticeIndex({
     const submitArchiveSavedNotice = (notice, event = null) => {
         event?.preventDefault?.();
 
-        if (!notice.actions?.archive_url || archiveHistoryForm.data.history_type.trim() === '') {
+        if (!notice?.actions?.archive_url || archiveHistoryForm.data.history_type.trim() === '') {
             return;
         }
 
@@ -1287,7 +1391,9 @@ export default function NoticeIndex({
         archiveHistoryForm.patch(notice.actions.archive_url, {
             preserveScroll: true,
             onSuccess: () => {
-                cancelArchiveSavedNoticeForm();
+                setArchivingNotice(null);
+                archiveHistoryForm.reset();
+                archiveHistoryForm.clearErrors();
             },
         });
     };
@@ -1421,25 +1527,7 @@ export default function NoticeIndex({
                             buttonLabel={nt.page_help_button ?? 'Hjelp'}
                             title={nt.page_help_title ?? 'Om Kunngjøringer'}
                             intro={nt.page_help_intro ?? 'Kunngjøringer er inngangen til nye anbudsmuligheter.'}
-                            sections={[
-                                {
-                                    title: nt.page_help_section_usage ?? 'Slik bruker du siden',
-                                    items: [
-                                        {
-                                            title: nt.page_help_item_live_title ?? 'Live-søk',
-                                            text: nt.page_help_item_live_text ?? 'Søk direkte mot Doffin med filtre på frist, CPV, nøkkelord og relevans.',
-                                        },
-                                        {
-                                            title: nt.page_help_item_saved_title ?? 'Arbeidsliste',
-                                            text: nt.page_help_item_saved_text ?? 'Viser kunngjøringer du allerede har lagret og jobber aktivt med.',
-                                        },
-                                        {
-                                            title: nt.page_help_item_save_title ?? 'Lagre en kunngjøring',
-                                            text: nt.page_help_item_save_text ?? 'Lagrede kunngjøringer flyttes til arbeidslisten og følges opp som saker.',
-                                        },
-                                    ],
-                                },
-                            ]}
+                            sections={getNoticesHelpSections(nt)}
                         />
                     </div>
                     <p className="text-base leading-6 text-slate-600">{pageSubtitle}</p>
@@ -1480,26 +1568,49 @@ export default function NoticeIndex({
                         </section>
 
                         <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                            <div className="mb-4">
+                            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                                <div className="min-w-0">
                                     <div className="flex items-center gap-2.5">
                                         <FilterIcon className="h-5 w-5 text-slate-500" />
-                                    <h2 className="text-xl font-semibold text-slate-950">{tf.filters_title}</h2>
+                                        <h2 className="text-xl font-semibold text-slate-950">{tf.filters_title}</h2>
                                     </div>
-                                    <p className="mt-1 text-base leading-6 text-slate-600">
-                                    {noticesText.filtersDescription}
-                                    </p>
+                                    {isFilterPanelOpen ? (
+                                        <p className="mt-1 text-base leading-6 text-slate-600">
+                                            {noticesText.filtersDescription}
+                                        </p>
+                                    ) : (
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                {navigation.watch_lists}
+                                            </span>
+                                            <span className={classNames(
+                                                'text-base font-semibold',
+                                                activeWatchList ? 'text-violet-800' : 'text-slate-600',
+                                            )}>
+                                                {filterPanelSummary(activeWatchList, { none: noticesText.filterPanelNoWatchList })}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
 
-                            <div className="space-y-3.5">
-                                <label className="space-y-2">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <span className="text-base font-medium text-slate-700">{navigation.watch_lists}</span>
-                                        {activeWatchList ? (
-                                            <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-base font-medium leading-6 text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                {common.active}
-                                            </span>
-                                        ) : null}
-                                    </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsFilterPanelOpen((current) => !current)}
+                                    aria-expanded={isFilterPanelOpen}
+                                    aria-controls="live-filter-panel-body"
+                                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                >
+                                    {isFilterPanelOpen ? noticesText.filterPanelCollapse : noticesText.filterPanelExpand}
+                                    <span aria-hidden="true" className="text-base font-semibold text-slate-600">
+                                        {isFilterPanelOpen ? '−' : '+'}
+                                    </span>
+                                </button>
+                            </div>
+
+                            <div id="live-filter-panel-body" hidden={!isFilterPanelOpen} className="mt-4">
+                            <div>
+                                <label className="block space-y-2">
+                                    <span className={FILTER_LABEL_ROW}>{navigation.watch_lists}</span>
                                     <select
                                         value={selectedWatchListId}
                                         disabled={watchListOptions.length === 0}
@@ -1513,28 +1624,30 @@ export default function NoticeIndex({
                                             </option>
                                         ))}
                                     </select>
-                                    {activeWatchList ? (
-                                        <div className="rounded-xl border border-violet-200 bg-violet-50/70 px-3 py-2.5">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">{noticesText.watchListActiveTitle}</span>
-                                                <span className="text-base font-medium text-violet-900">{activeWatchList.label}</span>
-                                            </div>
-                                            <p className="mt-1 text-base leading-6 text-violet-800">
-                                                {noticesText.watchListActiveDescription}
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <p className="text-base leading-6 text-slate-600">
-                                            {watchListOptions.length === 0
-                                                ? noticesText.watchListEmptyHelp
-                                                : noticesText.watchListHelp}
-                                        </p>
-                                    )}
                                 </label>
 
-                                <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
+                                {activeWatchList ? (
+                                    <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3">
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="text-base font-semibold uppercase tracking-[0.12em] text-violet-700">{noticesText.watchListActiveTitle}</span>
+                                            <span className="text-base font-medium text-violet-900">{activeWatchList.label}</span>
+                                        </div>
+                                        <p className="mt-1.5 text-base leading-6 text-violet-800">
+                                            {noticesText.watchListActiveDescription}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-base leading-6 text-slate-600">
+                                        {watchListOptions.length === 0
+                                            ? noticesText.watchListEmptyHelp
+                                            : noticesText.watchListHelp}
+                                    </p>
+                                )}
+
+                                {/* The watch list above is context; the fields below are the controls it fills in. */}
+                                <div className="mt-6 grid gap-x-4 gap-y-5 border-t border-slate-100 pt-5 md:grid-cols-2 xl:grid-cols-3">
                                     <label className="space-y-2">
-                                        <span className="text-base font-medium text-slate-700">{tf.organization_name}</span>
+                                        <span className={FILTER_LABEL_ROW}>{tf.organization_name}</span>
                                         <input
                                             type="text"
                                             value={organizationName}
@@ -1549,9 +1662,15 @@ export default function NoticeIndex({
                                         onSelectedItemsChange={setSelectedCpvItems}
                                         popularItems={cpvSelector?.popular ?? []}
                                         labelHint={nt.hint_cpv}
+                                        texts={{
+                                            cpv_selected_one: nt.cpv_selected_one,
+                                            cpv_selected_many: nt.cpv_selected_many,
+                                            cpv_show_codes: nt.cpv_show_codes,
+                                            cpv_hide_codes: nt.cpv_hide_codes,
+                                        }}
                                     />
                                     <label className="space-y-2">
-                                        <span className="text-base font-medium text-slate-700">{tf.keyword}</span>
+                                        <span className={FILTER_LABEL_ROW}>{tf.keyword}</span>
                                         <input
                                             type="text"
                                             value={keywords}
@@ -1565,7 +1684,7 @@ export default function NoticeIndex({
                                         <p className="text-base leading-6 text-slate-600">{noticesText.keywordsHelp}</p>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-base font-medium text-slate-700">{noticesText.publicationDateLabel}</span>
+                                        <span className={FILTER_LABEL_ROW}>{noticesText.publicationDateLabel}</span>
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             <label className="space-y-1">
                                                 <span className="text-base font-medium uppercase tracking-[0.1em] text-slate-600">{noticesText.fromDateLabel}</span>
@@ -1588,7 +1707,7 @@ export default function NoticeIndex({
                                         </div>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-base font-medium text-slate-700">{common.status}</span>
+                                        <span className={FILTER_LABEL_ROW}>{common.status}</span>
                                         <select
                                             value={status}
                                             onChange={(event) => setStatus(event.target.value)}
@@ -1619,6 +1738,7 @@ export default function NoticeIndex({
                                 >
                                     {tf.clear_filters}
                                 </button>
+                            </div>
                             </div>
                         </section>
 
@@ -2234,28 +2354,31 @@ export default function NoticeIndex({
                                                             <button
                                                                 type="button"
                                                                 onClick={() => saveNotice(notice)}
-                                                                disabled={notice.is_saved}
+                                                                disabled={notice.is_saved || notice.is_in_history}
+                                                                title={notice.is_in_history ? noticesText.saveAlreadyInHistory : undefined}
                                                                 className={classNames(
                                                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-base font-semibold transition',
                                                                     notice.is_saved
                                                                         ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
-                                                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                        : notice.is_in_history
+                                                                            ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
+                                                                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                             >
-                                                                {notice.is_saved ? noticesText.savedLabel : common.save}
+                                                                {notice.is_saved
+                                                                    ? noticesText.savedLabel
+                                                                    : notice.is_in_history
+                                                                        ? noticesText.inHistoryLabel
+                                                                        : common.save}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
                                                             <button
                                                                 type="button"
-                                                                onClick={() => (
-                                                                    archivingSavedNoticeId === notice.id
-                                                                        ? cancelArchiveSavedNoticeForm()
-                                                                        : openArchiveSavedNoticeForm(notice)
-                                                                )}
+                                                                onClick={(event) => openArchiveSavedNoticeForm(notice, event)}
                                                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                {archivingSavedNoticeId === notice.id ? noticesText.hideMove : noticesText.moveToHistory}
+                                                                {noticesText.moveToHistory}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
@@ -2300,62 +2423,6 @@ export default function NoticeIndex({
                                                         ) : null}
                                                     </div>
                                                 </div>
-
-                                                {isSavedMode && archivingSavedNoticeId === notice.id ? (
-                                                    <form
-                                                        onSubmit={(event) => submitArchiveSavedNotice(notice, event)}
-                                                        className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                                                    >
-                                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                            <div>
-                                                            <div className="text-base font-semibold uppercase tracking-[0.16em] text-slate-600">
-                                                                    {noticesText.moveToHistory}
-                                                                </div>
-                                                                <p className="mt-1 text-base leading-6 text-slate-600">
-                                                                    {noticesText.archiveToHistoryHelp}
-                                                                </p>
-                                                            </div>
-
-                                                            <button
-                                                                type="button"
-                                                                onClick={cancelArchiveSavedNoticeForm}
-                                                                className="inline-flex min-h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                                            >
-                                                                {noticesText.cancelLabel}
-                                                            </button>
-                                                        </div>
-
-                                                        <label className="mt-4 block space-y-2">
-                                                            <span className="text-base font-medium text-slate-700">Type</span>
-                                                            <select
-                                                                value={archiveHistoryForm.data.history_type}
-                                                                onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
-                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                            >
-                                                                <option value="">Velg type</option>
-                                                                {historyTypeOptions.map((option) => (
-                                                                    <option key={option.value} value={option.value}>
-                                                                        {option.label}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                            {archiveHistoryForm.errors.history_type ? (
-                                                                <p className="text-base text-rose-600">{archiveHistoryForm.errors.history_type}</p>
-                                                            ) : null}
-                                                        </label>
-
-                                                        <div className="mt-4 flex flex-wrap gap-3">
-                                                            <button
-                                                                type="button"
-                                                                onClick={(event) => submitArchiveSavedNotice(notice, event)}
-                                                                disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
-                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            >
-                                                                {archiveHistoryForm.processing ? noticesText.moving : noticesText.saveAndMoveToHistory}
-                                                            </button>
-                                                        </div>
-                                                    </form>
-                                                ) : null}
 
                                                         {(isSavedMode || (isHistoryMode && isDetailsExpanded)) ? (
                                                             <div className="mt-4 border-t border-slate-100 pt-4 text-base leading-6 text-slate-600">
@@ -2841,6 +2908,74 @@ export default function NoticeIndex({
                     </div>
 
                 </div>
+
+                <ActionDialog
+                    isOpen={archivingNotice !== null}
+                    onClose={cancelArchiveSavedNoticeForm}
+                    closeDisabled={archiveHistoryForm.processing}
+                    titleId="archive-notice-title"
+                    initialFocusRef={archiveTypeRef}
+                    returnFocusRef={archiveTriggerRef}
+                >
+                    <form onSubmit={(event) => submitArchiveSavedNotice(archivingNotice, event)}>
+                        <h2 id="archive-notice-title" className="text-xl font-semibold tracking-tight text-slate-950">
+                            {noticesText.archiveDialogTitle}
+                        </h2>
+                        {archivingNotice?.title ? (
+                            <p className="mt-1 text-base font-medium text-slate-700">{archivingNotice.title}</p>
+                        ) : null}
+
+                        <p className="mt-3 text-base leading-6 text-slate-600">{noticesText.archiveDialogDescription}</p>
+
+                        {archivingNotice?.bid_status === 'no_go' ? (
+                            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-base leading-6 text-amber-900">
+                                {noticesText.archiveDialogNoGoNote}
+                            </p>
+                        ) : null}
+
+                        <label className="mt-5 block space-y-1.5" htmlFor="archive_history_type">
+                            <span className="text-base font-medium text-slate-800">{noticesText.archiveDialogTypeLabel}</span>
+                            <select
+                                ref={archiveTypeRef}
+                                id="archive_history_type"
+                                value={archiveHistoryForm.data.history_type}
+                                onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
+                                aria-describedby={archiveHistoryForm.errors.history_type ? 'archive_history_type_error' : 'archive_history_type_help'}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                <option value="">{noticesText.archiveDialogTypePlaceholder}</option>
+                                {historyTypeOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            {archiveHistoryForm.errors.history_type ? (
+                                <p id="archive_history_type_error" className="text-base text-rose-600">{archiveHistoryForm.errors.history_type}</p>
+                            ) : (
+                                <p id="archive_history_type_help" className="text-base text-slate-600">{noticesText.archiveDialogTypeHelp}</p>
+                            )}
+                        </label>
+
+                        <div className="mt-6 flex flex-wrap gap-3">
+                            <button
+                                type="submit"
+                                disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-base font-semibold text-amber-800 transition hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {archiveHistoryForm.processing ? noticesText.moving : noticesText.archiveDialogConfirm}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={cancelArchiveSavedNoticeForm}
+                                disabled={archiveHistoryForm.processing}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {common.cancel}
+                            </button>
+                        </div>
+                    </form>
+                </ActionDialog>
             </div>
         </CustomerAppLayout>
     );

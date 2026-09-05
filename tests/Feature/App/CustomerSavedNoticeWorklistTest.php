@@ -11,12 +11,14 @@ use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticeInfoItem;
+use App\Models\SavedNoticeNoGoDecision;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -39,6 +41,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
     private bool $createdSavedNoticePhaseCommentsTable = false;
 
+    private bool $createdSavedNoticeNoGoDecisionsTable = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -50,6 +54,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->ensureSavedNoticeInfoItemsTable();
         $this->ensureSavedNoticeUserAccessTable();
         $this->ensureSavedNoticePhaseCommentsTable();
+        $this->ensureSavedNoticeNoGoDecisionsTable();
         DB::beginTransaction();
     }
 
@@ -84,6 +89,10 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         if ($this->createdSavedNoticePhaseCommentsTable) {
             Schema::dropIfExists('saved_notice_phase_comments');
             DB::statement('DROP SEQUENCE IF EXISTS saved_notice_phase_comments_id_seq CASCADE');
+        }
+
+        if ($this->createdSavedNoticeNoGoDecisionsTable) {
+            Schema::dropIfExists('saved_notice_no_go_decisions');
         }
 
         parent::tearDown();
@@ -3045,18 +3054,25 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ]);
     }
 
-    public function test_saving_an_archived_notice_reactivates_it_in_saved_mode(): void
+    public function test_saving_an_archived_notice_does_not_bring_it_back_to_the_work_list(): void
     {
         $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1009', 'Kom tilbake', archived: true);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009',
+            'Blir liggende i historikk',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_LOST,
+        );
+        $archivedAt = $savedNotice->archived_at;
 
         $response = $this->actingAs($context['admin'])
             ->withSession(['_token' => 'test-token'])
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
-            ->from('/app/notices?mode=history')
+            ->from('/app/notices?mode=live')
             ->post('/app/notices/save', [
                 'notice_id' => $savedNotice->external_id,
-                'title' => 'Kom tilbake',
+                'title' => 'Blir liggende i historikk',
                 'buyer_name' => 'Procynia',
                 'external_url' => 'https://doffin.no/notices/2026-1009',
                 'summary' => 'Oppdatert oppsummering',
@@ -3066,21 +3082,234 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 'cpv_code' => '72000000',
             ]);
 
-        $response->assertRedirect('/app/notices?mode=history');
+        $response->assertRedirect('/app/notices?mode=live');
+        $response->assertSessionHas('error', trans('procynia.notices.save_already_in_history'));
 
         $savedNotice->refresh();
 
-        $this->assertNull($savedNotice->archived_at);
-        $this->assertNull($savedNotice->history_type);
+        $this->assertTrue($savedNotice->archived_at->equalTo($archivedAt));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_LOST, $savedNotice->history_type);
 
         $savedPage = $this->inertiaPage(
             $this->actingAs($context['admin'])
                 ->get('/app/notices?mode=saved'),
         );
 
-        $this->assertSame(1, $savedPage['props']['worklist']['saved_count']);
-        $this->assertSame(0, $savedPage['props']['worklist']['history_count']);
-        $this->assertSame('Kom tilbake', $savedPage['props']['notices']['data'][0]['title']);
+        $this->assertSame(0, $savedPage['props']['worklist']['saved_count']);
+        $this->assertSame(1, $savedPage['props']['worklist']['history_count']);
+    }
+
+    public function test_saving_an_archived_notice_creates_no_duplicate_case(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009-dup',
+            'Ingen duplikat',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+        );
+
+        $this->actingAs($context['admin'])
+            ->post('/app/notices/save', [
+                'notice_id' => $savedNotice->external_id,
+                'title' => 'Ingen duplikat',
+                'buyer_name' => 'Procynia',
+                'external_url' => "https://doffin.no/notices/{$savedNotice->external_id}",
+                'summary' => 'Oppdatert oppsummering',
+                'publication_date' => '2026-03-20',
+                'deadline' => '2026-04-20',
+                'status' => 'ACTIVE',
+                'cpv_code' => '72000000',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(1, SavedNotice::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('external_id', $savedNotice->external_id)
+            ->count());
+    }
+
+    public function test_saving_an_archived_notice_does_not_overwrite_case_data(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009-data',
+            'Behold saksdata',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_LOST,
+            rfiSubmissionDeadlineAt: '2026-04-01 00:00:00',
+            rfpSubmissionDeadlineAt: '2026-05-01 00:00:00',
+            referenceNumber: 'REF-4711',
+            contactPersonName: 'Kari Nordmann',
+            contactPersonEmail: 'kari@example.test',
+            notes: 'Interne notater som ikke skal forsvinne.',
+        );
+
+        $this->actingAs($context['admin'])
+            ->post('/app/notices/save', [
+                'notice_id' => $savedNotice->external_id,
+                'title' => 'Overskrevet tittel',
+                'buyer_name' => 'Annen oppdragsgiver',
+                'external_url' => "https://doffin.no/notices/{$savedNotice->external_id}",
+                'summary' => 'Overskrevet oppsummering',
+                'publication_date' => '2026-03-20',
+                'deadline' => '2026-04-20',
+                'status' => 'ACTIVE',
+                'cpv_code' => '72000000',
+            ])
+            ->assertRedirect();
+
+        $savedNotice->refresh();
+
+        $this->assertSame('Behold saksdata', $savedNotice->title);
+        $this->assertSame('REF-4711', $savedNotice->reference_number);
+        $this->assertSame('Kari Nordmann', $savedNotice->contact_person_name);
+        $this->assertSame('kari@example.test', $savedNotice->contact_person_email);
+        $this->assertSame('Interne notater som ikke skal forsvinne.', $savedNotice->notes);
+        $this->assertNotNull($savedNotice->rfi_submission_deadline_at);
+        $this->assertNotNull($savedNotice->rfp_submission_deadline_at);
+    }
+
+    public function test_an_archived_private_request_stays_in_history_when_a_new_one_is_registered(): void
+    {
+        $context = $this->customerAdminContext();
+        $archivedRequest = $this->createSavedNotice(
+            $context['customer']->id,
+            'private-request-archived-1',
+            'Arkivert privat forespørsel',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        );
+        $archivedAt = $archivedRequest->archived_at;
+
+        $this->actingAs($context['admin'])
+            ->post('/app/notices/save', [
+                'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                'title' => 'Arkivert privat forespørsel',
+                'buyer_name' => 'Procynia',
+                'summary' => 'Ny registrering av samme mulighet.',
+            ])
+            ->assertRedirect();
+
+        $archivedRequest->refresh();
+
+        $this->assertTrue($archivedRequest->archived_at->equalTo($archivedAt));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, $archivedRequest->history_type);
+    }
+
+    public function test_there_is_no_route_for_restoring_an_archived_case(): void
+    {
+        $routeUris = collect(Route::getRoutes()->getRoutes())
+            ->map(fn ($route): string => (string) $route->uri())
+            ->filter(fn (string $uri): bool => str_starts_with($uri, 'app/notices'))
+            ->values();
+
+        foreach (['restore', 'unarchive', 'reactivate'] as $forbidden) {
+            $this->assertTrue(
+                $routeUris->every(fn (string $uri): bool => ! str_contains($uri, $forbidden)),
+                "A case in History must not be restorable: found an 'app/notices' route containing '{$forbidden}'.",
+            );
+        }
+    }
+
+    public function test_archiving_a_case_removes_it_from_the_work_list_and_lists_it_in_history(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009-archive',
+            'Skal til historikk',
+            savedByUserId: $context['admin']->id,
+        );
+
+        $this->assertNull($savedNotice->archived_at);
+
+        $this->actingAs($context['admin'])
+            ->patch("/app/notices/saved/{$savedNotice->id}/archive", [
+                'history_type' => SavedNotice::HISTORY_TYPE_WON,
+            ])
+            ->assertRedirect();
+
+        $savedNotice->refresh();
+
+        $this->assertNotNull($savedNotice->archived_at);
+        $this->assertSame(SavedNotice::HISTORY_TYPE_WON, $savedNotice->history_type);
+
+        $savedPage = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get('/app/notices?mode=saved'),
+        );
+        $this->assertSame(0, $savedPage['props']['worklist']['saved_count']);
+        $this->assertSame(1, $savedPage['props']['worklist']['history_count']);
+
+        $historyPage = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get('/app/notices?mode=history'),
+        );
+        $this->assertSame('Skal til historikk', $historyPage['props']['notices']['data'][0]['title']);
+    }
+
+    public function test_an_archived_case_that_is_not_no_go_cannot_be_reopened_through_the_no_go_flow(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009-not-no-go',
+            'Tapt sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_LOST,
+            bidStatus: SavedNotice::BID_STATUS_LOST,
+        );
+        $archivedAt = $savedNotice->archived_at;
+
+        $this->actingAs($context['admin'])
+            ->patch("/app/notices/saved/{$savedNotice->id}/reopen-after-no-go", [
+                'reopen_reason' => 'Forsøker å hente saken tilbake.',
+                'confirm_reopen' => true,
+            ])
+            ->assertForbidden();
+
+        $savedNotice->refresh();
+
+        $this->assertSame(SavedNotice::BID_STATUS_LOST, $savedNotice->bid_status);
+        $this->assertTrue($savedNotice->archived_at->equalTo($archivedAt));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_LOST, $savedNotice->history_type);
+    }
+
+    public function test_saving_an_archived_no_go_notice_does_not_reactivate_it(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1009-no-go',
+            'Stoppet sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_NO_GO,
+            bidStatus: SavedNotice::BID_STATUS_NO_GO,
+            bidClosedAt: '2026-03-20 10:00:00',
+            bidClosureReason: SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+        );
+        $archivedAt = $savedNotice->archived_at;
+
+        $this->actingAs($context['admin'])
+            ->post('/app/notices/save', [
+                'notice_id' => $savedNotice->external_id,
+                'title' => 'Stoppet sak',
+                'buyer_name' => 'Procynia',
+                'external_url' => "https://doffin.no/notices/{$savedNotice->external_id}",
+                'summary' => 'Oppdatert oppsummering',
+                'publication_date' => '2026-03-20',
+                'deadline' => '2026-04-20',
+                'status' => 'ACTIVE',
+                'cpv_code' => '72000000',
+            ])
+            ->assertRedirect();
+
+        $savedNotice->refresh();
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $savedNotice->bid_status);
+        $this->assertTrue($savedNotice->archived_at->equalTo($archivedAt));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_NO_GO, $savedNotice->history_type);
     }
 
     public function test_saved_notice_payload_includes_case_link_bid_status_and_submission_count(): void
@@ -3968,6 +4197,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             ['Move to In Progress', 'Set as No-Go'],
             array_column($actions, 'label'),
         );
+        $this->assertSame([], $page['props']['notice']['no_go_decisions']);
+        $this->assertFalse($page['props']['notice']['actions']['can_reopen_after_no_go']);
+        $this->assertNull($page['props']['notice']['actions']['reopen_after_no_go_url']);
     }
 
     public function test_saved_notice_case_show_page_exposes_late_stage_actions_for_submitted_case(): void
@@ -4077,6 +4309,310 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(SavedNotice::BID_CLOSURE_REASON_CAPACITY, $savedNotice->bid_closure_reason);
         $this->assertSame('Too many parallel bids.', $savedNotice->bid_closure_note);
         $this->assertSame('2026-03-31 16:45:00', $savedNotice->bid_closed_at?->format('Y-m-d H:i:s'));
+        $this->assertDatabaseHas('saved_notice_no_go_decisions', [
+            'saved_notice_id' => $savedNotice->id,
+            'closed_by_user_id' => $context['admin']->id,
+            'closure_reason' => SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+            'closure_note' => 'Too many parallel bids.',
+        ]);
+
+        $page = $this->inertiaPage($this->actingAs($context['admin'])->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])));
+        $this->assertTrue($page['props']['notice']['actions']['can_reopen_after_no_go']);
+        $this->assertSame(
+            route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]),
+            $page['props']['notice']['actions']['reopen_after_no_go_url'],
+        );
+        $this->assertSame([], $page['props']['notice']['actions']['status_actions']);
+        $this->assertCount(1, $page['props']['notice']['no_go_decisions']);
+        $this->assertSame(SavedNotice::BID_CLOSURE_REASON_CAPACITY, $page['props']['notice']['no_go_decisions'][0]['closure_reason']);
+    }
+
+    public function test_customer_can_reopen_no_go_only_through_explicit_endpoint_and_history_is_preserved(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-01 09:30:00'));
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-reopen-no-go',
+            'Reopen No-Go',
+            bidStatus: SavedNotice::BID_STATUS_NO_GO,
+            bidClosedAt: '2026-03-31 16:45:00',
+            bidClosureReason: SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+            bidClosureNote: 'Too many parallel bids.',
+        );
+
+        $this->actingAs($context['admin'])
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]), [
+                'reopen_reason' => 'Kapasiteten er nå tilgjengelig.',
+                'confirm_reopen' => true,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $savedNotice->refresh();
+        $this->assertSame(SavedNotice::BID_STATUS_GO_NO_GO, $savedNotice->bid_status);
+        $this->assertNull($savedNotice->bid_closed_at);
+        $this->assertNull($savedNotice->bid_closure_reason);
+        $this->assertNull($savedNotice->bid_closure_note);
+
+        $decision = SavedNoticeNoGoDecision::query()->where('saved_notice_id', $savedNotice->id)->sole();
+        $this->assertSame(SavedNotice::BID_CLOSURE_REASON_CAPACITY, $decision->closure_reason);
+        $this->assertSame('Too many parallel bids.', $decision->closure_note);
+        $this->assertSame($context['admin']->id, $decision->reopened_by_user_id);
+        $this->assertSame('Kapasiteten er nå tilgjengelig.', $decision->reopen_reason);
+        $this->assertSame('2026-04-01 09:30:00', $decision->reopened_at?->format('Y-m-d H:i:s'));
+
+        $page = $this->inertiaPage($this->actingAs($context['admin'])->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])));
+        $this->assertSame([SavedNotice::BID_STATUS_IN_PROGRESS, SavedNotice::BID_STATUS_NO_GO], array_column($page['props']['notice']['actions']['status_actions'], 'status'));
+        $this->assertFalse($page['props']['notice']['actions']['can_reopen_after_no_go']);
+        $this->assertSame('Too many parallel bids.', $page['props']['notice']['no_go_decisions'][0]['closure_note']);
+        $this->assertSame('Kapasiteten er nå tilgjengelig.', $page['props']['notice']['no_go_decisions'][0]['reopen_reason']);
+    }
+
+    public function test_reopen_no_go_requires_reason_and_explicit_confirmation(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-reopen-validation', 'Reopen validation', bidStatus: SavedNotice::BID_STATUS_NO_GO);
+
+        $response = $this->actingAs($context['admin'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]), []);
+
+        $response->assertSessionHasErrors(['reopen_reason', 'confirm_reopen']);
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $savedNotice->fresh()->bid_status);
+    }
+
+    public function test_reopen_no_go_rejects_blank_or_too_long_reason(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-reopen-reason-validation', 'Reopen reason validation', bidStatus: SavedNotice::BID_STATUS_NO_GO);
+        $url = route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]);
+
+        $this->actingAs($context['admin'])
+            ->patch($url, [
+                'reopen_reason' => '',
+                'confirm_reopen' => true,
+            ])
+            ->assertSessionHasErrors(['reopen_reason']);
+
+        $this->actingAs($context['admin'])
+            ->patch($url, [
+                'reopen_reason' => str_repeat('a', 4001),
+                'confirm_reopen' => true,
+            ])
+            ->assertSessionHasErrors(['reopen_reason']);
+
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $savedNotice->fresh()->bid_status);
+    }
+
+    public function test_reopen_endpoint_rejects_cases_that_are_not_no_go(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-reopen-not-no-go', 'Not No-Go', bidStatus: SavedNotice::BID_STATUS_GO_NO_GO);
+
+        $this->actingAs($context['admin'])
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]), [
+                'reopen_reason' => 'Dette skal avvises.',
+                'confirm_reopen' => true,
+            ])
+            ->assertForbidden();
+
+        $this->assertSame(SavedNotice::BID_STATUS_GO_NO_GO, $savedNotice->fresh()->bid_status);
+    }
+
+    public function test_customer_can_reopen_archived_no_go_and_the_archive_state_is_audited(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-reopen-archived-no-go',
+            'Archived No-Go',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_NO_GO,
+            bidStatus: SavedNotice::BID_STATUS_NO_GO,
+            bidClosedAt: '2026-03-31 16:45:00',
+            bidClosureReason: SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+        );
+        $archivedAt = $savedNotice->archived_at;
+
+        $this->actingAs($context['admin'])
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]), [
+                'reopen_reason' => 'Kunden har endret forutsetningene.',
+                'confirm_reopen' => true,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $savedNotice->refresh();
+        $this->assertSame(SavedNotice::BID_STATUS_GO_NO_GO, $savedNotice->bid_status);
+        $this->assertNull($savedNotice->archived_at);
+        $this->assertNull($savedNotice->history_type);
+
+        $decision = SavedNoticeNoGoDecision::query()->where('saved_notice_id', $savedNotice->id)->sole();
+        $this->assertTrue($decision->reopened_from_archived_at->equalTo($archivedAt));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_NO_GO, $decision->reopened_from_history_type);
+    }
+
+    public function test_contributor_cannot_reopen_no_go_case(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-reopen-forbidden', 'Protected No-Go', bidStatus: SavedNotice::BID_STATUS_NO_GO);
+        $contributor = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $contributor->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+        ]);
+
+        $this->actingAs($contributor)
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]), [
+                'reopen_reason' => 'Forsøk uten beslutningsrett.',
+                'confirm_reopen' => true,
+            ])
+            ->assertForbidden();
+
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $savedNotice->fresh()->bid_status);
+
+        $page = $this->inertiaPage($this->actingAs($contributor)->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])));
+        $this->assertFalse($page['props']['notice']['actions']['can_reopen_after_no_go']);
+        $this->assertNull($page['props']['notice']['actions']['reopen_after_no_go_url']);
+        $this->assertSame([], $page['props']['notice']['actions']['status_actions']);
+    }
+
+    public function test_viewer_and_user_from_another_customer_cannot_reopen_no_go_case(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-reopen-viewer-forbidden', 'Protected No-Go', bidStatus: SavedNotice::BID_STATUS_NO_GO);
+        $viewer = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $viewer->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+        ]);
+        $otherCustomer = $this->customerAdminContext('Annen kunde');
+        $url = route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]);
+        $payload = [
+            'reopen_reason' => 'Forsøk uten riktig tilgang.',
+            'confirm_reopen' => true,
+        ];
+
+        $this->actingAs($viewer)
+            ->patch($url, $payload)
+            ->assertForbidden();
+
+        $this->actingAs($otherCustomer['admin'])
+            ->patch($url, $payload)
+            ->assertNotFound();
+
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $savedNotice->fresh()->bid_status);
+    }
+
+    public function test_department_scoped_bid_manager_can_reopen_only_no_go_cases_within_management_scope(): void
+    {
+        $context = $this->customerAdminContext();
+        $sales = $this->createDepartment($context['customer']->id, 'Sales');
+        $delivery = $this->createDepartment($context['customer']->id, 'Delivery');
+        $manager = User::factory()->create([
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_DEPARTMENTS,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+        ]);
+        $manager->managedDepartments()->sync([$sales->id]);
+
+        $managedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-reopen-managed-no-go',
+            'Sales No-Go',
+            bidStatus: SavedNotice::BID_STATUS_NO_GO,
+            organizationalDepartmentId: $sales->id,
+        );
+        $blockedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-reopen-blocked-no-go',
+            'Delivery No-Go',
+            bidStatus: SavedNotice::BID_STATUS_NO_GO,
+            organizationalDepartmentId: $delivery->id,
+        );
+
+        $this->actingAs($manager)
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $managedNotice->id]), [
+                'reopen_reason' => 'Salgsteamet har bekreftet kapasitet.',
+                'confirm_reopen' => true,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $managedNotice->id]));
+
+        $this->assertSame(SavedNotice::BID_STATUS_GO_NO_GO, $managedNotice->fresh()->bid_status);
+
+        $this->actingAs($manager)
+            ->patch(route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $blockedNotice->id]), [
+                'reopen_reason' => 'Forsøk utenfor ansvarsområdet.',
+                'confirm_reopen' => true,
+            ])
+            ->assertForbidden();
+
+        $this->assertSame(SavedNotice::BID_STATUS_NO_GO, $blockedNotice->fresh()->bid_status);
+    }
+
+    public function test_multiple_no_go_and_reopen_cycles_create_separate_audit_rows(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-reopen-multiple-cycles',
+            'Repeated No-Go',
+            bidStatus: SavedNotice::BID_STATUS_GO_NO_GO,
+        );
+        $statusUrl = route('app.notices.saved.status.update', ['savedNotice' => $savedNotice->id]);
+        $reopenUrl = route('app.notices.saved.reopen-after-no-go', ['savedNotice' => $savedNotice->id]);
+
+        foreach ([
+            [SavedNotice::BID_CLOSURE_REASON_CAPACITY, 'Kapasitet mangler.', 'Kapasitet er frigjort.'],
+            [SavedNotice::BID_CLOSURE_REASON_STRATEGIC_MISMATCH, 'Strategien er ikke riktig.', 'Strategien er oppdatert.'],
+        ] as [$closureReason, $closureNote, $reopenReason]) {
+            $this->actingAs($context['admin'])
+                ->patch($statusUrl, [
+                    'status' => SavedNotice::BID_STATUS_NO_GO,
+                    'bid_closure_reason' => $closureReason,
+                    'bid_closure_note' => $closureNote,
+                ])
+                ->assertRedirect();
+
+            $this->actingAs($context['admin'])
+                ->patch($reopenUrl, [
+                    'reopen_reason' => $reopenReason,
+                    'confirm_reopen' => true,
+                ])
+                ->assertRedirect();
+        }
+
+        $decisions = SavedNoticeNoGoDecision::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $decisions);
+        $this->assertSame([
+            SavedNotice::BID_CLOSURE_REASON_CAPACITY,
+            SavedNotice::BID_CLOSURE_REASON_STRATEGIC_MISMATCH,
+        ], $decisions->pluck('closure_reason')->all());
+        $this->assertSame([
+            'Kapasitet er frigjort.',
+            'Strategien er oppdatert.',
+        ], $decisions->pluck('reopen_reason')->all());
+        $this->assertTrue($decisions->every(fn (SavedNoticeNoGoDecision $decision): bool => $decision->reopened_at !== null));
     }
 
     public function test_invalid_saved_notice_status_transition_is_rejected_by_status_endpoint(): void
@@ -4741,6 +5277,31 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             ->update([
                 'bid_status' => SavedNotice::BID_STATUS_DISCOVERED,
             ]);
+    }
+
+    private function ensureSavedNoticeNoGoDecisionsTable(): void
+    {
+        if (Schema::hasTable('saved_notice_no_go_decisions')) {
+            return;
+        }
+
+        Schema::create('saved_notice_no_go_decisions', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('saved_notice_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('closed_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('closure_reason')->nullable();
+            $table->text('closure_note')->nullable();
+            $table->timestamp('closed_at')->nullable();
+            $table->foreignId('reopened_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('reopen_reason')->nullable();
+            $table->timestamp('reopened_at')->nullable();
+            $table->timestamp('reopened_from_archived_at')->nullable();
+            $table->string('reopened_from_history_type')->nullable();
+            $table->timestamps();
+        });
+
+        $this->createdSavedNoticeNoGoDecisionsTable = true;
     }
 
     private function ensureBidSubmissionsTable(): void

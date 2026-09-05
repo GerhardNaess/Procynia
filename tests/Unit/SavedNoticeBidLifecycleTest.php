@@ -173,6 +173,17 @@ class SavedNoticeBidLifecycleTest extends TestCase
         $notice->transitionBidStatus(SavedNotice::BID_STATUS_SUBMITTED);
     }
 
+    public function test_no_go_cannot_return_to_go_no_go_via_ordinary_transition(): void
+    {
+        $notice = new SavedNotice([
+            'bid_status' => SavedNotice::BID_STATUS_NO_GO,
+        ]);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $notice->transitionBidStatus(SavedNotice::BID_STATUS_GO_NO_GO);
+    }
+
     public function test_archived_cannot_transition_to_any_other_status(): void
     {
         $notice = new SavedNotice([
