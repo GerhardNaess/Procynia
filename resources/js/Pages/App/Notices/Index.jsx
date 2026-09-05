@@ -689,7 +689,6 @@ export default function NoticeIndex({
         deadlineQuestionsRfiLabel: nt.deadline_questions_rfi_label,
         deadlineRfiSubmissionLabel: nt.deadline_rfi_submission_label,
         deadlineQuestionsRfpLabel: nt.deadline_questions_rfp_label,
-        deadlineRfpSubmissionLabel: nt.deadline_rfp_submission_label,
         deadlineAwardDateLabel: nt.deadline_award_date_label,
         registeredLabel: nt.registered_label,
         buyerLabel: nt.buyer_label,
