@@ -2071,6 +2071,13 @@ class NoticeController extends Controller
             ->all();
     }
 
+    /**
+     * The next deadline a case is actually working towards.
+     *
+     * The official notice deadline IS the RFP submission deadline — the rest of the model already
+     * treats it that way, so the separate rfp_submission_deadline_at column is legacy and stays
+     * out of this on purpose. No type outranks another: the earliest future candidate wins.
+     */
     private function nextRelevantSavedNoticeDeadline(SavedNotice $notice): array
     {
         $now = now();
@@ -2085,6 +2092,10 @@ class NoticeController extends Controller
             [
                 'type' => 'RFI',
                 'at' => $notice->rfi_submission_deadline_at,
+            ],
+            [
+                'type' => 'RFP',
+                'at' => $notice->deadline,
             ],
         ])
             ->merge($businessReviewCandidates)

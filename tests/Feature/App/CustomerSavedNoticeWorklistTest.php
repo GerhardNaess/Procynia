@@ -639,7 +639,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             '2026-1010',
             'Bare RFI',
             rfiSubmissionDeadlineAt: $rfiDeadline->toDateTimeString(),
-            deadline: now()->addDay()->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -658,6 +658,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             '2026-1011',
             'Bare RFP',
             rfpSubmissionDeadlineAt: now()->addDays(9)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -668,7 +669,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertNull($payload['next_deadline_at']);
     }
 
-    public function test_saved_payload_returns_rfi_when_both_rfi_and_rfp_exist(): void
+    public function test_saved_payload_returns_rfi_when_both_rfi_and_the_legacy_rfp_field_exist(): void
     {
         $context = $this->customerAdminContext();
         $rfiDeadline = now()->addDays(10)->startOfDay();
@@ -678,6 +679,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'Begge frister',
             rfiSubmissionDeadlineAt: $rfiDeadline->toDateTimeString(),
             rfpSubmissionDeadlineAt: now()->addDays(4)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -697,6 +699,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'RFI passert, RFP ignorert',
             rfiSubmissionDeadlineAt: now()->subDays(2)->startOfDay()->toDateTimeString(),
             rfpSubmissionDeadlineAt: now()->addDays(7)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -714,8 +717,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $context['customer']->id,
             '2026-rfp-ignore',
             'Kun gammel manuell RFP-frist',
-            deadline: '2026-06-22 00:00:00',
-            rfpSubmissionDeadlineAt: '2026-07-24 00:00:00',
+            deadline: null,
+            rfpSubmissionDeadlineAt: now()->addDays(30)->startOfDay()->toDateTimeString(),
             status: null,
         );
 
@@ -727,13 +730,14 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertNotSame('2026-07-24', substr((string) $payload['next_deadline_at'], 0, 10));
     }
 
-    public function test_saved_payload_marks_deadline_metadata_missing_when_neither_rfi_nor_rfp_exists(): void
+    public function test_saved_payload_marks_deadline_metadata_missing_when_neither_rfi_nor_the_official_deadline_exists(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice(
             $context['customer']->id,
             '2026-1014',
             'Mangler metadata',
+            deadline: null,
             status: null,
         );
 
@@ -752,6 +756,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             '2026-1014-q',
             'Kun spørsmål',
             questionsDeadlineAt: now()->addDays(2)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -773,6 +778,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             questionsRfiDeadlineAt: now()->addDays(2)->startOfDay()->toDateTimeString(),
             questionsRfpDeadlineAt: now()->addDays(6)->startOfDay()->toDateTimeString(),
             awardDateAt: now()->addDays(12)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -786,7 +792,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(substr((string) $savedNotice->award_date_at?->toIso8601String(), 0, 10), substr((string) $payload['award_date_at'], 0, 10));
     }
 
-    public function test_saved_payload_marks_deadline_as_expired_when_all_submission_deadlines_are_past(): void
+    public function test_saved_payload_marks_deadline_as_expired_when_rfi_and_the_legacy_rfp_field_are_past(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice(
@@ -795,6 +801,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'Utløpte frister',
             rfiSubmissionDeadlineAt: now()->subDays(6)->startOfDay()->toDateTimeString(),
             rfpSubmissionDeadlineAt: now()->subDays(1)->startOfDay()->toDateTimeString(),
+            deadline: null,
             status: null,
         );
 
@@ -803,6 +810,137 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame('expired', $payload['deadline_state']);
         $this->assertNull($payload['next_deadline_type']);
         $this->assertNull($payload['next_deadline_at']);
+    }
+
+    public function test_saved_payload_treats_the_official_deadline_as_the_rfp_submission_deadline(): void
+    {
+        // The common case: a notice saved straight from Doffin, with only the official deadline.
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(21)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-official-only',
+            'Kun offisiell frist',
+            deadline: $officialDeadline->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFP', $payload['next_deadline_type']);
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+    }
+
+    public function test_saved_payload_is_not_expired_when_rfi_has_passed_but_the_official_deadline_has_not(): void
+    {
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(21)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-rfi-past',
+            'RFI passert, offisiell frist igjen',
+            rfiSubmissionDeadlineAt: now()->subDays(2)->startOfDay()->toDateTimeString(),
+            deadline: $officialDeadline->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertNotSame('expired', $payload['deadline_state']);
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFP', $payload['next_deadline_type']);
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+    }
+
+    public function test_saved_payload_returns_the_official_deadline_when_it_falls_before_rfi(): void
+    {
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(3)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-official-first',
+            'Offisiell frist først',
+            rfiSubmissionDeadlineAt: now()->addDays(8)->startOfDay()->toDateTimeString(),
+            deadline: $officialDeadline->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFP', $payload['next_deadline_type']);
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+    }
+
+    public function test_saved_payload_returns_rfi_when_it_falls_before_the_official_deadline(): void
+    {
+        $context = $this->customerAdminContext();
+        $rfiDeadline = now()->addDays(3)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-rfi-first',
+            'RFI først',
+            rfiSubmissionDeadlineAt: $rfiDeadline->toDateTimeString(),
+            deadline: now()->addDays(8)->startOfDay()->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFI', $payload['next_deadline_type']);
+        $this->assertSame($rfiDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+    }
+
+    public function test_saved_payload_returns_business_review_when_it_falls_before_rfi_and_the_official_deadline(): void
+    {
+        $context = $this->customerAdminContext();
+        $businessReviewAt = now()->addDay()->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-br-first',
+            'Business Review først',
+            rfiSubmissionDeadlineAt: now()->addDays(3)->startOfDay()->toDateTimeString(),
+            deadline: now()->addDays(8)->startOfDay()->toDateTimeString(),
+            status: null,
+        );
+        SavedNoticeBusinessReview::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'business_review_at' => $businessReviewAt->toDateString(),
+        ]);
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('Business Review', $payload['next_deadline_type']);
+        $this->assertSame($businessReviewAt->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+    }
+
+    public function test_saved_payload_still_ignores_the_legacy_rfp_submission_field_alongside_the_official_deadline(): void
+    {
+        // rfp_submission_deadline_at is legacy and no longer editable; the official deadline is
+        // what counts. A nearer legacy value must not pull the next deadline forward.
+        $context = $this->customerAdminContext();
+        $officialDeadline = now()->addDays(10)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1016-legacy-rfp',
+            'Legacy RFP-felt ignoreres',
+            rfpSubmissionDeadlineAt: now()->addDays(2)->startOfDay()->toDateTimeString(),
+            deadline: $officialDeadline->toDateTimeString(),
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('upcoming', $payload['deadline_state']);
+        $this->assertSame('RFP', $payload['next_deadline_type']);
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertNotSame(
+            now()->addDays(2)->format('Y-m-d'),
+            substr((string) $payload['next_deadline_at'], 0, 10),
+        );
     }
 
     public function test_saved_payload_includes_compact_expanded_metadata_fields(): void
@@ -2675,9 +2813,15 @@ class CustomerSavedNoticeWorklistTest extends TestCase
     public function test_saved_payload_reflects_updated_deadlines_and_canonical_deadline_after_update(): void
     {
         $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1021', 'Payload oppdateres', status: null);
+        $officialDeadline = now()->addDays(20)->startOfDay();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1021',
+            'Payload oppdateres',
+            deadline: $officialDeadline->toDateTimeString(),
+            status: null,
+        );
         $rfiDeadline = now()->addDays(8)->toDateString();
-        $rfpDeadline = now()->addDays(3)->toDateString();
 
         $this->actingAs($context['admin'])
             ->withSession(['_token' => 'test-token'])
@@ -2687,7 +2831,6 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 'questions_rfi_deadline_at' => now()->addDays(1)->toDateString(),
                 'rfi_submission_deadline_at' => $rfiDeadline,
                 'questions_rfp_deadline_at' => now()->addDays(2)->toDateString(),
-                'rfp_submission_deadline_at' => $rfpDeadline,
                 'award_date_at' => now()->addDays(12)->toDateString(),
             ])
             ->assertRedirect('/app/notices?mode=saved');
@@ -2697,11 +2840,14 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(now()->addDays(1)->toDateString(), substr((string) $payload['questions_rfi_deadline_at'], 0, 10));
         $this->assertSame($rfiDeadline, substr((string) $payload['rfi_submission_deadline_at'], 0, 10));
         $this->assertSame(now()->addDays(2)->toDateString(), substr((string) $payload['questions_rfp_deadline_at'], 0, 10));
-        $this->assertSame($rfpDeadline, substr((string) $payload['rfp_submission_deadline_at'], 0, 10));
         $this->assertSame(now()->addDays(12)->toDateString(), substr((string) $payload['award_date_at'], 0, 10));
+
+        // The canonical next deadline is the earliest future candidate: RFI at +8 days, ahead of
+        // the official deadline at +20. Question dates and the award date never compete.
         $this->assertSame('upcoming', $payload['deadline_state']);
-        $this->assertSame('RFP', $payload['next_deadline_type']);
-        $this->assertSame($rfpDeadline, substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertSame('RFI', $payload['next_deadline_type']);
+        $this->assertSame($rfiDeadline, substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertSame($officialDeadline->format('Y-m-d'), substr((string) $payload['deadline'], 0, 10));
     }
 
     public function test_customer_can_archive_saved_notice_and_see_it_in_history(): void
