@@ -363,26 +363,72 @@ men med forskjellig eier:
 Dokument 63 har i dag `owner_user_id = 10`. Bruker 8 er altså den **gamle** eieren, og raden hennes
 står fortsatt igjen — med status `approved`.
 
-Dette tyder på at eierbytte ikke rydder godkjenningskrav korrekt: en tidligere eier kan bli stående
-som aktiv, nødvendig godkjenner etter at ansvaret er overført.
+**BEKREFTET (steg 1, gjennomført).** Reproduksjonstest viste at årsaken er bredere enn eierbytte.
+Rader er nøklet på `(version, owner, source_documents_hash)`, og `syncForPageVersion()` var **rent
+additiv** — den opprettet manglende rader, men fjernet eller merket aldri rader som ikke lenger var
+påkrevd. **Enhver** endring i dokumentsettet forlot en foreldreløs rad, ikke bare eierbytte:
+
+| Hendelse | Følge |
+|---|---|
+| Dokument bytter eier | Gammel eiers rad blir liggende |
+| Dokument nr. 2 kommer til | Forrige rad (annen hash) blir liggende |
+| Dokument slutter å bidra | Eierens rad blir liggende |
+
+**Konsekvensen var en permanent vranglås.** `approvedCurrentVersionPageIds()` krever at *alle* rader
+på gjeldende versjon er `approved`. Én foreldreløs `pending`-rad låste siden ute av godkjent kunnskap
+for godt — raden var ikke i kravsettet, så den dukket aldri opp i noe godkjenningsgrensesnitt, og
+ingen kunne avgjøre den. Siden falt dermed stille ut av `RequirementWikiCatalogBuilder`, katalogen
+som grunnlegger AI-svar. Verifisert: med alle gjeldende krav innvilget var siden fortsatt utelatt.
 
 **Konsekvens:** den eksisterende approval-mekanismen må ikke tas i bruk som **obligatorisk
 kvalitetsport** før dette er undersøkt. Gjør vi det nå, kan en side enten bli blokkert av en
 person som ikke lenger har ansvar, eller regnes som godkjent på grunnlag av en beslutning tatt av
 noen som ikke lenger er eier.
 
-### TODO — må gjøres før approval brukes som port
+### Rettingen — gjennomført
 
-- [ ] Verifiser `EnterpriseWikiDocumentOwnerApprovalService::syncForDocument()` — hva skjer med
-      eksisterende rader ved eierbytte?
-- [ ] Definer skillet mellom **historikk** (beslutninger som ble tatt, skal bevares) og **aktivt
-      godkjenningskrav** (hvem må godkjenne nå). I dag ser disse ut til å dele samme rad.
-- [ ] Sørg for at gammel eier ikke blir stående som aktiv nødvendig godkjenner etter eierskifte.
-- [ ] Avklar hva som skjer med en `approved`-rad fra gammel eier: teller den fortsatt, eller må ny
-      eier godkjenne på nytt?
+Rotårsaken var at én rad besvarte to spørsmål samtidig: *«må denne eieren fortsatt godkjenne?»* og
+*«hva ble besluttet?»*. Ingenting skilte dem.
 
-**ÅPENT** Om side 275 er et reelt produksjonsmønster eller et artefakt av testdata. Må bekreftes mot
-et miljø med ekte data før omfanget vurderes.
+`superseded_at` (nullable timestamp) gjør skillet eksplisitt. `syncForPageVersion()` pensjonerer nå
+hver rad kravsettet ikke lenger ber om. Radene **slettes ikke** — de bærer en reell beslutning med
+`decided_at` og `decided_by_user_id`, og invariant 11 krever at det er sporbart.
+
+**BESLUTNING** Ved eierskifte må ny eier godkjenne på nytt; gammel eiers beslutning bevares som
+historikk og teller ikke. Dette var allerede avgjort i koden — `approvedCurrentVersionPageIds()`
+dokumenterer at «a regenerated page gets fresh pending rows and loses its approval automatically», og
+`EnterpriseWikiDocumentOwnerReassignmentTest` fastsetter at eierbytte gjenåpner en fullført kjøring.
+Rettingen innfører altså ingen ny produktregel; den gjør den eksisterende gjennomførbar.
+
+**BEKREFTET INVARIANT (steg 1)**
+
+> For en gitt Wiki-versjon skal aktive document-owner approvals til enhver tid reflektere dagens
+> eierskap til de kildedokumentene som faktisk bidrar til versjonen. Én eier har nøyaktig én aktiv
+> rad per versjon, med `source_document_ids` som union av eierens bidragende dokumenter. Rader som
+> ikke lenger er påkrevd merkes `superseded_at` og bevares som historikk — de teller aldri som
+> utestående krav og kan ikke avgjøres.
+
+**ÅPENT** Om side 275 er et reelt produksjonsmønster eller et artefakt av testdata.
+
+**BESLUTNING — eksisterende rader backfilles ikke.** Rettingen virker fremover. En rad pensjoneres
+først neste gang versjonen synkes, og det er tilstrekkelig: `syncForPageVersion()` kjøres på hver
+kjøring, ved hvert eierbytte via `syncForDocument()`, og hver gang completion-gaten evalueres. En
+versjon som er i bruk vil derfor rette seg selv.
+
+Konkret betyr det:
+
+- Ingen global reconciliation.
+- Ingen Artisan-kommando.
+- Ingen data-backfill.
+- Ingen masseendring av historiske rader.
+
+Eksisterende foreldreløse rader kan bli stående til neste naturlige sync. **Dette aksepteres.** En
+versjon som aldri re-synkes er per definisjon en versjon ingen arbeider med, og en engangsrydding
+ville skrevet `superseded_at` på rader ut fra et kravsett beregnet i dag — uten den kjøringen eller
+eierendringen som faktisk gjorde dem foreldreløse. Det gir dårligere sporbarhet enn å la sync eie
+overgangen.
+
+Det skal derfor ikke bygges separat datarensing for denne tabellen.
 
 ---
 
@@ -477,7 +523,7 @@ Rekkefølgen er valgt slik at hvert steg står på et verifisert fundament. Sær
 være ferdig før approval-mekanismen brukes som port (jf. 9), og at steg 3 må være ferdig før
 review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er publisert.
 
-1. Verifisere og rette document-owner approval sync
+1. ~~Verifisere og rette document-owner approval sync~~ — **gjennomført**, se 9
 2. Definere og backfille Wiki-sideeier
 3. Rette versjons-/current-/published-modellen
 4. Definere Wiki review capability
@@ -489,7 +535,8 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 10. Begrense Spør Wiki og retrieval til approved/published
 11. Oppdatere Wiki UI
 12. Oppdatere PageHelp
-13. Migrere og backfille eksisterende data
+13. Migrere og backfille eksisterende data — gjelder sideeier (steg 2) og `is_current`-semantikken
+    (steg 3). **Document-owner approvals er eksplisitt unntatt**: de backfilles ikke, se 9.
 14. Full regresjons- og sikkerhetstest
 
 ---

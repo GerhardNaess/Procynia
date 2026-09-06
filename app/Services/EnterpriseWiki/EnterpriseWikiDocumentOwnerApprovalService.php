@@ -49,7 +49,38 @@ class EnterpriseWikiDocumentOwnerApprovalService
             $approvals->push($this->materializeRequirement($version, $page, $run, $requirement));
         }
 
+        $this->supersedeRowsNoLongerRequired($version, $approvals);
+
         return $approvals;
+    }
+
+    /**
+     * Retire every row on this version that the current requirements no longer ask for.
+     *
+     * Rows are keyed by (version, owner, source_documents_hash), so an ordinary lifecycle event —
+     * a document changing owner, or a second document joining the version — leaves the previous row
+     * behind. It is not deleted: it records a real decision, with decided_at and decided_by_user_id,
+     * and the approval model has to stay auditable. It is marked historic instead, so that the two
+     * questions the row used to answer at once — "is this still required?" and "what was decided?" —
+     * become separable.
+     *
+     * Without this, one orphaned pending row made approvedCurrentVersionPageIds() exclude the page
+     * for good: it demands that every row on the current version be approved, while the orphan was
+     * invisible to every approval surface and so could never be decided.
+     *
+     * @param  Collection<int, EnterpriseWikiPageVersionDocumentOwnerApproval>  $required
+     */
+    private function supersedeRowsNoLongerRequired(EnterpriseWikiPageVersion $version, Collection $required): void
+    {
+        $keepIds = $required
+            ->map(static fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): int => (int) $approval->id)
+            ->all();
+
+        EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->whereNull('superseded_at')
+            ->when($keepIds !== [], fn ($query) => $query->whereNotIn('id', $keepIds))
+            ->update(['superseded_at' => now()]);
     }
 
     /**
@@ -222,6 +253,12 @@ class EnterpriseWikiDocumentOwnerApprovalService
             return false;
         }
 
+        // A superseded row is history. Deciding it would record a fresh decision against a
+        // requirement that no longer exists — System Owner included.
+        if ($approval->isSuperseded()) {
+            return false;
+        }
+
         if ($actor->isSystemOwner()) {
             return true;
         }
@@ -336,6 +373,7 @@ class EnterpriseWikiDocumentOwnerApprovalService
             )
             ->where('enterprise_wiki_pages.customer_id', $customerId)
             ->where('enterprise_wiki_page_versions.is_current', true)
+            ->whereNull('approvals.superseded_at')
             ->when($pageIds !== [], fn ($query) => $query->whereIn('enterprise_wiki_page_versions.enterprise_wiki_page_id', $pageIds))
             ->groupBy('enterprise_wiki_page_versions.enterprise_wiki_page_id')
             ->havingRaw('count(*) = count(*) filter (where approvals.approval_status = ?)', [
@@ -582,8 +620,21 @@ class EnterpriseWikiDocumentOwnerApprovalService
             ->first();
 
         if ($approval instanceof EnterpriseWikiPageVersionDocumentOwnerApproval) {
+            $revive = [];
+
             if ($run !== null && $approval->enterprise_wiki_ingest_run_id === null) {
-                $approval->forceFill(['enterprise_wiki_ingest_run_id' => $run->id])->save();
+                $revive['enterprise_wiki_ingest_run_id'] = $run->id;
+            }
+
+            // The same (owner, hash) can become required again — a document handed back, or a
+            // second document removed again. The row is the requirement, so it returns to active
+            // with the decision it already carries rather than being duplicated.
+            if ($approval->superseded_at !== null) {
+                $revive['superseded_at'] = null;
+            }
+
+            if ($revive !== []) {
+                $approval->forceFill($revive)->save();
             }
 
             return $approval->loadMissing(['page', 'pageVersion.page', 'documentOwner', 'decidedBy', 'overriddenBy']);

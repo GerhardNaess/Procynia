@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -35,6 +36,7 @@ class EnterpriseWikiPageVersionDocumentOwnerApproval extends Model
         'override_reason',
         'overridden_by_user_id',
         'overridden_at',
+        'superseded_at',
     ];
 
     protected function casts(): array
@@ -50,6 +52,7 @@ class EnterpriseWikiPageVersionDocumentOwnerApproval extends Model
             'is_override' => 'boolean',
             'overridden_by_user_id' => 'integer',
             'overridden_at' => 'datetime',
+            'superseded_at' => 'datetime',
         ];
     }
 
@@ -96,5 +99,21 @@ class EnterpriseWikiPageVersionDocumentOwnerApproval extends Model
     public function isRejected(): bool
     {
         return $this->approval_status === self::APPROVAL_STATUS_REJECTED;
+    }
+
+    /**
+     * A superseded row is history: it records a decision that was really made, but the requirement
+     * it belonged to no longer exists — the document changed owner, or the document set behind this
+     * owner changed. It must never count as something still to be done, and must never be decidable.
+     */
+    public function isSuperseded(): bool
+    {
+        return $this->superseded_at !== null;
+    }
+
+    /** @param  Builder<self>  $query */
+    public function scopeActive($query)
+    {
+        return $query->whereNull('superseded_at');
     }
 }

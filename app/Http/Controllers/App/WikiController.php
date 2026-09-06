@@ -244,6 +244,7 @@ class WikiController extends Controller
             ->where('enterprise_wiki_pages.customer_id', $customerId)
             ->whereIn('enterprise_wiki_pages.status', $visibleStatuses)
             ->where('enterprise_wiki_page_versions.is_current', true)
+            ->whereNull('enterprise_wiki_page_version_document_owner_approvals.superseded_at')
             ->distinct()
             ->orderBy('users.name')
             ->orderBy('users.id')
