@@ -970,8 +970,10 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 8. ~~Implementere retur / endringskrav~~ — **gjennomført**, se 10
 9. ~~Koble notification-/task-mekanisme~~ — **gjennomført**, se 10
 10. ~~Begrense Spør Wiki og retrieval til approved/published~~ — **gjennomført**, se 6
-11. Oppdatere Wiki UI
-12. Oppdatere PageHelp
+11. ~~Oppdatere Wiki UI~~ — **gjennomført**
+12. ~~Oppdatere PageHelp~~ — **gjennomført**: hjelpen beskriver nå eierskaps-, gjennomgangs- og
+    publiseringsflyten, dokumenterer kun Wiki-sidevisningen, og den gamle teksten om «System Owner
+    only», «ingen mottaker» og «ingen varsling» er fjernet
 13. Migrere og backfille eksisterende data — gjelder sideeier (steg 2) og `is_current`-semantikken
     (steg 3). **Document-owner approvals er eksplisitt unntatt**: de backfilles ikke, se 9.
 14. Full regresjons- og sikkerhetstest
