@@ -2298,10 +2298,22 @@ class WikiController extends Controller
             abort(422);
         }
 
-        $page->status = EnterpriseWikiPage::STATUS_APPROVED;
-        $page->reviewed_at = now();
-        $page->reviewed_by_user_id = $user->id;
-        $page->save();
+        // Approval is the only thing that publishes. The working version becomes the published one
+        // here and nowhere else — a later run replaces the working version and leaves this alone, so
+        // readers keep the last approved content while new content is being reviewed.
+        $currentVersion = $page->currentVersion()->first();
+
+        DB::transaction(function () use ($page, $user, $currentVersion): void {
+            $page->status = EnterpriseWikiPage::STATUS_APPROVED;
+            $page->reviewed_at = now();
+            $page->reviewed_by_user_id = $user->id;
+
+            if ($currentVersion !== null) {
+                $page->published_version_id = $currentVersion->id;
+            }
+
+            $page->save();
+        });
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er godkjent.');
     }
@@ -2329,6 +2341,8 @@ class WikiController extends Controller
             abort(422);
         }
 
+        // published_version_id is deliberately untouched: rejecting new work must never withdraw
+        // the content that was already approved.
         $page->status = EnterpriseWikiPage::STATUS_REJECTED;
         $page->reviewed_at = now();
         $page->reviewed_by_user_id = $user->id;

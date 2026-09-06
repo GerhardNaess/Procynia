@@ -173,8 +173,11 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
 
             $markdown = $articleClient->generateArticle($pageTitle, $claimsData, $languageCode);
 
-            // Publish the generated article to the draft page version.
-            // is_current=true makes this the active version (readable via Page::currentVersion()).
+            // Write the generated article to the draft page version and make it the WORKING version.
+            // is_current is the version the pipeline operates on (QA, lint, links, claims); it is
+            // not publication. enterprise_wiki_pages.published_version_id is what readers rely on,
+            // and it is set only by WikiController::approve() — so a page that already had an
+            // approved version keeps serving it while this one is reviewed.
             // Page advances to pending_review — ready for human review, not yet approved.
             // Claims remain in approval_status='pending' — human approval is a separate step.
             $pageVersion->update([

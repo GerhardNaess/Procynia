@@ -351,9 +351,58 @@ kontroll.
 
 **Ingen draft- eller pending-versjon skal være autoritativ Wiki-kunnskap.**
 
-Dette står i direkte motstrid til dagens oppførsel (2.8) og krever at `is_current`-semantikken
-splittes: «den nyeste arbeidsversjonen» og «den publiserte versjonen» er to forskjellige begreper som
-i dag deler ett flagg.
+### Gjennomført i steg 3
+
+**BESLUTNING — modell C: `enterprise_wiki_pages.published_version_id`** (nullable FK).
+
+| Begrep | Kolonne | Betydning |
+|---|---|---|
+| Arbeidsversjon | `enterprise_wiki_page_versions.is_current` | Den versjonen pipelinen jobber på — QA, lint, lenkebygging, patching, claim-uttrekk |
+| Publisert versjon | `enterprise_wiki_pages.published_version_id` | Den versjonen lesere kan stole på. NULL = aldri godkjent |
+
+`is_current` beholder sin dokumenterte betydning. Rundt **40 lesere** i `app/` avhenger av den —
+og modellen dokumenterer den selv som «the single source of truth for a page's live/active Wiki
+version», håndhevet av `ewpv_page_single_current_unique`. Å omdefinere den til «publisert» ville
+endret betydningen under alle disse leserne samtidig.
+
+**Hvorfor én kolonne på siden, ikke et flagg på versjonen:** «maks én publisert versjon» blir sant
+*ved konstruksjon* — én kolonne rommer én verdi — i stedet for noe en partial unique index må
+forsvare. NULL er en meningsfull tilstand, ikke en manglende verdi.
+
+Avviste alternativer: **A** (gjenbruke `is_current` som publisert) endrer betydningen under ~40
+lesere; **B** (`is_published` på versjonen) krever indeks for å hindre to publiserte;
+**D** (`working_version_id`) dupliserer det `is_current` allerede uttrykker og gir to
+«current»-begreper; **E** er begge ulempene.
+
+**BEKREFTET INVARIANT**
+
+> En Wiki-side har høyst én publisert versjon, navngitt av `published_version_id`. Den settes kun
+> ved godkjenning. En ny arbeidsversjon kan eksistere parallelt uten å bli publisert. Har ingen
+> versjon vært godkjent, er `published_version_id` NULL og siden har ingen publisert versjon.
+
+**Endringer:** `WikiController::approve()` setter `published_version_id` til arbeidsversjonen,
+transaksjonelt. `reject()` rører den ikke — en avvist revisjon skal aldri trekke tilbake innhold som
+allerede er godkjent. `FinalizeEnterpriseWikiIngest` publiserer ikke; den setter kun arbeidsversjonen,
+som nå er korrekt oppførsel framfor en feil.
+
+**Migrering (gjennomført, i migrasjonen).** Datatilstand før: 1 side `approved`, 18 `draft`, ingen
+`pending_review`/`rejected`, ingen anomalier — hver side hadde nøyaktig én current-versjon.
+
+| Gruppe | Antall | Regel |
+|---|---|---|
+| A: `approved` side | 1 | `published_version_id` = current versjon |
+| D: `draft` side | 18 | NULL — aldri godkjent |
+| B, C, E, F | 0 | — |
+
+Regelen for A er entydig: siden ble godkjent mens dens current-versjon var current. Verifisert på
+side 208 — `reviewed_at` er 2026-09-06, v11 ble opprettet 2026-08-16, altså før godkjenningen.
+
+**ÅPENT — retrieval bytter ikke port i dette steget.** `RequirementWikiCatalogBuilder` leser
+fortsatt `currentVersion` bak dokumenteier-porten. Å bytte til `publishedVersion` nå ville tatt
+katalogen fra **7 til 1 side** lokalt, fordi nesten ingenting har vært sidegodkjent. Plandokumentets
+egen rekkefølge legger dette til **steg 10** («Begrense Spør Wiki og retrieval til
+approved/published»), og det hører hjemme der sammen med beslutningen om hvordan
+dokumenteier-porten skal nøkles mot publisert versjon.
 
 ---
 
@@ -559,8 +608,8 @@ Disse skal aldri brytes. Brudd er en regresjon, uansett hvor praktisk det måtte
 10. Spør Wiki skal kun bruke godkjent/publisert kunnskap.
 11. Alle review- og eierskapsendringer skal kunne auditeres.
 
-**Merk:** invariant 1, 2 og 10 er brutt i dag (2.8). Invariant 8 er brutt i dag (2.7). Invariant 3,
-5 og 6 er innfridd i steg 2 (3.1).
+**Merk:** invariant 1 og 2 er innfridd i steg 3 (6). Invariant 3, 5 og 6 er innfridd i steg 2 (3.1).
+Invariant 8 er fortsatt brutt (2.7). Invariant 10 gjenstår til steg 10 — se ÅPENT i 6.
 
 ---
 
@@ -572,7 +621,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 
 1. ~~Verifisere og rette document-owner approval sync~~ — **gjennomført**, se 9
 2. ~~Definere og backfille Wiki-sideeier~~ — **gjennomført**, se 3.1
-3. Rette versjons-/current-/published-modellen
+3. ~~Rette versjons-/current-/published-modellen~~ — **gjennomført**, se 6
 4. Definere Wiki review capability
 5. Modellere reviewer- og submit-metadata
 6. Implementere source-owner review

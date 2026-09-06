@@ -77,6 +77,7 @@ class EnterpriseWikiPage extends Model
         'status',
         'generated_by',
         'owner_user_id',
+        'published_version_id',
         'last_source_hash',
         'reviewed_at',
         'reviewed_by_user_id',
@@ -111,11 +112,31 @@ class EnterpriseWikiPage extends Model
         return $this->hasMany(EnterpriseWikiPageVersion::class);
     }
 
+    /**
+     * The version the pipeline is working on — what QA, lint, link building, patching and claim
+     * extraction operate against. Being current says nothing about whether anyone has approved it.
+     */
     public function currentVersion(): HasOne
     {
         return $this->hasOne(EnterpriseWikiPageVersion::class)
             ->where('is_current', true)
             ->latestOfMany('version_number');
+    }
+
+    /**
+     * The version readers may rely on: the one that was approved. Null until the page has been
+     * approved for the first time, which is why "no published version" is a real state rather than
+     * a missing value. It only moves on approval — a new run replaces the working version, never
+     * this one. See docs/enterprise-wiki-approval-model.md §6.
+     */
+    public function publishedVersion(): BelongsTo
+    {
+        return $this->belongsTo(EnterpriseWikiPageVersion::class, 'published_version_id');
+    }
+
+    public function hasPublishedVersion(): bool
+    {
+        return $this->published_version_id !== null;
     }
 
     public function claims(): HasMany
