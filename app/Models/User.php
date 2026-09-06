@@ -365,9 +365,11 @@ class User extends Authenticatable implements FilamentUser
     /**
      * May this user act on a version that has been assigned to somebody?
      *
-     * Normally only the named reviewer. A System Owner may step in when a review is stuck — that is
-     * the administrative override the model already gives them (§4) — but never on a version they
-     * submitted themselves, which is the one rule the override does not reach.
+     * Only the named reviewer, or a System Owner stepping in when a review is stuck — but never on
+     * a version they submitted themselves, which is the one rule the override does not reach.
+     *
+     * A version with no reviewer cannot be decided at all. Ingest leaves pages in draft, so the only
+     * way into pending_review is submit(), which always names one.
      */
     public function canReviewEnterpriseWikiVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): bool
     {
@@ -375,9 +377,11 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
+        // No fallback for an unassigned version. Reaching pending_review means somebody handed the
+        // version over through submit(), so a missing reviewer is broken state, not a licence for
+        // anyone with the capability to decide it.
         if ($version->reviewer_user_id === null) {
-            // Never submitted through the assignment flow — capability alone decides, as before.
-            return true;
+            return false;
         }
 
         return (int) $version->reviewer_user_id === (int) $this->id || $this->isSystemOwner();

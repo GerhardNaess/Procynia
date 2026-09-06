@@ -42,6 +42,7 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         [$customer, $page] = $this->pendingPage();
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
         $reviewer = $this->user($customer, User::BID_ROLE_BID_MANAGER);
+        $this->submitTo($page, $reviewer);
 
         $this->actingAs($reviewer)
             ->patch("/app/wiki/{$page->slug}/approve")
@@ -54,6 +55,8 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     public function test_a_user_without_the_capability_is_refused(): void
     {
         [$customer, $page] = $this->pendingPage();
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
         $contributor = $this->user($customer, User::BID_ROLE_CONTRIBUTOR);
 
         $this->actingAs($contributor)
@@ -72,6 +75,9 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         );
 
         [$customer, $page] = $this->pendingPage();
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, []);
 
         foreach ([User::BID_ROLE_BID_MANAGER, User::BID_ROLE_CONTRIBUTOR] as $role) {
             $this->actingAs($this->user($customer, $role))
@@ -84,8 +90,11 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     public function test_a_system_owner_can_still_approve_without_being_granted_it(): void
     {
         [$customer, $page] = $this->pendingPage();
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, []);
 
+        // A System Owner takes over an assignment that is not theirs.
         $this->actingAs($this->user($customer, User::BID_ROLE_SYSTEM_OWNER))
             ->patch("/app/wiki/{$page->slug}/approve")
             ->assertRedirect(route('app.wiki.show', $page->slug));
@@ -96,7 +105,9 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     // D. never across customers
     public function test_a_reviewer_from_another_customer_cannot_approve(): void
     {
-        [, $page] = $this->pendingPage();
+        [$customer, $page] = $this->pendingPage();
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
         $otherCustomer = $this->customer('Fremmed Kunde AS');
         $this->grant($otherCustomer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
 
@@ -111,6 +122,8 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     public function test_claim_approval_does_not_confer_page_approval(): void
     {
         [$customer, $page] = $this->pendingPage();
+        $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $this->submitTo($page, $this->user($customer, User::BID_ROLE_BID_MANAGER));
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_CLAIMS, ['contributor']);
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, []);
 
@@ -149,12 +162,14 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     {
         [$customer, $page] = $this->pendingPage();
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $reviewer = $this->user($customer, User::BID_ROLE_BID_MANAGER);
+        $this->submitTo($page, $reviewer);
 
         $this->actingAs($this->user($customer, User::BID_ROLE_CONTRIBUTOR))
             ->patch("/app/wiki/{$page->slug}/reject")
             ->assertForbidden();
 
-        $this->actingAs($this->user($customer, User::BID_ROLE_BID_MANAGER))
+        $this->actingAs($reviewer)
             ->patch("/app/wiki/{$page->slug}/reject")
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
@@ -231,16 +246,23 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
     // Fixtures
     // =========================================================================
 
-    /** @return array{0: Customer, 1: EnterpriseWikiPage} */
+    /**
+     * A draft page with a working version and an owner who can hand it over.
+     *
+     * @return array{0: Customer, 1: EnterpriseWikiPage}
+     */
     private function pendingPage(string $status = EnterpriseWikiPage::STATUS_PENDING_REVIEW): array
     {
         $customer = $this->customer();
+        $pageOwner = $this->user($customer, User::BID_ROLE_CONTRIBUTOR);
+
         $page = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
+            'owner_user_id' => $pageOwner->id,
             'slug' => 'review-side-'.Str::lower(Str::random(6)),
             'title' => 'Review Side',
             'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
-            'status' => $status,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
         ]);
@@ -253,7 +275,20 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
             'generated_by_model' => 'gpt-5',
         ]);
 
-        return [$customer, $page];
+        return [$customer, $page->fresh()];
+    }
+
+    /**
+     * Hand the page to this reviewer, the way the product does. Reaching pending_review any other
+     * way would leave the version without an assignment, which approve() now refuses outright.
+     */
+    private function submitTo(EnterpriseWikiPage $page, User $reviewer): void
+    {
+        $owner = User::query()->findOrFail($page->owner_user_id);
+
+        $this->actingAs($owner)
+            ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
     }
 
     /** @param list<string> $roles */

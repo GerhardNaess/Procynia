@@ -207,9 +207,9 @@ class EnterpriseWikiIngestFlowTest extends TestCase
 
         $page->refresh();
         $this->assertSame(
-            EnterpriseWikiPage::STATUS_PENDING_REVIEW,
+            EnterpriseWikiPage::STATUS_DRAFT,
             $page->status,
-            'Page must advance to pending_review — not approved.',
+            'A finished run leaves the page in draft — reaching review requires a submission with a named reviewer.',
         );
 
         // Claims must still be pending after finalize (human approval step is separate).
@@ -308,7 +308,7 @@ class EnterpriseWikiIngestFlowTest extends TestCase
 
         return Customer::query()->create([
             'name' => $name,
-            'slug' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,

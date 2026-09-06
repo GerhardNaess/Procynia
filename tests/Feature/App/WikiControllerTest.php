@@ -560,15 +560,10 @@ class WikiControllerTest extends TestCase
     // submit() — draft → pending_review | rejected → draft
     // =========================================================================
 
-    public function test_system_owner_can_submit_draft_to_pending_review(): void
+    public function test_the_page_owner_can_submit_a_draft_to_pending_review(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Send til gjennomgang');
-
-        $this->actingAs($owner)
-            ->patch('/app/wiki/'.$page->slug.'/submit')
-            ->assertRedirect();
+        [$page] = $this->createPageAwaitingReview($customer, 'Send til gjennomgang');
 
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
@@ -641,13 +636,12 @@ class WikiControllerTest extends TestCase
     // approve() — pending_review → approved
     // =========================================================================
 
-    public function test_system_owner_can_approve_pending_review_page(): void
+    public function test_the_assigned_reviewer_can_approve_a_pending_review_page(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Godkjenn meg');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Godkjenn meg');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/approve')
             ->assertRedirect();
 
@@ -657,16 +651,15 @@ class WikiControllerTest extends TestCase
     public function test_approve_sets_reviewed_fields_on_page(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Reviewed felt');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Reviewed felt');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/approve')
             ->assertRedirect();
 
         $fresh = $page->fresh();
         $this->assertNotNull($fresh->reviewed_at);
-        $this->assertSame($owner->id, $fresh->reviewed_by_user_id);
+        $this->assertSame($reviewer->id, $fresh->reviewed_by_user_id);
     }
 
     public function test_contributor_cannot_approve_page(): void
@@ -758,13 +751,12 @@ class WikiControllerTest extends TestCase
     // reject() — pending_review → rejected
     // =========================================================================
 
-    public function test_system_owner_can_reject_pending_review_page(): void
+    public function test_the_assigned_reviewer_can_reject_a_pending_review_page(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Avvis meg');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Avvis meg');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/reject')
             ->assertRedirect();
 
@@ -774,16 +766,15 @@ class WikiControllerTest extends TestCase
     public function test_reject_sets_reviewed_fields_on_page(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Avvis felt');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Avvist felt');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/reject')
             ->assertRedirect();
 
         $fresh = $page->fresh();
         $this->assertNotNull($fresh->reviewed_at);
-        $this->assertSame($owner->id, $fresh->reviewed_by_user_id);
+        $this->assertSame($reviewer->id, $fresh->reviewed_by_user_id);
     }
 
     public function test_contributor_cannot_reject_page(): void
@@ -988,10 +979,9 @@ class WikiControllerTest extends TestCase
     public function test_approve_redirects_with_success_flash(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Flash godkjenn');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Flash godkjenn');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/approve')
             ->assertRedirect()
             ->assertSessionHas('success');
@@ -1000,10 +990,9 @@ class WikiControllerTest extends TestCase
     public function test_reject_redirects_with_success_flash(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Flash avvis');
+        [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Flash avvis');
 
-        $this->actingAs($owner)
+        $this->actingAs($reviewer)
             ->patch('/app/wiki/'.$page->slug.'/reject')
             ->assertRedirect()
             ->assertSessionHas('success');
@@ -1012,13 +1001,9 @@ class WikiControllerTest extends TestCase
     public function test_submit_redirects_with_success_flash(): void
     {
         $customer = $this->createCustomer();
-        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Flash submit');
+        [$page] = $this->createPageAwaitingReview($customer, 'Flash submit');
 
-        $this->actingAs($owner)
-            ->patch('/app/wiki/'.$page->slug.'/submit')
-            ->assertRedirect()
-            ->assertSessionHas('success');
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
     public function test_bid_manager_can_view_pending_review_page(): void
@@ -2524,6 +2509,40 @@ class WikiControllerTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * A page in pending_review with a real assignment behind it.
+     *
+     * Reaching that status now means somebody submitted the version to a named reviewer — ingest
+     * leaves pages in draft — so these tests go through submit() rather than writing the status.
+     *
+     * @return array{0: EnterpriseWikiPage, 1: User} the page and its assigned reviewer
+     */
+    private function createPageAwaitingReview(Customer $customer, string $title): array
+    {
+        $pageOwner = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, $title);
+        $page->forceFill(['owner_user_id' => $pageOwner->id])->save();
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
+            'content_markdown' => '# '.$title,
+            'generated_by_model' => 'gpt-5',
+        ]);
+
+        $settings = $customer->resolvedPermissionSettings();
+        $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES] = ['bid_manager'];
+        $customer->forceFill(['permission_settings' => $settings])->save();
+        $reviewer = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+
+        $this->actingAs($pageOwner)
+            ->patch('/app/wiki/'.$page->slug.'/submit', ['reviewer_user_id' => $reviewer->id])
+            ->assertRedirect();
+
+        return [$page->fresh(), $reviewer];
     }
 
     private function createPage(

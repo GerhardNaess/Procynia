@@ -700,6 +700,65 @@ må fortsatt handle. Testet eksplisitt.
 **Eksisterende data:** 19 gjeldende versjoner, alle med minst ett aktivt krav, 7 med flere eiere;
 14 pending, 12 approved, 0 rejected, 0 superseded. Konsistent — ingen backfill.
 
+### Gjennomført i steg 7 — endelig Wiki-review
+
+**BESLUTNING — semantikk.** Endelig review er *publiseringsbeslutningen*: den tildelte kontrolløren
+vurderer hele arbeidsversjonen og avgjør om den skal bli den publiserte. Den er ikke claim approval,
+ikke dokumenteiergodkjenning, og ikke bare en statusendring.
+
+**Forutsetninger, håndhevet i denne rekkefølgen** — valgt slik et menneske ville spurt, og gjenbrukt
+både av endepunktet og av `final_approval_blocker` i payloaden, så skjerm og API ikke kan si
+forskjellige ting:
+
+1. siden er `pending_review` — ellers 422 («allerede avgjort» / «ikke sendt til gjennomgang»)
+2. brukeren har `approve_wiki_pages` — ellers 403
+3. brukeren er ikke innsenderen — ellers 403
+4. brukeren er tildelt kontrollør, eller System Owner som trår inn — ellers 403
+5. alle aktive dokumenteierkrav er godkjent — ellers 409
+
+**KRITISK INVARIANT — en godkjent side navngir alltid det som ble godkjent.** `status` og
+`published_version_id` skrives i samme operasjon. Finnes ingen arbeidsversjon, avbrytes hele
+godkjenningen framfor å publisere ingenting.
+
+**Samtidighet.** Alle forutsetninger revalideres inne i transaksjonen etter `lockForUpdate()` på
+siderad-en. Låsen serialiserer to samtidige forsøk: den første committer, den andre leser en side som
+ikke lenger er `pending_review` og får 422. `reviewed_by_user_id` tilhører dermed alltid den som
+faktisk vant.
+
+**Historikk bevares.** `submitted_by_user_id`, `submitted_at` og `reviewer_user_id` nullstilles ikke
+ved godkjenning — de er journalen over hvem som overleverte versjonen og til hvem, og den er verdt
+mer etter beslutningen enn før. Den forrige publiserte versjonen slettes ikke; siden slutter bare å
+peke på den.
+
+**Samtidig publisert og under vurdering er en gyldig tilstand:** `page.status = pending_review` mens
+`published_version_id` peker på V1. Ved godkjenning av V2 flyttes publiseringen. Testet begge veier.
+
+**System Owner takeover** virker som besluttet i steg 5 — de kan tre inn i en annens tildeling, men
+aldri godkjenne noe de selv har sendt inn, og aldri hoppe over dokumenteierporten.
+`reviewed_by_user_id` viser den faktiske beslutningstakeren. Det finnes ikke noe eget felt som
+skiller en takeover fra en ordinær godkjenning — **ÅPENT** om det trengs; ingen ny auditmodell er
+bygget nå.
+
+**Reject** er uendret ut over å ha fått samme lås og revalidering. Publisert versjon røres ikke.
+Full retur-/endringsflyt er steg 8.
+
+**BESLUTNING — ingest ender alltid i `draft`.** En fullført kjøring produserer arbeid, ikke en
+forespørsel om gjennomgang. `FinalizeEnterpriseWikiIngest` satte tidligere `pending_review` direkte,
+noe som ga sider som ventet på ingen. Den setter nå `draft`.
+
+**KRITISK INVARIANT — `pending_review` innebærer alltid en reell tildeling.** `submit()` er den
+eneste veien inn i statusen, og den skriver alltid `submitted_by_user_id`, `submitted_at` og
+`reviewer_user_id`.
+
+Fallbacken fra steg 5 — «uten tildeling avgjør capability alene» — er derfor **fjernet**. En versjon
+uten tildeling kan ikke behandles av noen, heller ikke System Owner: den er ødelagt tilstand, og det
+finnes ingen ærlig måte å utpeke en kontrollør i ettertid. Både approve og reject svarer **409** med
+beskjed om å gjenåpne siden og sende den inn på nytt.
+
+Eksisterende data er ikke backfillet og ingen kontrollør er gjettet. Lokalt finnes **0** sider i
+`pending_review`, så ingen legacy-rader er berørt. Skulle slike finnes i et annet miljø, må de
+håndteres manuelt ved å gjenåpne og sende inn på nytt.
+
 **ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
 besluttet.
 
@@ -760,7 +819,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 4. ~~Definere Wiki review capability~~ — **gjennomført**, se 10
 5. ~~Modellere reviewer- og submit-metadata~~ — **gjennomført**, se 10
 6. ~~Implementere source-owner review~~ — **gjennomført**, se 10
-7. Implementere endelig Wiki-review
+7. ~~Implementere endelig Wiki-review~~ — **gjennomført**, se 10
 8. Implementere retur / endringskrav
 9. Koble notification-/task-mekanisme
 10. Begrense Spør Wiki og retrieval til approved/published

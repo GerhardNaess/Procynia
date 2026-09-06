@@ -1709,6 +1709,13 @@ class WikiController extends Controller
                 'source_owner_gate' => $currentVersion !== null
                     ? $this->sourceOwnerGatePayload($currentVersion, $user)
                     : null,
+                'published_version_id' => $page->published_version_id !== null ? (int) $page->published_version_id : null,
+                'working_version_id' => $currentVersion !== null ? (int) $currentVersion->id : null,
+                'can_approve_final' => $currentVersion !== null
+                    && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
+                'final_approval_blocker' => $currentVersion !== null
+                    ? $this->finalApprovalBlocker($page, $currentVersion, $user)
+                    : 'no_working_version',
             ],
             'current_version' => $currentVersion !== null ? [
                 'id' => $currentVersion->id,
@@ -2384,28 +2391,44 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-            abort(422);
-        }
-
+        $this->assertPendingReview($page);
         $this->assertMayReviewCurrentVersion($user, $page);
         $this->assertSourceOwnersHaveSignedOff($page);
 
-        // Approval is the only thing that publishes. The working version becomes the published one
-        // here and nowhere else — a later run replaces the working version and leaves this alone, so
-        // readers keep the last approved content while new content is being reviewed.
-        $currentVersion = $page->currentVersion()->first();
+        // Everything above is a fast pre-check for a good error message. The decision itself is made
+        // again under a row lock, because two reviewers — or a reviewer and a System Owner stepping
+        // in — can press approve at the same moment. The lock serialises them: the first commits,
+        // the second re-reads a page that is no longer pending_review and is told so.
+        DB::transaction(function () use ($page, $user): void {
+            $locked = EnterpriseWikiPage::query()
+                ->whereKey($page->id)
+                ->lockForUpdate()
+                ->first();
 
-        DB::transaction(function () use ($page, $user, $currentVersion): void {
-            $page->status = EnterpriseWikiPage::STATUS_APPROVED;
-            $page->reviewed_at = now();
-            $page->reviewed_by_user_id = $user->id;
+            $this->assertPendingReview($locked);
+            $this->assertMayReviewCurrentVersion($user, $locked);
+            $this->assertSourceOwnersHaveSignedOff($locked);
 
-            if ($currentVersion !== null) {
-                $page->published_version_id = $currentVersion->id;
+            $workingVersion = $locked->currentVersion()->first();
+
+            // A page cannot become approved without naming what was approved. Aborting here rather
+            // than publishing nothing keeps "approved implies published_version_id" true.
+            if ($workingVersion === null) {
+                abort(422, 'Siden har ingen arbeidsversjon å godkjenne.');
             }
 
-            $page->save();
+            // Status and publication move together, in one write. The previously published version
+            // stays in the table untouched — it simply stops being the one the page points at.
+            $locked->forceFill([
+                'status' => EnterpriseWikiPage::STATUS_APPROVED,
+                'published_version_id' => $workingVersion->id,
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $user->id,
+            ])->save();
+
+            // submitted_by_user_id, submitted_at and reviewer_user_id are deliberately left alone:
+            // they are the record of who handed this version over and to whom, and that history is
+            // worth more after the decision than before it.
         });
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er godkjent.');
@@ -2431,18 +2454,28 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
-            abort(422);
-        }
-
+        $this->assertPendingReview($page);
         $this->assertMayReviewCurrentVersion($user, $page);
 
-        // published_version_id is deliberately untouched: rejecting new work must never withdraw
-        // the content that was already approved.
-        $page->status = EnterpriseWikiPage::STATUS_REJECTED;
-        $page->reviewed_at = now();
-        $page->reviewed_by_user_id = $user->id;
-        $page->save();
+        DB::transaction(function () use ($page, $user): void {
+            $locked = EnterpriseWikiPage::query()
+                ->whereKey($page->id)
+                ->lockForUpdate()
+                ->first();
+
+            $this->assertPendingReview($locked);
+            $this->assertMayReviewCurrentVersion($user, $locked);
+
+            // published_version_id is deliberately untouched: rejecting new work must never
+            // withdraw content that was already approved.
+            $locked->forceFill([
+                'status' => EnterpriseWikiPage::STATUS_REJECTED,
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $user->id,
+            ])->save();
+        });
+
+        $page->refresh();
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
     }
@@ -2516,6 +2549,48 @@ class WikiController extends Controller
     }
 
     /**
+     * Why this user cannot give final approval right now, or null when they can.
+     *
+     * Read-only and deliberately ordered the way a person would ask: is it even out for review, may
+     * I act on it, and have the document owners finished? The same conditions approve() enforces,
+     * so the screen and the endpoint cannot disagree.
+     */
+    private function finalApprovalBlocker(EnterpriseWikiPage $page, EnterpriseWikiPageVersion $version, User $user): ?string
+    {
+        return match (true) {
+            $page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW => 'not_in_review',
+            $version->reviewer_user_id === null
+                || $version->submitted_by_user_id === null
+                || $version->submitted_at === null => 'missing_assignment',
+            ! $user->canApproveWikiPages() => 'missing_capability',
+            $version->submitted_by_user_id !== null
+                && (int) $version->submitted_by_user_id === (int) $user->id => 'own_submission',
+            ! $user->canReviewEnterpriseWikiVersion($version, $page) => 'not_assigned',
+            ! $this->documentOwnerApprovalService->sourceOwnerGateForVersion($version)['ready'] => 'source_owners_pending',
+            default => null,
+        };
+    }
+
+    /**
+     * A version can only be decided once, and only while it is actually out for review.
+     */
+    private function assertPendingReview(?EnterpriseWikiPage $page): void
+    {
+        if ($page === null) {
+            abort(404);
+        }
+
+        if ($page->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            return;
+        }
+
+        abort(422, match ($page->status) {
+            EnterpriseWikiPage::STATUS_APPROVED, EnterpriseWikiPage::STATUS_REJECTED => 'Denne versjonen er allerede avgjort.',
+            default => 'Versjonen er ikke sendt til gjennomgang.',
+        });
+    }
+
+    /**
      * Final approval waits for the document owners.
      *
      * Each active approval row is one owner confirming that the content taken from their documents
@@ -2571,9 +2646,26 @@ class WikiController extends Controller
     {
         $version = $page->currentVersion()->first();
 
-        if ($version === null || ! $user->canReviewEnterpriseWikiVersion($version, $page)) {
-            abort(403);
+        if ($version === null) {
+            abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
         }
+
+        // Legacy data only: a page that reached pending_review before ingest was changed to stop
+        // doing so. It has no submitter and no reviewer, and no honest way to invent either, so it
+        // is reported rather than waved through.
+        if ($version->reviewer_user_id === null
+            || $version->submitted_by_user_id === null
+            || $version->submitted_at === null) {
+            abort(409, 'Denne versjonen mangler en gyldig innsending og kan ikke behandles. Gjenåpne siden og send den til gjennomgang på nytt.');
+        }
+
+        if ($user->canReviewEnterpriseWikiVersion($version, $page)) {
+            return;
+        }
+
+        abort(403, $version->submitted_by_user_id !== null && (int) $version->submitted_by_user_id === (int) $user->id
+            ? 'Du kan ikke godkjenne en versjon du selv har sendt til gjennomgang.'
+            : 'Du er ikke tildelt som kontrollør for denne versjonen.');
     }
 
     /**

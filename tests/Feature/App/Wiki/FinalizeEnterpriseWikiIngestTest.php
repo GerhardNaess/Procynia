@@ -133,7 +133,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $this->assertNotNull($run->finished_at);
     }
 
-    public function test_finalize_sets_page_version_is_current_and_page_pending_review(): void
+    public function test_finalize_makes_the_version_current_and_leaves_the_page_in_draft(): void
     {
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run);
@@ -144,8 +144,10 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $pageVersion->refresh();
         $this->assertTrue($pageVersion->is_current);
 
+        // A finished run produces work, not a review request. Reaching pending_review means somebody
+        // handed the version to a named reviewer through submit().
         $page->refresh();
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->status);
     }
 
     // -------------------------------------------------------------------------
@@ -457,7 +459,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
 
         return Customer::query()->create([
             'name' => $name,
-            'slug' => Str::slug($name) . '-' . Str::lower(Str::random(6)),
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
@@ -509,7 +511,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         $page = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
-            'slug' => 'wiki-draft-' . $run->id,
+            'slug' => 'wiki-draft-'.$run->id,
             'title' => 'Test Document',
             'status' => EnterpriseWikiPage::STATUS_DRAFT,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,

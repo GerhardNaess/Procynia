@@ -75,7 +75,9 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $v2 = $this->version($page, 2, isCurrent: false);
         $v1->forceFill(['is_current' => false])->save();
         $v2->forceFill(['is_current' => true])->save();
-        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW]);
+        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $v2->forceFill(['submitted_by_user_id' => null, 'submitted_at' => null, 'reviewer_user_id' => null])->save();
+        $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
         $page->refresh();
         $this->assertSame($v2->id, (int) $page->currentVersion()->first()->id, 'v2 is the working version');
@@ -96,7 +98,9 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $v2 = $this->version($page, 2, isCurrent: false);
         $v1->forceFill(['is_current' => false])->save();
         $v2->forceFill(['is_current' => true])->save();
-        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW]);
+        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $v2->forceFill(['submitted_by_user_id' => null, 'submitted_at' => null, 'reviewer_user_id' => null])->save();
+        $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
         $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/approve");
 
@@ -125,7 +129,9 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $v2 = $this->version($page, 2, isCurrent: false);
         $v1->forceFill(['is_current' => false])->save();
         $v2->forceFill(['is_current' => true])->save();
-        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW]);
+        EnterpriseWikiPage::query()->whereKey($page->id)->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $v2->forceFill(['submitted_by_user_id' => null, 'submitted_at' => null, 'reviewer_user_id' => null])->save();
+        $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
         $this->actingAs($systemOwner)
             ->patch("/app/wiki/{$page->slug}/reject")
@@ -187,14 +193,47 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
     /**
      * @return array{0: Customer, 1: User, 2: EnterpriseWikiPage}
      */
+    /**
+     * A page with a working version, optionally already handed to a reviewer.
+     *
+     * Where a test needs pending_review it goes through submit(), because that is the only way a
+     * page reaches that status now — ingest leaves pages in draft, and approve() refuses a version
+     * with no assignment behind it.
+     *
+     * The System Owner returned acts as reviewer by taking over the assignment. These tests are
+     * about version semantics, not about who is allowed to decide.
+     *
+     * @return array{0: Customer, 1: User, 2: EnterpriseWikiPage}
+     */
     private function pageWithWorkingVersion(string $status = EnterpriseWikiPage::STATUS_DRAFT): array
     {
         $customer = $this->customer();
         $systemOwner = $this->user($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->page($customer, $status);
+        $pageOwner = $this->user($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $page = $this->page($customer, EnterpriseWikiPage::STATUS_DRAFT);
+        $page->forceFill(['owner_user_id' => $pageOwner->id])->save();
         $this->version($page, 1, isCurrent: true);
 
+        if ($status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            $this->handOver($page, $customer, $pageOwner);
+        }
+
         return [$customer, $systemOwner, $page->fresh()];
+    }
+
+    /** Submit the page to a reviewer who is not its owner, so the assignment is real. */
+    private function handOver(EnterpriseWikiPage $page, Customer $customer, User $pageOwner): void
+    {
+        $settings = $customer->resolvedPermissionSettings();
+        $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES] = ['bid_manager'];
+        $customer->forceFill(['permission_settings' => $settings])->save();
+
+        $reviewer = $this->user($customer, User::BID_ROLE_BID_MANAGER);
+
+        $this->actingAs($pageOwner)
+            ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
+            ->assertRedirect(route('app.wiki.show', $page->slug));
     }
 
     private function customer(): Customer

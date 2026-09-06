@@ -230,9 +230,12 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
         $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
     }
 
-    // L. a version that never went through the flow is handled explicitly, not guessed
-    public function test_a_pending_page_with_no_assignment_falls_back_to_the_capability(): void
+    // L. a version that never went through the flow cannot be decided at all
+    public function test_a_pending_page_with_no_assignment_cannot_be_decided(): void
     {
+        // This shape is legacy only: ingest now leaves pages in draft, so pending_review always has
+        // a submitter and a reviewer behind it. Where it does not, the version is broken state —
+        // there is no honest way to name a reviewer after the fact, so nobody may decide it.
         [$customer, , $page, $version] = $this->draftPage();
         $page->forceFill(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW])->save();
 
@@ -240,7 +243,9 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
 
         $this->actingAs($this->reviewer($customer))
             ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertRedirect(route('app.wiki.show', $page->slug));
+            ->assertStatus(409);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
     }
 
     // An assignment in flight is not silently replaced

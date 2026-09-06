@@ -178,7 +178,10 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
             // not publication. enterprise_wiki_pages.published_version_id is what readers rely on,
             // and it is set only by WikiController::approve() — so a page that already had an
             // approved version keeps serving it while this one is reviewed.
-            // Page advances to pending_review — ready for human review, not yet approved.
+            // The page stays in draft. A finished run produces work, not a review request: reaching
+            // pending_review means somebody handed the version to a named reviewer through
+            // WikiController::submit(). Setting it here used to skip that, which left pages waiting
+            // on nobody — see docs/enterprise-wiki-approval-model.md §10.
             // Claims remain in approval_status='pending' — human approval is a separate step.
             $pageVersion->update([
                 'content_markdown' => $markdown,
@@ -189,7 +192,7 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
 
             EnterpriseWikiPage::query()
                 ->where('id', $run->enterprise_wiki_page_id)
-                ->update(['status' => EnterpriseWikiPage::STATUS_PENDING_REVIEW]);
+                ->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
 
             $run->update([
                 'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
