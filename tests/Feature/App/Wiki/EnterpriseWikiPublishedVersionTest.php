@@ -134,7 +134,7 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
         $this->handOver($page->fresh(), $customer, User::query()->findOrFail($page->owner_user_id));
 
         $this->actingAs($systemOwner)
-            ->patch("/app/wiki/{$page->slug}/reject")
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
         $page->refresh();
@@ -150,7 +150,7 @@ class EnterpriseWikiPublishedVersionTest extends TestCase
     {
         [$customer, $systemOwner, $page] = $this->pageWithWorkingVersion(EnterpriseWikiPage::STATUS_PENDING_REVIEW);
 
-        $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/reject");
+        $this->actingAs($systemOwner)->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.']);
 
         $this->assertNull($page->fresh()->published_version_id);
     }

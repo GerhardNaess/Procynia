@@ -190,11 +190,11 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
         [$customer, $page, $reviewer] = $this->submittedPage();
 
         $this->actingAs($this->reviewer($customer))
-            ->patch("/app/wiki/{$page->slug}/reject")
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertForbidden();
 
         $this->actingAs($reviewer)
-            ->patch("/app/wiki/{$page->slug}/reject")
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
         $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
@@ -265,7 +265,7 @@ class EnterpriseWikiReviewAssignmentTest extends TestCase
     public function test_reopening_a_rejected_page_clears_the_assignment(): void
     {
         [$customer, $page, $reviewer] = $this->submittedPage();
-        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/reject");
+        $this->actingAs($reviewer)->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.']);
 
         $owner = User::query()->findOrFail($page->owner_user_id);
         $this->actingAs($owner)

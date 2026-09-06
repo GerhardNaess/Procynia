@@ -153,13 +153,16 @@ class EnterpriseWikiSourceOwnerGateTest extends TestCase
         $requirement = $this->activeRequirements($version)->first();
 
         $this->actingAs($owners[0])
-            ->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$requirement->id}/reject");
+            ->patch("/app/wiki/{$page->slug}/document-owner-approvals/{$requirement->id}/reject", ['comment' => 'Kildegrunnlaget stemmer ikke med innholdet.']);
 
+        // Since step 8 a refusal also sends the version back to its owner, so the page is no longer
+        // in review at all — 422 rather than 409. Either way final approval is impossible.
         $this->actingAs($this->reviewerOf($page))
             ->patch("/app/wiki/{$page->slug}/approve")
-            ->assertStatus(409);
+            ->assertStatus(422);
 
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
+        $this->assertNull($page->fresh()->published_version_id);
     }
 
     // J + K. cleared gate lets the reviewer act — and only the reviewer publishes

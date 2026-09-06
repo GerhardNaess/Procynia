@@ -166,11 +166,11 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         $this->submitTo($page, $reviewer);
 
         $this->actingAs($this->user($customer, User::BID_ROLE_CONTRIBUTOR))
-            ->patch("/app/wiki/{$page->slug}/reject")
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertForbidden();
 
         $this->actingAs($reviewer)
-            ->patch("/app/wiki/{$page->slug}/reject")
+            ->patch("/app/wiki/{$page->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect(route('app.wiki.show', $page->slug));
 
         $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
@@ -182,7 +182,8 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         $source = file_get_contents(base_path('app/Http/Controllers/App/WikiController.php'));
 
         foreach (['approve', 'reject'] as $action) {
-            $at = strpos($source, "public function {$action}(string \$slug)");
+            // reject() takes the Request now (a return carries a reason), approve() does not.
+            $at = strpos($source, "public function {$action}(") ?: null;
             $this->assertNotFalse($at, "{$action}() is gone");
 
             $body = substr($source, $at, strpos($source, 'abort(403)', $at) - $at);

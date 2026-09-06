@@ -759,6 +759,58 @@ Eksisterende data er ikke backfillet og ingen kontrollør er gjettet. Lokalt fin
 `pending_review`, så ingen legacy-rader er berørt. Skulle slike finnes i et annet miljø, må de
 håndteres manuelt ved å gjenåpne og sende inn på nytt.
 
+### Gjennomført i steg 8 — retur til sideeier
+
+**FAKTA som avgjorde modellen: innhold muteres aldri.** `EnterpriseWikiPageVersionWriter` oppretter
+alltid en ny versjon, og manuell blokkredigering *stager* en ny versjon før den promoteres. En
+versjon som har vært til gjennomgang endrer derfor aldri innhold. Det gjør gamle
+dokumenteiergodkjenninger entydige: de gjelder et innhold som ikke kan ha endret seg.
+
+**BESLUTNING — `rejected` beholdes teknisk, med semantikken «endringer kreves».** Å innføre
+`changes_requested` som ny enumverdi ville krevd endringer i statuslister, i katalogen og i
+`Wiki/Show.jsx` sitt `PAGE_STATUS_STYLES` — en fryst fil, så statusen ville rendret uten stil. `rejected`
+betyr allerede «sendt tilbake, må rettes», og flyten er `rejected` → gjenåpne → `draft` → ny
+innsending. Dette lukker åpent spørsmål 11.10.
+
+**BESLUTNING — begrunnelse er obligatorisk, og lagres i egen tabell.**
+`enterprise_wiki_page_review_events`: side, versjon, aktør, aktørrolle, hendelsestype, begrunnelse,
+tidspunkt. Append-only — ingenting oppdaterer eller sletter radene.
+
+Grunnen til egen tabell framfor felt på siden eller på godkjenningsraden: begge holder *én*
+beslutning. En side som går tre runder har tre begrunnelser verdt å lese, og å overskrive de
+tidligere mister argumentet arbeidet svarte på.
+
+Krav til begrunnelsen: obligatorisk, trimmet, 10–2000 tegn. Manglende eller tom gir **422**.
+
+**To aktører, to slags innvending:**
+
+| Aktør | Gjelder | Handling |
+|---|---|---|
+| Tildelt kontrollør | siden som helhet | `reject` med `reason` → side `rejected` |
+| Dokumenteier | innhold fra egne kilder | avvis krav med `comment` → side `rejected` |
+
+**BESLUTNING — dokumenteiers avvisning sender versjonen tilbake**, den parkerer den ikke i
+gjennomgang. Å la siden stå i `pending_review` ville vært misvisende: den venter ikke på noen, den
+venter på at sideeier svarer på en innvending. Godkjenning av et krav krever fortsatt ingen
+begrunnelse — det er bare avvisning som må forklares.
+
+**Andre eieres ventende krav røres ikke ved retur.** De tilhører denne versjonen. Sendes den inn på
+nytt uendret, står de fortsatt; redigerer eieren, blir det en ny versjon og kravsettet utledes på
+nytt fra bunnen. Det siste er testet.
+
+**Resubmit.** Gjenåpning nullstiller runden sin tildeling, og ny innsending krever at kontrollør
+oppgis eksplisitt på nytt — den forrige gjenbrukes ikke stille. Forhåndsutfylling er i så fall et
+UI-valg, ikke en backend-default.
+
+**Publisert versjon er urørt av enhver retur.** V1 publisert, V2 sendt tilbake → `published_version_id`
+peker fortsatt på V1. Først når en senere runde godkjennes flyttes den.
+
+**Payload:** `review_assignment.changes_requested` med `is_returned`, `latest` og `history` — alle
+runder, nyeste først, med aktør, rolle, begrunnelse og tidspunkt, og `applies_to_working_version` per
+hendelse. Historikken er sidebasert, ikke versjonsbasert: etter en retur redigerer eieren, som gir en
+*ny* versjon, så en versjonsbasert liste ville vært tom nettopp når eieren trenger å lese hva de ble
+bedt om å rette.
+
 **ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
 besluttet.
 
@@ -779,8 +831,8 @@ dokumentet.
 7. Hvilken notification/task-mekanisme skal brukes? (Ingen finnes for Wiki i dag.)
 8. Hvordan håndteres eksisterende sider med `owner_user_id = NULL`? (I dag: alle.)
 9. Hvordan migreres dagens `is_current`-semantikk til skillet arbeidsversjon/publisert versjon?
-10. Hvordan skal eksisterende `rejected`-status behandles i den nye modellen — blir den
-    `changes_requested`, eller beholdes begge?
+10. ~~Hvordan skal eksisterende `rejected`-status behandles~~ — **besluttet i steg 8**: `rejected`
+    beholdes teknisk og leses som «endringer kreves». Se 10.
 11. Hvilke Wiki-sider skal inngå i Spør Wiki mens review pågår?
 
 ---
@@ -820,7 +872,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 5. ~~Modellere reviewer- og submit-metadata~~ — **gjennomført**, se 10
 6. ~~Implementere source-owner review~~ — **gjennomført**, se 10
 7. ~~Implementere endelig Wiki-review~~ — **gjennomført**, se 10
-8. Implementere retur / endringskrav
+8. ~~Implementere retur / endringskrav~~ — **gjennomført**, se 10
 9. Koble notification-/task-mekanisme
 10. Begrense Spør Wiki og retrieval til approved/published
 11. Oppdatere Wiki UI

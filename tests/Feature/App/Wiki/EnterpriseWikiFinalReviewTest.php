@@ -121,11 +121,15 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $requirement = $this->activeRequirements($case['version'])->first();
 
         $this->actingAs($case['documentOwners'][0])
-            ->patch("/app/wiki/{$case['page']->slug}/document-owner-approvals/{$requirement->id}/reject");
+            ->patch("/app/wiki/{$case['page']->slug}/document-owner-approvals/{$requirement->id}/reject", ['comment' => 'Kildegrunnlaget stemmer ikke med innholdet.']);
 
+        // A refusal returns the version to its owner, so the page has left review — 422 rather than
+        // 409. What matters is that it cannot be published.
         $this->actingAs($case['reviewer'])
             ->patch("/app/wiki/{$case['page']->slug}/approve")
-            ->assertStatus(409);
+            ->assertStatus(422);
+
+        $this->assertNull($case['page']->fresh()->published_version_id);
     }
 
     // F. capability alone is not enough
@@ -224,7 +228,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $this->submitFor($case['page'], $case['reviewer']);
 
         $this->actingAs($case['reviewer'])
-            ->patch("/app/wiki/{$case['page']->slug}/reject")
+            ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect(route('app.wiki.show', $case['page']->slug));
 
         $page = $case['page']->fresh();
@@ -264,7 +268,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $this->actingAs($case['reviewer'])->patch("/app/wiki/{$case['page']->slug}/approve");
 
         $this->actingAs($systemOwner)
-            ->patch("/app/wiki/{$case['page']->slug}/reject")
+            ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertStatus(422);
 
         $page = $case['page']->fresh();
@@ -348,7 +352,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
                 ->assertStatus(409);
 
             $this->actingAs($actor)
-                ->patch("/app/wiki/{$case['page']->slug}/reject")
+                ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
                 ->assertStatus(409);
         }
 

@@ -12,6 +12,7 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Models\EnterpriseWikiPageReviewEvent;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\EnterpriseWikiSourceReference;
@@ -1716,6 +1717,7 @@ class WikiController extends Controller
                 'final_approval_blocker' => $currentVersion !== null
                     ? $this->finalApprovalBlocker($page, $currentVersion, $user)
                     : 'no_working_version',
+                'changes_requested' => $this->changesRequestedPayload($page, $currentVersion),
             ],
             'current_version' => $currentVersion !== null ? [
                 'id' => $currentVersion->id,
@@ -2438,7 +2440,7 @@ class WikiController extends Controller
      * Reject a page in pending_review → rejected.
      * Requires the approve_wiki_pages capability; System Owner passes as an override.
      */
-    public function reject(string $slug): RedirectResponse
+    public function reject(Request $request, string $slug): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
@@ -2457,7 +2459,10 @@ class WikiController extends Controller
         $this->assertPendingReview($page);
         $this->assertMayReviewCurrentVersion($user, $page);
 
-        DB::transaction(function () use ($page, $user): void {
+        // No return without a reason: the page owner has to know what to fix.
+        $reason = $this->validatedReturnReason($request);
+
+        DB::transaction(function () use ($page, $user, $reason): void {
             $locked = EnterpriseWikiPage::query()
                 ->whereKey($page->id)
                 ->lockForUpdate()
@@ -2466,7 +2471,17 @@ class WikiController extends Controller
             $this->assertPendingReview($locked);
             $this->assertMayReviewCurrentVersion($user, $locked);
 
-            // published_version_id is deliberately untouched: rejecting new work must never
+            $version = $locked->currentVersion()->first();
+
+            $this->recordChangesRequested(
+                $locked,
+                $version,
+                $user,
+                EnterpriseWikiPageReviewEvent::ACTOR_ROLE_REVIEWER,
+                $reason,
+            );
+
+            // published_version_id is deliberately untouched: sending new work back must never
             // withdraw content that was already approved.
             $locked->forceFill([
                 'status' => EnterpriseWikiPage::STATUS_REJECTED,
@@ -2569,6 +2584,87 @@ class WikiController extends Controller
             ! $this->documentOwnerApprovalService->sourceOwnerGateForVersion($version)['ready'] => 'source_owners_pending',
             default => null,
         };
+    }
+
+    /**
+     * Every time this page has been sent back, newest first, and who asked.
+     *
+     * Page-wide rather than version-scoped on purpose: after a return the owner edits, which
+     * produces a NEW version, so a version-scoped list would look empty exactly when the owner needs
+     * to read what they were asked to fix.
+     *
+     * @return array{is_returned: bool, latest: ?array<string, mixed>, history: list<array<string, mixed>>}
+     */
+    private function changesRequestedPayload(EnterpriseWikiPage $page, ?EnterpriseWikiPageVersion $currentVersion): array
+    {
+        $events = EnterpriseWikiPageReviewEvent::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->with('actor:id,name')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->get()
+            ->map(static fn (EnterpriseWikiPageReviewEvent $event): array => [
+                'id' => (int) $event->id,
+                'page_version_id' => (int) $event->enterprise_wiki_page_version_id,
+                'actor' => $event->actor !== null
+                    ? ['id' => (int) $event->actor->id, 'name' => $event->actor->name]
+                    : null,
+                'actor_role' => $event->actor_role,
+                'reason' => $event->reason,
+                'created_at' => $event->created_at,
+                'applies_to_working_version' => $currentVersion !== null
+                    && (int) $event->enterprise_wiki_page_version_id === (int) $currentVersion->id,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'is_returned' => $page->status === EnterpriseWikiPage::STATUS_REJECTED,
+            'latest' => $events[0] ?? null,
+            'history' => $events,
+        ];
+    }
+
+    /**
+     * The reason a version is being sent back. Required, and required to say something.
+     */
+    private function validatedReturnReason(Request $request): string
+    {
+        $validated = $request->validate([
+            'reason' => [
+                'required',
+                'string',
+                'min:'.EnterpriseWikiPageReviewEvent::REASON_MIN_LENGTH,
+                'max:'.EnterpriseWikiPageReviewEvent::REASON_MAX_LENGTH,
+            ],
+        ], [], ['reason' => 'begrunnelse']);
+
+        return trim($validated['reason']);
+    }
+
+    /**
+     * Record that this version was sent back, and by whom. Append-only — never updated, so a page
+     * that went round several times keeps every objection.
+     */
+    private function recordChangesRequested(
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $version,
+        User $actor,
+        string $actorRole,
+        string $reason,
+    ): void {
+        if ($version === null) {
+            return;
+        }
+
+        EnterpriseWikiPageReviewEvent::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'actor_user_id' => $actor->id,
+            'actor_role' => $actorRole,
+            'event_type' => EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED,
+            'reason' => $reason,
+        ]);
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageReviewEvent;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
@@ -13,6 +14,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class WikiDocumentOwnerApprovalController extends Controller
 {
@@ -32,6 +34,41 @@ class WikiDocumentOwnerApprovalController extends Controller
         return $this->decide($request, $slug, $approval, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED);
     }
 
+    /**
+     * A document owner's refusal sends the version back rather than parking it in review.
+     *
+     * Leaving the page in pending_review would be misleading: it is not waiting for anyone, it is
+     * waiting for the page owner to answer an objection. published_version_id is untouched, so
+     * whatever was already approved keeps serving.
+     *
+     * Other owners' pending requirements are deliberately left as they are. They belong to this
+     * version, and if it is resubmitted unchanged they still stand; if the owner edits, the edit
+     * produces a new version and the requirement set is derived again from scratch.
+     */
+    private function returnVersionToOwner(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersionDocumentOwnerApproval $approval,
+        User $actor,
+        string $reason,
+    ): void {
+        DB::transaction(function () use ($page, $approval, $actor, $reason): void {
+            EnterpriseWikiPageReviewEvent::query()->create([
+                'enterprise_wiki_page_id' => $page->id,
+                'enterprise_wiki_page_version_id' => $approval->enterprise_wiki_page_version_id,
+                'actor_user_id' => $actor->id,
+                'actor_role' => EnterpriseWikiPageReviewEvent::ACTOR_ROLE_DOCUMENT_OWNER,
+                'event_type' => EnterpriseWikiPageReviewEvent::EVENT_TYPE_CHANGES_REQUESTED,
+                'reason' => $reason,
+            ]);
+
+            $locked = EnterpriseWikiPage::query()->whereKey($page->id)->lockForUpdate()->first();
+
+            if ($locked !== null && $locked->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+                $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_REJECTED])->save();
+            }
+        });
+    }
+
     private function decide(
         Request $request,
         string $slug,
@@ -46,11 +83,23 @@ class WikiDocumentOwnerApprovalController extends Controller
 
         abort_unless($this->approvalService->canDecide($approval, $user), 403);
 
-        $validated = $request->validate([
-            'comment' => ['nullable', 'string', 'max:2000'],
-        ]);
+        $isRejection = $decision === EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED;
 
-        $this->approvalService->decide($approval, $user, $decision, $validated['comment'] ?? null);
+        // Approving needs no explanation; refusing does. The page owner has to know what to fix,
+        // and "rejected, no reason given" is not something they can act on.
+        $validated = $request->validate([
+            'comment' => $isRejection
+                ? ['required', 'string', 'min:'.EnterpriseWikiPageReviewEvent::REASON_MIN_LENGTH, 'max:'.EnterpriseWikiPageReviewEvent::REASON_MAX_LENGTH]
+                : ['nullable', 'string', 'max:'.EnterpriseWikiPageReviewEvent::REASON_MAX_LENGTH],
+        ], [], ['comment' => 'begrunnelse']);
+
+        $comment = isset($validated['comment']) ? trim($validated['comment']) : null;
+
+        $this->approvalService->decide($approval, $user, $decision, $comment);
+
+        if ($isRejection) {
+            $this->returnVersionToOwner($page, $approval, $user, (string) $comment);
+        }
 
         $runId = $approval->enterprise_wiki_ingest_run_id
             ?? EnterpriseWikiIngestRunPage::query()

@@ -757,7 +757,7 @@ class WikiControllerTest extends TestCase
         [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Avvis meg');
 
         $this->actingAs($reviewer)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
@@ -769,7 +769,7 @@ class WikiControllerTest extends TestCase
         [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Avvist felt');
 
         $this->actingAs($reviewer)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect();
 
         $fresh = $page->fresh();
@@ -784,7 +784,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Bidragsyter avviser');
 
         $this->actingAs($user)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertForbidden();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
@@ -797,7 +797,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM avviser');
 
         $this->actingAs($manager)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertForbidden();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
@@ -810,7 +810,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'QA avviser ikke hele siden');
 
         $this->actingAs($qaContributor)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertForbidden();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
@@ -823,7 +823,7 @@ class WikiControllerTest extends TestCase
         $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Avvis utkast');
 
         $this->actingAs($owner)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertStatus(422);
 
         $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
@@ -837,7 +837,7 @@ class WikiControllerTest extends TestCase
         $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Fremmed avvisning');
 
         $this->actingAs($owner)
-            ->patch('/app/wiki/'.$foreignPage->slug.'/reject')
+            ->patch('/app/wiki/'.$foreignPage->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertNotFound();
 
         $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $foreignPage->fresh()->status);
@@ -993,7 +993,7 @@ class WikiControllerTest extends TestCase
         [$page, $reviewer] = $this->createPageAwaitingReview($customer, 'Flash avvis');
 
         $this->actingAs($reviewer)
-            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->patch('/app/wiki/'.$page->slug.'/reject', ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
             ->assertRedirect()
             ->assertSessionHas('success');
     }
