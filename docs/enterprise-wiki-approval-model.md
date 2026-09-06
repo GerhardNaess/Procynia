@@ -1,13 +1,19 @@
 # Enterprise Wiki — godkjenningsmodell
 
-> **Status: Beslutningsgrunnlag – ikke fullt implementert**
+> **Status: Godkjenningsmodellen er implementert og verifisert (steg 1–14)**
 
-Dette dokumentet beskriver **målmodellen**. Store deler av den finnes ikke i koden ennå. Der dokumentet
-beskriver dagens kode er det merket **FAKTA** med filreferanse. Alt annet er **BESLUTNING** (vedtatt
-retning) eller **ÅPENT** (ikke besluttet — ikke improviser).
+Godkjenningsmodellen dette dokumentet beskriver — eierskap, innsending, kontrollørtildeling,
+kildeeierport, endelig godkjenning med publisering, retur med begrunnelse, varsling og
+publiseringsstyrt retrieval — er bygget, testet og verifisert. Den gjelder nå som **FAKTA**.
 
-Ved konflikt mellom dette dokumentet og eldre samtaler eller antakelser: dette dokumentet gjelder,
-inntil det er erstattet av implementert kode og oppdatert arkitekturdokumentasjon.
+Dette er **ikke** det samme som at Enterprise Wiki er ferdig. Uttrekk, verifisering, reparasjon og
+figurgenerering er egne løyper med egen status. Se `docs/enterprise-wiki-architecture.md`.
+
+Der dokumentet beskriver dagens kode er det merket **FAKTA** med filreferanse. **BESLUTNING** markerer
+vedtatt retning som nå er implementert; **ÅPENT** markerer det som fortsatt ikke er besluttet — ikke
+improviser der.
+
+Ved konflikt mellom dette dokumentet og eldre samtaler eller antakelser: dette dokumentet gjelder.
 
 ---
 
@@ -976,7 +982,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
     only», «ingen mottaker» og «ingen varsling» er fjernet
 13. ~~Migrere og backfille eksisterende data~~ — **gjennomført**, se 14 — gjelder sideeier (steg 2) og `is_current`-semantikken
     (steg 3). **Document-owner approvals er eksplisitt unntatt**: de backfilles ikke, se 9.
-14. Full regresjons- og sikkerhetstest
+14. ~~Full regresjons- og sikkerhetstest~~ — **gjennomført**, se 15
 
 
 ---
@@ -1026,6 +1032,51 @@ hvert avvik den finner krever enten et menneske som vet hva riktig verdi var, el
 | `approved` uten publisert versjon | Avgjør hvilken versjon som faktisk ble godkjent; ikke anta gjeldende |
 | Peker til feil sides versjon | Datakorrupsjon — krever undersøkelse |
 | Side uten eier | Sett eier eksplisitt, eller la stå
+
+---
+
+## 15. Regresjons- og sikkerhetsverifisering (steg 14)
+
+**Konklusjon: ingen regresjon innført av steg 1–13.**
+
+**Godkjenningsmodellen isolert:** 13 suiter, **197 passed, 0 failed**. Dekker separasjon av plikter,
+kundegrenser (eier, kontrollør, kildeeier, hendelsesaktør, varselmottaker, retrieval, Spør Wiki),
+låsing og revalidering ved samtidig godkjenning, idempotent varsling, og fail-closed retrieval.
+
+**Full suite, sammenlignet mot faktisk baseline** (`81c4fb7`, før steg 1) med identisk kommando:
+
+| | Baseline `81c4fb7` | HEAD `d17430b` |
+|---|---|---|
+| Failed | 98 | 150 |
+| Passed | 5331 | 5468 |
+| Assertions | 25366 | 26271 |
+
+Tallene alene er ikke bevis: to kjøringer av **samme** HEAD-kode ga 98 og 150. Suiten er
+rekkefølge-avhengig, så **feilmengdene** ble diffet, ikke tallene.
+
+- Baselinens 96 unike feilende testnavn er en **ekte delmengde** av HEADs 148. Ingen feil forsvant —
+  det utelukker at endringene selektivt flyttet på noe.
+- De 52 «nye» navnene er **null** innenfor godkjenningsmodellen; alle ligger i kunnskapsbase-,
+  metadata- og chunk-løypene, som ikke er rørt.
+- Tre av dem kjørt alene på HEAD: `KnowledgeChunkMetadataValidatorTest` 8 passed,
+  `MetadataCandidateRetrievalServiceTest` 19 passed, `KnowledgeMetadataMapServiceTest` 8 passed.
+  **Klassifisering C** — forurensning i samlet kjøring, ikke regresjon.
+- Wiki-suiter som feiler også alene ble kjørt på pre-steg-1-koden og feilet **identisk**:
+  `EnterpriseWikiLineageTest` 1 failed/7 passed, `EnterpriseWikiTableIngestTest` 2 failed/2 passed,
+  `EnterpriseWikiClaimStepLeaseTest` 4 failed/7 passed. **Klassifisering B** — pre-eksisterende, med
+  baseline-bevis. `EnterpriseWikiLineageTest` bryter `ewpv_page_single_current_unique` fra migrasjon
+  `2026_08_07_000001`, som er eldre enn dette arbeidet.
+
+Ingen failure ble klassifisert A (ny regresjon) eller D (fixture med gammel modell).
+
+**Øvrig verifisert:** alle migrasjoner kjørt, 0 ventende, skjema komplett;
+`enterprise-wiki:audit-approval-model` exit 0 med 0 alvorlige avvik; JS-guards 48 passed;
+`npm run build` OK; Pint ren på berørte filer; `git diff --check` ren.
+
+**Kjent, ikke-blokkerende:** den samlede suiten har en rekkefølge-avhengig forurensning som er eldre
+enn dette arbeidet (98 feilende ved baseline). Den bør ryddes som eget arbeid — den skjuler ekte feil
+for alle som leser sluttsummen i stedet for å diffe mengdene.
+
 ---
 
 ## Referanser
