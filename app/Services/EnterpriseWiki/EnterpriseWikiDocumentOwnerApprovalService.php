@@ -219,6 +219,47 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
+     * Are this version's source owners done with it?
+     *
+     * The quality gate before final Wiki review. Each active row is one document owner confirming
+     * that the content drawn from THEIR documents is represented correctly — not that the page as a
+     * whole is ready. That judgement stays with the assigned reviewer.
+     *
+     * Requirements are re-synced first, the same way evaluateRunCompletionGate() does, so a document
+     * that changed hands since submission is reflected rather than answered by whoever used to own
+     * it. A version with no requirements at all is ready: nothing was drawn from a source document,
+     * so there is nobody to ask.
+     *
+     * @return array{ready: bool, pending: list<array<string, mixed>>, rejected: list<array<string, mixed>>}
+     */
+    public function sourceOwnerGateForVersion(EnterpriseWikiPageVersion $version): array
+    {
+        $pending = [];
+        $rejected = [];
+
+        foreach ($this->syncForPageVersion($version) as $approval) {
+            $entry = [
+                'approval_id' => (int) $approval->id,
+                'owner_label' => $this->ownerLabel($approval),
+                'documents_label' => $this->documentsLabel($approval),
+                'status' => $approval->approval_status,
+            ];
+
+            if ($approval->isRejected()) {
+                $rejected[] = $entry;
+            } elseif ($approval->isPending()) {
+                $pending[] = $entry;
+            }
+        }
+
+        return [
+            'ready' => $pending === [] && $rejected === [],
+            'pending' => $pending,
+            'rejected' => $rejected,
+        ];
+    }
+
+    /**
      * Apply an approval or rejection decision to the concrete approval row.
      */
     public function decide(

@@ -654,6 +654,52 @@ auditert.
 med eier, innsender, kontrollør, `can_submit`, `can_review` og `eligible_reviewers`, slik at
 UI-steget blir en rendering-oppgave.
 
+### Gjennomført i steg 6 — kildeeierporten
+
+**BESLUTNING — semantikk.** Document-owner approval betyr: *«Jeg bekrefter at innholdet i denne
+Wiki-versjonen som stammer fra mine kildedokumenter, er korrekt nok til å inngå i videre
+Wiki-review.»* Den er **ikke** publisering, ikke sidegodkjenning og ikke en uttalelse om siden som
+helhet — den vurderingen ligger hos den tildelte kontrolløren.
+
+**BESLUTNING — ingen ny status.** `pending_review` dekker hele review-fasen; kildeeierporten er en
+separat completion gate inni den. Å innføre en egen `source_owner_review`-status ville doblet
+statusmodellen uten å si noe systemet ikke allerede vet fra godkjenningsradene. Spørsmålet om
+`changes_requested` er fortsatt åpent (11.10) og hører til steg 8.
+
+**Tre rettigheter, ingen impliserer de andre:**
+
+| Rettighet | Spørsmål den svarer på |
+|---|---|
+| `approve_wiki_claims` | Er denne ene påstanden støttet av kilden sin? |
+| Document-owner approval | Er innholdet fra *mine* dokumenter gjengitt riktig? |
+| `approve_wiki_pages` | Skal denne siden publiseres? |
+
+Alle seks kombinasjoner er testet.
+
+**Hvem avgjør et krav.** Eieren av dokumentene i raden, samme kunde, aktiv bruker, ikke-superseded
+rad. `EnterpriseWikiDocumentOwnerApprovalService::canDecide()` var allerede korrekt fra før.
+
+**Innsending synker kravsettet.** `submit()` kaller `syncForPageVersion()` for versjonen, slik at de
+som spørres er dagens dokumenteiere — ikke den som eide et dokument tidligere. Gaten synker på nytt
+ved evaluering, samme mønster som `evaluateRunCompletionGate()`.
+
+**Porten.** `approve()` avvises med **409** — ikke 403 — så lenge én aktiv rad er `pending` eller
+`rejected`. Aktøren *har* lov til å reviewe; versjonen er bare ikke klar. Feilmeldingen navngir hvem
+det ventes på.
+
+**BESLUTNING — ingen bypass.** En System Owner kan avgjøre en enkelt eiers rad, og det registreres
+på raden selv (`is_override`, `overridden_by_user_id`, `overridden_at`) — altså synlig, ikke en
+stille omgåelse. Men å hoppe over rader ingen har svart på er aldri besluttet, og er ikke innført.
+
+**Reject blokkerer, men returnerer ikke.** En avvist rad gjør endelig godkjenning umulig.
+Sidestatus, tildeling og publisert versjon røres ikke. Full retur-/endringsflyt er steg 8.
+
+**Ingenting publiseres av porten.** Når alle rader er godkjent, er versjonen klar — men kontrolløren
+må fortsatt handle. Testet eksplisitt.
+
+**Eksisterende data:** 19 gjeldende versjoner, alle med minst ett aktivt krav, 7 med flere eiere;
+14 pending, 12 approved, 0 rejected, 0 superseded. Konsistent — ingen backfill.
+
 **ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
 besluttet.
 
@@ -713,7 +759,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 3. ~~Rette versjons-/current-/published-modellen~~ — **gjennomført**, se 6
 4. ~~Definere Wiki review capability~~ — **gjennomført**, se 10
 5. ~~Modellere reviewer- og submit-metadata~~ — **gjennomført**, se 10
-6. Implementere source-owner review
+6. ~~Implementere source-owner review~~ — **gjennomført**, se 10
 7. Implementere endelig Wiki-review
 8. Implementere retur / endringskrav
 9. Koble notification-/task-mekanisme

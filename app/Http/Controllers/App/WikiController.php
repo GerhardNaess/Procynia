@@ -1704,6 +1704,11 @@ class WikiController extends Controller
                 'can_review' => $currentVersion !== null
                     && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
                 'eligible_reviewers' => $this->eligibleReviewerOptions($page, $user),
+                // Why final approval is or is not available yet. Read-only: computed from the
+                // requirement rows that already exist, never by deciding anything.
+                'source_owner_gate' => $currentVersion !== null
+                    ? $this->sourceOwnerGatePayload($currentVersion, $user)
+                    : null,
             ],
             'current_version' => $currentVersion !== null ? [
                 'id' => $currentVersion->id,
@@ -2318,6 +2323,12 @@ class WikiController extends Controller
                 'reviewer_user_id' => $reviewer->id,
             ])->save();
 
+            // Re-derive who must vouch for the source-based content in THIS version, so the people
+            // asked are today's document owners rather than whoever owned a document earlier.
+            // A version with no source-based content produces no requirements, which is a valid
+            // state — there is simply nobody to ask.
+            $this->documentOwnerApprovalService->syncForPageVersion($version);
+
             // published_version_id is untouched: sending new work for review must not withdraw
             // whatever was already approved.
             $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
@@ -2378,6 +2389,7 @@ class WikiController extends Controller
         }
 
         $this->assertMayReviewCurrentVersion($user, $page);
+        $this->assertSourceOwnersHaveSignedOff($page);
 
         // Approval is the only thing that publishes. The working version becomes the published one
         // here and nowhere else — a later run replaces the working version and leaves this alone, so
@@ -2458,6 +2470,94 @@ class WikiController extends Controller
             ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
             ->values()
             ->all();
+    }
+
+    /**
+     * What the source-owner gate looks like right now, and what this user can do about it.
+     *
+     * @return array{ready: bool, blocking_reason: ?string, requirements: list<array<string, mixed>>}
+     */
+    private function sourceOwnerGatePayload(EnterpriseWikiPageVersion $version, User $user): array
+    {
+        $approvals = $version->relationLoaded('documentOwnerApprovals')
+            ? $version->documentOwnerApprovals
+            : $version->documentOwnerApprovals()->with('documentOwner', 'decidedBy')->get();
+
+        $active = $approvals->filter(
+            static fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): bool => ! $approval->isSuperseded(),
+        );
+
+        $pending = $active->filter(static fn ($approval): bool => $approval->isPending());
+        $rejected = $active->filter(static fn ($approval): bool => $approval->isRejected());
+
+        return [
+            'ready' => $pending->isEmpty() && $rejected->isEmpty(),
+            'blocking_reason' => match (true) {
+                $rejected->isNotEmpty() => 'rejected',
+                $pending->isNotEmpty() => 'pending',
+                default => null,
+            },
+            'requirements' => $active
+                ->map(fn (EnterpriseWikiPageVersionDocumentOwnerApproval $approval): array => [
+                    'id' => (int) $approval->id,
+                    'owner' => $approval->documentOwner !== null
+                        ? ['id' => (int) $approval->documentOwner->id, 'name' => $approval->documentOwner->name]
+                        : null,
+                    'source_document_ids' => is_array($approval->source_document_ids) ? $approval->source_document_ids : [],
+                    'status' => $approval->approval_status,
+                    'decided_at' => $approval->decided_at,
+                    'decided_by' => $approval->decidedBy?->name,
+                    'is_override' => (bool) $approval->is_override,
+                    'can_decide' => $this->documentOwnerApprovalService->canDecide($approval, $user),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * Final approval waits for the document owners.
+     *
+     * Each active approval row is one owner confirming that the content taken from their documents
+     * is represented correctly. Until every one of them has said so, the page is not ready to be
+     * published — and a rejection from any of them stops it outright.
+     *
+     * No bypass, System Owner included: a System Owner may decide an individual owner's row (that
+     * override exists and is recorded on the row itself, with is_override and overridden_by_user_id),
+     * but skipping rows nobody has answered has never been decided and is not invented here.
+     */
+    private function assertSourceOwnersHaveSignedOff(EnterpriseWikiPage $page): void
+    {
+        $version = $page->currentVersion()->first();
+
+        if ($version === null) {
+            abort(422);
+        }
+
+        $gate = $this->documentOwnerApprovalService->sourceOwnerGateForVersion($version);
+
+        if ($gate['ready']) {
+            return;
+        }
+
+        // 409, not 403: the actor is allowed to review, the version is simply not ready yet.
+        abort(409, $this->sourceOwnerGateMessage($gate));
+    }
+
+    /**
+     * @param  array{pending: list<array<string, mixed>>, rejected: list<array<string, mixed>>}  $gate
+     */
+    private function sourceOwnerGateMessage(array $gate): string
+    {
+        if ($gate['rejected'] !== []) {
+            $owners = implode(', ', array_column($gate['rejected'], 'owner_label'));
+
+            return "Siden kan ikke godkjennes: kildegrunnlaget er avvist av {$owners}.";
+        }
+
+        $owners = implode(', ', array_column($gate['pending'], 'owner_label'));
+
+        return "Siden kan ikke godkjennes ennå: venter på godkjenning fra {$owners}.";
     }
 
     /**
