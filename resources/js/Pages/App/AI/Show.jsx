@@ -1,4 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
@@ -3212,7 +3213,7 @@ export default function AiShow({
                                                 || !documentsUploadUrl
                                                 || documentUploadForm.data.documents.length === 0
                                             }
-                                            className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className={`ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl px-5 py-3 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                         >
                                             {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
                                         </button>
@@ -3533,7 +3534,7 @@ export default function AiShow({
                                 <button
                                     type="submit"
                                     disabled={manualRequirementForm.processing || !requirementsStoreUrl || requirementUpdatesLocked}
-                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                 >
                                     {manualRequirementForm.processing ? tai.saving : tai.manual_requirement_submit}
                                 </button>
@@ -3827,7 +3828,7 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
                                                                     title={tai.generate_draft_for_requirement}
-                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1.5 text-base font-semibold leading-6 text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className={`inline-flex rounded-full px-3 py-1.5 text-base font-semibold leading-6 transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {tai.create_answer}
                                                                 </button>
@@ -3913,7 +3914,7 @@ export default function AiShow({
                                                                 type="button"
                                                                 onClick={() => { void requestWikiAnswerGeneration(requirement); }}
                                                                 disabled={requirementUpdatesLocked}
-                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className={`inline-flex rounded-full px-4 py-1.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                             >
                                                                 {tai.create_answer}
                                                             </button>
@@ -3998,7 +3999,7 @@ export default function AiShow({
                                                             <button
                                                                 type="submit"
                                                                 disabled={requirementEditForm.processing}
-                                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                             >
                                                                 {requirementEditForm.processing ? tai.saving : tai.save_requirement_changes}
                                                             </button>
@@ -4489,7 +4490,7 @@ export default function AiShow({
                                                                         || wikiAnswerGeneratingRequirementId === activeRequirement.id
                                                                         || wikiAnswerSavingRequirementId === activeRequirement.id
                                                                     }
-                                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {wikiAnswerSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
                                                                 </button>

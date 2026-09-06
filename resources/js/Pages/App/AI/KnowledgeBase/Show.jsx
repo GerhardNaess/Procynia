@@ -1,4 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../../Support/actionStyles';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
@@ -1314,7 +1315,7 @@ export default function KnowledgeBaseShow({
                             <button
                                 type="button"
                                 onClick={openChunksTab}
-                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white transition hover:bg-violet-700"
+                                className={`inline-flex items-center justify-center rounded-2xl px-5 py-3 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                             >
                                 {tks.continue_review}
                             </button>
@@ -1350,7 +1351,7 @@ export default function KnowledgeBaseShow({
                                 <button
                                     type="submit"
                                     disabled={summaryForm.processing}
-                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                 >
                                     {summaryForm.processing ? tks.saving : tks.save}
                                 </button>
@@ -2065,7 +2066,7 @@ export default function KnowledgeBaseShow({
                                                                 <button
                                                                     type="submit"
                                                                     disabled={isChunkContentSaving}
-                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {isChunkContentSaving ? tks.saving : tks.save_content}
                                                                 </button>
@@ -2106,7 +2107,7 @@ export default function KnowledgeBaseShow({
                                                                     type="button"
                                                                     onClick={submitChunkMetadata}
                                                                     disabled={chunkMetadataForm.processing}
-                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                 >
                                                                     {chunkMetadataForm.processing ? tks.saving : tks.save_metadata}
                                                                 </button>
@@ -2457,7 +2458,7 @@ export default function KnowledgeBaseShow({
                                             <button
                                                 type="submit"
                                                 disabled={replaceFileForm.processing || !replaceFileForm.data.file}
-                                                className="rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                className={`rounded-xl px-4 py-2 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-violet-400 ${PRIMARY_COLOURS}`}
                                             >
                                                 {replaceFileForm.processing
                                                     ? knowledgeShowLabels.uploadNewVersionSubmitting

@@ -1,4 +1,5 @@
 import { router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -418,7 +419,7 @@ export default function CustomerEnvironmentIndex({
                                 <button
                                     type="button"
                                     onClick={openCreateDepartment}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
+                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                                 >
                                     Opprett avdeling
                                 </button>
@@ -473,7 +474,7 @@ export default function CustomerEnvironmentIndex({
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => openEditDepartment(department)}
-                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                        className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                                     >
                                                                         Rediger
                                                                     </button>
@@ -483,8 +484,8 @@ export default function CustomerEnvironmentIndex({
                                                                         disabled={togglingDepartmentId === department.id}
                                                                         className={
                                                                             department.is_active
-                                                                                ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                                                : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                                ? `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity- ${WARNING_COLOURS}`
+                                                                                : `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity- ${PRIMARY_COLOURS}`
                                                                         }
                                                                     >
                                                                         {department.is_active
@@ -523,7 +524,7 @@ export default function CustomerEnvironmentIndex({
                                 </div>
                                 <a
                                     href={userCreateHref}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
+                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                                 >
                                     Opprett bruker
                                 </a>
@@ -705,7 +706,7 @@ export default function CustomerEnvironmentIndex({
                                                         <div className="flex flex-wrap gap-2">
                                                             <a
                                                                 href={userEditHref(user)}
-                                                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                             >
                                                                 Rediger
                                                             </a>
@@ -716,8 +717,8 @@ export default function CustomerEnvironmentIndex({
                                                                 className={
                                                                     user.can_toggle_active
                                                                         ? user.is_active
-                                                                            ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                                            : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                            ? `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${WARNING_COLOURS}`
+                                                                            : `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${PRIMARY_COLOURS}`
                                                                         : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-base font-semibold text-slate-600'
                                                                 }
                                                             >
@@ -790,7 +791,7 @@ export default function CustomerEnvironmentIndex({
                                 <button
                                     type="submit"
                                     disabled={departmentForm.processing}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                 >
                                     {departmentForm.processing ? 'Lagrer...' : departmentModalState.mode === 'edit' ? 'Lagre avdeling' : 'Opprett avdeling'}
                                 </button>

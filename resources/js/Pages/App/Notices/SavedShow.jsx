@@ -1,4 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useEffect, useRef, useState } from 'react';
 import { PRIMARY_ACTION, WARNING_ACTION, DISCLOSURE_ACTION } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
@@ -1321,7 +1322,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         <button
                                                             type="submit"
                                                             disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                         >
                                                             {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
                                                         </button>
@@ -1587,7 +1588,7 @@ export default function SavedNoticeShow({ notice }) {
                                         <button
                                             type="submit"
                                             disabled={infoItemForm.processing || infoItemForm.data.body.trim() === ''}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                         >
                                             {infoItemForm.processing ? tsn.save_action_saving : tsn.save_action}
                                         </button>
@@ -2052,7 +2053,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <button
                                                     type="submit"
                                                     disabled={!isBidManagerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                 >
                                                     {bidManagerForm.processing ? tsn.bid_manager_saving : tsn.bid_manager_save}
                                                 </button>
@@ -2104,7 +2105,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <button
                                                     type="submit"
                                                     disabled={!isOpportunityOwnerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                 >
                                                     {opportunityOwnerForm.processing ? tsn.opportunity_owner_saving : tsn.opportunity_owner_save}
                                                 </button>

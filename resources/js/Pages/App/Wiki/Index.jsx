@@ -1,4 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
@@ -40,7 +41,7 @@ const RUNS_GRID_TEMPLATE = 'minmax(0,3.5rem) minmax(0,1.1fr) minmax(0,1.9fr) min
 // status label. Base carries layout + a11y (focus ring, disabled state, no word-wrapping inside
 // the label); variants only change color/emphasis.
 const ACTION_BUTTON_BASE = 'inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 text-base font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50';
-const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} border-transparent bg-violet-600 text-white shadow-sm hover:bg-violet-700 focus-visible:ring-violet-400`;
+const ACTION_BUTTON_PRIMARY = `${ACTION_BUTTON_BASE} shadow-sm ${PRIMARY_COLOURS}`;
 const ACTION_BUTTON_SECONDARY = `${ACTION_BUTTON_BASE} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-300`;
 const ACTION_BUTTON_DESTRUCTIVE = `${ACTION_BUTTON_BASE} border-rose-300 bg-white text-rose-700 hover:border-rose-400 hover:bg-rose-50 focus-visible:ring-rose-400`;
 // Icon-only sibling of ACTION_BUTTON_SECONDARY: same border, hover and focus-visible treatment,
@@ -1890,7 +1891,7 @@ function SourcesTab({
                                     />
                                     <label
                                         htmlFor="wiki-source-file"
-                                        className="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-700"
+                                        className={`inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer- peer- peer- peer- ${PRIMARY_COLOURS}`}
                                     >
                                         {tw.sources_file_label ?? 'Velg fil'}
                                     </label>
@@ -1943,7 +1944,7 @@ function SourcesTab({
                             <button
                                 type="submit"
                                 disabled={!uploadForm.data.file || uploadForm.processing}
-                                className="inline-flex h-11 items-center justify-center rounded-full bg-violet-600 px-5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-base font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
                             >
                                 {uploadForm.processing
                                     ? (tw.sources_uploading ?? 'Laster opp...')
@@ -2723,7 +2724,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                 type="button"
                                 onClick={handleRetryConfirm}
                                 disabled={retryInFlight}
-                                className="inline-flex h-11 items-center rounded-full bg-violet-600 px-4 text-base font-semibold leading-6 text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className={`inline-flex h-11 items-center rounded-full px-4 text-base font-semibold leading-6 transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
                             >
                                 {tw.run_retry_maintainer_decision_confirm_button ?? 'Prøv på nytt'}
                             </button>

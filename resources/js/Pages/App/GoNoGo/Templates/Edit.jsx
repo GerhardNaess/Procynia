@@ -1,4 +1,5 @@
 import { router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
@@ -169,7 +170,7 @@ function CriterionModal({ criterion, templateId, criteriaStoreUrl, onClose }) {
                         type="submit"
                         form="criterion-form"
                         disabled={form.processing || !form.data.title.trim()}
-                        className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50"
+                        className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${PRIMARY_COLOURS}`}
                     >
                         {isNew ? 'Legg til' : 'Lagre'}
                     </button>
@@ -271,7 +272,7 @@ export default function GoNoGoTemplatesEdit({ template, criteria }) {
                             <button
                                 type="submit"
                                 disabled={form.processing}
-                                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50"
+                                className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${PRIMARY_COLOURS}`}
                             >
                                 Lagre
                             </button>
@@ -307,7 +308,7 @@ export default function GoNoGoTemplatesEdit({ template, criteria }) {
                         <button
                             type="button"
                             onClick={openNew}
-                            className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
+                            className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold shadow-sm ${PRIMARY_COLOURS}`}
                         >
                             + Legg til punkt
                         </button>

@@ -2,7 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import { filterPanelSummary } from './filterPanelLogic';
-import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
+import { DISCLOSURE_INLINE, PRIMARY_COLOURS, SECONDARY_ACTION } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
@@ -1495,7 +1495,7 @@ export default function NoticeIndex({
                                                     href={notice.external_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                    className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                 >
                                                     {noticesText.alertsOpenDoffin}
                                                 </a>
@@ -1716,7 +1716,7 @@ export default function NoticeIndex({
                                 <button
                                     type="button"
                                     onClick={applyFilters}
-                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
+                                    className={`inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                                 >
                                     {common.search}
                                 </button>
@@ -1922,7 +1922,7 @@ export default function NoticeIndex({
                                                 <button
                                                     type="submit"
                                                     disabled={privateRequestForm.processing}
-                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className={`inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                 >
                                                     {privateRequestForm.processing ? noticesText.privateRequestSaving : noticesText.privateRequestSubmit}
                                                 </button>
@@ -2066,7 +2066,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                             >
                                                                 {noticesText.openInDoffinLabel}
                                                             </a>
@@ -2368,7 +2368,7 @@ export default function NoticeIndex({
                                                                         ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
                                                                         : notice.is_in_history
                                                                             ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
-                                                                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                            : PRIMARY_COLOURS,
                                                                 )}
                                                             >
                                                                 {notice.is_saved
@@ -2422,7 +2422,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className={classNames(SECONDARY_ACTION, 'min-w-[108px]')}
                                                             >
                                                                 {noticeExternalLinkLabel(notice, noticesText)}
                                                             </a>
@@ -2693,7 +2693,7 @@ export default function NoticeIndex({
                                                                         <button
                                                                             type="submit"
                                                                             disabled={deadlineForm.processing}
-                                                                            className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                            className={`inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                         >
                                                                             {deadlineForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                         </button>
@@ -2861,7 +2861,7 @@ export default function NoticeIndex({
                                                                     <button
                                                                         type="submit"
                                                                         disabled={historyForm.processing}
-                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        className={`inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                                     >
                                                                         {historyForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                     </button>

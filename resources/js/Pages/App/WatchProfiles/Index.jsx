@@ -1,4 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS, DESTRUCTIVE_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -96,7 +97,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                     <div className="mb-4 flex justify-end">
                         <Link
                             href="/app/watch-profiles/create"
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700"
+                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                         >
                             Legg til Watch Profile
                         </Link>
@@ -145,7 +146,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                             <button
                                 type="button"
                                 onClick={() => applyFilters({ user_id: null, department_id: null })}
-                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                className={`inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                             >
                                 Nullstill filtre
                             </button>
@@ -194,7 +195,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                         <div className="flex flex-col gap-2 sm:flex-row">
                                             <Link
                                                 href={watchProfile.edit_url}
-                                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                             >
                                                 Rediger
                                             </Link>
@@ -204,8 +205,8 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                 disabled={togglingId === watchProfile.id}
                                                 className={
                                                     watchProfile.is_active
-                                                        ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                        : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                        ? `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${WARNING_COLOURS}`
+                                                        : `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${PRIMARY_COLOURS}`
                                                 }
                                             >
                                                 {watchProfile.is_active
@@ -220,7 +221,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                 type="button"
                                                 onClick={() => deleteWatchProfile(watchProfile)}
                                                 disabled={deletingId === watchProfile.id}
-                                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:opacity-60"
+                                                className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${DESTRUCTIVE_COLOURS}`}
                                             >
                                                 {deletingId === watchProfile.id ? 'Sletter...' : 'Slett'}
                                             </button>
@@ -267,7 +268,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                     <div className="flex flex-wrap gap-2">
                                                         <Link
                                                             href={watchProfile.edit_url}
-                                                            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition ${SECONDARY_COLOURS}`}
                                                         >
                                                             Rediger
                                                         </Link>
@@ -277,8 +278,8 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                             disabled={togglingId === watchProfile.id}
                                                             className={
                                                                 watchProfile.is_active
-                                                                    ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
-                                                                    : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-base font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                    ? `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${WARNING_COLOURS}`
+                                                                    : `inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${PRIMARY_COLOURS}`
                                                             }
                                                         >
                                                             {watchProfile.is_active
@@ -293,7 +294,7 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
                                                             type="button"
                                                             onClick={() => deleteWatchProfile(watchProfile)}
                                                             disabled={deletingId === watchProfile.id}
-                                                            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-white px-3 py-2 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:opacity-60"
+                                                            className={`inline-flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-base font-semibold transition disabled:opacity-60 ${DESTRUCTIVE_COLOURS}`}
                                                         >
                                                             {deletingId === watchProfile.id ? 'Sletter...' : 'Slett'}
                                                         </button>

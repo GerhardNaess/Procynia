@@ -1,4 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
@@ -189,7 +190,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                         </div>
                         <button
                             type="submit"
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                            className={`inline-flex min-h-11 items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition ${PRIMARY_COLOURS}`}
                         >
                             Søk
                         </button>

@@ -23,17 +23,37 @@
 const BASE = 'inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-base font-semibold transition';
 const DISABLED = 'disabled:cursor-not-allowed disabled:opacity-60';
 
+/**
+ * The primary colours on their own, for a button whose geometry is driven by its own state machine
+ * — "Lagre" on a Doffin hit also renders as saved and as in-history, each with its own palette, so
+ * it composes the colours rather than taking the whole style. Same role, same tokens, one source.
+ *
+ * The tone deliberately matches the active item in the top navigation (bg-violet-50 / text-violet-700
+ * / violet-200 edge): a saturated violet-600 fill read as too dominant next to it. `border` is
+ * included so a site that already reserves a border edge picks up the colour without extra classes.
+ */
+export const PRIMARY_COLOURS = 'border border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-300 hover:bg-violet-100 hover:text-violet-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600';
+
 /** Commits the work: submits a form, confirms a dialog. At most one per surface. */
-export const PRIMARY_ACTION = `${BASE} bg-violet-600 text-white hover:bg-violet-700 ${DISABLED}`;
+export const PRIMARY_ACTION = `${BASE} ${PRIMARY_COLOURS} ${DISABLED}`;
+
+/**
+ * Each remaining role exposed the same way as PRIMARY_COLOURS, for the rows and toolbars that set
+ * their own compact geometry (min-h-10, px-3) and would be resized by taking a whole *_ACTION.
+ * The full styles below are built from these, so a role only ever has one definition.
+ */
+export const SECONDARY_COLOURS = 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950';
+export const WARNING_COLOURS = 'border border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100';
+export const DESTRUCTIVE_COLOURS = 'border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100';
 
 /** Goes somewhere else, or backs out. Never the action a surface exists to perform. */
-export const SECONDARY_ACTION = `${BASE} border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950 ${DISABLED}`;
+export const SECONDARY_ACTION = `${BASE} ${SECONDARY_COLOURS} ${DISABLED}`;
 
-/** Terminal but intended — archiving a case, cancelling a run. Not deletion. */
-export const WARNING_ACTION = `${BASE} border border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100 ${DISABLED}`;
+/** Terminal but intended — archiving a case, deactivating a profile. Not deletion. */
+export const WARNING_ACTION = `${BASE} ${WARNING_COLOURS} ${DISABLED}`;
 
 /** Removes data. Tinted for the trigger, filled for the confirm inside the dialog. */
-export const DESTRUCTIVE_ACTION = `${BASE} border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100 ${DISABLED}`;
+export const DESTRUCTIVE_ACTION = `${BASE} ${DESTRUCTIVE_COLOURS} ${DISABLED}`;
 export const DESTRUCTIVE_CONFIRM = `${BASE} bg-rose-600 text-white hover:bg-rose-700 ${DISABLED}`;
 
 /**

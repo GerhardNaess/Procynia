@@ -1,4 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
@@ -246,7 +247,7 @@ const WIKI_INLINE_LINK_CLASS =
  * and must stay visually subordinate to the finding return.
  */
 const WIKI_FINDING_BACK_BUTTON_CLASS =
-    'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700';
+    `inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition ${PRIMARY_COLOURS}`;
 
 const WIKI_SECONDARY_BACK_LINK_CLASS =
     'inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950';
@@ -2274,7 +2275,7 @@ export default function WikiShow({
                                     type="button"
                                     disabled={processing !== null}
                                     onClick={() => sendAction('submit')}
-                                    className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className={`inline-flex min-h-9 items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
                                 >
                                     {processing === 'submit' ? actionLabel : (tw.submit_button ?? 'Send til gjennomgang')}
                                 </button>
@@ -2439,7 +2440,7 @@ export default function WikiShow({
                                                                 type="button"
                                                                 disabled={!canSaveBlockEdit}
                                                                 onClick={() => saveWikiBlockEdit(block.block_key)}
-                                                                className="rounded-full bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className={`rounded-full px-4 py-2 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${PRIMARY_COLOURS}`}
                                                             >
                                                                 {wikiBlockSaveProcessingKey === block.block_key ? 'Lagrer...' : 'Lagre endring'}
                                                             </button>

@@ -1,4 +1,5 @@
 import { router, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
@@ -66,7 +67,7 @@ function CreateTemplateModal({ isOpen, onClose }) {
                         <button
                             type="submit"
                             disabled={form.processing || !form.data.name.trim()}
-                            className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:opacity-50"
+                            className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm disabled:opacity-50 ${PRIMARY_COLOURS}`}
                         >
                             Opprett mal
                         </button>
@@ -105,7 +106,7 @@ export default function GoNoGoTemplatesIndex({ templates }) {
                     <button
                         type="button"
                         onClick={() => setShowCreate(true)}
-                        className="shrink-0 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
+                        className={`shrink-0 inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-sm ${PRIMARY_COLOURS}`}
                     >
                         + Ny mal
                     </button>

@@ -1,4 +1,5 @@
 import { router } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../Support/actionStyles';
 import { useState } from 'react';
 
 function classNames(...values) {
@@ -247,7 +248,7 @@ export default function DiscoveryNoticeCard({
                                         ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
                                         : notice.is_in_history
                                             ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
-                                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                            : PRIMARY_COLOURS,
                                 )}
                             >
                                 {notice.is_saved

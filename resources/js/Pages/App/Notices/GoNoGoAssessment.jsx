@@ -1,4 +1,5 @@
 import { router } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import PageHelpPanel from '../../../Components/App/PageHelpPanel';
 
@@ -333,7 +334,7 @@ export default function GoNoGoAssessment({ template, assessment, saveUrl }) {
                                     type="button"
                                     onClick={handleSave}
                                     disabled={isSaving || !hasPendingChanges}
-                                    className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white shadow-sm hover:bg-violet-700 disabled:cursor-default disabled:opacity-40"
+                                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-base font-semibold shadow-sm disabled:cursor-default disabled:opacity-40 ${PRIMARY_COLOURS}`}
                                 >
                                     {isSaving ? 'Lagrer…' : 'Lagre vurdering'}
                                 </button>

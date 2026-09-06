@@ -1,4 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS } from '../../../../Support/actionStyles';
 import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../../Components/App/PageHelpButton';
@@ -589,7 +590,7 @@ export default function KnowledgeBaseIndex({
                         <div className="flex flex-wrap gap-3 lg:justify-end">
                             <Link
                                 href={newDocumentUrl}
-                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white transition hover:bg-violet-700"
+                                className={`inline-flex items-center justify-center rounded-2xl px-5 py-3 text-base font-semibold transition ${PRIMARY_COLOURS}`}
                             >
                                 {tk.new_document}
                             </Link>

@@ -1,4 +1,5 @@
 import { Link, useForm, usePage } from '@inertiajs/react';
+import { PRIMARY_ACTION } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
@@ -112,7 +113,7 @@ export default function Ask({ question = null, result = null, maxQuestionLength 
                         <button
                             type="submit"
                             disabled={form.processing || form.data.question.trim() === ''}
-                            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            className={`${PRIMARY_ACTION} gap-2 shadow-sm`}
                         >
                             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                                 <circle cx="9" cy="9" r="5.25" stroke="currentColor" strokeWidth="1.75" />
