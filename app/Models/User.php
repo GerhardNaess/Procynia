@@ -340,6 +340,67 @@ class User extends Authenticatable implements FilamentUser
             && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_PAGES, $this->isQa());
     }
 
+    /**
+     * May this user be assigned as reviewer for a page, given who submitted it?
+     *
+     * Four things must hold: same customer, active account, the approve_wiki_pages capability, and
+     * not being the submitter. The last one is separation of duties — see
+     * docs/enterprise-wiki-approval-model.md §10 — and it holds for everyone, System Owner
+     * included: an emergency exception has not been decided, and quietly inventing one would let a
+     * single person both hand work over and sign it off.
+     */
+    public function canBeEnterpriseWikiReviewerFor(EnterpriseWikiPage $page, ?int $submittedByUserId = null): bool
+    {
+        if (! $this->is_active || ! $this->canApproveWikiPages()) {
+            return false;
+        }
+
+        if ((int) $this->customer_id !== (int) $page->customer_id) {
+            return false;
+        }
+
+        return $submittedByUserId === null || (int) $submittedByUserId !== (int) $this->id;
+    }
+
+    /**
+     * May this user act on a version that has been assigned to somebody?
+     *
+     * Normally only the named reviewer. A System Owner may step in when a review is stuck — that is
+     * the administrative override the model already gives them (§4) — but never on a version they
+     * submitted themselves, which is the one rule the override does not reach.
+     */
+    public function canReviewEnterpriseWikiVersion(EnterpriseWikiPageVersion $version, EnterpriseWikiPage $page): bool
+    {
+        if (! $this->canBeEnterpriseWikiReviewerFor($page, $version->submitted_by_user_id)) {
+            return false;
+        }
+
+        if ($version->reviewer_user_id === null) {
+            // Never submitted through the assignment flow — capability alone decides, as before.
+            return true;
+        }
+
+        return (int) $version->reviewer_user_id === (int) $this->id || $this->isSystemOwner();
+    }
+
+    /**
+     * May this user send a page for review? The page owner carries it; a System Owner can step in,
+     * which also covers pages whose original owner could not be determined.
+     */
+    public function canSubmitEnterpriseWikiPage(EnterpriseWikiPage $page): bool
+    {
+        if (! $this->is_active || ! $this->canAccessCustomerFrontend()) {
+            return false;
+        }
+
+        if ((int) $this->customer_id !== (int) $page->customer_id) {
+            return false;
+        }
+
+        return $this->isSystemOwner()
+            || ($page->owner_user_id !== null && (int) $page->owner_user_id === (int) $this->id);
+    }
+
     public function canBeEnterpriseWikiDocumentOwner(): bool
     {
         if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {

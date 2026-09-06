@@ -602,7 +602,60 @@ kun til System Owner (`auth.user.is_system_owner`). Filen var fryst i dette steg
 `can_approve_wiki_pages` deles allerede som Inertia-prop, så oppdateringen er en enlinjes endring når
 filen kan røres.
 
-**ÅPENT — `edit_wiki_pages`** er ikke innført. Redigerings-/innsendingsrettighet er ikke besluttet.
+### Gjennomført i steg 5 — tildeling og innsendingsmetadata
+
+**BESLUTNING — metadata ligger på versjonen**, ikke siden:
+`enterprise_wiki_page_versions.submitted_by_user_id`, `submitted_at`, `reviewer_user_id`.
+
+Versjonen er det som vurderes. En side lever gjennom mange versjoner, og en tildeling som overlevde
+en regenerering ville pekt på en gjennomgang av innhold som ikke lenger finnes. En egen
+tildelingstabell tjener først til noe når én versjon kan bære flere review-runder — omtildeling er
+ikke bygget, så den mindre modellen er fortsatt sann.
+
+**BESLUTNING — hvem kan sende inn.** Sideeier, eller System Owner. Ingen ny `edit_wiki_pages`
+capability var nødvendig: eierskapet fra steg 2 uttrykker allerede ansvaret. System Owner-adgangen
+dekker også de sidene som ikke fikk en entydig eier (2 av 19 lokalt).
+
+**BESLUTNING — hvem kan være kontrollør.** Fire krav, samlet i
+`User::canBeEnterpriseWikiReviewerFor()`: samme kunde, aktiv bruker, `approve_wiki_pages`, og ikke
+innsenderen selv.
+
+**BESLUTNING — kontrollør velges eksplisitt.** Sideeier oppgir `reviewer_user_id` ved innsending, og
+den valideres mot kravene over. Systemet tildeler aldri automatisk og velger aldri «første bruker».
+Er lista tom, kan siden ikke sendes videre — det er et riktig svar, ikke en feil: da holder ingen
+andre capability-en ennå.
+
+**BESLUTNING — separation of duties håndheves absolutt.** Innsenderen kan ikke godkjenne sin egen
+versjon, uansett capability og uansett rolle — **System Owner inkludert**. Overriden deres rekker til
+*hvems kø det er*, ikke til å signere eget arbeid.
+
+**Approve/reject respekterer tildelingen.** Er en kontrollør navngitt, kan bare vedkommende handle —
+eller en System Owner som trår til i en fastlåst gjennomgang. En versjon uten tildeling faller
+tilbake på capability alene, slik at sider fra før denne flyten ikke blir stående fast.
+
+**Innsending rører ikke `published_version_id`.** Å sende nytt arbeid til gjennomgang trekker aldri
+tilbake det som allerede er godkjent.
+
+**Allerede tildelt versjon avvises med 409** framfor å bli stille omtildelt. Gjenåpning av en avvist
+side nullstiller tildelingen, fordi den returnerer siden til eieren for redigering — det er ingen
+overlevering.
+
+**Eksisterende data:** 0 sider i `pending_review`, så ingen tildelinger å backfille og ingenting å
+gjette.
+
+**ÅPENT — nød-override for self-approval.** Ikke besluttet, og derfor ikke bygget. Dagens regel er
+den sikre: ingen kan godkjenne eget arbeid. Skal det finnes et unntak, må det være eksplisitt og
+auditert.
+
+**ÅPENT — omtildeling.** Kan kontrollør byttes mens siden er til gjennomgang, av hvem, og skal
+`submitted_by`/`submitted_at` beholdes? Ikke besluttet, ikke bygget.
+
+**ÅPENT — frontend.** `Wiki/Show.jsx` er fortsatt fryst. Payloaden inneholder nå `review_assignment`
+med eier, innsender, kontrollør, `can_submit`, `can_review` og `eligible_reviewers`, slik at
+UI-steget blir en rendering-oppgave.
+
+**ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
+besluttet.
 
 ---
 
@@ -659,7 +712,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 2. ~~Definere og backfille Wiki-sideeier~~ — **gjennomført**, se 3.1
 3. ~~Rette versjons-/current-/published-modellen~~ — **gjennomført**, se 6
 4. ~~Definere Wiki review capability~~ — **gjennomført**, se 10
-5. Modellere reviewer- og submit-metadata
+5. ~~Modellere reviewer- og submit-metadata~~ — **gjennomført**, se 10
 6. Implementere source-owner review
 7. Implementere endelig Wiki-review
 8. Implementere retur / endringskrav

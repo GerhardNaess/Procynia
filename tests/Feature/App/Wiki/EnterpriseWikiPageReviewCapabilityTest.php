@@ -176,21 +176,20 @@ class EnterpriseWikiPageReviewCapabilityTest extends TestCase
         }
     }
 
-    // J. submit is deliberately untouched in this step
-    public function test_submit_is_unchanged(): void
+    // J. the review capability is not a submit right
+    public function test_the_review_capability_alone_does_not_let_someone_submit(): void
     {
+        // Step 5 moved submit to the page owner. The point this test has always made still holds:
+        // being allowed to review is not being allowed to hand work over.
         [$customer, $page] = $this->pendingPage(EnterpriseWikiPage::STATUS_DRAFT);
         $this->grant($customer, Customer::PERMISSION_APPROVE_WIKI_PAGES, ['bid_manager']);
+        $reviewer = $this->user($customer, User::BID_ROLE_BID_MANAGER);
 
-        // Review capability alone does not let someone submit — submitting is an editing right and
-        // is left to a later step.
-        $this->actingAs($this->user($customer, User::BID_ROLE_BID_MANAGER))
-            ->patch("/app/wiki/{$page->slug}/submit")
+        $this->actingAs($reviewer)
+            ->patch("/app/wiki/{$page->slug}/submit", ['reviewer_user_id' => $reviewer->id])
             ->assertForbidden();
 
-        $this->actingAs($this->user($customer, User::BID_ROLE_SYSTEM_OWNER))
-            ->patch("/app/wiki/{$page->slug}/submit")
-            ->assertRedirect(route('app.wiki.show', $page->slug));
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
     }
 
     // G. the capability is administrable in the existing permissions screen

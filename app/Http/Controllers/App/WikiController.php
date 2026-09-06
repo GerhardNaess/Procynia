@@ -1685,6 +1685,25 @@ class WikiController extends Controller
                 'generated_by' => $page->generated_by,
                 'reviewed_at' => $page->reviewed_at,
                 'updated_at' => $page->updated_at,
+                'owner' => $page->owner !== null
+                    ? ['id' => $page->owner->id, 'name' => $page->owner->name]
+                    : null,
+            ],
+            // Who handed this version over, to whom, and what the viewer may do about it. The Wiki
+            // page view does not read these yet — the frontend gate is a later UI step — but the
+            // data is settled here so that step is a rendering change, not a modelling one.
+            'review_assignment' => [
+                'submitted_by' => $currentVersion?->submittedBy !== null
+                    ? ['id' => $currentVersion->submittedBy->id, 'name' => $currentVersion->submittedBy->name]
+                    : null,
+                'submitted_at' => $currentVersion?->submitted_at,
+                'reviewer' => $currentVersion?->reviewer !== null
+                    ? ['id' => $currentVersion->reviewer->id, 'name' => $currentVersion->reviewer->name]
+                    : null,
+                'can_submit' => $user->canSubmitEnterpriseWikiPage($page),
+                'can_review' => $currentVersion !== null
+                    && $user->canReviewEnterpriseWikiVersion($currentVersion, $page),
+                'eligible_reviewers' => $this->eligibleReviewerOptions($page, $user),
             ],
             'current_version' => $currentVersion !== null ? [
                 'id' => $currentVersion->id,
@@ -2245,14 +2264,9 @@ class WikiController extends Controller
      * Restricted to System Owner in pilot. Broader submit roles can be
      * considered in a future phase once the approval flow is validated.
      */
-    public function submit(string $slug): RedirectResponse
+    public function submit(Request $request, string $slug): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
-
-        if (! $user?->isSystemOwner()) {
-            abort(403);
-        }
-
         $customerId = $this->customerContext->currentCustomerId();
 
         $page = EnterpriseWikiPage::query()
@@ -2260,19 +2274,82 @@ class WikiController extends Controller
             ->where('slug', $slug)
             ->first() ?? abort(404);
 
-        if ($page->status === EnterpriseWikiPage::STATUS_DRAFT) {
-            $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
-            $flash = 'Siden er sendt til gjennomgang.';
-        } elseif ($page->status === EnterpriseWikiPage::STATUS_REJECTED) {
-            $page->status = EnterpriseWikiPage::STATUS_DRAFT;
-            $flash = 'Siden er gjenåpnet for redigering.';
-        } else {
+        if (! $user?->canSubmitEnterpriseWikiPage($page)) {
+            abort(403);
+        }
+
+        // Reopening a rejected page is not a handover — it returns the page to its owner for
+        // editing, so it carries no reviewer and clears any assignment the rejected round left.
+        if ($page->status === EnterpriseWikiPage::STATUS_REJECTED) {
+            return $this->reopenRejectedPage($page);
+        }
+
+        if ($page->status !== EnterpriseWikiPage::STATUS_DRAFT) {
             abort(422);
         }
 
-        $page->save();
+        $version = $page->currentVersion()->first();
 
-        return redirect()->route('app.wiki.show', $page->slug)->with('success', $flash);
+        if ($version === null) {
+            abort(422);
+        }
+
+        // Refusing rather than silently reassigning: an assignment already in flight belongs to
+        // whoever is acting on it.
+        if ($version->reviewer_user_id !== null) {
+            abort(409);
+        }
+
+        $reviewerId = (int) $request->validate([
+            'reviewer_user_id' => ['required', 'integer'],
+        ])['reviewer_user_id'];
+
+        $reviewer = User::query()->find($reviewerId);
+
+        if (! $reviewer instanceof User || ! $reviewer->canBeEnterpriseWikiReviewerFor($page, $user->id)) {
+            return redirect()->route('app.wiki.show', $page->slug)
+                ->with('error', 'Velg en gyldig kontrollør: en aktiv bruker hos samme kunde som kan godkjenne Wiki-sider, og som ikke er deg selv.');
+        }
+
+        DB::transaction(function () use ($page, $version, $user, $reviewer): void {
+            $version->forceFill([
+                'submitted_by_user_id' => $user->id,
+                'submitted_at' => now(),
+                'reviewer_user_id' => $reviewer->id,
+            ])->save();
+
+            // published_version_id is untouched: sending new work for review must not withdraw
+            // whatever was already approved.
+            $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+            $page->save();
+        });
+
+        return redirect()->route('app.wiki.show', $page->slug)
+            ->with('success', "Siden er sendt til gjennomgang hos {$reviewer->name}.");
+    }
+
+    /**
+     * Return a rejected page to draft so its owner can work on it again.
+     */
+    private function reopenRejectedPage(EnterpriseWikiPage $page): RedirectResponse
+    {
+        DB::transaction(function () use ($page): void {
+            $version = $page->currentVersion()->first();
+
+            if ($version !== null) {
+                $version->forceFill([
+                    'submitted_by_user_id' => null,
+                    'submitted_at' => null,
+                    'reviewer_user_id' => null,
+                ])->save();
+            }
+
+            $page->status = EnterpriseWikiPage::STATUS_DRAFT;
+            $page->save();
+        });
+
+        return redirect()->route('app.wiki.show', $page->slug)
+            ->with('success', 'Siden er gjenåpnet for redigering.');
     }
 
     /**
@@ -2299,6 +2376,8 @@ class WikiController extends Controller
         if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
             abort(422);
         }
+
+        $this->assertMayReviewCurrentVersion($user, $page);
 
         // Approval is the only thing that publishes. The working version becomes the published one
         // here and nowhere else — a later run replaces the working version and leaves this alone, so
@@ -2344,6 +2423,8 @@ class WikiController extends Controller
             abort(422);
         }
 
+        $this->assertMayReviewCurrentVersion($user, $page);
+
         // published_version_id is deliberately untouched: rejecting new work must never withdraw
         // the content that was already approved.
         $page->status = EnterpriseWikiPage::STATUS_REJECTED;
@@ -2352,6 +2433,47 @@ class WikiController extends Controller
         $page->save();
 
         return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
+    }
+
+    /**
+     * The people this user could hand the page to: same customer, active, able to approve Wiki
+     * pages, and not the user themselves. Empty is a real answer — it means nobody but this user
+     * holds the capability, and the page cannot be handed over until somebody else is granted it.
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    private function eligibleReviewerOptions(EnterpriseWikiPage $page, User $actor): array
+    {
+        if (! $actor->canSubmitEnterpriseWikiPage($page)) {
+            return [];
+        }
+
+        return User::query()
+            ->where('customer_id', $page->customer_id)
+            ->where('is_active', true)
+            ->whereKeyNot($actor->id)
+            ->orderBy('name')
+            ->get(['id', 'name', 'role', 'bid_role', 'is_qa', 'customer_id', 'is_active'])
+            ->filter(fn (User $candidate): bool => $candidate->canBeEnterpriseWikiReviewerFor($page, $actor->id))
+            ->map(static fn (User $candidate): array => ['id' => (int) $candidate->id, 'name' => $candidate->name])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The capability says who may review at all; the assignment says whose turn it is.
+     *
+     * A version submitted through the flow names its reviewer, and only they — or a System Owner
+     * stepping in on a stuck review — may act on it. Nobody may act on a version they submitted
+     * themselves, System Owner included.
+     */
+    private function assertMayReviewCurrentVersion(User $user, EnterpriseWikiPage $page): void
+    {
+        $version = $page->currentVersion()->first();
+
+        if ($version === null || ! $user->canReviewEnterpriseWikiVersion($version, $page)) {
+            abort(403);
+        }
     }
 
     /**

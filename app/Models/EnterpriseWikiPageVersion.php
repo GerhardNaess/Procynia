@@ -29,6 +29,9 @@ class EnterpriseWikiPageVersion extends Model
         'generated_by_model',
         'generation_prompt_hash',
         'created_by_user_id',
+        'submitted_by_user_id',
+        'submitted_at',
+        'reviewer_user_id',
     ];
 
     protected function casts(): array
@@ -40,7 +43,27 @@ class EnterpriseWikiPageVersion extends Model
             'content_blocks_json' => 'array',
             'best_practice_review_json' => 'array',
             'created_by_user_id' => 'integer',
+            'submitted_by_user_id' => 'integer',
+            'submitted_at' => 'datetime',
+            'reviewer_user_id' => 'integer',
         ];
+    }
+
+    /** Who handed this version over for review. */
+    public function submittedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'submitted_by_user_id');
+    }
+
+    /** Who is expected to act on it. Null when the version was never submitted through the flow. */
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewer_user_id');
+    }
+
+    public function isAwaitingReview(): bool
+    {
+        return $this->reviewer_user_id !== null;
     }
 
     public function page(): BelongsTo
