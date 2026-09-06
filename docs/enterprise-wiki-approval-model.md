@@ -974,10 +974,58 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 12. ~~Oppdatere PageHelp~~ — **gjennomført**: hjelpen beskriver nå eierskaps-, gjennomgangs- og
     publiseringsflyten, dokumenterer kun Wiki-sidevisningen, og den gamle teksten om «System Owner
     only», «ingen mottaker» og «ingen varsling» er fjernet
-13. Migrere og backfille eksisterende data — gjelder sideeier (steg 2) og `is_current`-semantikken
+13. ~~Migrere og backfille eksisterende data~~ — **gjennomført**, se 14 — gjelder sideeier (steg 2) og `is_current`-semantikken
     (steg 3). **Document-owner approvals er eksplisitt unntatt**: de backfilles ikke, se 9.
 14. Full regresjons- og sikkerhetstest
 
+
+---
+
+## 14. Datakontroll og utrulling (steg 13)
+
+**Ingen data ble endret.** Kontrollen fant ingen alvorlige avvik, og alt som gjensto var enten
+allerede riktig eller bevisst tomt.
+
+**Kontrollert:** sider og statuser, sideeierskap, publiseringspeker og relasjonen dens,
+arbeidsversjoner (én current per side, ingen manglende), review-metadata, dokumenteiergodkjenninger,
+review-hendelser, varsler, kundegrenser og migrasjonsstatus.
+
+**Backfill av sideeier:** kjørt som dry-run. **0 kan løses entydig**, 2 mangler `created`-rad — de
+samme sidene (205, 208) som i steg 2. De forblir uten eier; å utlede en fra en senere
+`updated`-kjøring ville gitt siden til den som sist beriket den.
+
+**Publisering:** 1 side publisert, peker på egen side, ingen `approved` uten peker. Ingen flytting.
+
+**Eksplisitt IKKE backfillet:** dokumenteiergodkjenninger, i tråd med beslutningen i 9. Kontrollen
+fant 24 aktive rader på ikke-gjeldende versjoner og 7 aktive rader på gjeldende versjoner der eieren
+ikke lenger eier de siterte dokumentene. Radene på ikke-gjeldende versjoner er inerte — porten leser
+bare gjeldende versjon. De 7 rettes av neste ordinære sync. Ingen global reconciliation ble kjørt.
+
+Heller ikke backfillet: varsler (hendelser sendes ikke i ettertid), review-hendelser (append-only),
+review-tildelinger (kan ikke gjettes).
+
+**`php artisan enterprise-wiki:audit-approval-model`** er lagt til: read-only, `--customer=`, og
+exit-kode ≠ 0 ved alvorlige avvik, slik at en utrulling kan stoppe på den. Den reparerer ingenting —
+hvert avvik den finner krever enten et menneske som vet hva riktig verdi var, eller et produktvalg.
+
+**Utrullingsrekkefølge for et eksisterende miljø**
+
+1. `php artisan migrate`
+2. `php artisan enterprise-wiki:audit-approval-model` — utgangspunkt før endring
+3. `php artisan enterprise-wiki:backfill-page-owners --dry-run` — les rapporten
+4. `php artisan enterprise-wiki:backfill-page-owners` kun hvis «resolvable» > 0
+5. `php artisan enterprise-wiki:audit-approval-model` — verifiser
+6. Behandle eventuelle alvorlige avvik manuelt (se under)
+7. Røyktest av Spør Wiki: en side med publisert versjon skal svare; en uten skal ikke
+
+**Manuell håndtering av legacy-tilstander**
+
+| Avvik | Handling |
+|---|---|
+| `pending_review` uten tildeling | Gjenåpne til utkast og send inn på nytt med navngitt kontrollør |
+| `approved` uten publisert versjon | Avgjør hvilken versjon som faktisk ble godkjent; ikke anta gjeldende |
+| Peker til feil sides versjon | Datakorrupsjon — krever undersøkelse |
+| Side uten eier | Sett eier eksplisitt, eller la stå
 ---
 
 ## Referanser
