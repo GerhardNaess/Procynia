@@ -2,8 +2,9 @@ import { test, expect } from '@playwright/test';
 import { loginAs, USER } from './helpers/auth.js';
 
 /**
- * The live-search filter panel folds at two independent levels: the CPV chips on their own, and
- * the whole panel separately. Both are presentation — a collapsed panel must still filter.
+ * The live-search filter panel starts closed — the results are the point of the page — and folds
+ * at two independent levels: the CPV chips on their own, and the whole panel separately. Both are
+ * presentation: a collapsed panel must still filter, and reopening must return every value.
  */
 
 const LIVE_SEARCH = '/app/notices?mode=live';
@@ -16,35 +17,52 @@ async function collapseToggle(page) {
     return page.getByRole('button', { name: /Skjul filtre|Vis filtre/ });
 }
 
-test('the whole filter panel collapses and still names the active watch list', async ({ page }) => {
+test('the panel starts closed, offering to show the filters', async ({ page }) => {
     await page.goto(LIVE_SEARCH);
 
     const toggle = await collapseToggle(page);
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-
-    const body = page.locator('#live-filter-panel-body');
-    await expect(body).toBeVisible();
-
-    await toggle.click();
 
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(body).toBeHidden();
-
-    // The watch list line survives the collapse, so nobody has to reopen the panel to see it.
-    const header = page.locator('section', { has: toggle }).first();
-    await expect(header).toContainText(/Bevakningslister|Watch lists/i);
-
-    await toggle.click();
-    await expect(body).toBeVisible();
+    await expect(toggle).toHaveText(/Vis filtre/);
+    await expect(page.locator('#live-filter-panel-body')).toBeHidden();
 });
 
-test('collapsing the panel keeps the filter values', async ({ page }) => {
+test('the closed header still names the active watch list', async ({ page }) => {
     await page.goto(LIVE_SEARCH);
+
+    const toggle = await collapseToggle(page);
+    const header = page.locator('section', { has: toggle }).first();
+
+    // Nobody should have to open the panel just to see what is driving the results.
+    await expect(header).toContainText(/Bevakningslister|Watch lists/i);
+});
+
+test('opening shows the filters and closing hides them again', async ({ page }) => {
+    await page.goto(LIVE_SEARCH);
+
+    const toggle = await collapseToggle(page);
+    const body = page.locator('#live-filter-panel-body');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveText(/Skjul filtre/);
+    await expect(body).toBeVisible();
+    await expect(page.getByRole('textbox', { name: /Organisasjonsnavn|Organisation name/i }).first()).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(body).toBeHidden();
+});
+
+test('a filter value survives closing and reopening the panel', async ({ page }) => {
+    await page.goto(LIVE_SEARCH);
+
+    const toggle = await collapseToggle(page);
+    await toggle.click();
 
     const organization = page.getByRole('textbox', { name: /Organisasjonsnavn|Organisation name/i }).first();
     await organization.fill('Testetaten');
 
-    const toggle = await collapseToggle(page);
     await toggle.click();
     await expect(page.locator('#live-filter-panel-body')).toBeHidden();
 
@@ -61,23 +79,33 @@ test('collapsing the panel keeps the filter values', async ({ page }) => {
 test('the filter fields line up across the row', async ({ page }) => {
     await page.goto(LIVE_SEARCH);
 
-    // The CPV label row carries a count and a show/hide toggle. It must still occupy the same
-    // height as a plain label, or its input drops below its neighbours'.
+    await (await collapseToggle(page)).click();
+
+    // CPV now lives in its own section below the search action, so the row holds the short filters.
     const organisation = page.getByRole('textbox', { name: /Organisasjonsnavn|Organisation name/i }).first();
     const keyword = page.getByRole('textbox', { name: /Nøkkelord|Keyword/i }).first();
-    // The CPV combobox sits inside a padded chip container, so compare that container — it is the
-    // field box, the same thing the plain inputs are.
-    const cpv = page.getByRole('combobox', { name: 'CPV' })
-        .locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]');
 
-    const [organisationBox, cpvBox, keywordBox] = await Promise.all([
+    const [organisationBox, keywordBox] = await Promise.all([
         organisation.boundingBox(),
-        cpv.boundingBox(),
         keyword.boundingBox(),
     ]);
 
-    expect(Math.abs(cpvBox.y - organisationBox.y), 'CPV input aligns with the organisation input').toBeLessThanOrEqual(2);
     expect(Math.abs(keywordBox.y - organisationBox.y), 'keyword input aligns with the organisation input').toBeLessThanOrEqual(2);
+});
+
+test('the search action comes before the CPV section', async ({ page }) => {
+    await page.goto(LIVE_SEARCH);
+
+    await (await collapseToggle(page)).click();
+
+    const search = page.getByRole('button', { name: /^Søk$/ }).first();
+    const cpvLabel = page.getByText('CPV', { exact: true }).first();
+
+    const [searchBox, cpvBox] = await Promise.all([search.boundingBox(), cpvLabel.boundingBox()]);
+
+    expect(searchBox, 'the search button renders').not.toBeNull();
+    expect(cpvBox, 'the CPV section renders').not.toBeNull();
+    expect(searchBox.y, 'search sits above CPV').toBeLessThan(cpvBox.y);
 });
 
 test('the collapsed filter panel is short on every viewport', async ({ page }) => {
@@ -90,7 +118,6 @@ test('the collapsed filter panel is short on every viewport', async ({ page }) =
         await page.goto(LIVE_SEARCH);
 
         const toggle = await collapseToggle(page);
-        await toggle.click();
         await expect(page.locator('#live-filter-panel-body')).toBeHidden();
 
         const section = page.locator('section', { has: toggle }).first();

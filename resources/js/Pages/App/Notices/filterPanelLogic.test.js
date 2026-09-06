@@ -148,6 +148,56 @@ describe('collapsing is presentation only', () => {
     });
 });
 
+describe('the CPV section sits below the primary controls', () => {
+    test('CPV renders after the search action, not among the short filters', () => {
+        const searchAction = indexSource.indexOf('onClick={applyFilters}');
+        const cpvSection = indexSource.indexOf('<CpvSelector');
+
+        assert.ok(searchAction > -1 && cpvSection > -1);
+        assert.ok(
+            searchAction < cpvSection,
+            'a long watch list must never push the search button below the fold',
+        );
+    });
+
+    test('the chip list is height-capped and scrolls on its own', () => {
+        const at = selectorSource.indexOf('id={chipsId}');
+        assert.ok(at > -1, 'the chip container must carry the collapse target id');
+
+        // The container's own attributes, up to the end of its opening tag.
+        const openingTag = selectorSource.slice(at, selectorSource.indexOf('>', at));
+
+        assert.match(openingTag, /max-h-\[\d+px\]/, 'the chip list needs a max height');
+        assert.match(openingTag, /overflow-y-auto/, 'the chip list scrolls internally');
+    });
+
+    test('chips use two columns on wide screens and one when narrow', () => {
+        assert.ok(
+            selectorSource.includes('grid gap-1.5 lg:grid-cols-2'),
+            'the chip grid is single-column by default and two-column from lg up',
+        );
+    });
+
+    test('a chip can shrink, so a long label never widens the panel', () => {
+        // Grid items default to min-width:auto; without min-w-0 the longest CPV label sets the width.
+        assert.ok(selectorSource.includes('flex w-full min-w-0 items-center gap-2 rounded-full'));
+        assert.ok(selectorSource.includes('min-w-0 flex-1 truncate'));
+    });
+
+    test('every chip keeps a labelled remove button', () => {
+        assert.match(selectorSource, /onClick=\{\(\) => removeItem\(item\.code\)\}/);
+        assert.match(selectorSource, /aria-label=\{`Slett \$\{item\.label\}`\}/);
+    });
+
+    test('the search input stays outside the scroll area so it is always reachable', () => {
+        const chips = selectorSource.indexOf('id={chipsId}');
+        const input = selectorSource.indexOf('id={inputId}\n');
+
+        assert.ok(chips > -1);
+        assert.ok(selectorSource.indexOf('role="combobox"') > chips, 'the combobox renders after the chip list');
+    });
+});
+
 describe('both collapse controls are accessible', () => {
     test('the filter panel control is a real button with aria-expanded and a label', () => {
         const button = buttonAround(indexSource, 'aria-expanded={isFilterPanelOpen}');
@@ -167,6 +217,13 @@ describe('both collapse controls are accessible', () => {
         assert.match(button, /type="button"/);
         assert.match(button, /aria-controls=\{chipsId\}/);
         assert.match(button, /cpv_hide_codes|cpv_show_codes/);
+    });
+
+    test('the panel starts closed', () => {
+        assert.ok(
+            indexSource.includes('const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);'),
+            'the filter panel must open collapsed — the results are what the page is for',
+        );
     });
 
     test('the two levels are independent state', () => {
