@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import WikiReviewPanel from './WikiReviewPanel';
 import {
     getWikiQualityCheckCopy,
     groupWikiFindingsByCode,
@@ -26,8 +27,91 @@ import {
     worklistRangesByCard,
 } from './wikiOpenClaimWorklist';
 
+/**
+ * Help for THIS page: what is published, what is being worked on, who is responsible, and what the
+ * actions on screen do. Not the Wiki as a system, and not the other Wiki screens.
+ *
+ * It deliberately explains the concepts rather than the current state — the review panel already
+ * shows who is being waited on, so the help says what a document-owner check means, not who Kari is.
+ */
 function getWikiShowHelpSections(tw) {
     return [
+        {
+            title: tw.show_page_help_section_about ?? 'Om denne siden',
+            items: [
+                {
+                    title: tw.show_page_help_item_about_title ?? 'Én Wiki-side, to versjoner',
+                    text: tw.show_page_help_item_about_text ?? 'Siden viser innholdet som er under arbeid, hvem som har ansvar for gjennomgangen, og hvilken versjon som eventuelt allerede er publisert.',
+                },
+                {
+                    title: tw.show_page_help_item_ai_title ?? '«AI-generert» er ikke en status',
+                    text: tw.show_page_help_item_ai_text ?? 'Merknaden om AI-generert utkast vises på alle sider som ikke er ferdig behandlet, fordi innholdet er bygget av Procynia fra kildedokumentene. Den sier hvor innholdet kommer fra, ikke hvor langt siden har kommet.',
+                },
+                {
+                    title: tw.show_page_help_item_type_title ?? '«Konsept» er en sidetype, ikke en status',
+                    text: tw.show_page_help_item_type_text ?? 'Konsept, Artikkel, Oppsummering og Enhet beskriver hva slags side dette er. Sidetypen endrer seg ikke når siden godkjennes.',
+                },
+                {
+                    title: tw.show_page_help_item_visibility_title ?? 'Status skjuler ikke siden',
+                    text: tw.show_page_help_item_visibility_text ?? 'Alle autoriserte Wiki-brukere hos kunden kan lese siden uansett status. Status styrer bare hvem som kan handle på den.',
+                },
+            ],
+        },
+        {
+            title: tw.show_page_help_section_versions ?? 'Publisert og arbeidsversjon',
+            items: [
+                {
+                    title: tw.show_page_help_item_published_title ?? 'Den publiserte versjonen er den som gjelder',
+                    text: tw.show_page_help_item_published_text ?? 'Når en versjon er godkjent, blir den den publiserte kunnskapen på siden. Den er det brukerne og AI-svar bygger på.',
+                },
+                {
+                    title: tw.show_page_help_item_working_title ?? 'Arbeidsversjonen endrer ingenting før den godkjennes',
+                    text: tw.show_page_help_item_working_text ?? 'En nyere arbeidsversjon kan være under redigering eller gjennomgang samtidig som forrige publiserte versjon fortsatt er den godkjente kunnskapen. Først når arbeidsversjonen godkjennes, erstatter den den forrige. Tidligere versjoner beholdes.',
+                },
+            ],
+        },
+        {
+            title: tw.show_page_help_section_responsibility ?? 'Ansvar og gjennomgang',
+            items: [
+                {
+                    title: tw.show_page_help_item_owner_title ?? 'Sideeier',
+                    text: tw.show_page_help_item_owner_text ?? 'Har ansvar for Wiki-siden som helhet, retter innholdet og sender det til gjennomgang.',
+                },
+                {
+                    title: tw.show_page_help_item_document_owner_title ?? 'Dokumenteier',
+                    text: tw.show_page_help_item_document_owner_text ?? 'Bekrefter at innhold hentet fra egne kildedokumenter er riktig gjengitt. Dette er en kontroll av kildegrunnlaget, ikke en publisering.',
+                },
+                {
+                    title: tw.show_page_help_item_reviewer_title ?? 'Kontrollør',
+                    text: tw.show_page_help_item_reviewer_text ?? 'Gjør den endelige gjennomgangen av hele arbeidsversjonen og avgjør om den skal publiseres.',
+                },
+                {
+                    title: tw.show_page_help_item_submit_title ?? 'Send til gjennomgang',
+                    text: tw.show_page_help_item_submit_text ?? 'Sideeier velger en konkret kontrollør. Relevante dokumenteiere får sine egne kontrollpunkter, og kontrolløren får ansvaret for sluttgjennomgangen. Alle som får et ansvar blir varslet i Procynia.',
+                },
+                {
+                    title: tw.show_page_help_item_publish_title ?? 'Godkjenn og publiser',
+                    text: tw.show_page_help_item_publish_text ?? 'Kontrolløren kan publisere først når nødvendige dokumenteierkontroller er ferdige. Da blir arbeidsversjonen den publiserte kunnskapen på siden.',
+                },
+            ],
+        },
+        {
+            title: tw.show_page_help_section_changes ?? 'Endringer kreves',
+            items: [
+                {
+                    title: tw.show_page_help_item_changes_who_title ?? 'Både kontrollør og dokumenteier kan be om endringer',
+                    text: tw.show_page_help_item_changes_who_text ?? 'Siden går tilbake til sideeier for retting. Den publiserte versjonen berøres ikke — den fortsetter å gjelde.',
+                },
+                {
+                    title: tw.show_page_help_item_changes_reason_title ?? 'Begrunnelsen følger med',
+                    text: tw.show_page_help_item_changes_reason_text ?? 'Den som ber om endringer må skrive hva som må rettes. Begrunnelsen vises på siden, og tidligere tilbakemeldinger beholdes.',
+                },
+                {
+                    title: tw.show_page_help_item_changes_resubmit_title ?? 'Rett og send inn på nytt',
+                    text: tw.show_page_help_item_changes_resubmit_text ?? 'Sideeier gjenåpner siden, retter innholdet og sender det til gjennomgang igjen. Kontrollør velges på nytt for hver runde.',
+                },
+            ],
+        },
         {
             title: tw.show_page_help_section_best_practice ?? 'Forslag basert på beste praksis',
             items: [
@@ -726,6 +810,7 @@ export default function WikiShow({
     related_concepts: relatedConcepts = [],
     related_entities: relatedEntities = [],
     backlinks = [],
+    review_assignment: reviewAssignment = null,
 }) {
     const { translations = {}, auth = {}, errors = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -1197,7 +1282,8 @@ export default function WikiShow({
         approved: tw.status_approved ?? 'Godkjent',
         pending_review: tw.status_pending_review ?? 'Til gjennomgang',
         draft: tw.status_draft ?? 'Utkast',
-        rejected: tw.status_rejected ?? 'Avvist',
+        // Technically 'rejected', but it means "fix this and send it again", not a final refusal.
+        rejected: tw.status_changes_requested ?? 'Endringer kreves',
         archived: tw.status_archived ?? 'Arkivert',
     }[status] ?? status);
 
@@ -2201,7 +2287,7 @@ export default function WikiShow({
                         <PageHelpButton
                             buttonLabel={tw.page_help_button ?? 'Hjelp'}
                             title={tw.show_page_help_title ?? 'Slik fungerer Wiki-siden'}
-                            intro={tw.show_page_help_intro ?? 'Forklarer hvordan beste-praksis-forslag skiller seg fra kvalitetsfeil.'}
+                            intro={tw.show_page_help_intro ?? 'Forklarer hva du ser på denne Wiki-siden: hva som er publisert, hva som er under arbeid, hvem som har ansvar, og hva som skjer når du sender siden videre.'}
                             sections={getWikiShowHelpSections(tw)}
                         />
                         <div className="mt-1 flex flex-wrap gap-2">
@@ -2237,69 +2323,14 @@ export default function WikiShow({
                 )}
 
                 {/* Approval actions */}
-                {(() => {
-                    const actionableForOwner = isSystemOwner && ['draft', 'pending_review', 'rejected'].includes(page.status);
-                    const noticeForNonOwner = !isSystemOwner && page.status === 'pending_review';
-                    if (!actionableForOwner && !noticeForNonOwner) return null;
-
-                    return (
-                        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                            {isSystemOwner && page.status === 'pending_review' && (
-                                <div className="flex flex-wrap items-center gap-4">
-                                    <p className="text-sm text-slate-600">
-                                        {tw.pending_review_notice ?? 'Denne siden venter på godkjenning av System Owner.'}
-                                    </p>
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={processing !== null}
-                                            onClick={() => sendAction('approve')}
-                                            className="inline-flex min-h-9 items-center justify-center rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {processing === 'approve' ? actionLabel : (tw.approve_button ?? 'Godkjenn')}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={processing !== null}
-                                            onClick={() => sendAction('reject')}
-                                            className="inline-flex min-h-9 items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            {processing === 'reject' ? actionLabel : (tw.reject_button ?? 'Avvis')}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {isSystemOwner && page.status === 'draft' && (
-                                <button
-                                    type="button"
-                                    disabled={processing !== null}
-                                    onClick={() => sendAction('submit')}
-                                    className={`inline-flex min-h-9 items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${PRIMARY_COLOURS}`}
-                                >
-                                    {processing === 'submit' ? actionLabel : (tw.submit_button ?? 'Send til gjennomgang')}
-                                </button>
-                            )}
-
-                            {isSystemOwner && page.status === 'rejected' && (
-                                <button
-                                    type="button"
-                                    disabled={processing !== null}
-                                    onClick={() => sendAction('submit')}
-                                    className="inline-flex min-h-9 items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                    {processing === 'submit' ? actionLabel : (tw.reopen_button ?? 'Gjenåpne')}
-                                </button>
-                            )}
-
-                            {noticeForNonOwner && (
-                                <p className="text-sm text-amber-700">
-                                    {tw.pending_review_notice ?? 'Denne siden venter på godkjenning av System Owner.'}
-                                </p>
-                            )}
-                        </section>
-                    );
-                })()}
+                <WikiReviewPanel
+                    page={page}
+                    currentVersion={current_version}
+                    reviewAssignment={reviewAssignment}
+                    tw={tw}
+                    isSystemOwner={isSystemOwner}
+                    currentUserId={auth.user?.id ?? null}
+                />
 
                 {(reviewReference || hasStructureFinding) && (
                     <div>

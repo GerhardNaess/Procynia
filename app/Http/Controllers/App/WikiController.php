@@ -1713,6 +1713,9 @@ class WikiController extends Controller
                     ? $this->sourceOwnerGatePayload($currentVersion, $user)
                     : null,
                 'published_version_id' => $page->published_version_id !== null ? (int) $page->published_version_id : null,
+                // The number, not just the id: the page says "Publisert versjon v3", and looking it
+                // up in the client would mean shipping every version just to render one label.
+                'published_version_number' => $page->publishedVersion?->version_number,
                 'working_version_id' => $currentVersion !== null ? (int) $currentVersion->id : null,
                 'can_approve_final' => $currentVersion !== null
                     && $this->finalApprovalBlocker($page, $currentVersion, $user) === null,
