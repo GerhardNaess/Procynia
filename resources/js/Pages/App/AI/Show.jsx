@@ -1,4 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
@@ -3378,7 +3379,7 @@ export default function AiShow({
                                     onClick={() => setShowManualRequirementForm((value) => !value)}
                                     disabled={requirementUpdatesLocked && !showManualRequirementForm}
                                     aria-expanded={showManualRequirementForm}
-                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className={`${DISCLOSURE_INLINE} px-4 py-2`}
                                 >
                                     {showManualRequirementForm ? tai.hide_requirement_form : tai.show_requirement_form}
                                 </button>

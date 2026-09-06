@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import { filterPanelSummary } from './filterPanelLogic';
+import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
@@ -877,8 +878,10 @@ export default function NoticeIndex({
     const [editingHistoryNoticeId, setEditingHistoryNoticeId] = useState(null);
     const [archivingNotice, setArchivingNotice] = useState(null);
     const [isPrivateRequestFormOpen, setIsPrivateRequestFormOpen] = useState(false);
-    // Presentation only — the filter values live in their own state and keep applying either way.
-    const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(true);
+    // Closed by default: the results are what the page is for, and the header still says which
+    // watch list is driving them. Presentation only — the filter values live in their own state
+    // and keep applying either way.
+    const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
     const archiveTriggerRef = useRef(null);
     const archiveTypeRef = useRef(null);
     const deadlineForm = useForm({
@@ -1492,7 +1495,7 @@ export default function NoticeIndex({
                                                     href={notice.external_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                 >
                                                     {noticesText.alertsOpenDoffin}
                                                 </a>
@@ -1597,7 +1600,7 @@ export default function NoticeIndex({
                                     onClick={() => setIsFilterPanelOpen((current) => !current)}
                                     aria-expanded={isFilterPanelOpen}
                                     aria-controls="live-filter-panel-body"
-                                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className={classNames(DISCLOSURE_INLINE, 'min-h-11 shrink-0 px-4 py-2')}
                                 >
                                     {isFilterPanelOpen ? noticesText.filterPanelCollapse : noticesText.filterPanelExpand}
                                     <span aria-hidden="true" className="text-base font-semibold text-slate-600">
@@ -1655,19 +1658,6 @@ export default function NoticeIndex({
                                             className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition placeholder:text-slate-500 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
                                     </label>
-                                    <CpvSelector
-                                        endpoint={cpvSelector?.endpoint ?? '/app/notices/cpv-suggestions'}
-                                        selectedItems={selectedCpvItems}
-                                        onSelectedItemsChange={setSelectedCpvItems}
-                                        popularItems={cpvSelector?.popular ?? []}
-                                        labelHint={nt.hint_cpv}
-                                        texts={{
-                                            cpv_selected_one: nt.cpv_selected_one,
-                                            cpv_selected_many: nt.cpv_selected_many,
-                                            cpv_show_codes: nt.cpv_show_codes,
-                                            cpv_hide_codes: nt.cpv_hide_codes,
-                                        }}
-                                    />
                                     <label className="space-y-2">
                                         <span className={FILTER_LABEL_ROW}>{tf.keyword}</span>
                                         <input
@@ -1738,6 +1728,23 @@ export default function NoticeIndex({
                                     {tf.clear_filters}
                                 </button>
                             </div>
+
+                            {/* CPV is filter detail, not a primary control — it sits below the
+                                search action so a long watch list never pushes it off screen. */}
+                            <CpvSelector
+                                endpoint={cpvSelector?.endpoint ?? '/app/notices/cpv-suggestions'}
+                                selectedItems={selectedCpvItems}
+                                onSelectedItemsChange={setSelectedCpvItems}
+                                popularItems={cpvSelector?.popular ?? []}
+                                texts={{
+                                    cpv_selected_one: nt.cpv_selected_one,
+                                    cpv_selected_many: nt.cpv_selected_many,
+                                    cpv_show_codes: nt.cpv_show_codes,
+                                    cpv_hide_codes: nt.cpv_hide_codes,
+                                    cpv_empty: nt.cpv_empty,
+                                    cpv_hint: nt.cpv_hint,
+                                }}
+                            />
                             </div>
                         </section>
 
@@ -2059,7 +2066,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {noticesText.openInDoffinLabel}
                                                             </a>
@@ -2315,7 +2322,7 @@ export default function NoticeIndex({
                                                         {isSavedOrHistoryMode && notice.show_url ? (
                                                             <Link
                                                                 href={notice.show_url}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 Åpne sak
                                                             </Link>
@@ -2415,7 +2422,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {noticeExternalLinkLabel(notice, noticesText)}
                                                             </a>

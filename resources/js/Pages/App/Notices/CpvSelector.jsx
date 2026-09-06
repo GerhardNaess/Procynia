@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { DISCLOSURE_INLINE } from '../../../Support/actionStyles';
 import {
     cpvSelectionSummary,
     shouldOfferCpvToggle,
@@ -162,50 +163,63 @@ export default function CpvSelector({
     });
 
     return (
-        <div className="space-y-2">
-            <div className="flex h-9 items-center justify-between gap-3">
-                <label className="text-base font-medium text-slate-700" htmlFor={inputId}>CPV</label>
+        <section className="mt-6 border-t border-slate-100 pt-5">
+            <label className="text-base font-medium text-slate-700" htmlFor={inputId}>CPV</label>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                <span className="min-w-0 text-base text-slate-600">
+                    {selectedItems.length > 0 ? selectionSummary : (texts.cpv_empty ?? 'Ingen koder valgt')}
+                </span>
                 {offerChipToggle ? (
-                    <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-base text-slate-600">{selectionSummary}</span>
-                        <button
-                            type="button"
-                            onClick={() => setAreChipsExpanded((current) => !current)}
-                            aria-expanded={showChips}
-                            aria-controls={chipsId}
-                            className="shrink-0 rounded-lg px-2 py-1 text-base font-semibold text-violet-700 underline underline-offset-2 transition hover:bg-violet-50 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                        >
-                            {showChips
-                                ? (texts.cpv_hide_codes ?? 'Skjul koder')
-                                : (texts.cpv_show_codes ?? 'Vis koder')}
-                        </button>
-                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setAreChipsExpanded((current) => !current)}
+                        aria-expanded={showChips}
+                        aria-controls={chipsId}
+                        className={`${DISCLOSURE_INLINE} shrink-0`}
+                    >
+                        {showChips
+                            ? (texts.cpv_hide_codes ?? 'Skjul koder')
+                            : (texts.cpv_show_codes ?? 'Vis koder')}
+                    </button>
                 ) : null}
             </div>
-            <div className="relative">
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
-                    <div id={chipsId} className="flex flex-wrap items-center gap-1.5">
-                        {showChips ? selectedItems.map((item) => (
-                            <span
-                                key={item.code}
-                                className="inline-flex max-w-full items-center gap-2 rounded-full bg-violet-100 px-3 py-1.5 text-base font-medium leading-6 text-violet-800 ring-1 ring-inset ring-violet-200"
-                            >
-                                <span className="min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
-                                    {item.label}
-                                </span>
-                                <span className="shrink-0 text-violet-700">{item.code}</span>
-                                <button
-                                    type="button"
-                                    onClick={() => removeItem(item.code)}
-                                    className="shrink-0 rounded-full text-violet-700 transition hover:text-violet-900"
-                                    aria-label={`Slett ${item.label}`}
-                                >
-                                    x
-                                </button>
-                            </span>
-                        )) : null}
 
-                        <div className="flex min-w-[120px] flex-1 items-center py-1">
+            {showChips ? (
+                <div className="mt-3">
+                    {selectedItems.length > 0 ? (
+                        // Capped and scrolled on its own, so a long watch list cannot stretch the
+                        // filter panel past the controls above it.
+                        <div
+                            id={chipsId}
+                            className="max-h-[280px] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/60 p-2.5"
+                        >
+                            <div className="grid gap-1.5 lg:grid-cols-2">
+                                {selectedItems.map((item) => (
+                                    <span
+                                        key={item.code}
+                                        className="flex w-full min-w-0 items-center gap-2 rounded-full bg-violet-100 px-3 py-1.5 text-base font-medium leading-6 text-violet-800 ring-1 ring-inset ring-violet-200"
+                                    >
+                                        <span className="min-w-0 flex-1 truncate" title={item.label}>
+                                            {item.label}
+                                        </span>
+                                        <span className="shrink-0 text-violet-700">{item.code}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeItem(item.code)}
+                                            className="shrink-0 rounded-full px-1 text-violet-700 transition hover:bg-violet-200 hover:text-violet-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                            aria-label={`Slett ${item.label}`}
+                                        >
+                                            x
+                                        </button>
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    <div className="relative mt-2">
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 transition focus-within:border-violet-300 focus-within:ring-4 focus-within:ring-violet-100">
+                            <div className="flex min-w-[120px] flex-1 items-center py-1">
                             <input
                                 id={inputId}
                                 ref={inputRef}
@@ -231,11 +245,10 @@ export default function CpvSelector({
                                 aria-autocomplete="list"
                                 aria-activedescendant={activeIndex >= 0 && suggestions[activeIndex] ? `${listboxId}-${suggestions[activeIndex].code}` : undefined}
                             />
+                            </div>
                         </div>
-                    </div>
-                </div>
 
-                {isOpen ? (
+                        {isOpen ? (
                     <div
                         id={listboxId}
                         role="listbox"
@@ -273,10 +286,15 @@ export default function CpvSelector({
                         {showEmptyState ? (
                             <div className="px-3 py-3 text-base text-slate-600">Ingen CPV-treff</div>
                         ) : null}
+                            </div>
+                        ) : null}
                     </div>
-                ) : null}
-            </div>
-            <p className="text-base leading-6 text-slate-600">Velg ett eller flere CPV-områder med vanlig språk eller kode.</p>
-        </div>
+
+                    <p className="mt-2 text-base leading-6 text-slate-600">
+                        {texts.cpv_hint ?? 'Velg ett eller flere CPV-områder med vanlig språk eller kode.'}
+                    </p>
+                </div>
+            ) : null}
+        </section>
     );
 }

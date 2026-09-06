@@ -1,5 +1,6 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
+import { PRIMARY_ACTION, WARNING_ACTION, DISCLOSURE_ACTION } from '../../../Support/actionStyles';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import BidStatusPipeline from '../../../Components/App/BidStatusPipeline';
 import GoNoGoAssessment from './GoNoGoAssessment';
@@ -993,7 +994,7 @@ export default function SavedNoticeShow({ notice }) {
                                     href={notice.external_url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {externalLinkLabel}
                                 </a>
@@ -1320,7 +1321,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         <button
                                                             type="submit"
                                                             disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
-                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
                                                         </button>
@@ -1409,7 +1410,7 @@ export default function SavedNoticeShow({ notice }) {
                                 <button
                                     type="button"
                                     onClick={openInfoItemCreator}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                    className={DISCLOSURE_ACTION}
                                 >
                                     {tsn.new_action}
                                 </button>
@@ -1586,7 +1587,7 @@ export default function SavedNoticeShow({ notice }) {
                                         <button
                                             type="submit"
                                             disabled={infoItemForm.processing || infoItemForm.data.body.trim() === ''}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {infoItemForm.processing ? tsn.save_action_saving : tsn.save_action}
                                         </button>
@@ -1820,7 +1821,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         ref={reopenNoGoTriggerRef}
                                                         type="button"
                                                         onClick={() => setIsReopenNoGoDialogOpen(true)}
-                                                        className="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 sm:w-auto"
+                                                        className={classNames(PRIMARY_ACTION, 'w-full shrink-0 sm:w-auto')}
                                                     >
                                                         {tsn.reopen_no_go_action}
                                                     </button>
@@ -2051,7 +2052,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <button
                                                     type="submit"
                                                     disabled={!isBidManagerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {bidManagerForm.processing ? tsn.bid_manager_saving : tsn.bid_manager_save}
                                                 </button>
@@ -2103,7 +2104,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <button
                                                     type="submit"
                                                     disabled={!isOpportunityOwnerDirty}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {opportunityOwnerForm.processing ? tsn.opportunity_owner_saving : tsn.opportunity_owner_save}
                                                 </button>
@@ -2293,7 +2294,7 @@ export default function SavedNoticeShow({ notice }) {
                         </label>
                         {reopenNoGoForm.errors.confirm_reopen ? <p className="mt-2 text-base text-rose-700">{reopenNoGoForm.errors.confirm_reopen}</p> : null}
                         <div className="mt-6 flex flex-wrap gap-3">
-                            <button type="submit" disabled={reopenNoGoForm.processing || reopenNoGoForm.data.reopen_reason.trim() === '' || !reopenNoGoForm.data.confirm_reopen} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60">{reopenNoGoForm.processing ? tsn.reopening_no_go : tsn.reopen_no_go_action}</button>
+                            <button type="submit" disabled={reopenNoGoForm.processing || reopenNoGoForm.data.reopen_reason.trim() === '' || !reopenNoGoForm.data.confirm_reopen} className={PRIMARY_ACTION}>{reopenNoGoForm.processing ? tsn.reopening_no_go : tsn.reopen_no_go_action}</button>
                             <button type="button" onClick={closeReopenNoGoDialog} disabled={reopenNoGoForm.processing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">{common.cancel}</button>
                         </div>
                     </form>
@@ -2355,7 +2356,7 @@ export default function SavedNoticeShow({ notice }) {
                         </label>
 
                         <div className="mt-6 flex flex-wrap gap-3">
-                            <button type="submit" disabled={isStatusActionProcessing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60">
+                            <button type="submit" disabled={isStatusActionProcessing} className={WARNING_ACTION}>
                                 {isStatusActionProcessing ? tsn.updating : tsn.setNoGo}
                             </button>
                             <button type="button" onClick={closeNoGoDialog} disabled={isStatusActionProcessing} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60">
