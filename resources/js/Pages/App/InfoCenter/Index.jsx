@@ -356,7 +356,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                         <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
                                             <Link
                                                 href={detailUrl}
-                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
                                                 {isAiRequirementTask ? 'Åpne krav i AI' : 'Åpne sak'}
                                             </Link>

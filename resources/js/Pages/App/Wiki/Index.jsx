@@ -2772,7 +2772,7 @@ function RunAffectedPagesPanel({ panelId, state, onRetry, tw }) {
                 <button
                     type="button"
                     onClick={onRetry}
-                    className="shrink-0 rounded-md border border-rose-200 px-3.5 py-2 text-base font-medium leading-6 text-rose-700 transition hover:bg-rose-50"
+                    className="shrink-0 rounded-md border border-slate-200 px-3.5 py-2 text-base font-medium leading-6 text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                 >
                     {tw.runs_pages_retry ?? 'Prøv igjen'}
                 </button>
@@ -3022,7 +3022,7 @@ function RunFindingsPanel({ panelId, state, onRetry, tw, locale, focusFindingId 
                 <button
                     type="button"
                     onClick={onRetry}
-                    className="shrink-0 rounded-md border border-rose-200 px-3.5 py-2 text-base font-medium leading-6 text-rose-700 transition hover:bg-rose-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500"
+                    className="shrink-0 rounded-md border border-slate-200 px-3.5 py-2 text-base font-medium leading-6 text-slate-700 transition hover:border-slate-300 hover:text-slate-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                 >
                     {tw.runs_pages_retry ?? 'Prøv igjen'}
                 </button>

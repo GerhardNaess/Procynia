@@ -192,7 +192,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                         <td className="px-5 py-4 text-right">
                                                             <Link
                                                                 href={analysisCase.action_url}
-                                                                className="inline-flex rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-base font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {tai.open_case ?? 'Åpne sak'}
                                                             </Link>
