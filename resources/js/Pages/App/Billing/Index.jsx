@@ -1,4 +1,5 @@
 import { router, usePage } from '@inertiajs/react';
+import { PRIMARY_COLOURS, SECONDARY_COLOURS, WARNING_COLOURS } from '../../../Support/actionStyles';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AiQuotaCard from '../../../Components/App/AiQuotaCard';
@@ -60,7 +61,7 @@ function SummaryCard({ label, value, hint, hintLabel }) {
     );
 }
 
-function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Bekreft', cancelLabel = 'Avbryt', danger = false }) {
+function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLabel = 'Bekreft', cancelLabel = 'Avbryt', warning = false }) {
     if (!isOpen) {
         return null;
     }
@@ -73,15 +74,15 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
                 <div className="mt-5 flex justify-end gap-3">
                     <button
                         onClick={onCancel}
-                        className="rounded-lg border border-slate-200 px-4 py-2 text-base font-medium text-slate-700 hover:bg-slate-50"
+                        className={`rounded-lg px-4 py-2 text-base font-medium ${SECONDARY_COLOURS}`}
                     >
                         {cancelLabel}
                     </button>
                     <button
                         onClick={onConfirm}
                         className={classNames(
-                            'rounded-lg px-4 py-2 text-base font-medium text-white',
-                            danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+                            'rounded-lg px-4 py-2 text-base font-medium',
+                            warning ? WARNING_COLOURS : PRIMARY_COLOURS
                         )}
                     >
                         {confirmLabel}
@@ -358,8 +359,8 @@ export default function BillingIndex() {
     };
 
     return (
-        <CustomerAppLayout title={tb.title ?? 'Abonnement'}>
-            <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+        <CustomerAppLayout title={tb.title ?? 'Abonnement'} showPageTitle={false}>
+            <div className="space-y-7">
                 {flash?.success && (
                     <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-base leading-6 text-green-800">
                         {flash.success}
@@ -371,11 +372,9 @@ export default function BillingIndex() {
                     </div>
                 )}
 
-                <header className="space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-                            {tb.title ?? 'Abonnement'}
-                        </h1>
+                <section className="space-y-1.5">
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{tb.title ?? 'Abonnement'}</h1>
                         <PageHelpButton
                             buttonLabel={tb.page_help_button ?? 'Hjelp'}
                             title={tb.page_help_title ?? 'Om abonnement, tilleggstjenester og fakturaer'}
@@ -401,13 +400,13 @@ export default function BillingIndex() {
                             ]}
                         />
                     </div>
-                    <p className="max-w-4xl text-base leading-6 text-slate-600">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         {tb.subtitle ?? 'Oversikt over abonnement, tilleggstjenester og fakturaer.'}
                     </p>
-                    <p className="max-w-4xl text-base leading-6 text-slate-600">
+                    <p className="max-w-3xl text-base leading-7 text-slate-600">
                         {tb.intro ?? 'Her ser du kundens abonnement, tilleggstjenester og fakturering. Fakturaer og PDF-er vises når de finnes.'}
                     </p>
-                </header>
+                </section>
 
                 <section className="grid gap-4 md:grid-cols-2">
                     <SummaryCard
@@ -474,7 +473,7 @@ export default function BillingIndex() {
                             {canChangePlan && (
                                 <button
                                     onClick={openPlanChangeModal}
-                                    className="rounded-lg border border-blue-200 px-4 py-2 text-base font-medium text-blue-700 hover:bg-blue-50"
+                                    className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
                                 >
                                     {planChangeText.button ?? 'Endre abonnement'}
                                 </button>
@@ -482,7 +481,7 @@ export default function BillingIndex() {
                             {subscription?.status === 'active' && !subscription.cancel_at_period_end && (
                                 <button
                                     onClick={() => setConfirmCancel(true)}
-                                    className="rounded-lg border border-red-200 px-4 py-2 text-base font-medium text-red-700 hover:bg-red-50"
+                                    className={`rounded-lg px-4 py-2 text-base font-medium ${WARNING_COLOURS}`}
                                 >
                                     {tb.cancel ?? 'Si opp abonnement'}
                                 </button>
@@ -490,7 +489,7 @@ export default function BillingIndex() {
                             {subscription?.cancel_at_period_end && (
                                 <button
                                     onClick={() => setConfirmResume(true)}
-                                    className="rounded-lg border border-green-200 px-4 py-2 text-base font-medium text-green-700 hover:bg-green-50"
+                                    className={`rounded-lg px-4 py-2 text-base font-medium ${PRIMARY_COLOURS}`}
                                 >
                                     {tb.resume ?? 'Gjenoppta abonnement'}
                                 </button>
@@ -852,7 +851,7 @@ export default function BillingIndex() {
                 onCancel={() => setConfirmCancel(false)}
                 confirmLabel={tb.cancel ?? 'Si opp abonnement'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
-                danger
+                warning
             />
 
             <ConfirmDialog

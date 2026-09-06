@@ -533,3 +533,56 @@ describe('the users tab treats deactivating as reversible', () => {
         assert.ok(!/border-emerald-200/.test(env), 'no roleless emerald action is left on the page');
     });
 });
+
+describe('cancelling a subscription is terminal, not destructive', () => {
+    const billing = read('Billing/Index.jsx');
+
+    /** The class expression of the action whose handler contains `handler`. */
+    function actionFor(handler) {
+        const at = billing.indexOf(handler);
+        assert.notEqual(at, -1, `no action matches ${handler}`);
+
+        return billing.slice(at, billing.indexOf('>', billing.indexOf('className', at)));
+    }
+
+    test('changing the subscription is the primary action of the card', () => {
+        assert.match(actionFor('onClick={openPlanChangeModal}'), /PRIMARY_COLOURS/);
+    });
+
+    test('cancelling warns rather than threatening deletion', () => {
+        // The subscription runs to the end of the period and no data is removed.
+        const cancel = actionFor('onClick={() => setConfirmCancel(true)}');
+
+        assert.match(cancel, /WARNING_COLOURS/);
+        assert.ok(!/DESTRUCTIVE|rose|red/.test(cancel), 'cancelling deletes nothing');
+    });
+
+    test('the confirmation carries the same warning, and cancels in secondary', () => {
+        const dialog = billing.slice(billing.indexOf('function ConfirmDialog('), billing.indexOf('export default function BillingIndex'));
+
+        assert.match(dialog, /warning \? WARNING_COLOURS : PRIMARY_COLOURS/, 'the confirm button follows the role');
+        assert.match(dialog, /SECONDARY_COLOURS/, 'backing out of the dialog stays secondary');
+        assert.ok(!/bg-red-600|bg-blue-600/.test(dialog), 'the dialog no longer uses off-palette fills');
+    });
+
+    test('the flag that drives the tone says warning, not danger', () => {
+        // It used to be `danger`, which is what made a red confirm look correct.
+        assert.ok(!billing.includes('danger'), 'a danger flag would invite the destructive colour back');
+        assert.match(billing, /warning = false/);
+    });
+
+    test('resuming a cancelled subscription is the primary way back', () => {
+        // Cancellation is reversible until the period ends, which is why it warns instead of
+        // deleting — and why the way back is an ordinary primary action.
+        const resume = actionFor('onClick={() => setConfirmResume(true)}');
+
+        assert.match(resume, /PRIMARY_COLOURS/);
+        assert.ok(!/green/.test(resume), 'green was never one of the roles');
+    });
+
+    test('the subscription actions keep their own compact geometry', () => {
+        for (const handler of ['onClick={openPlanChangeModal}', 'onClick={() => setConfirmCancel(true)}', 'onClick={() => setConfirmResume(true)}']) {
+            assert.match(actionFor(handler), /rounded-lg .*px-4 py-2 text-base font-medium/);
+        }
+    });
+});
