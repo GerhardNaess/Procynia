@@ -80,6 +80,11 @@ trait CreatesEnterpriseWikiFixtures
 
         if ($withDocumentOwnerApproval && ($version->is_current ?? false)) {
             $this->approveWikiPageVersionAsDocumentOwner($version);
+
+            // Retrieval reads enterprise_wiki_pages.published_version_id, so a fixture that means
+            // "this page is available as knowledge" has to publish the version. Document-owner
+            // sign-off is what permits publication; it is no longer the retrieval signal itself.
+            $page->forceFill(['published_version_id' => $version->id])->save();
         }
 
         return $page->refresh();

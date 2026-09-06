@@ -44,10 +44,18 @@ class RequirementWikiCatalogBuilderTest extends TestCase
         $this->assertSame('Godkjent side', $catalog[0]['title']);
     }
 
-    public function test_draft_pages_are_excluded(): void
+    public function test_pages_with_nothing_published_are_excluded(): void
     {
+        // Draft status alone no longer decides: a page being revised can still have a published
+        // version worth answering from. Having published nothing is what keeps it out.
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Kladd', 'Innhold i kladden.', ['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $this->createWikiPageWithVersion(
+            $customer,
+            'Kladd',
+            'Innhold i kladden.',
+            ['status' => EnterpriseWikiPage::STATUS_DRAFT],
+            withDocumentOwnerApproval: false,
+        );
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
 

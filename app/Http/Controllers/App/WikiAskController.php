@@ -166,7 +166,7 @@ class WikiAskController extends Controller
      * user is allowed to read. Falls back to approved-only for a user with no explicit rights.
      *
      * Note this can legitimately return archived/superseded/rejected too — those are readable page
-     * statuses. RequirementWikiCatalogBuilder::CURRENT_KNOWLEDGE_STATUSES intersects them away, so
+     * statuses. Retrieval grounds only in published versions regardless, so
      * stale content can never enter the answer context no matter what is passed here.
      *
      * @return list<string>

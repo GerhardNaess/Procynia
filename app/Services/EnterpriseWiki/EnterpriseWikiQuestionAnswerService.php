@@ -3,8 +3,8 @@
 namespace App\Services\EnterpriseWiki;
 
 use App\Data\Ai\AiCallContext;
-use App\Services\Ai\AiUsageMeter;
 use App\Models\EnterpriseWikiPage;
+use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Wiki\EnterpriseWikiSemanticRetrievalService;
 use App\Services\Ai\Wiki\RequirementWikiPageReader;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
@@ -69,7 +69,11 @@ class EnterpriseWikiQuestionAnswerService
         $question = trim($question);
         $queryTokens = RequirementWikiTermNormalizer::tokenize($question);
 
-        $semanticRetrieval = $this->semanticRetrieval->retrieve($question, $customerId, $languageCode, $visibleStatuses);
+        // $visibleStatuses still gates whether the user may ASK at all, but no longer what may be
+        // answered from: Spør Wiki grounds only in published versions. A reviewer who may read a
+        // draft page still gets no answers out of it — reading unreviewed content is one thing,
+        // having the AI present it as documented fact is another.
+        $semanticRetrieval = $this->semanticRetrieval->retrieve($question, $customerId, $languageCode);
         $catalog = $semanticRetrieval['catalog'];
         $ranked = $semanticRetrieval['candidate_pool'];
         $candidateCountIn = count($ranked);

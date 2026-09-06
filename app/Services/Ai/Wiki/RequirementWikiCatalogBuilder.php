@@ -13,9 +13,18 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
  *
  * A page is in the catalog only when it:
  * - belongs to the given customer_id,
- * - has EnterpriseWikiPage::STATUS_APPROVED,
- * - has a current page version, and
- * - that version's content_markdown is non-empty.
+ * - names a published version (enterprise_wiki_pages.published_version_id),
+ * - that version exists and actually belongs to this page, and
+ * - its content_markdown is non-empty.
+ *
+ * Deliberately NOT gated on page.status. Status describes what is happening to the WORKING version:
+ * a page can be pending_review or rejected while a previously approved version is still published,
+ * and that approved knowledge must keep answering questions. Only archived and superseded pages —
+ * which are retired outright, not merely being revised — are excluded.
+ *
+ * Nor is it gated on document-owner approvals. That gate is what allows a version to be published;
+ * once publication has happened the decision stands, and pending sign-offs on a NEW working version
+ * must not retroactively withdraw knowledge that was approved.
  *
  * Each entry carries the page's own content_markdown (needed by RequirementWikiPageRanker for
  * content-hit scoring and by RequirementWikiPageReader once a page is actually selected) plus
@@ -35,16 +44,6 @@ class RequirementWikiCatalogBuilder
     ) {}
 
     /**
-     * Statuses that can ever represent CURRENT customer knowledge. Archived/superseded/rejected are
-     * excluded by construction, so no caller can widen $statuses into stale content.
-     */
-    public const CURRENT_KNOWLEDGE_STATUSES = [
-        EnterpriseWikiPage::STATUS_APPROVED,
-        EnterpriseWikiPage::STATUS_DRAFT,
-        EnterpriseWikiPage::STATUS_PENDING_REVIEW,
-    ];
-
-    /**
      * Purpose: Build the full customer-scoped Wiki catalog.
      * Inputs: The customer id, and optionally which page statuses are eligible.
      * Returns: One entry per eligible page:
@@ -52,55 +51,28 @@ class RequirementWikiCatalogBuilder
      *           excerpt, outgoing_link_count, backlink_count}.
      * Side effects: None (read-only).
      *
-     * $statuses defaults to approved-only, which is the behaviour every existing caller relies on.
-     * "Spør Wiki" (EnterpriseWikiQuestionAnswerService) passes the asking user's own visible
-     * statuses instead, so a reviewer who may legitimately read a draft page can also get answers
-     * grounded in it — the same read model the Wiki pages themselves use. Archived, superseded and
-     * rejected pages are never eligible for either caller: they are not current knowledge.
-     *
-     * $requireCurrentVersionApproval adds the sign-off gate on top: only pages whose CURRENT
-     * version is fully approved by its document owners are eligible. That is the gate the ingest
-     * flow itself ends on — a run stops at 'awaiting_document_owner_approval', and nothing in the
-     * current architecture ever advances enterprise_wiki_pages.status past 'draft'. Page status
-     * therefore says nothing about whether anyone has signed off on today's content; it is the
-     * legacy single-page review lifecycle (WikiController::submit()/approve(),
-     * FinalizeEnterpriseWikiIngest), still meaningful for archived/superseded/rejected but not a
-     * statement of approval. Off by default so read-oriented callers keep their exploratory
-     * semantics; requirement answers turn it on, because a bid answer presents Wiki content as
-     * documented customer fact.
-     *
-     * @param  list<string>|null  $statuses
-     * @return list<array{page_id: int, title: string, page_type: string, scope: string, slug: string, content_markdown: string, figures: list<array<string, mixed>>, headings: list<string>, excerpt: string, outgoing_link_count: int, backlink_count: int}>
+     * Takes no status or approval parameters: publication is the only question, which makes the
+     * old "widen the statuses and see what comes back" mistake impossible to express.
      */
-    public function build(int $customerId, ?array $statuses = null, bool $requireCurrentVersionApproval = false): array
+    public function build(int $customerId): array
     {
-        $eligibleStatuses = array_values(array_intersect(
-            $statuses ?? [EnterpriseWikiPage::STATUS_APPROVED],
-            self::CURRENT_KNOWLEDGE_STATUSES,
-        ));
-
-        if ($eligibleStatuses === []) {
-            return [];
-        }
-
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->whereIn('status', $eligibleStatuses)
-            ->with('currentVersion')
+            ->whereNotNull('published_version_id')
+            ->whereNotIn('status', [EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED])
+            ->with('publishedVersion')
             ->get()
-            ->filter(fn (EnterpriseWikiPage $page): bool => trim((string) $page->currentVersion?->content_markdown) !== '')
+            ->filter(function (EnterpriseWikiPage $page): bool {
+                $published = $page->publishedVersion;
+
+                // Fail closed. A pointer to a missing version, or to a version belonging to another
+                // page, is corruption — and falling back to the working version would answer with
+                // content nobody approved. Better to drop the page from the catalog.
+                return $published !== null
+                    && (int) $published->enterprise_wiki_page_id === (int) $page->id
+                    && trim((string) $published->content_markdown) !== '';
+            })
             ->values();
-
-        if ($requireCurrentVersionApproval) {
-            $approvedPageIds = array_flip($this->documentOwnerApprovals->approvedCurrentVersionPageIds(
-                $customerId,
-                $pages->pluck('id')->map(static fn ($id): int => (int) $id)->all(),
-            ));
-
-            $pages = $pages
-                ->filter(fn (EnterpriseWikiPage $page): bool => isset($approvedPageIds[(int) $page->id]))
-                ->values();
-        }
 
         if ($pages->isEmpty()) {
             return [];
@@ -112,7 +84,7 @@ class RequirementWikiCatalogBuilder
 
         return $pages
             ->map(function (EnterpriseWikiPage $page) use ($outgoingCounts, $backlinkCounts): array {
-                $contentMarkdown = (string) $page->currentVersion->content_markdown;
+                $contentMarkdown = (string) $page->publishedVersion->content_markdown;
 
                 return [
                     'page_id' => $page->id,
@@ -125,7 +97,7 @@ class RequirementWikiCatalogBuilder
                     // caption and citation but never the image itself. Carried alongside the text
                     // so a page that is actually read can offer its own figures to the answer.
                     'figures' => $this->figureCatalog->fromContentBlocks(
-                        (array) ($page->currentVersion->content_blocks_json ?? []),
+                        (array) ($page->publishedVersion->content_blocks_json ?? []),
                     ),
                     'headings' => $this->extractHeadings($contentMarkdown),
                     'excerpt' => $this->extractExcerpt($contentMarkdown),

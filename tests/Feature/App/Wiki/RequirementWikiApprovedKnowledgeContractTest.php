@@ -4,43 +4,34 @@ namespace Tests\Feature\App\Wiki;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
-use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\Concerns\CreatesEnterpriseWikiFixtures;
-use Tests\Concerns\UsesProjectPostgresConnection;
 use Tests\TestCase;
 
 /**
- * What "approved current Wiki knowledge" means for a bid answer.
+ * What "approved Wiki knowledge" means for a bid answer.
  *
- * The ingest flow ends at run status 'awaiting_document_owner_approval' and never advances
- * enterprise_wiki_pages.status past 'draft', so page status cannot be the approval signal. The
- * authoritative one is document-owner sign-off on the page's CURRENT version — version-scoped, so
- * regenerating a page drops it back out until the owners sign the new version.
+ * It used to mean document-owner sign-off on the page's CURRENT version. That had two consequences
+ * nobody wanted: a page dropped out of the catalog the moment a run regenerated it, and the same
+ * gate was being re-evaluated forever against work in progress.
+ *
+ * The rule is now one term: `enterprise_wiki_pages.published_version_id`. Sign-off is what permits a
+ * version to be published; publication is what makes it knowledge. Once a version is published the
+ * decision stands, and later work on the page cannot retroactively withdraw it.
+ *
+ * Spør Wiki and requirement answers now share this rule. There is no wider exploratory read model:
+ * being allowed to READ a draft page is not the same as having the AI present it as documented fact.
  */
 class RequirementWikiApprovedKnowledgeContractTest extends TestCase
 {
     use CreatesEnterpriseWikiFixtures;
-    use UsesProjectPostgresConnection;
+    use DatabaseTransactions;
 
-    protected function setUp(): void
+    /** @return list<array<string, mixed>> */
+    private function catalog(int $customerId): array
     {
-        parent::setUp();
-
-        $this->useProjectPostgresConnection();
-        DB::beginTransaction();
-    }
-
-    protected function tearDown(): void
-    {
-        if (DB::transactionLevel() > 0) {
-            DB::rollBack();
-        }
-
-        DB::disconnect(DB::getDefaultConnection());
-
-        parent::tearDown();
+        return app(RequirementWikiCatalogBuilder::class)->build($customerId);
     }
 
     private function currentVersion(EnterpriseWikiPage $page): EnterpriseWikiPageVersion
@@ -51,76 +42,48 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
             ->firstOrFail();
     }
 
-    /** The requirement-answer catalog: current knowledge statuses plus the sign-off gate. */
-    private function answerCatalog(int $customerId): array
-    {
-        return app(RequirementWikiCatalogBuilder::class)->build(
-            $customerId,
-            RequirementWikiCatalogBuilder::CURRENT_KNOWLEDGE_STATUSES,
-            true,
-        );
-    }
-
-    public function test_a_page_whose_current_version_is_signed_off_is_available_to_requirement_answers(): void
+    public function test_a_published_page_is_available_to_requirement_answers(): void
     {
         $customer = $this->createWikiCustomer();
-        $page = $this->createWikiPageWithVersion($customer, 'Samhandlings- og styringsmodell', 'Innhold om samhandling.', [
-            // Exactly the state the real Wiki is in: never submitted for the legacy page review.
-            'status' => EnterpriseWikiPage::STATUS_DRAFT,
-        ]);
+        $this->createWikiPageWithVersion($customer, 'Samhandlingsmodell', 'Innhold om samhandling.');
+
+        $this->assertCount(1, $this->catalog($customer->id));
+    }
+
+    public function test_a_page_that_was_never_published_is_kept_out(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $this->createWikiPageWithVersion(
+            $customer,
+            'Uferdig side',
+            'Innhold.',
+            withDocumentOwnerApproval: false,
+        );
+
+        $this->assertSame([], $this->catalog($customer->id));
+    }
+
+    public function test_signing_off_without_publishing_is_not_enough(): void
+    {
+        // Sign-off permits publication; it is not publication. A version the document owners have
+        // cleared but nobody approved at page level is still not knowledge.
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'Klarert men upublisert', 'Innhold.');
         $this->approveWikiPageVersionAsDocumentOwner($this->currentVersion($page));
+        $page->forceFill(['published_version_id' => null])->save();
 
-        $catalog = $this->answerCatalog($customer->id);
-
-        $this->assertCount(1, $catalog);
-        $this->assertSame('Samhandlings- og styringsmodell', $catalog[0]['title']);
+        $this->assertSame([], $this->catalog($customer->id));
     }
 
-    public function test_a_page_nobody_has_signed_off_is_kept_out(): void
+    public function test_regenerating_a_page_does_not_withdraw_the_published_version(): void
     {
-        $customer = $this->createWikiCustomer();
-        $page = $this->createWikiPageWithVersion($customer, 'Ansvarsmatrise', 'Innhold.', [
-            'status' => EnterpriseWikiPage::STATUS_DRAFT,
-        ], withDocumentOwnerApproval: false);
-        $this->approveWikiPageVersionAsDocumentOwner($this->currentVersion($page), EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
-
-        $this->assertSame([], $this->answerCatalog($customer->id));
-    }
-
-    public function test_one_rejected_owner_keeps_the_page_out_even_when_another_approved(): void
-    {
-        $customer = $this->createWikiCustomer();
-        // The fixture signs off one owner; a second owner on the same version rejects.
-        $page = $this->createWikiPageWithVersion($customer, 'Delt side', 'Innhold fra to dokumenter.');
-        $this->approveWikiPageVersionAsDocumentOwner(
-            $this->currentVersion($page),
-            EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_REJECTED,
-        );
-
-        $this->assertSame([], $this->answerCatalog($customer->id));
-    }
-
-    public function test_a_version_with_no_approval_requirement_is_not_approved_by_default(): void
-    {
-        $customer = $this->createWikiCustomer();
-        // page.status = approved (legacy lifecycle) but no owner has ever signed the version.
-        $this->createWikiPageWithVersion($customer, 'Gammel godkjent side', 'Innhold.', [
-            'status' => EnterpriseWikiPage::STATUS_APPROVED,
-        ], withDocumentOwnerApproval: false);
-
-        $this->assertSame([], $this->answerCatalog($customer->id));
-    }
-
-    public function test_sign_off_on_an_older_version_does_not_carry_over_to_a_regenerated_page(): void
-    {
+        // The opposite of the old contract, and the point of the change: a page under revision keeps
+        // answering from what was approved, instead of falling silent until the new work is done.
         $customer = $this->createWikiCustomer();
         $page = $this->createWikiPageWithVersion($customer, 'Single Point of Contact (SPOC)', 'Første versjon.');
-        $oldVersion = $this->currentVersion($page);
+        $published = $this->currentVersion($page);
 
-        $this->assertCount(1, $this->answerCatalog($customer->id));
-
-        // A later run regenerates the page: version 2 becomes current, unapproved.
-        $oldVersion->forceFill(['is_current' => false])->save();
+        $published->forceFill(['is_current' => false])->save();
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 2,
@@ -128,53 +91,83 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
             'content_markdown' => 'Andre versjon med nytt innhold.',
         ]);
 
-        $this->assertSame(
-            [],
-            $this->answerCatalog($customer->id),
-            'Approval belongs to the version that was read, never to the page.',
-        );
+        $catalog = $this->catalog($customer->id);
+
+        $this->assertCount(1, $catalog);
+        $this->assertStringContainsString('Første versjon.', $catalog[0]['content_markdown']);
+        $this->assertStringNotContainsString('Andre versjon', $catalog[0]['content_markdown']);
+        $this->assertSame($published->id, (int) $page->fresh()->published_version_id);
     }
 
-    public function test_a_rejected_or_archived_page_stays_out_even_when_signed_off(): void
+    public function test_publishing_the_regenerated_version_switches_the_answer_source(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $page = $this->createWikiPageWithVersion($customer, 'SPOC', 'Første versjon.');
+        $this->currentVersion($page)->forceFill(['is_current' => false])->save();
+
+        $second = EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 2,
+            'is_current' => true,
+            'content_markdown' => 'Andre versjon med nytt innhold.',
+        ]);
+        $page->forceFill(['published_version_id' => $second->id])->save();
+
+        $catalog = $this->catalog($customer->id);
+
+        $this->assertCount(1, $catalog, 'one page, one entry — never both versions');
+        $this->assertStringContainsString('Andre versjon', $catalog[0]['content_markdown']);
+    }
+
+    public function test_a_page_being_revised_still_answers_from_its_published_version(): void
     {
         $customer = $this->createWikiCustomer();
 
-        foreach ([EnterpriseWikiPage::STATUS_REJECTED, EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED] as $status) {
-            $page = $this->createWikiPageWithVersion($customer, 'Side '.$status, 'Innhold.', ['status' => $status]);
-            $this->approveWikiPageVersionAsDocumentOwner($this->currentVersion($page));
+        foreach ([EnterpriseWikiPage::STATUS_DRAFT, EnterpriseWikiPage::STATUS_PENDING_REVIEW, EnterpriseWikiPage::STATUS_REJECTED] as $status) {
+            $page = $this->createWikiPageWithVersion($customer, 'Side '.$status, 'Innhold.');
+            $page->forceFill(['status' => $status])->save();
         }
 
-        $this->assertSame([], $this->answerCatalog($customer->id));
+        $this->assertCount(3, $this->catalog($customer->id), 'status describes the working version, not the published one');
     }
 
-    public function test_another_customers_signed_off_page_is_never_visible(): void
+    public function test_archived_and_superseded_pages_stay_out_even_when_published(): void
+    {
+        // Retiring a page is a different act from revising it.
+        $customer = $this->createWikiCustomer();
+
+        foreach ([EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED] as $status) {
+            $page = $this->createWikiPageWithVersion($customer, 'Side '.$status, 'Innhold.');
+            $page->forceFill(['status' => $status])->save();
+        }
+
+        $this->assertSame([], $this->catalog($customer->id));
+    }
+
+    public function test_another_customers_published_page_is_never_visible(): void
     {
         $customerA = $this->createWikiCustomer('Kunde A');
         $customerB = $this->createWikiCustomer('Kunde B');
-        $page = $this->createWikiPageWithVersion($customerA, 'Samhandling', 'Innhold.');
-        $this->approveWikiPageVersionAsDocumentOwner($this->currentVersion($page));
+        $this->createWikiPageWithVersion($customerA, 'Samhandling', 'Innhold.');
 
-        $this->assertCount(1, $this->answerCatalog($customerA->id));
-        $this->assertSame([], $this->answerCatalog($customerB->id));
+        $this->assertCount(1, $this->catalog($customerA->id));
+        $this->assertSame([], $this->catalog($customerB->id));
     }
 
-    public function test_ask_wiki_semantics_are_unchanged_by_the_sign_off_gate(): void
+    public function test_ask_wiki_and_requirement_answers_share_one_rule(): void
     {
+        // Previously Spør Wiki could ground answers in a draft page the reader was allowed to open.
+        // Reading unreviewed content is one thing; having the AI present it as documented fact is
+        // another, and the catalog can no longer be widened to allow it.
         $customer = $this->createWikiCustomer();
-        $page = $this->createWikiPageWithVersion($customer, 'Ikke signert side', 'Innhold.', [
-            'status' => EnterpriseWikiPage::STATUS_DRAFT,
-        ], withDocumentOwnerApproval: false);
-        $this->approveWikiPageVersionAsDocumentOwner($this->currentVersion($page), EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING);
+        $this->createWikiPageWithVersion(
+            $customer,
+            'Ikke publisert side',
+            'Innhold.',
+            ['status' => EnterpriseWikiPage::STATUS_DRAFT],
+            withDocumentOwnerApproval: false,
+        );
 
-        // "Spør Wiki" passes the reader's own visible statuses and no approval requirement — an
-        // exploratory read model, deliberately wider than what a bid answer may cite.
-        $askWikiCatalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id, [
-            EnterpriseWikiPage::STATUS_DRAFT,
-            EnterpriseWikiPage::STATUS_PENDING_REVIEW,
-            EnterpriseWikiPage::STATUS_APPROVED,
-        ]);
-
-        $this->assertCount(1, $askWikiCatalog);
-        $this->assertSame([], $this->answerCatalog($customer->id));
+        $this->assertSame([], $this->catalog($customer->id));
     }
 }

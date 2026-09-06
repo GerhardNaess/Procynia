@@ -67,17 +67,9 @@ class RequirementWikiResearchService
     {
         $researchInput = trim(($requirement->requirement_identifier ?? '').' '.$requirement->requirement_text);
         // A bid answer presents Wiki content as the customer's documented fact, so it reads only
-        // pages whose current version the document owners have signed off on. Status is passed
-        // explicitly as CURRENT_KNOWLEDGE_STATUSES rather than approved-only: it exists here to
-        // keep archived/superseded/rejected pages out, not to express approval — that is what the
-        // sign-off gate is for. See RequirementWikiCatalogBuilder::build().
-        $semanticRetrieval = $this->semanticRetrieval->retrieve(
-            $researchInput,
-            $customerId,
-            $languageCode,
-            RequirementWikiCatalogBuilder::CURRENT_KNOWLEDGE_STATUSES,
-            requireCurrentVersionApproval: true,
-        );
+        // published versions. That is now the retrieval rule itself rather than something this
+        // caller has to ask for. See RequirementWikiCatalogBuilder::build().
+        $semanticRetrieval = $this->semanticRetrieval->retrieve($researchInput, $customerId, $languageCode);
         $catalog = $semanticRetrieval['catalog'];
         $catalogByPageId = [];
 
@@ -379,16 +371,23 @@ class RequirementWikiResearchService
             return $empty;
         }
 
+        // Claims are read from the PUBLISHED version. One attached to the working version has not
+        // been published, and citing it would ground an answer in content nobody approved. No
+        // published version means no evidence — never a fallback to the newest one.
+        $publishedVersionId = EnterpriseWikiPage::query()->whereKey($pageId)->value('published_version_id');
+
+        if ($publishedVersionId === null) {
+            return $empty;
+        }
+
         $matches = EnterpriseWikiClaim::query()
             ->where('enterprise_wiki_page_id', $pageId)
+            ->where('enterprise_wiki_page_version_id', $publishedVersionId)
             ->where('conflict_flag', false)
             ->whereIn('content_origin', [
                 EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
                 EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
             ])
-            ->whereHas('version', function ($query): void {
-                $query->where('is_current', true);
-            })
             ->get(['id', 'claim_text', 'content_origin'])
             ->filter(function (EnterpriseWikiClaim $claim) use ($queryTokens): bool {
                 $claimTokens = RequirementWikiTermNormalizer::tokenize((string) $claim->claim_text);

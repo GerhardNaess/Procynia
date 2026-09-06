@@ -372,15 +372,17 @@ class WikiAskControllerTest extends TestCase
     // Retrieval scope
     // =========================================================================
 
-    public function test_archived_superseded_and_rejected_pages_are_never_used(): void
+    public function test_archived_and_superseded_pages_are_never_used(): void
     {
         $customer = $this->createCustomer();
         $user = $this->createUser($customer);
 
+        // Rejected is deliberately absent: it describes the WORKING version, and a page whose
+        // earlier version is published still answers questions from it. Archived and superseded are
+        // retired outright, which is a different thing.
         foreach ([
             EnterpriseWikiPage::STATUS_ARCHIVED,
             EnterpriseWikiPage::STATUS_SUPERSEDED,
-            EnterpriseWikiPage::STATUS_REJECTED,
         ] as $index => $status) {
             $page = $this->createApprovedPage(
                 $customer,
@@ -407,15 +409,17 @@ class WikiAskControllerTest extends TestCase
         $user = $this->createUser($customer);
         $page = $this->createApprovedPage($customer, 'procedure', 'Procedure', "# Procedure\n\nThe deadline is 30 minutes.");
 
-        // Supersede v1 with a corrected v2.
+        // Supersede v1 with a corrected v2, and publish it — a newer version only reaches readers
+        // once it has actually been approved.
         $page->versions()->update(['is_current' => false]);
-        EnterpriseWikiPageVersion::query()->create([
+        $v2 = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 2,
             'is_current' => true,
             'content_markdown' => "# Procedure\n\nThe deadline is 15 minutes.",
             'generated_by_model' => 'deterministic/section-patch',
         ]);
+        $page->forceFill(['published_version_id' => $v2->id])->save();
 
         $this->mockAnswer(function (array $context): array {
             $this->assertStringContainsString('15 minutes', $context[0]['content_markdown']);
@@ -1079,17 +1083,22 @@ class WikiAskControllerTest extends TestCase
         $this->actingAs($user)->post('/app/wiki/ask', ['question' => 'What is the deadline?'])->assertOk();
     }
 
-    public function test_the_catalog_builder_still_defaults_to_approved_only(): void
+    public function test_the_catalog_builder_answers_from_published_versions_regardless_of_status(): void
     {
-        // Guards the additive change: existing callers must be unaffected.
+        // Page status describes the WORKING version. A page being revised — draft here — still has
+        // published knowledge worth answering from, so status is no longer the eligibility rule.
         $customer = $this->createCustomer();
         $approved = $this->createApprovedPage($customer, 'approved-page', 'Approved Page', "# Approved Page\n\nContent.");
-        $draft = $this->createApprovedPage($customer, 'draft-page', 'Draft Page', "# Draft Page\n\nContent.");
-        $draft->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+        $beingRevised = $this->createApprovedPage($customer, 'draft-page', 'Draft Page', "# Draft Page\n\nContent.");
+        $beingRevised->update(['status' => EnterpriseWikiPage::STATUS_DRAFT]);
+
+        $unpublished = $this->createApprovedPage($customer, 'unpublished-page', 'Unpublished Page', "# Unpublished Page\n\nContent.");
+        $unpublished->forceFill(['published_version_id' => null])->save();
 
         $pageIds = array_column(app(RequirementWikiCatalogBuilder::class)->build($customer->id), 'page_id');
 
-        $this->assertSame([$approved->id], $pageIds);
+        $this->assertEqualsCanonicalizing([$approved->id, $beingRevised->id], $pageIds);
+        $this->assertNotContains($unpublished->id, $pageIds, 'nothing published, nothing to answer from');
     }
 
     public function test_the_catalog_builder_never_returns_stale_statuses_even_when_asked(): void
@@ -1224,7 +1233,7 @@ class WikiAskControllerTest extends TestCase
             'last_source_hash' => str_pad('hash', 64, '0'),
         ], $overrides));
 
-        EnterpriseWikiPageVersion::query()->create([
+        $version = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 1,
             'is_current' => true,
@@ -1232,7 +1241,10 @@ class WikiAskControllerTest extends TestCase
             'generated_by_model' => 'gpt-5',
         ]);
 
-        return $page;
+        // Retrieval reads published_version_id, so an "approved page" fixture has to publish.
+        $page->forceFill(['published_version_id' => $version->id])->save();
+
+        return $page->refresh();
     }
 
     private function createPageWithVersion(Customer $customer, string $slug, string $title, string $markdown): EnterpriseWikiPage

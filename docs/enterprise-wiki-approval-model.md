@@ -865,6 +865,46 @@ til in-app, i tråd med eksisterende mønster.
 «endringer kreves». Å gjette en mottaker ville satt en annens navn på arbeid de aldri påtok seg. Ingen
 eksisterende produktregel sier at System Owner mottar slike foreldreløse oppgaver.
 
+### Gjennomført i steg 10 — retrieval leser publisert kunnskap
+
+**BESLUTNING — én regel.** En side er tilgjengelig for autoritativ retrieval når den navngir en
+publisert versjon (`enterprise_wiki_pages.published_version_id`), versjonen finnes og faktisk
+tilhører siden, og innholdet ikke er tomt. Innholdet leses fra den versjonen — aldri fra
+`is_current`, nyeste versjonsnummer eller arbeidsversjonen.
+
+**Sidestatus er ikke lenger en del av regelen.** Status beskriver hva som skjer med
+*arbeidsversjonen*. En side kan være `pending_review` eller `rejected` mens en tidligere godkjent
+versjon fortsatt svarer på spørsmål. Bare `archived` og `superseded` holdes ute — de er pensjonert,
+ikke under revisjon.
+
+**Dokumenteierporten er en publiseringsport, ikke en retrieval-port.** Sign-off er det som tillater
+at en versjon publiseres. Når publiseringen først har skjedd, står beslutningen: ventende
+godkjenninger på en *ny* arbeidsversjon trekker ikke tilbake kunnskap som allerede er godkjent, og
+et eierskifte i ettertid gjør det heller ikke.
+
+**Dette rettet en reell lekkasje.** `RequirementWikiPageRanker` og `RequirementWikiResearchService`
+leste claims fra arbeidsversjonen, så en påstand ingen hadde godkjent kunne både rangere sider og
+siteres som evidens. Begge leser nå kun claims som tilhører den publiserte versjonen.
+
+**Fail-closed.** Peker `published_version_id` på en versjon som tilhører en annen side, utelates
+siden. Slettes den publiserte versjonen, nullstiller fremmednøkkelen (`nullOnDelete`) pekeren og
+siden faller ut. Det faller **aldri** tilbake til arbeidsversjonen.
+
+**API-et er strammet inn.** `RequirementWikiCatalogBuilder::build()` tar nå bare `customerId` —
+`$statuses` og `$requireCurrentVersionApproval` er fjernet, så «utvid statusene og se hva som kommer»
+ikke lenger lar seg uttrykke. `CURRENT_KNOWLEDGE_STATUSES` er borte.
+
+**Spør Wiki og anbudssvar deler nå én regel.** Tidligere kunne Spør Wiki grunne svar i en utkastside
+leseren hadde lov til å åpne. Å lese ugodkjent innhold er én ting; å la AI-en presentere det som
+dokumentert faktum er en annen. Brukerens synlige statuser styrer fortsatt om hen får *spørre*.
+
+**Ingen cache eller index.** Katalogen bygges direkte fra tabellene ved hvert kall, så det finnes
+ingen indeks der ikke-publisert tekst kan ligge igjen. Ingen embeddings i denne kjeden.
+`publishedVersion` eager-lastes, som `currentVersion` var før — ingen N+1.
+
+**Eksisterende data:** 19 sider, 1 publisert, 18 uten. Ingen anomalier: ingen `approved` uten
+publisert versjon, ingen peker på feil sides versjon. Ingen dataendring var nødvendig.
+
 **ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
 besluttet.
 
@@ -888,7 +928,8 @@ dokumentet.
 9. Hvordan migreres dagens `is_current`-semantikk til skillet arbeidsversjon/publisert versjon?
 10. ~~Hvordan skal eksisterende `rejected`-status behandles~~ — **besluttet i steg 8**: `rejected`
     beholdes teknisk og leses som «endringer kreves». Se 10.
-11. Hvilke Wiki-sider skal inngå i Spør Wiki mens review pågår?
+11. ~~Hvilke Wiki-sider skal inngå i Spør Wiki mens review pågår?~~ — **besluttet i steg 10**: de
+    som har en publisert versjon. Sidestatus styrer ikke retrieval.
 
 ---
 
@@ -908,9 +949,8 @@ Disse skal aldri brytes. Brudd er en regresjon, uansett hvor praktisk det måtte
 10. Spør Wiki skal kun bruke godkjent/publisert kunnskap.
 11. Alle review- og eierskapsendringer skal kunne auditeres.
 
-**Merk:** invariant 1 og 2 er innfridd i steg 3 (6). Invariant 3, 5 og 6 er innfridd i steg 2 (3.1).
+**Merk:** invariant 10 er innfridd i steg 10 (6). Invariant 1 og 2 er innfridd i steg 3 (6). Invariant 3, 5 og 6 er innfridd i steg 2 (3.1).
 Invariant 7 og 8 er innfridd i steg 4 (10) på backend — frontend-porten gjenstår, se ÅPENT i 10.
-Invariant 10 gjenstår til steg 10 — se ÅPENT i 6.
 
 ---
 
@@ -929,7 +969,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 7. ~~Implementere endelig Wiki-review~~ — **gjennomført**, se 10
 8. ~~Implementere retur / endringskrav~~ — **gjennomført**, se 10
 9. ~~Koble notification-/task-mekanisme~~ — **gjennomført**, se 10
-10. Begrense Spør Wiki og retrieval til approved/published
+10. ~~Begrense Spør Wiki og retrieval til approved/published~~ — **gjennomført**, se 6
 11. Oppdatere Wiki UI
 12. Oppdatere PageHelp
 13. Migrere og backfille eksisterende data — gjelder sideeier (steg 2) og `is_current`-semantikken

@@ -384,8 +384,11 @@ class EnterpriseWikiDocumentOwnerApprovalService
     }
 
     /**
-     * The pages whose CURRENT version is fully signed off by its document owners — the one
-     * authoritative "approved current knowledge" signal in this architecture.
+     * The pages whose CURRENT version is fully signed off by its document owners.
+     *
+     * NOT a retrieval signal. Retrieval reads enterprise_wiki_pages.published_version_id and nothing
+     * else — this answers "is the working version cleared for publication?", which is a question
+     * about work in progress, not about what readers may rely on.
      *
      * Same rule evaluateRunCompletionGate() applies to a run, asked per page instead: every
      * approval row on the current version is approved, and there is at least one. A version with

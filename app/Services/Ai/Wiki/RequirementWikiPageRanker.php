@@ -3,7 +3,6 @@
 namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiClaim;
-use App\Models\EnterpriseWikiPage;
 
 /**
  * Deterministically ranks Wiki catalog entries (see RequirementWikiCatalogBuilder) against a set
@@ -160,16 +159,20 @@ class RequirementWikiPageRanker
      */
     private function claimHitCountsByPageId(int $customerId, array $queryTokens): array
     {
+        // Scored against PUBLISHED claims only, and not gated on page.status: a page being revised
+        // still has approved knowledge worth ranking. The join on published_version_id is what
+        // keeps working-version claims out.
         $claims = EnterpriseWikiClaim::query()
-            ->whereHas('page', function ($query) use ($customerId): void {
-                $query->where('customer_id', $customerId)
-                    ->where('status', EnterpriseWikiPage::STATUS_APPROVED);
-            })
-            ->whereHas('version', function ($query): void {
-                $query->where('is_current', true);
-            })
-            ->where('conflict_flag', false)
-            ->get(['id', 'enterprise_wiki_page_id', 'claim_text', 'content_origin']);
+            ->join('enterprise_wiki_pages', 'enterprise_wiki_pages.id', '=', 'enterprise_wiki_claims.enterprise_wiki_page_id')
+            ->where('enterprise_wiki_pages.customer_id', $customerId)
+            ->whereColumn('enterprise_wiki_claims.enterprise_wiki_page_version_id', 'enterprise_wiki_pages.published_version_id')
+            ->where('enterprise_wiki_claims.conflict_flag', false)
+            ->get([
+                'enterprise_wiki_claims.id',
+                'enterprise_wiki_claims.enterprise_wiki_page_id',
+                'enterprise_wiki_claims.claim_text',
+                'enterprise_wiki_claims.content_origin',
+            ]);
 
         $counts = [];
 

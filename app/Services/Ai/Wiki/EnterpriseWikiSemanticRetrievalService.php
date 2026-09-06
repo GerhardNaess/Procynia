@@ -33,13 +33,16 @@ class EnterpriseWikiSemanticRetrievalService
     ) {}
 
     /**
-     * @param  list<string>|null  $statuses
+     * Retrieval reads published Wiki knowledge only. There is deliberately no status or approval
+     * parameter: a caller cannot widen the result into draft or unreviewed content, because
+     * enterprise_wiki_pages.published_version_id is the whole eligibility rule.
+     *
      * @return array{catalog: list<array<string, mixed>>, navigation_plan: array<string, mixed>, candidate_pool: list<array<string, mixed>>, telemetry: array<string, mixed>}
      */
-    public function retrieve(string $input, int $customerId, string $languageCode, ?array $statuses = null, bool $requireCurrentVersionApproval = false): array
+    public function retrieve(string $input, int $customerId, string $languageCode): array
     {
         $input = trim($input);
-        $catalog = $this->catalogBuilder->build($customerId, $statuses, $requireCurrentVersionApproval);
+        $catalog = $this->catalogBuilder->build($customerId);
         [$wikiIndex, $indexOmittedCount] = $this->buildWikiIndex($catalog, $customerId);
 
         if ($wikiIndex === []) {
