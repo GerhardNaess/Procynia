@@ -281,6 +281,9 @@ class EnterpriseWikiMaintainerDecisionApplyService
         try {
             $page = DB::transaction(fn () => EnterpriseWikiPage::query()->create([
                 'customer_id' => $customerId,
+                // Only on this branch: the reuse path above returns an existing page untouched, so a
+                // later run enriching it never takes ownership away from whoever created it.
+                'owner_user_id' => app(EnterpriseWikiPageOwnerService::class)->ownerUserIdForRun($run),
                 'slug' => $slug,
                 'title' => $entry['title'],
                 'page_type' => $pageType,

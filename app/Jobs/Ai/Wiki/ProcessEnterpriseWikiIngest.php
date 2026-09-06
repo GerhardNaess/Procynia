@@ -10,6 +10,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\KnowledgeItem;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageOwnerService;
 use App\Support\Ai\RunsInAiCallContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -111,6 +112,9 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
             $sectionIds = DB::transaction(function () use ($run, $sections, $pageTitle): array {
                 $page = EnterpriseWikiPage::query()->create([
                     'customer_id' => $run->customer_id,
+                    // Overall responsibility follows the document this page is built from. Null when
+                    // the source cannot name an owner — never a stand-in.
+                    'owner_user_id' => app(EnterpriseWikiPageOwnerService::class)->ownerUserIdForRun($run),
                     'slug' => Str::slug($pageTitle).'-'.Str::lower(Str::random(6)),
                     'title' => $pageTitle,
                     'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,

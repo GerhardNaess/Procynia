@@ -95,8 +95,8 @@ plukker blokker med `content_origin = source_based`, henter `source_type`/`sourc
 **FAKTA** `enterprise_wiki_pages.owner_user_id` **eksisterer allerede** — i `$fillable` og med
 `belongsTo(User::class, 'owner_user_id')` på `app/Models/EnterpriseWikiPage.php:101`.
 
-**Den skrives aldri.** Ingen create, update eller service setter den noe sted i `app/`. I lokal
-database har 0 av 19 sider verdi.
+~~**Den skrives aldri.**~~ **Tatt i bruk i steg 2** — se 3.1. Begge opprettelsesveier setter den nå
+fra eieren av det opprinnelige kildedokumentet, og eksisterende sider er backfillet.
 
 ### 2.5 Dokumenteier
 
@@ -194,6 +194,53 @@ på forskjellige spørsmål.
 Bruk «opprinnelig kildedokument». Grunnen er at «primærkilde» antyder en rangering mellom kilder som
 systemet verken beregner eller vedlikeholder; «opprinnelig» er en ren historisk kjensgjerning vi
 allerede kan lese ut av dataene.
+
+### Gjennomført i steg 2
+
+**BEKREFTET INVARIANT**
+
+> Wiki-sideeier settes én gang ved opprettelse fra opprinnelig kildeeier, og endres ikke automatisk
+> når senere kilder beriker siden eller når dokumenteierskap endres.
+
+Implementert i `app/Services/EnterpriseWiki/EnterpriseWikiPageOwnerService.php`, koblet inn i begge
+opprettelsesveiene (`ProcessEnterpriseWikiIngest`, og kun opprettelsesgrenen i
+`EnterpriseWikiMaintainerDecisionApplyService::resolvePage()` — gjenbruksgrenen returnerer
+eksisterende side urørt).
+
+**BESLUTNING — ingen fallback.** Når kilden ikke kan navngi en eier, forblir `owner_user_id` NULL.
+Det er ingen tilbakefall til innlogget bruker, System Owner eller første kundeadmin: en eier ingen
+faktisk har akseptert ville gjort feltet usant, hvilket er verre enn at det er tomt.
+
+**Kildetyper**
+
+| `source_type` | Eier utledes | Hvordan |
+|---|---|---|
+| `enterprise_wiki_document` | Ja | `enterprise_wiki_documents.owner_user_id`, kundescopet |
+| `knowledge_item_version` | **Nei** | Se ÅPENT nedenfor |
+
+**ÅPENT — `knowledge_item_version`.** `KnowledgeItemVersion` har ingen eier. Forelderen
+`KnowledgeItem` har `owner_user_id`, så en kjede finnes teknisk — men det er et produktspørsmål om
+eierskap i AI-kunnskapsbasen skal gi helhetsansvar for en Wiki-side. Det er et annet ansvar, med
+egne permissions (`be_enterprise_wiki_document_owner` gjelder kun Wiki-dokumenter). Ingen kjøringer
+bruker denne kildetypen i dag. Sider fra en slik kjøring får derfor NULL eier, og det er bevisst.
+
+**Backfill (gjennomført).** `php artisan enterprise-wiki:backfill-page-owners` (`--dry-run`,
+`--customer=`). Kommando, ikke migrasjon: å tildele ansvar til navngitte personer bør være noe noen
+velger å gjøre og kan lese resultatet av, ikke noe som skjer stille under deploy. Idempotent, og
+overskriver aldri en eier som allerede er satt.
+
+Opprinnelsen leses via `enterprise_wiki_ingest_run_pages.action = 'created'` → run → dokument. Kun
+`created`-rader brukes; en `updated`-rad betyr at en senere kjøring festet innhold på en side som
+allerede fantes, og å bruke den ville gitt siden til den som sist beriket den.
+
+Sider hvor opprinnelsen ikke er entydig — ingen `created`-rad, flere, manglende kjøring, slettet
+dokument, dokument uten eier, eller ikke-dokumentkilde — hoppes over og rapporteres med side-id.
+Resultat i lokal database: **17 av 19 sider fikk eier; 2 (205, 208) har kun `updated`-rader og står
+bevisst uten.**
+
+**ÅPENT — manuelt eierskifte.** Det finnes ingen måte å endre sideeier på i dag, og det er ikke bygget
+i dette steget. `owner_user_id` har nå reell semantikk, så et fremtidig eksplisitt eierskifte må være
+auditert.
 
 ### 3.2 Kildedokumenteier
 
@@ -512,8 +559,8 @@ Disse skal aldri brytes. Brudd er en regresjon, uansett hvor praktisk det måtte
 10. Spør Wiki skal kun bruke godkjent/publisert kunnskap.
 11. Alle review- og eierskapsendringer skal kunne auditeres.
 
-**Merk:** invariant 1, 2 og 10 er brutt i dag (2.8). Invariant 8 er brutt i dag (2.7). Invariant 3 er
-ikke implementert (2.4).
+**Merk:** invariant 1, 2 og 10 er brutt i dag (2.8). Invariant 8 er brutt i dag (2.7). Invariant 3,
+5 og 6 er innfridd i steg 2 (3.1).
 
 ---
 
@@ -524,7 +571,7 @@ være ferdig før approval-mekanismen brukes som port (jf. 9), og at steg 3 må 
 review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er publisert.
 
 1. ~~Verifisere og rette document-owner approval sync~~ — **gjennomført**, se 9
-2. Definere og backfille Wiki-sideeier
+2. ~~Definere og backfille Wiki-sideeier~~ — **gjennomført**, se 3.1
 3. Rette versjons-/current-/published-modellen
 4. Definere Wiki review capability
 5. Modellere reviewer- og submit-metadata
