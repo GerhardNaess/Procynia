@@ -19,6 +19,13 @@ class Customer extends Model
 
     public const PERMISSION_APPROVE_WIKI_CLAIMS = 'approve_wiki_claims';
 
+    /**
+     * Final approval of a whole Wiki page. Deliberately named beside PERMISSION_APPROVE_WIKI_CLAIMS
+     * rather than merged with it: a claim decision says one statement is supported by its source, a
+     * page decision publishes the page. Holding one must never imply the other.
+     */
+    public const PERMISSION_APPROVE_WIKI_PAGES = 'approve_wiki_pages';
+
     public const PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'be_enterprise_wiki_document_owner';
 
     public const PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER = 'assign_enterprise_wiki_document_owner';
@@ -28,6 +35,9 @@ class Customer extends Model
         self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_APPROVE_WIKI_CLAIMS => ['system_owner', 'qa'],
+        // Defaults to System Owner alone, which is exactly who could approve before this capability
+        // existed — so introducing it changes nobody's access until a customer widens it.
+        self::PERMISSION_APPROVE_WIKI_PAGES => ['system_owner'],
         self::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager', 'contributor'],
         self::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER => ['system_owner', 'bid_manager'],
     ];

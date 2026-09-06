@@ -97,6 +97,7 @@ class CustomerEnvironmentController extends Controller
             Customer::PERMISSION_CREATE_USERS,
             Customer::PERMISSION_VIEW_ALL_CASES,
             Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
+            Customer::PERMISSION_APPROVE_WIKI_PAGES,
             Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER,
             Customer::PERMISSION_ASSIGN_ENTERPRISE_WIKI_DOCUMENT_OWNER,
         ];
@@ -154,6 +155,13 @@ class CustomerEnvironmentController extends Controller
                 'key' => Customer::PERMISSION_APPROVE_WIKI_CLAIMS,
                 'label' => 'Godkjenne Wiki-påstander',
                 'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_CLAIMS],
+            ],
+            [
+                // Sits next to "Godkjenne Wiki-påstander" so the two are read as different things:
+                // a claim decision vouches for one statement, a page decision publishes the page.
+                'key' => Customer::PERMISSION_APPROVE_WIKI_PAGES,
+                'label' => 'Godkjenne Wiki-sider',
+                'roles' => $settings[Customer::PERMISSION_APPROVE_WIKI_PAGES],
             ],
             [
                 'key' => Customer::PERMISSION_BE_ENTERPRISE_WIKI_DOCUMENT_OWNER,

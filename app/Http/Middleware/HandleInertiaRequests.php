@@ -50,6 +50,7 @@ class HandleInertiaRequests extends Middleware
                     'is_qa' => $user->isQa(),
                     'can_manage_customer_billing' => $user->canManageCustomerBilling(),
                     'can_approve_wiki_claims' => $user->canApproveWikiClaims(),
+                    'can_approve_wiki_pages' => $user->canApproveWikiPages(),
                     'can_be_enterprise_wiki_document_owner' => $user->canBeEnterpriseWikiDocumentOwner(),
                     'can_assign_enterprise_wiki_document_owner' => $user->canAssignEnterpriseWikiDocumentOwner(),
                     'can_manage_customer_users' => $this->customerContext->canManageCustomerUsers($user),

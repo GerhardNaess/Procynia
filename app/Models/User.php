@@ -321,6 +321,25 @@ class User extends Authenticatable implements FilamentUser
             && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_CLAIMS, $this->isQa());
     }
 
+    /**
+     * May this user give a Wiki page its final approval?
+     *
+     * Separate from canApproveWikiClaims(): approving a claim vouches for one statement against its
+     * source, approving a page publishes it. System Owner still passes — roleHasPermission()
+     * short-circuits — but as an override, not because the workflow names them the approver.
+     */
+    public function canApproveWikiPages(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_APPROVE_WIKI_PAGES, $this->isQa());
+    }
+
     public function canBeEnterpriseWikiDocumentOwner(): bool
     {
         if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {

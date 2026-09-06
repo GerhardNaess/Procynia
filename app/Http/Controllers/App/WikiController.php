@@ -2277,13 +2277,15 @@ class WikiController extends Controller
 
     /**
      * Approve a page in pending_review → approved.
-     * System Owner only (pilot). Bid Manager as approver deferred to later phase.
+     * Requires the approve_wiki_pages capability; System Owner passes as an override.
      */
     public function approve(string $slug): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner()) {
+        // Authorized by capability, not by job title. System Owner still passes, because
+        // roleHasPermission() short-circuits for them — an override, not the normal route.
+        if (! $user?->canApproveWikiPages()) {
             abort(403);
         }
 
@@ -2320,13 +2322,14 @@ class WikiController extends Controller
 
     /**
      * Reject a page in pending_review → rejected.
-     * System Owner only (pilot).
+     * Requires the approve_wiki_pages capability; System Owner passes as an override.
      */
     public function reject(string $slug): RedirectResponse
     {
         $user = $this->customerContext->currentUser();
 
-        if (! $user?->isSystemOwner()) {
+        // Same capability as approve: sending a page back is a review decision too.
+        if (! $user?->canApproveWikiPages()) {
             abort(403);
         }
 

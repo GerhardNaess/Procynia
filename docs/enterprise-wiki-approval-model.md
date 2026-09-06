@@ -564,10 +564,45 @@ konsistens med resten av produktet.
 
 **BESLUTNING** Den som sender inn skal normalt ikke kunne godkjenne sin egen versjon.
 
-**ÅPENT — navngivning.** Forslaget i oppdraget var `wiki.edit` / `wiki.review` / `wiki.manage`.
-Husets konvensjon er flat snake_case (`approve_wiki_claims`). Antagelig `approve_wiki_pages` og
-`edit_wiki_pages`, men navnene er ikke besluttet. Merk at `approve_wiki_claims` (claim-nivå) og en ny
-side-nivå-permission er forskjellige ting og må ikke slås sammen.
+### Gjennomført i steg 4
+
+**BESLUTNING — capability `approve_wiki_pages`.** Lagt i den eksisterende
+`permission_settings`-mekanismen, direkte ved siden av `approve_wiki_claims`. Samme prefiks, annet
+objekt: forskjellen mellom å gå god for én påstand og å publisere hele siden blir da lesbar både i
+koden og i Tilganger-tabellen. `wiki.review`-formen ble avvist fordi huset bruker flat snake_case.
+
+**Granularitet — viktig presisering.** `permission_settings` er verken et rent kundeflagg eller en
+individuell brukerrettighet. Den er **per kunde × per rolle**: kunden bestemmer hvilke `bid_role`-er
+(pluss pseudorollen `qa`) som holder rettigheten, og brukeren arver den via sin rolle.
+
+Den kan altså uttrykke «Bid Managere kan godkjenne, Contributors kan ikke», men **ikke** «Kari kan,
+Per kan ikke» når begge er Bid Manager. Det er tilstrekkelig for steg 4, som bare handler om hvem som
+*har rett til* å godkjenne. Å peke ut én person er reviewer assignment — steg 5 — og det er der
+behovet for individnivå faktisk oppstår.
+
+**Default `['system_owner']`.** Nøyaktig de som kunne godkjenne før capability-en fantes, så
+innføringen utvider ingens tilgang. En kunde må aktivt gi den videre.
+
+**System Owner override.** `Customer::roleHasPermission()` kortslutter til `true` for
+`system_owner` før rollelisten konsulteres. Overriden er dermed sentralisert i
+permission-mekanismen, ikke gjentatt som en `isSystemOwner()`-sjekk i controlleren.
+
+**Autorisasjon.** `User::canApproveWikiPages()`, samme mønster som `canApproveWikiClaims()`.
+`WikiController::approve()` og `reject()` bruker den; ingen av dem har `isSystemOwner()` igjen.
+
+**BESLUTNING — claim approval og page approval er separate rettigheter.** Å ha den ene gir aldri den
+andre. Begge retninger er testet.
+
+**Submit uendret.** `submit()` er fortsatt System Owner-only. Å sende inn er en redigeringsrettighet,
+ikke en review-rettighet, og hører til et senere steg. Konsekvensen i dag er at en Bid Manager med
+review-capability kan godkjenne, men ikke sende inn — som er den tiltenkte arbeidsdelingen.
+
+**ÅPENT — frontend-porten.** `resources/js/Pages/App/Wiki/Show.jsx` viser fortsatt godkjenn/avvis
+kun til System Owner (`auth.user.is_system_owner`). Filen var fryst i dette steget.
+`can_approve_wiki_pages` deles allerede som Inertia-prop, så oppdateringen er en enlinjes endring når
+filen kan røres.
+
+**ÅPENT — `edit_wiki_pages`** er ikke innført. Redigerings-/innsendingsrettighet er ikke besluttet.
 
 ---
 
@@ -609,7 +644,8 @@ Disse skal aldri brytes. Brudd er en regresjon, uansett hvor praktisk det måtte
 11. Alle review- og eierskapsendringer skal kunne auditeres.
 
 **Merk:** invariant 1 og 2 er innfridd i steg 3 (6). Invariant 3, 5 og 6 er innfridd i steg 2 (3.1).
-Invariant 8 er fortsatt brutt (2.7). Invariant 10 gjenstår til steg 10 — se ÅPENT i 6.
+Invariant 7 og 8 er innfridd i steg 4 (10) på backend — frontend-porten gjenstår, se ÅPENT i 10.
+Invariant 10 gjenstår til steg 10 — se ÅPENT i 6.
 
 ---
 
@@ -622,7 +658,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 1. ~~Verifisere og rette document-owner approval sync~~ — **gjennomført**, se 9
 2. ~~Definere og backfille Wiki-sideeier~~ — **gjennomført**, se 3.1
 3. ~~Rette versjons-/current-/published-modellen~~ — **gjennomført**, se 6
-4. Definere Wiki review capability
+4. ~~Definere Wiki review capability~~ — **gjennomført**, se 10
 5. Modellere reviewer- og submit-metadata
 6. Implementere source-owner review
 7. Implementere endelig Wiki-review
