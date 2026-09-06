@@ -811,6 +811,60 @@ hendelse. Historikken er sidebasert, ikke versjonsbasert: etter en retur rediger
 *ny* versjon, så en versjonsbasert liste ville vært tom nettopp når eieren trenger å lese hva de ble
 bedt om å rette.
 
+### Gjennomført i steg 9 — varsling
+
+**FAKTA — Procynia har varsler, ikke oppgaver.** `UserNotification` (kundescopet, med `event_type`,
+`severity`, `target_url`, `is_read`, `metadata`) rendres av `NotificationBell` via
+`UserNotificationService::panelPayload()`. Mønsteret er å opprette radene direkte fra en service,
+pakket i `rescue()`. Det finnes **ingen** generell task-modell —
+`RequirementResponsibilityTaskService` er saksspesifikk. Ingen ny generell arkitektur ble bygget.
+
+**BESLUTNING — varsler eier ingen workflow-state.** `reviewer_user_id` bestemmer hvem som
+kontrollerer, godkjenningsradene bestemmer hva som gjenstår, og review-hendelsene holder begrunnelsen.
+Slett alle varsler, og arbeidsflyten er uendret. Testet eksplisitt.
+
+**BESLUTNING — notification, ikke task.** Siden produktet bare har varsler, brukes de. Arbeidslisten
+kan senere utledes fra domenetabellene, som allerede holder «hva venter på meg».
+
+| Hendelse | Mottaker | Nøkkel | Faller bort når |
+|---|---|---|---|
+| Innsending | tildelt kontrollør | versjon + bruker | leses; ansvaret følger `reviewer_user_id` |
+| Innsending | hver dokumenteier med ventende krav | krav-id + bruker | kravet avgjøres eller supersedes |
+| Porten åpnet | tildelt kontrollør | versjon + bruker | leses |
+| Endringer kreves | sideeier | review-hendelse + bruker | ny runde gir ny hendelse |
+| Publisert | sideeier, og innsender når det er en annen | versjon + bruker | leses |
+
+**Ordlyd:** kontrolløren får «Du er tildelt som kontrollør», *ikke* «klar til godkjenning» —
+kildeeierporten kan fortsatt være lukket, og å love en beslutning de ikke kan ta ville sendt dem til
+en blokkert side. «Klar for endelig gjennomgang» sendes først når porten faktisk åpner.
+
+**Én eier, ett varsel.** Godkjenningsraden bærer allerede alle dokumentene eieren svarer for, så en
+eier med fire kilder spørres én gang. Superseded, godkjente og avviste rader varsles ikke.
+
+**Idempotens:** ny nullable, unik `user_notifications.dedupe_key`. Alle skrivinger går gjennom
+`firstOrCreate` på den nøkkelen, så en gjenkjørt jobb, en dobbeltklikk eller en ny
+`syncForPageVersion()` ikke kan varsle to ganger. Nøkkelen er bygget av type + domene-id + mottaker,
+aldri av tekst. Kolonnen er nullable, så eksisterende varseltyper er upåvirket.
+
+**After commit:** alt sendes via `DB::afterCommit()`. En beslutning som rulles tilbake annonseres
+aldri. Testet begge veier.
+
+**Ingen selvvarsling.** Den som utfører handlingen varsles ikke om den. Skillet er «du gjorde noe»
+mot «du har fått et ansvar» — det siste varsles.
+
+**Kundeisolasjon** håndheves i selve skriveren: mottakeren må være aktiv og tilhøre sidens kunde. Et
+varsel er en utlevering, så dette er en grense, ikke en bekvemmelighetssjekk.
+
+**E-post er ikke innført.** Mail brukes i dag kun til fakturering, kvote og digest. Steg 9 holder seg
+til in-app, i tråd med eksisterende mønster.
+
+**Ingen backfill.** Varsler er hendelser; gamle hendelser sendes ikke i ettertid. Lokalt fantes
+**0** varselrader, så ingenting å migrere.
+
+**ÅPENT — sideeier mangler.** Har en side ingen eier (2 av 19 lokalt), sendes ingen
+«endringer kreves». Å gjette en mottaker ville satt en annens navn på arbeid de aldri påtok seg. Ingen
+eksisterende produktregel sier at System Owner mottar slike foreldreløse oppgaver.
+
 **ÅPENT — `edit_wiki_pages`** er ikke innført. En bredere redigeringsrettighet enn eierskap er ikke
 besluttet.
 
@@ -828,7 +882,8 @@ dokumentet.
 5. Kan Wiki-sideeier også være source owner på samme side? (Sannsynlig i praksis — hva betyr det for
    «ikke godkjenne egen versjon»?)
 6. Hvordan håndteres fravær eller bytte av eier?
-7. Hvilken notification/task-mekanisme skal brukes? (Ingen finnes for Wiki i dag.)
+7. ~~Hvilken notification/task-mekanisme skal brukes?~~ — **besluttet i steg 9**: eksisterende
+   `UserNotification` (in-app). Ingen task-modell finnes, og ingen ble bygget.
 8. Hvordan håndteres eksisterende sider med `owner_user_id = NULL`? (I dag: alle.)
 9. Hvordan migreres dagens `is_current`-semantikk til skillet arbeidsversjon/publisert versjon?
 10. ~~Hvordan skal eksisterende `rejected`-status behandles~~ — **besluttet i steg 8**: `rejected`
@@ -873,7 +928,7 @@ review-løypen bygges — ellers bygges kontroller rundt innhold som allerede er
 6. ~~Implementere source-owner review~~ — **gjennomført**, se 10
 7. ~~Implementere endelig Wiki-review~~ — **gjennomført**, se 10
 8. ~~Implementere retur / endringskrav~~ — **gjennomført**, se 10
-9. Koble notification-/task-mekanisme
+9. ~~Koble notification-/task-mekanisme~~ — **gjennomført**, se 10
 10. Begrense Spør Wiki og retrieval til approved/published
 11. Oppdatere Wiki UI
 12. Oppdatere PageHelp

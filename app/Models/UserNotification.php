@@ -30,6 +30,7 @@ class UserNotification extends Model
         'user_id',
         'saved_notice_id',
         'event_type',
+        'dedupe_key',
         'severity',
         'title',
         'message',

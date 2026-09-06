@@ -25,6 +25,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionFailureRecoveryService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
@@ -49,6 +50,7 @@ class WikiController extends Controller
         private readonly EnterpriseWikiPageTraversalService $traversal,
         private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $documentOwnerApprovalService,
+        private readonly EnterpriseWikiReviewNotificationService $reviewNotifications,
         private readonly EnterpriseWikiRunFindingsService $runFindingsService,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
         private readonly EnterpriseWikiClaimFindingExplainer $claimFindingExplainer,
@@ -2338,6 +2340,8 @@ class WikiController extends Controller
             // state — there is simply nobody to ask.
             $this->documentOwnerApprovalService->syncForPageVersion($version);
 
+            $this->reviewNotifications->pageSubmittedForReview($page, $version->fresh(), $user);
+
             // published_version_id is untouched: sending new work for review must not withdraw
             // whatever was already approved.
             $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
@@ -2428,6 +2432,8 @@ class WikiController extends Controller
                 'reviewed_by_user_id' => $user->id,
             ])->save();
 
+            $this->reviewNotifications->pagePublished($locked, $workingVersion, $user);
+
             // submitted_by_user_id, submitted_at and reviewer_user_id are deliberately left alone:
             // they are the record of who handed this version over and to whom, and that history is
             // worth more after the decision than before it.
@@ -2473,13 +2479,17 @@ class WikiController extends Controller
 
             $version = $locked->currentVersion()->first();
 
-            $this->recordChangesRequested(
+            $event = $this->recordChangesRequested(
                 $locked,
                 $version,
                 $user,
                 EnterpriseWikiPageReviewEvent::ACTOR_ROLE_REVIEWER,
                 $reason,
             );
+
+            if ($event !== null) {
+                $this->reviewNotifications->changesRequested($locked, $event);
+            }
 
             // published_version_id is deliberately untouched: sending new work back must never
             // withdraw content that was already approved.
@@ -2652,12 +2662,12 @@ class WikiController extends Controller
         User $actor,
         string $actorRole,
         string $reason,
-    ): void {
+    ): ?EnterpriseWikiPageReviewEvent {
         if ($version === null) {
-            return;
+            return null;
         }
 
-        EnterpriseWikiPageReviewEvent::query()->create([
+        return EnterpriseWikiPageReviewEvent::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'actor_user_id' => $actor->id,

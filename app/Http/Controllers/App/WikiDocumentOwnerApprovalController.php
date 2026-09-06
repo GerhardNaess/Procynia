@@ -7,10 +7,12 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageReviewEvent;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiReviewNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,6 +23,7 @@ class WikiDocumentOwnerApprovalController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiDocumentOwnerApprovalService $approvalService,
+        private readonly EnterpriseWikiReviewNotificationService $reviewNotifications,
         private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
     ) {}
 
@@ -52,7 +55,7 @@ class WikiDocumentOwnerApprovalController extends Controller
         string $reason,
     ): void {
         DB::transaction(function () use ($page, $approval, $actor, $reason): void {
-            EnterpriseWikiPageReviewEvent::query()->create([
+            $event = EnterpriseWikiPageReviewEvent::query()->create([
                 'enterprise_wiki_page_id' => $page->id,
                 'enterprise_wiki_page_version_id' => $approval->enterprise_wiki_page_version_id,
                 'actor_user_id' => $actor->id,
@@ -66,6 +69,8 @@ class WikiDocumentOwnerApprovalController extends Controller
             if ($locked !== null && $locked->status === EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
                 $locked->forceFill(['status' => EnterpriseWikiPage::STATUS_REJECTED])->save();
             }
+
+            $this->reviewNotifications->changesRequested($locked ?? $page, $event);
         });
     }
 
@@ -97,8 +102,14 @@ class WikiDocumentOwnerApprovalController extends Controller
 
         $this->approvalService->decide($approval, $user, $decision, $comment);
 
+        $version = EnterpriseWikiPageVersion::query()->find($approval->enterprise_wiki_page_version_id);
+
         if ($isRejection) {
             $this->returnVersionToOwner($page, $approval, $user, (string) $comment);
+        } elseif ($version instanceof EnterpriseWikiPageVersion) {
+            // Only when this approval was the last one outstanding does the reviewer hear anything —
+            // the service checks the gate itself, so approving the first of three stays quiet.
+            $this->reviewNotifications->sourceOwnerGateBecameReady($page, $version, $user);
         }
 
         $runId = $approval->enterprise_wiki_ingest_run_id
