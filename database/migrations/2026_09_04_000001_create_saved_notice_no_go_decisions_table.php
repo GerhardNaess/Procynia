@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\SavedNotice;
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -10,7 +11,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (! Schema::hasTable('saved_notices') || Schema::hasTable('saved_notice_no_go_decisions')) {
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'saved_notices');
+
+        // Genuine idempotence: the table this migration creates already exists.
+        if (Schema::hasTable('saved_notice_no_go_decisions')) {
             return;
         }
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -11,9 +12,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (! Schema::hasTable('operational_runbooks')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'operational_runbooks');
 
         $mappings = [
             'General' => 'general',

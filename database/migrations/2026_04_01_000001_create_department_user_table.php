@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -19,9 +20,9 @@ return new class extends Migration
             });
         }
 
-        if (! Schema::hasTable('users') || ! Schema::hasColumn('users', 'department_id')) {
-            return;
-        }
+        // users.department_id is added by 2026_03_25_204721 and never dropped, so its absence
+        // means the chain is broken rather than that there is nothing to backfill.
+        MigrationSchemaPrecondition::requireColumns(basename(__FILE__, '.php'), 'users', 'department_id');
 
         $memberships = DB::table('users')
             ->select('id', 'department_id')

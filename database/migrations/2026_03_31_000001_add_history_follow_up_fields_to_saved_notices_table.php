@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -9,9 +10,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (! Schema::hasTable('saved_notices')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'saved_notices');
 
         $hasProcurementType = Schema::hasColumn('saved_notices', 'procurement_type');
         $hasFollowUpMode = Schema::hasColumn('saved_notices', 'follow_up_mode');

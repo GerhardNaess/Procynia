@@ -1,21 +1,19 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        if (! Schema::hasTable('billing_prices')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'billing_prices');
 
         $backfill = [
             'ultra' => 60,
-            'max'   => 20,
-            'pro'   => 3,
+            'max' => 20,
+            'pro' => 3,
         ];
 
         foreach ($backfill as $tierKey => $aiOffers) {

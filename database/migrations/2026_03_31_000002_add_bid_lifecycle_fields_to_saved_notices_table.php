@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Schema\Blueprint;
@@ -10,9 +11,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (! Schema::hasTable('saved_notices')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'saved_notices');
 
         $hasBidStatus = Schema::hasColumn('saved_notices', 'bid_status');
         $hasBidOwnerUserId = Schema::hasColumn('saved_notices', 'bid_owner_user_id');
@@ -86,14 +85,14 @@ return new class extends Migration
             if ($hasBidOwnerUserId) {
                 try {
                     $table->dropForeign(['bid_owner_user_id']);
-                } catch (\Throwable $exception) {
+                } catch (Throwable $exception) {
                 }
             }
 
             if ($hasBidStatus) {
                 try {
                     $table->dropIndex(['bid_status']);
-                } catch (\Throwable $exception) {
+                } catch (Throwable $exception) {
                 }
             }
 

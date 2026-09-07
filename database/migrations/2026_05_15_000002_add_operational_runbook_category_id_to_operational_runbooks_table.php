@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\MigrationSchemaPrecondition;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -12,9 +13,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (! Schema::hasTable('operational_runbooks') || ! Schema::hasTable('operational_runbook_categories')) {
-            return;
-        }
+        MigrationSchemaPrecondition::requireTables(basename(__FILE__, '.php'), 'operational_runbooks', 'operational_runbook_categories');
 
         Schema::table('operational_runbooks', function (Blueprint $table): void {
             $table->foreignId('operational_runbook_category_id')
