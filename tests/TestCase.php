@@ -23,6 +23,26 @@ abstract class TestCase extends BaseTestCase
     ];
 
     /**
+     * The only PostgreSQL account the suite may use, and the single place its credentials are
+     * written. Tests\Concerns\UsesProjectPostgresConnection reads these rather than keeping its
+     * own copy, so the two cannot drift apart.
+     *
+     * This is a deliberately powerless role: it can create and drop anything inside
+     * procynia_test and has no CONNECT privilege on procynia or on any of the recovery
+     * databases. That is the actual safety boundary — PHP-level guards sit on top of it, but a
+     * misconfigured environment can no longer reach the development database at all, because
+     * PostgreSQL refuses the connection before Laravel gets a say.
+     *
+     * The password is a local-only value for a role that can touch nothing but the throwaway
+     * test database; it is not a secret in any meaningful sense. It nonetheless lives in
+     * committed files (here, phpunit.xml, .env.testing) — see the note in .env.testing.
+     */
+    public const TEST_DATABASE_CREDENTIALS = [
+        'username' => 'procynia_test_user',
+        'password' => 'test_only_local_9f3a1c',
+    ];
+
+    /**
      * Create the application and stop immediately if tests resolve to an unsafe database.
      */
     public function createApplication()
@@ -53,8 +73,8 @@ abstract class TestCase extends BaseTestCase
             'DB_HOST' => 'postgres',
             'DB_PORT' => '5432',
             'DB_DATABASE' => 'procynia_test',
-            'DB_USERNAME' => 'gehard',
-            'DB_PASSWORD' => 'Opaque01',
+            'DB_USERNAME' => self::TEST_DATABASE_CREDENTIALS['username'],
+            'DB_PASSWORD' => self::TEST_DATABASE_CREDENTIALS['password'],
             'QUEUE_CONNECTION' => 'sync',
             'STRIPE_KEY' => 'pk_test_procynia',
             'STRIPE_SECRET' => 'sk_test_procynia',
@@ -135,6 +155,35 @@ abstract class TestCase extends BaseTestCase
         // check that closes that gap for the ENTIRE suite: every test's createApplication() call
         // reaches this line before setUpTraits() can run any migration/truncation.
         self::assertConnectionIsSafeTestDatabase($defaultConnection);
+
+        if ($defaultConnection === 'pgsql') {
+            self::assertConnectionUsesRestrictedTestRole($defaultConnection);
+        }
+    }
+
+    /**
+     * Purpose: Refuse to run if the suite connected as anything other than the restricted test
+     * role. The role is the real boundary — it has no CONNECT privilege on procynia — so running
+     * as a privileged account would silently remove the protection while every other check
+     * still passed.
+     * Inputs: Connection name.
+     * Returns: None.
+     * Side effects: Runs a live `select current_user`.
+     */
+    protected static function assertConnectionUsesRestrictedTestRole(string $connectionName): void
+    {
+        $expected = self::TEST_DATABASE_CREDENTIALS['username'];
+        $actual = (string) DB::connection($connectionName)->selectOne('select current_user as who')->who;
+
+        if ($actual !== $expected) {
+            throw new RuntimeException(sprintf(
+                'Refusing to run tests as PostgreSQL role [%s]. The suite must connect as [%s], which has no '
+                .'CONNECT privilege on the development database. Connecting as a privileged role removes the '
+                .'only safety boundary that does not depend on application configuration.',
+                $actual,
+                $expected,
+            ));
+        }
     }
 
     /**

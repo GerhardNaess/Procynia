@@ -42,8 +42,8 @@ trait UsesProjectPostgresConnection
             'database.connections.pgsql.host' => 'postgres',
             'database.connections.pgsql.port' => '5432',
             'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => 'Opaque01',
+            'database.connections.pgsql.username' => TestCase::TEST_DATABASE_CREDENTIALS['username'],
+            'database.connections.pgsql.password' => TestCase::TEST_DATABASE_CREDENTIALS['password'],
             'database.connections.pgsql.search_path' => 'public',
             'database.connections.pgsql.url' => null,
         ]);
