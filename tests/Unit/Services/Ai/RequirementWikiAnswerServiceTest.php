@@ -813,8 +813,8 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $customerA = $this->createWikiCustomer('Provenance Customer A');
         $customerB = $this->createWikiCustomer('Provenance Customer B');
         $requirement = $this->createRequirement($customerA, 'Beskriv rutinen for Problem Management.');
-        $pageA = $this->createWikiPageWithVersion($customerA, 'Problem Management', 'Innhold om Problem Management.');
-        $pageB = $this->createWikiPageWithVersion($customerB, 'Problem Management hos B', 'Innhold hos kunde B om Problem Management.');
+        $pageA = $this->createPublishedWikiPage($customerA, 'Problem Management', 'Innhold om Problem Management.');
+        $pageB = $this->createPublishedWikiPage($customerB, 'Problem Management hos B', 'Innhold hos kunde B om Problem Management.');
 
         $sourceClaim = $this->createWikiClaim($pageA, 'Problem Management rapporteres månedlig til kunden.', [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,

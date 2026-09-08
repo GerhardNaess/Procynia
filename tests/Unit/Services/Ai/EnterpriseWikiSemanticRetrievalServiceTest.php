@@ -37,7 +37,7 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
     public function test_a_score_zero_page_can_be_selected_from_the_wiki_index(): void
     {
         $customer = $this->createWikiCustomer();
-        $canonical = $this->createWikiPageWithVersion(
+        $canonical = $this->createPublishedWikiPage(
             $customer,
             'Operational Governance',
             "# Operational Governance\n\nDefines decision rights, controls, and accountability.",
@@ -58,10 +58,10 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
     public function test_index_navigation_can_select_multiple_subprocesses_without_lexical_overlap(): void
     {
         $customer = $this->createWikiCustomer();
-        $incident = $this->createWikiPageWithVersion($customer, 'Incident Process', '# Incident Process'."\n\nIncident response is documented here.");
-        $change = $this->createWikiPageWithVersion($customer, 'Change Process', '# Change Process'."\n\nChange control is documented here.");
-        $problem = $this->createWikiPageWithVersion($customer, 'Problem Process', '# Problem Process'."\n\nRoot cause analysis is documented here.");
-        $serviceLevel = $this->createWikiPageWithVersion($customer, 'Service Level Process', '# Service Level Process'."\n\nService targets are documented here.");
+        $incident = $this->createPublishedWikiPage($customer, 'Incident Process', '# Incident Process'."\n\nIncident response is documented here.");
+        $change = $this->createPublishedWikiPage($customer, 'Change Process', '# Change Process'."\n\nChange control is documented here.");
+        $problem = $this->createPublishedWikiPage($customer, 'Problem Process', '# Problem Process'."\n\nRoot cause analysis is documented here.");
+        $serviceLevel = $this->createPublishedWikiPage($customer, 'Service Level Process', '# Service Level Process'."\n\nService targets are documented here.");
 
         $this->mockPlan(fn (array $index): array => $this->plan([$incident->id, $change->id, $problem->id, $serviceLevel->id]));
         $result = app(EnterpriseWikiSemanticRetrievalService::class)->retrieve('Describe the operating framework.', $customer->id, 'en');
@@ -72,8 +72,8 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
     public function test_index_contains_compact_metadata_and_limited_wikilinks(): void
     {
         $customer = $this->createWikiCustomer();
-        $source = $this->createWikiPageWithVersion($customer, 'Release Governance', '# Release Governance'."\n\nCoordinates releases.");
-        $target = $this->createWikiPageWithVersion($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment guidance.");
+        $source = $this->createPublishedWikiPage($customer, 'Release Governance', '# Release Governance'."\n\nCoordinates releases.");
+        $target = $this->createPublishedWikiPage($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment guidance.");
         $this->createWikilink($customer, $source, $target);
 
         $this->mockPlan(function (array $index) use ($source, $target): array {
@@ -92,8 +92,8 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
     public function test_index_navigation_supports_abbreviations_and_multilingual_terms_without_synonym_rules(): void
     {
         $customer = $this->createWikiCustomer();
-        $expanded = $this->createWikiPageWithVersion($customer, 'Identity and Access Management', '# Identity and Access Management'."\n\nControls identity lifecycle and access rights.");
-        $abbreviated = $this->createWikiPageWithVersion($customer, 'CMDB', '# CMDB'."\n\nRecords service components.");
+        $expanded = $this->createPublishedWikiPage($customer, 'Identity and Access Management', '# Identity and Access Management'."\n\nControls identity lifecycle and access rights.");
+        $abbreviated = $this->createPublishedWikiPage($customer, 'CMDB', '# CMDB'."\n\nRecords service components.");
 
         $this->mockPlan(fn (array $index): array => $this->plan([$expanded->id, $abbreviated->id]));
         $result = app(EnterpriseWikiSemanticRetrievalService::class)->retrieve('Hvordan sikrer vi at bare autoriserte personer får tilgang og at CMDB er oppdatert?', $customer->id, 'no');
@@ -105,11 +105,11 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $otherCustomer = $this->createWikiCustomer('Other customer');
-        $seed = $this->createWikiPageWithVersion($customer, 'Release Governance', '# Release Governance'."\n\nRelease coordination.");
-        $relevant = $this->createWikiPageWithVersion($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment steps.");
-        $irrelevant = $this->createWikiPageWithVersion($customer, 'Office Coffee', '# Office Coffee'."\n\nCoffee machine cleaning.");
-        $stale = $this->createWikiPageWithVersion($customer, 'Retired Deployment', '# Retired Deployment'."\n\nOld steps.", ['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
-        $foreign = $this->createWikiPageWithVersion($otherCustomer, 'Foreign Deployment', '# Foreign Deployment'."\n\nConfidential.");
+        $seed = $this->createPublishedWikiPage($customer, 'Release Governance', '# Release Governance'."\n\nRelease coordination.");
+        $relevant = $this->createPublishedWikiPage($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment steps.");
+        $irrelevant = $this->createPublishedWikiPage($customer, 'Office Coffee', '# Office Coffee'."\n\nCoffee machine cleaning.");
+        $stale = $this->createPublishedWikiPage($customer, 'Retired Deployment', '# Retired Deployment'."\n\nOld steps.", ['status' => EnterpriseWikiPage::STATUS_ARCHIVED]);
+        $foreign = $this->createPublishedWikiPage($otherCustomer, 'Foreign Deployment', '# Foreign Deployment'."\n\nConfidential.");
         $this->createWikilink($customer, $seed, $relevant);
         $this->createWikilink($customer, $seed, $irrelevant);
         $this->createWikilink($customer, $seed, $stale);

@@ -45,7 +45,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
     public function test_a_published_page_is_available_to_requirement_answers(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Samhandlingsmodell', 'Innhold om samhandling.');
+        $this->createPublishedWikiPage($customer, 'Samhandlingsmodell', 'Innhold om samhandling.');
 
         $this->assertCount(1, $this->catalog($customer->id));
     }
@@ -57,7 +57,6 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
             $customer,
             'Uferdig side',
             'Innhold.',
-            withDocumentOwnerApproval: false,
         );
 
         $this->assertSame([], $this->catalog($customer->id));
@@ -80,7 +79,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
         // The opposite of the old contract, and the point of the change: a page under revision keeps
         // answering from what was approved, instead of falling silent until the new work is done.
         $customer = $this->createWikiCustomer();
-        $page = $this->createWikiPageWithVersion($customer, 'Single Point of Contact (SPOC)', 'Første versjon.');
+        $page = $this->createPublishedWikiPage($customer, 'Single Point of Contact (SPOC)', 'Første versjon.');
         $published = $this->currentVersion($page);
 
         $published->forceFill(['is_current' => false])->save();
@@ -102,7 +101,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
     public function test_publishing_the_regenerated_version_switches_the_answer_source(): void
     {
         $customer = $this->createWikiCustomer();
-        $page = $this->createWikiPageWithVersion($customer, 'SPOC', 'Første versjon.');
+        $page = $this->createPublishedWikiPage($customer, 'SPOC', 'Første versjon.');
         $this->currentVersion($page)->forceFill(['is_current' => false])->save();
 
         $second = EnterpriseWikiPageVersion::query()->create([
@@ -124,7 +123,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
         $customer = $this->createWikiCustomer();
 
         foreach ([EnterpriseWikiPage::STATUS_DRAFT, EnterpriseWikiPage::STATUS_PENDING_REVIEW, EnterpriseWikiPage::STATUS_REJECTED] as $status) {
-            $page = $this->createWikiPageWithVersion($customer, 'Side '.$status, 'Innhold.');
+            $page = $this->createPublishedWikiPage($customer, 'Side '.$status, 'Innhold.');
             $page->forceFill(['status' => $status])->save();
         }
 
@@ -137,7 +136,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
         $customer = $this->createWikiCustomer();
 
         foreach ([EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED] as $status) {
-            $page = $this->createWikiPageWithVersion($customer, 'Side '.$status, 'Innhold.');
+            $page = $this->createPublishedWikiPage($customer, 'Side '.$status, 'Innhold.');
             $page->forceFill(['status' => $status])->save();
         }
 
@@ -148,7 +147,7 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
     {
         $customerA = $this->createWikiCustomer('Kunde A');
         $customerB = $this->createWikiCustomer('Kunde B');
-        $this->createWikiPageWithVersion($customerA, 'Samhandling', 'Innhold.');
+        $this->createPublishedWikiPage($customerA, 'Samhandling', 'Innhold.');
 
         $this->assertCount(1, $this->catalog($customerA->id));
         $this->assertSame([], $this->catalog($customerB->id));
@@ -165,7 +164,6 @@ class RequirementWikiApprovedKnowledgeContractTest extends TestCase
             'Ikke publisert side',
             'Innhold.',
             ['status' => EnterpriseWikiPage::STATUS_DRAFT],
-            withDocumentOwnerApproval: false,
         );
 
         $this->assertSame([], $this->catalog($customer->id));

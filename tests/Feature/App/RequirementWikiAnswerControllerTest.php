@@ -320,7 +320,7 @@ class RequirementWikiAnswerControllerTest extends TestCase
             'requirement_text' => 'Beskriv Problem Management.',
         ]);
 
-        $page = $this->createWikiPageWithVersion($context['customer'], 'Problem Management', 'Innhold om Problem Management og rotårsaksanalyse.');
+        $page = $this->createPublishedWikiPage($context['customer'], 'Problem Management', 'Innhold om Problem Management og rotårsaksanalyse.');
         $this->createWikiClaim($page, 'Problem Management gjennomfører rotårsaksanalyse.');
 
         $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock
@@ -378,8 +378,8 @@ class RequirementWikiAnswerControllerTest extends TestCase
 
         // Only mainPage's title/content overlaps the requirement text — linkedPage must be
         // reachable ONLY via the wikilink, never as a round-1 direct-search hit.
-        $mainPage = $this->createWikiPageWithVersion($context['customer'], 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
-        $linkedPage = $this->createWikiPageWithVersion($context['customer'], 'Kontinuerlig forbedring', 'Innhold uten det opprinnelige kravordet i det hele tatt.');
+        $mainPage = $this->createPublishedWikiPage($context['customer'], 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
+        $linkedPage = $this->createPublishedWikiPage($context['customer'], 'Kontinuerlig forbedring', 'Innhold uten det opprinnelige kravordet i det hele tatt.');
         $this->createWikilink($context['customer'], $mainPage, $linkedPage);
 
         $callCount = 0;

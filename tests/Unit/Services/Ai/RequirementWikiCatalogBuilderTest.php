@@ -36,7 +36,7 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     public function test_only_approved_pages_from_the_given_customer_are_included(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Godkjent side', 'Innhold i den godkjente siden.');
+        $this->createPublishedWikiPage($customer, 'Godkjent side', 'Innhold i den godkjente siden.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
 
@@ -54,7 +54,6 @@ class RequirementWikiCatalogBuilderTest extends TestCase
             'Kladd',
             'Innhold i kladden.',
             ['status' => EnterpriseWikiPage::STATUS_DRAFT],
-            withDocumentOwnerApproval: false,
         );
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
@@ -66,7 +65,7 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     {
         $customerA = $this->createWikiCustomer('Customer A');
         $customerB = $this->createWikiCustomer('Customer B');
-        $this->createWikiPageWithVersion($customerB, 'Side hos B', 'Innhold hos kunde B.');
+        $this->createPublishedWikiPage($customerB, 'Side hos B', 'Innhold hos kunde B.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customerA->id);
 
@@ -86,7 +85,7 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     public function test_pages_with_empty_content_markdown_are_excluded(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Tom side', '   ');
+        $this->createPublishedWikiPage($customer, 'Tom side', '   ');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
 
@@ -96,7 +95,7 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     public function test_headings_and_excerpt_are_extracted(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion(
+        $this->createPublishedWikiPage(
             $customer,
             'Prosessdokument',
             "# Prosessdokument\n\nDette er innledningen som beskriver formålet med prosessen.\n\n## Første del\n\nInnhold i første del.\n\n## Andre del\n\nInnhold i andre del.",
@@ -111,9 +110,9 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     public function test_outgoing_and_backlink_counts_are_correct(): void
     {
         $customer = $this->createWikiCustomer();
-        $pageA = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A som lenker til [[side-b]] og [[side-c]].');
-        $pageB = $this->createWikiPageWithVersion($customer, 'Side B', 'Innhold B.');
-        $pageC = $this->createWikiPageWithVersion($customer, 'Side C', 'Innhold C.');
+        $pageA = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A som lenker til [[side-b]] og [[side-c]].');
+        $pageB = $this->createPublishedWikiPage($customer, 'Side B', 'Innhold B.');
+        $pageC = $this->createPublishedWikiPage($customer, 'Side C', 'Innhold C.');
         $this->createWikilink($customer, $pageA, $pageB);
         $this->createWikilink($customer, $pageA, $pageC);
         $this->createWikilink($customer, $pageB, $pageA);
@@ -130,7 +129,7 @@ class RequirementWikiCatalogBuilderTest extends TestCase
     public function test_content_markdown_is_carried_for_downstream_ranking_and_reading(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Side', 'Fullstendig innhold på siden.');
+        $this->createPublishedWikiPage($customer, 'Side', 'Fullstendig innhold på siden.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
 

@@ -44,7 +44,7 @@ class EnterpriseWikiSemanticRetrievalFlowTest extends TestCase
     public function test_the_same_semantic_query_reaches_the_canonical_page_in_qa_and_requirement_research(): void
     {
         $customer = $this->createWikiCustomer();
-        $canonical = $this->createWikiPageWithVersion(
+        $canonical = $this->createPublishedWikiPage(
             $customer,
             'Service Continuity Management',
             "# Service Continuity Management\n\nThis process defines recovery preparation, restoration priorities, and continuity ownership.",
@@ -93,9 +93,9 @@ class EnterpriseWikiSemanticRetrievalFlowTest extends TestCase
     public function test_a_graph_neighbour_is_not_evidence_until_semantic_reranking_selects_it(): void
     {
         $customer = $this->createWikiCustomer();
-        $seed = $this->createWikiPageWithVersion($customer, 'Release Governance', '# Release Governance'."\n\nRelease coordination is governed here.");
-        $relevant = $this->createWikiPageWithVersion($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment validation is required before release.");
-        $irrelevant = $this->createWikiPageWithVersion($customer, 'Office Coffee', '# Office Coffee'."\n\nCoffee machine cleaning happens weekly.");
+        $seed = $this->createPublishedWikiPage($customer, 'Release Governance', '# Release Governance'."\n\nRelease coordination is governed here.");
+        $relevant = $this->createPublishedWikiPage($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment validation is required before release.");
+        $irrelevant = $this->createPublishedWikiPage($customer, 'Office Coffee', '# Office Coffee'."\n\nCoffee machine cleaning happens weekly.");
         $this->createWikilink($customer, $seed, $relevant);
         $this->createWikilink($customer, $seed, $irrelevant);
 

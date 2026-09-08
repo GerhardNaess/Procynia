@@ -37,8 +37,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_a_relevant_outgoing_wikilink_becomes_a_next_candidate(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Incident Management', 'Innhold om Incident Management.');
-        $to = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
+        $from = $this->createPublishedWikiPage($customer, 'Incident Management', 'Innhold om Incident Management.');
+        $to = $this->createPublishedWikiPage($customer, 'Problem Management', 'Innhold om Problem Management.');
         $this->createWikilink($customer, $from, $to);
 
         $discovered = app(RequirementWikiLinkNavigator::class)->discoverNeighbors([$from], $customer->id, []);
@@ -53,8 +53,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_a_relevant_backlink_becomes_a_next_candidate(): void
     {
         $customer = $this->createWikiCustomer();
-        $target = $this->createWikiPageWithVersion($customer, 'Problem Management', 'Innhold om Problem Management.');
-        $backlinkingPage = $this->createWikiPageWithVersion($customer, 'Incident Management', 'Innhold om Incident Management.');
+        $target = $this->createPublishedWikiPage($customer, 'Problem Management', 'Innhold om Problem Management.');
+        $backlinkingPage = $this->createPublishedWikiPage($customer, 'Incident Management', 'Innhold om Incident Management.');
         $this->createWikilink($customer, $backlinkingPage, $target);
 
         $discovered = app(RequirementWikiLinkNavigator::class)->discoverNeighbors([$target], $customer->id, []);
@@ -67,8 +67,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_a_page_with_no_link_connection_is_not_discovered(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A.');
-        $this->createWikiPageWithVersion($customer, 'Ikke tilkoblet side', 'Denne siden er ikke lenket til noe.');
+        $from = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A.');
+        $this->createPublishedWikiPage($customer, 'Ikke tilkoblet side', 'Denne siden er ikke lenket til noe.');
 
         $discovered = app(RequirementWikiLinkNavigator::class)->discoverNeighbors([$from], $customer->id, []);
 
@@ -78,7 +78,7 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_a_linked_draft_page_is_excluded(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A.');
+        $from = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A.');
         $draft = $this->createWikiPageWithVersion($customer, 'Kladd', 'Innhold i kladden.', ['status' => EnterpriseWikiPage::STATUS_DRAFT]);
         $this->createWikilink($customer, $from, $draft);
 
@@ -91,8 +91,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     {
         $customerA = $this->createWikiCustomer('Customer A');
         $customerB = $this->createWikiCustomer('Customer B');
-        $from = $this->createWikiPageWithVersion($customerA, 'Side A', 'Innhold A.');
-        $otherCustomerPage = $this->createWikiPageWithVersion($customerB, 'Side hos B', 'Innhold hos B.');
+        $from = $this->createPublishedWikiPage($customerA, 'Side A', 'Innhold A.');
+        $otherCustomerPage = $this->createPublishedWikiPage($customerB, 'Side hos B', 'Innhold hos B.');
 
         // A link row scoped to customer A but pointing at a page owned by customer B should never
         // occur in real data (link materialization is customer-scoped), but the navigator must
@@ -114,9 +114,9 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_the_same_page_reachable_via_multiple_links_is_deduplicated(): void
     {
         $customer = $this->createWikiCustomer();
-        $fromA = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A.');
-        $fromB = $this->createWikiPageWithVersion($customer, 'Side B', 'Innhold B.');
-        $shared = $this->createWikiPageWithVersion($customer, 'Delt side', 'Innhold som begge lenker til.');
+        $fromA = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A.');
+        $fromB = $this->createPublishedWikiPage($customer, 'Side B', 'Innhold B.');
+        $shared = $this->createPublishedWikiPage($customer, 'Delt side', 'Innhold som begge lenker til.');
         $this->createWikilink($customer, $fromA, $shared);
         $this->createWikilink($customer, $fromB, $shared);
 
@@ -129,8 +129,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_already_visited_pages_are_excluded_from_discovery(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A.');
-        $alreadyRead = $this->createWikiPageWithVersion($customer, 'Allerede lest', 'Innhold allerede lest.');
+        $from = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A.');
+        $alreadyRead = $this->createPublishedWikiPage($customer, 'Allerede lest', 'Innhold allerede lest.');
         $this->createWikilink($customer, $from, $alreadyRead);
 
         $discovered = app(RequirementWikiLinkNavigator::class)->discoverNeighbors([$from], $customer->id, [$alreadyRead->id]);
@@ -141,8 +141,8 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_only_link_type_wikilink_rows_are_used_never_the_structural_combinatoric_types(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Artikkel', 'Innhold.', ['page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE]);
-        $summary = $this->createWikiPageWithVersion($customer, 'Sammendrag', 'Innhold.', ['page_type' => EnterpriseWikiPage::PAGE_TYPE_SUMMARY]);
+        $from = $this->createPublishedWikiPage($customer, 'Artikkel', 'Innhold.', ['page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE]);
+        $summary = $this->createPublishedWikiPage($customer, 'Sammendrag', 'Innhold.', ['page_type' => EnterpriseWikiPage::PAGE_TYPE_SUMMARY]);
 
         EnterpriseWikiPageLink::query()->create([
             'customer_id' => $customer->id,
@@ -161,9 +161,9 @@ class RequirementWikiLinkNavigatorTest extends TestCase
     public function test_discovery_order_is_deterministic_by_page_id(): void
     {
         $customer = $this->createWikiCustomer();
-        $from = $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold A.');
-        $second = $this->createWikiPageWithVersion($customer, 'Side C', 'Innhold C.');
-        $first = $this->createWikiPageWithVersion($customer, 'Side B', 'Innhold B.');
+        $from = $this->createPublishedWikiPage($customer, 'Side A', 'Innhold A.');
+        $second = $this->createPublishedWikiPage($customer, 'Side C', 'Innhold C.');
+        $first = $this->createPublishedWikiPage($customer, 'Side B', 'Innhold B.');
         $this->createWikilink($customer, $from, $second);
         $this->createWikilink($customer, $from, $first);
 

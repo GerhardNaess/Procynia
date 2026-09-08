@@ -64,7 +64,7 @@ class RequirementWikiAssessmentControllerTest extends TestCase
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-001', 'Wiki assessment case');
-        $page = $this->createWikiPageWithVersion($context['customer'], 'Dokumentasjonsrutine', 'Leverandøren dokumenterer erfaring fra tilsvarende prosjekter i egen rutine.');
+        $page = $this->createPublishedWikiPage($context['customer'], 'Dokumentasjonsrutine', 'Leverandøren dokumenterer erfaring fra tilsvarende prosjekter i egen rutine.');
 
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal dokumentere erfaring.');
@@ -220,7 +220,7 @@ class RequirementWikiAssessmentControllerTest extends TestCase
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-005', 'Wiki assessment conflict case');
-        $page = $this->createWikiPageWithVersion($context['customer'], 'Ansvarsmodell', 'Kunden har ansvar for driften av løsningen.');
+        $page = $this->createPublishedWikiPage($context['customer'], 'Ansvarsmodell', 'Kunden har ansvar for driften av løsningen.');
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal drifte løsningen.');
         $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [

@@ -59,7 +59,7 @@ class RequirementWikiAnswerFigurePipelineTest extends TestCase
     public function test_the_catalog_carries_a_pages_figures_alongside_its_text(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion(
+        $this->createPublishedWikiPage(
             $customer,
             'Samhandling',
             "# Samhandling\n\nTekst.",
@@ -80,7 +80,7 @@ class RequirementWikiAnswerFigurePipelineTest extends TestCase
     public function test_a_page_with_no_figures_reports_an_empty_figure_list(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Endringsstyring', "# Endringsstyring\n\nTekst.");
+        $this->createPublishedWikiPage($customer, 'Endringsstyring', "# Endringsstyring\n\nTekst.");
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
 

@@ -71,7 +71,7 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $page = $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling og rotårsaksanalyse.');
+        $page = $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling og rotårsaksanalyse.');
 
         $this->mockResearchClient(fn (array $candidates) => [
             'action' => 'read_pages',
@@ -92,7 +92,7 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling.');
 
         $this->mockResearchClient(fn (array $candidates) => [
             'action' => 'enough_context',
@@ -112,8 +112,8 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
-        $searchTarget = $this->createWikiPageWithVersion($customer, 'Endringsstyre', 'Innhold om endringsstyre og endringshåndtering.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling.');
+        $searchTarget = $this->createPublishedWikiPage($customer, 'Endringsstyre', 'Innhold om endringsstyre og endringshåndtering.');
 
         // The original candidate ("Problembehandling") is still a legitimate, unread candidate
         // after the search_more round, so the AI genuinely gets a third round to decide it isn't
@@ -145,7 +145,7 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling.');
 
         $this->mockResearchClient(fn (array $candidates) => [
             'action' => 'read_pages',
@@ -165,8 +165,8 @@ class RequirementWikiResearchServiceTest extends TestCase
         $customerA = $this->createWikiCustomer('Customer A');
         $customerB = $this->createWikiCustomer('Customer B');
         $requirement = $this->createRequirement($customerA, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customerA, 'Problembehandling', 'Innhold om problembehandling.');
-        $otherCustomerPage = $this->createWikiPageWithVersion($customerB, 'Problembehandling hos B', 'Innhold hos kunde B.');
+        $this->createPublishedWikiPage($customerA, 'Problembehandling', 'Innhold om problembehandling.');
+        $otherCustomerPage = $this->createPublishedWikiPage($customerB, 'Problembehandling hos B', 'Innhold hos kunde B.');
 
         $this->mockResearchClient(fn (array $candidates) => [
             'action' => 'read_pages',
@@ -189,13 +189,12 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling.');
         $unsignedPage = $this->createWikiPageWithVersion(
             $customer,
             'Problembehandling kladd',
             'Kladdinnhold om problembehandling.',
             ['status' => EnterpriseWikiPage::STATUS_DRAFT],
-            withDocumentOwnerApproval: false,
         );
 
         $this->mockResearchClient(fn (array $candidates) => [
@@ -216,7 +215,7 @@ class RequirementWikiResearchServiceTest extends TestCase
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
         // Exactly the state a real generated Wiki is in: status never left 'draft', but the
         // document owner has approved the current version in the UI.
-        $signedDraft = $this->createWikiPageWithVersion(
+        $signedDraft = $this->createPublishedWikiPage(
             $customer,
             'Problembehandling',
             'Innhold om problembehandling.',
@@ -240,8 +239,8 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $pageA = $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
-        $pageB = $this->createWikiPageWithVersion($customer, 'Hendelsesbehandling', 'Innhold om hendelsesbehandling.');
+        $pageA = $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
+        $pageB = $this->createPublishedWikiPage($customer, 'Hendelsesbehandling', 'Innhold om hendelsesbehandling.');
         $this->createWikilink($customer, $pageA, $pageB);
         $this->createWikilink($customer, $pageB, $pageA);
 
@@ -280,7 +279,7 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling og relaterte prosesser.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling og relaterte prosesser.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling og relaterte prosesser.');
 
         // A response that never makes progress and never stops on its own — the service's own
         // round ceiling, not the AI, must end the run.
@@ -303,7 +302,7 @@ class RequirementWikiResearchServiceTest extends TestCase
         $pageIds = [];
 
         for ($i = 0; $i < 10; $i++) {
-            $pageIds[] = $this->createWikiPageWithVersion(
+            $pageIds[] = $this->createPublishedWikiPage(
                 $customer,
                 "Problembehandling del {$i}",
                 "Innhold om problembehandling og relaterte prosesser i drift, del {$i}.",
@@ -332,7 +331,7 @@ class RequirementWikiResearchServiceTest extends TestCase
         // Each page is kept under FULL_CONTENT_MAX_CHARS (sent whole, ~3900 chars) so the overall
         // MAX_CONTEXT_SIZE limit — not MAX_PAGES_READ — is what stops the run.
         for ($i = 0; $i < 8; $i++) {
-            $this->createWikiPageWithVersion(
+            $this->createPublishedWikiPage(
                 $customer,
                 "Problembehandling del {$i}",
                 $this->contentOfLength("Problembehandling del {$i}", 3900),
@@ -364,9 +363,9 @@ class RequirementWikiResearchServiceTest extends TestCase
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
 
-        $pageA = $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
-        $pageB = $this->createWikiPageWithVersion($customer, 'Kontinuerlig forbedring', 'Innhold om kontinuerlig forbedring som ikke nevner det opprinnelige kravordet.');
-        $pageC = $this->createWikiPageWithVersion($customer, 'Målstyring', 'Innhold om målstyring, to lenkehopp unna det opprinnelige søket.');
+        $pageA = $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
+        $pageB = $this->createPublishedWikiPage($customer, 'Kontinuerlig forbedring', 'Innhold om kontinuerlig forbedring som ikke nevner det opprinnelige kravordet.');
+        $pageC = $this->createPublishedWikiPage($customer, 'Målstyring', 'Innhold om målstyring, to lenkehopp unna det opprinnelige søket.');
         $this->createWikilink($customer, $pageA, $pageB);
         $this->createWikilink($customer, $pageB, $pageC);
 
@@ -414,7 +413,7 @@ class RequirementWikiResearchServiceTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         $requirement = $this->createRequirement($customer, 'Beskriv rutinen for problembehandling.');
-        $this->createWikiPageWithVersion($customer, 'Problembehandling', 'Innhold om problembehandling.');
+        $this->createPublishedWikiPage($customer, 'Problembehandling', 'Innhold om problembehandling.');
 
         config(['services.enterprise_wiki.ai_enabled' => false]);
 

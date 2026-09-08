@@ -38,8 +38,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_a_title_hit_outranks_a_page_that_only_matches_in_body_content(): void
     {
         $customer = $this->createWikiCustomer();
-        $titleMatch = $this->createWikiPageWithVersion($customer, 'Incident Management', 'Generell tekst uten mange gjentakelser.');
-        $bodyOnlyMatch = $this->createWikiPageWithVersion($customer, 'Urelatert side', 'Denne siden nevner incident bare en gang i forbifarten.');
+        $titleMatch = $this->createPublishedWikiPage($customer, 'Incident Management', 'Generell tekst uten mange gjentakelser.');
+        $bodyOnlyMatch = $this->createPublishedWikiPage($customer, 'Urelatert side', 'Denne siden nevner incident bare en gang i forbifarten.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv rutinen for Incident Management.');
@@ -51,8 +51,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_heading_hits_contribute_to_the_score(): void
     {
         $customer = $this->createWikiCustomer();
-        $withHeading = $this->createWikiPageWithVersion($customer, 'Driftsprosesser', "# Driftsprosesser\n\nIntroduksjon.\n\n## Rotårsaksanalyse\n\nDetaljer om rotårsaksanalyse.");
-        $withoutHeading = $this->createWikiPageWithVersion($customer, 'Andre prosesser', "# Andre prosesser\n\nIntroduksjon uten relevant overskrift.");
+        $withHeading = $this->createPublishedWikiPage($customer, 'Driftsprosesser', "# Driftsprosesser\n\nIntroduksjon.\n\n## Rotårsaksanalyse\n\nDetaljer om rotårsaksanalyse.");
+        $withoutHeading = $this->createPublishedWikiPage($customer, 'Andre prosesser', "# Andre prosesser\n\nIntroduksjon uten relevant overskrift.");
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv rotårsaksanalyse.');
@@ -65,8 +65,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_content_overlap_count_and_ratio_contribute_to_the_score(): void
     {
         $customer = $this->createWikiCustomer();
-        $focused = $this->createWikiPageWithVersion($customer, 'Fokusert side', 'Endringshåndtering og endringsstyre er kjernen i denne siden om endring.');
-        $diffuse = $this->createWikiPageWithVersion($customer, 'Diffus side', 'Endring nevnes kort her, men siden handler mest om andre uavhengige tema, prosjekter, historie og organisasjon.');
+        $focused = $this->createPublishedWikiPage($customer, 'Fokusert side', 'Endringshåndtering og endringsstyre er kjernen i denne siden om endring.');
+        $diffuse = $this->createPublishedWikiPage($customer, 'Diffus side', 'Endring nevnes kort her, men siden handler mest om andre uavhengige tema, prosjekter, historie og organisasjon.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv endringshåndtering og endringsstyre.');
@@ -78,8 +78,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_claims_improve_recall_without_being_the_primary_signal(): void
     {
         $customer = $this->createWikiCustomer();
-        $titlePage = $this->createWikiPageWithVersion($customer, 'Kapasitetsstyring', 'Beskrivelse av kapasitetsstyring.');
-        $claimOnlyPage = $this->createWikiPageWithVersion($customer, 'Urelatert tema', 'Denne siden handler om noe helt annet.');
+        $titlePage = $this->createPublishedWikiPage($customer, 'Kapasitetsstyring', 'Beskrivelse av kapasitetsstyring.');
+        $claimOnlyPage = $this->createPublishedWikiPage($customer, 'Urelatert tema', 'Denne siden handler om noe helt annet.');
         $this->createWikiClaim($claimOnlyPage, 'Kapasitetsstyring rapporteres månedlig til kunden.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
@@ -96,9 +96,9 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_ranking_is_deterministic_across_repeated_calls(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold om endring og styring.');
-        $this->createWikiPageWithVersion($customer, 'Side B', 'Innhold om endring og prosess.');
-        $this->createWikiPageWithVersion($customer, 'Side C', 'Innhold om endring og kontroll.');
+        $this->createPublishedWikiPage($customer, 'Side A', 'Innhold om endring og styring.');
+        $this->createPublishedWikiPage($customer, 'Side B', 'Innhold om endring og prosess.');
+        $this->createPublishedWikiPage($customer, 'Side C', 'Innhold om endring og kontroll.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv endringshåndtering.');
@@ -113,8 +113,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_database_row_order_does_not_affect_the_ranked_result(): void
     {
         $customer = $this->createWikiCustomer();
-        $this->createWikiPageWithVersion($customer, 'Side A', 'Innhold om endring og styring av endring.');
-        $this->createWikiPageWithVersion($customer, 'Side B', 'Innhold om endring og styring av endring.');
+        $this->createPublishedWikiPage($customer, 'Side A', 'Innhold om endring og styring av endring.');
+        $this->createPublishedWikiPage($customer, 'Side B', 'Innhold om endring og styring av endring.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $shuffledCatalog = array_reverse($catalog);
@@ -131,8 +131,8 @@ class RequirementWikiPageRankerTest extends TestCase
     {
         $customer = $this->createWikiCustomer();
         // Identical titles/content -> identical scores; only page_id can break the tie.
-        $pageA = $this->createWikiPageWithVersion($customer, 'Identisk side', 'Nøyaktig samme innhold om endring.');
-        $pageB = $this->createWikiPageWithVersion($customer, 'Identisk side', 'Nøyaktig samme innhold om endring.');
+        $pageA = $this->createPublishedWikiPage($customer, 'Identisk side', 'Nøyaktig samme innhold om endring.');
+        $pageB = $this->createPublishedWikiPage($customer, 'Identisk side', 'Nøyaktig samme innhold om endring.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv endring.');
@@ -147,7 +147,7 @@ class RequirementWikiPageRankerTest extends TestCase
         $customer = $this->createWikiCustomer();
 
         for ($i = 0; $i < RequirementWikiPageRanker::MAX_CANDIDATES + 5; $i++) {
-            $this->createWikiPageWithVersion($customer, "Endringsside {$i}", 'Innhold om endring og endringsstyre for denne siden.');
+            $this->createPublishedWikiPage($customer, "Endringsside {$i}", 'Innhold om endring og endringsstyre for denne siden.');
         }
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
@@ -166,8 +166,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_a_source_based_claim_hit_outranks_a_best_practice_claim_hit_at_equal_recall(): void
     {
         $customer = $this->createWikiCustomer();
-        $sourceBackedPage = $this->createWikiPageWithVersion($customer, 'Urelatert tittel en', 'Denne siden handler om noe helt annet.');
-        $bestPracticeOnlyPage = $this->createWikiPageWithVersion($customer, 'Urelatert tittel to', 'Denne siden handler også om noe helt annet.');
+        $sourceBackedPage = $this->createPublishedWikiPage($customer, 'Urelatert tittel en', 'Denne siden handler om noe helt annet.');
+        $bestPracticeOnlyPage = $this->createPublishedWikiPage($customer, 'Urelatert tittel to', 'Denne siden handler også om noe helt annet.');
         $this->createWikiClaim($sourceBackedPage, 'Kapasitetsstyring rapporteres månedlig til kunden.', [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
         ]);
@@ -195,11 +195,11 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_best_practice_content_can_still_rank_first_when_it_is_the_stronger_match(): void
     {
         $customer = $this->createWikiCustomer();
-        $bestPracticePage = $this->createWikiPageWithVersion($customer, 'Kapasitetsstyring', 'Anbefalt fremgangsmåte for kapasitetsstyring og kapasitetsplanlegging.');
+        $bestPracticePage = $this->createPublishedWikiPage($customer, 'Kapasitetsstyring', 'Anbefalt fremgangsmåte for kapasitetsstyring og kapasitetsplanlegging.');
         $this->createWikiClaim($bestPracticePage, 'Kapasitetsstyring bør gjennomgås kvartalsvis som beste praksis.', [
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
         ]);
-        $weaklyRelatedPage = $this->createWikiPageWithVersion($customer, 'Urelatert tema', 'Denne siden nevner kapasitetsstyring bare i forbifarten.');
+        $weaklyRelatedPage = $this->createPublishedWikiPage($customer, 'Urelatert tema', 'Denne siden nevner kapasitetsstyring bare i forbifarten.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Anbefal beste praksis for kapasitetsstyring.');
@@ -211,8 +211,8 @@ class RequirementWikiPageRankerTest extends TestCase
     public function test_excluded_page_ids_never_appear_in_the_result(): void
     {
         $customer = $this->createWikiCustomer();
-        $keep = $this->createWikiPageWithVersion($customer, 'Endringsside', 'Innhold om endring.');
-        $exclude = $this->createWikiPageWithVersion($customer, 'Endringsside to', 'Innhold om endring.');
+        $keep = $this->createPublishedWikiPage($customer, 'Endringsside', 'Innhold om endring.');
+        $exclude = $this->createPublishedWikiPage($customer, 'Endringsside to', 'Innhold om endring.');
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build($customer->id);
         $tokens = RequirementWikiTermNormalizer::tokenize('Beskriv endring.');
