@@ -101,7 +101,24 @@ class EnterpriseWikiTableIngestTest extends TestCase
         $this->assertCount(0, $tableBlocks);
     }
 
-    public function test_table_rows_produce_deterministic_claims_with_precise_cell_provenance(): void
+    /**
+     * A table is document content, so it never becomes a claim — and its per-cell provenance lives
+     * on the version's own table block instead.
+     *
+     * A claim is a Procynia assertion someone has to review. Restating what a document already says
+     * is not one: EnterpriseWikiExtractPageClaimsService only offers `best_practice` and
+     * `unsupported_generated_content` blocks to claim extraction, and refuses source_based blocks
+     * again after the AI response ("Direct document content is Wiki content with its own
+     * provenance, not a Procynia claim"). Table blocks are source_based by construction, so the
+     * page is genuinely processed and yields zero claims.
+     *
+     * This replaces an assertion that each (row, non-label column) cell became its own
+     * CONFIDENCE_HIGH claim with an EnterpriseWikiSourceReference. That path was deleted with
+     * EnterpriseWikiExtractPageClaimsService::createTableClaims() when source-based claim
+     * extraction landed; the exactness it protected did not disappear, it moved onto the block,
+     * which is what this test now pins.
+     */
+    public function test_a_cited_table_produces_no_claims_and_keeps_its_cell_provenance_on_the_block(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createTableDocument($customer);
@@ -111,34 +128,51 @@ class EnterpriseWikiTableIngestTest extends TestCase
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $claims = EnterpriseWikiClaim::query()
+        $this->assertSame(
+            0,
+            EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->count(),
+            'Document content must never be persisted as a claim.',
+        );
+        $this->assertSame(0, EnterpriseWikiSourceReference::query()->count());
+
+        // The page was processed rather than skipped — zero claims is a real result, not an
+        // extraction that never ran.
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->where('enterprise_wiki_page_id', $article->id)
-            ->where('confidence', EnterpriseWikiClaim::CONFIDENCE_HIGH)
-            ->get();
+            ->firstOrFail();
+        $this->assertNotNull($runPage->claims_extracted_at);
 
-        // 2 rows × 1 non-label column (Pris) each = 2 deterministic claims.
-        $this->assertCount(2, $claims);
-
-        $texts = $claims->pluck('claim_text')->all();
-        $this->assertContains('Administrert klient: Pris er £42.', $texts);
-        $this->assertContains('Standard support: Pris er £10.', $texts);
-
-        $claim = $claims->firstWhere('claim_text', 'Administrert klient: Pris er £42.');
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
-
-        $reference = EnterpriseWikiSourceReference::query()
-            ->where('enterprise_wiki_claim_id', $claim->id)
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->where('is_current', true)
             ->firstOrFail();
 
-        $this->assertSame('tbl0-row0', $reference->source_row_key);
-        $this->assertSame('tbl0-row0-col1', $reference->source_cell_key);
-        $this->assertSame('pris', $reference->source_column_key);
-        $this->assertStringContainsString('Tabell 1', $reference->page_reference);
-        $this->assertStringContainsString('Rad «Administrert klient»', $reference->page_reference);
-        $this->assertStringContainsString('Kolonne «Pris»', $reference->page_reference);
+        $tableBlock = collect($version->content_blocks_json)
+            ->first(fn (array $block): bool => ($block['block_type'] ?? null) === 'table');
+
+        $this->assertNotNull($tableBlock);
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $tableBlock['content_origin']);
+        $this->assertSame('tbl0-row0', $tableBlock['source_row_key']);
+
+        // Exactly the provenance the deleted per-cell claims used to carry: row key, column key,
+        // column index and the verbatim cell value, for every row.
+        $rows = $tableBlock['table_data']['rows'];
+
+        $this->assertSame('tbl0-row0', $rows[0]['row_key']);
+        $this->assertSame('Administrert klient', $rows[0]['label']);
+        $this->assertSame(1, $rows[0]['cells'][1]['column_index']);
+        $this->assertSame('pris', $rows[0]['cells'][1]['column_key']);
+        $this->assertSame('Pris', $rows[0]['cells'][1]['header']);
+        $this->assertSame('£42', $rows[0]['cells'][1]['value']);
+
+        $this->assertSame('tbl0-row1', $rows[1]['row_key']);
+        $this->assertSame('Standard support', $rows[1]['label']);
+        $this->assertSame('pris', $rows[1]['cells'][1]['column_key']);
+        $this->assertSame('£10', $rows[1]['cells'][1]['value']);
     }
 
-    public function test_re_extracting_claims_for_the_same_run_does_not_duplicate_table_claims(): void
+    public function test_re_extracting_claims_for_the_same_run_is_a_no_op(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createTableDocument($customer);
@@ -148,16 +182,27 @@ class EnterpriseWikiTableIngestTest extends TestCase
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $article->id)
+            ->firstOrFail();
+
         $firstCount = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->count();
+        $firstExtractedAt = $runPage->claims_extracted_at;
+
+        $this->assertNotNull($firstExtractedAt);
 
         // Re-running extraction for the same (already-completed) run must be a no-op per the
-        // existing claims_extracted_at checkpoint — table claims share that same checkpoint.
+        // claims_extracted_at checkpoint. That checkpoint — not "claims exist" — is what makes the
+        // guarantee observable here, because a page whose blocks are all source_based legitimately
+        // extracts zero claims, and a count alone cannot tell "already done" from "never started".
         Artisan::call('wiki:extract-page-claims', ['--run-id' => $run->id]);
 
-        $secondCount = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->count();
-
-        $this->assertSame($firstCount, $secondCount);
-        $this->assertGreaterThan(0, $firstCount);
+        $this->assertSame(
+            $firstCount,
+            EnterpriseWikiClaim::query()->where('enterprise_wiki_page_id', $article->id)->count(),
+        );
+        $this->assertEquals($firstExtractedAt, $runPage->fresh()->claims_extracted_at);
     }
 
     // ── fixtures ─────────────────────────────────────────────────────────────
