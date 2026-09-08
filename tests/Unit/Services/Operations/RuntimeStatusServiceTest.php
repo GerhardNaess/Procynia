@@ -90,6 +90,15 @@ class RuntimeStatusServiceTest extends TestCase
                 ],
             ]));
 
+        // next_run_at_human is a translated, user-facing string
+        // (RuntimeStatusService::formatCountdownLabel composes it from
+        // procynia.system_status.scheduler.*), so an assertion on its literal text has to declare
+        // the locale it is written in. Without this the test silently inherits whichever locale the
+        // loaded env file happens to supply: .env and .env.example both set APP_LOCALE=en, while
+        // .env.testing omits it and config/app.php falls back to 'no' — so the same test passed or
+        // failed depending only on which env file the run picked up.
+        $this->app->setLocale('no');
+
         $snapshot = app(RuntimeStatusService::class)->snapshot();
 
         $this->assertSame('testing', $snapshot['app_env']);
