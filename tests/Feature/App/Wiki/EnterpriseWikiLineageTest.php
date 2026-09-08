@@ -13,6 +13,7 @@ use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
 use App\Services\EnterpriseWiki\EnterpriseWikiSemanticQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiSemanticRepairService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -173,15 +174,21 @@ class EnterpriseWikiLineageTest extends TestCase
         $diagnosis = $this->semanticQaService()->review($run);
         $this->assertSame((int) $diagnosedVersion->id, (int) $diagnosis['page_version_id']);
 
-        // Add a second version and make it is_current AFTER diagnosis but BEFORE repair runs.
-        // If repair used is_current, it would target v2 instead of the diagnosed v1.
-        $v2 = EnterpriseWikiPageVersion::create([
-            'enterprise_wiki_page_id' => $article->id,
-            'version_number' => 2,
-            'is_current' => true,
+        // Another writer publishes a new current version AFTER diagnosis but BEFORE repair runs —
+        // the exact race this test exists for. It goes through EnterpriseWikiPageVersionWriter, the
+        // one write path every real writer uses, so the page ends up with v2 current and v1 demoted
+        // rather than two current versions (which ewpv_page_single_current_unique forbids outright).
+        // If repair used is_current, it would now target v2 instead of the diagnosed v1.
+        $v2 = app(EnterpriseWikiPageVersionWriter::class)->writeNewCurrentVersion($article, [
             'content_markdown' => "# Article v2\n\nDifferent content.",
             'generated_by_model' => 'test',
         ]);
+
+        $this->assertSame(2, (int) $v2->version_number);
+        $this->assertFalse(
+            (bool) $diagnosedVersion->fresh()->is_current,
+            'The competing write must have demoted the diagnosed version — that is what makes this a real race.',
+        );
 
         $repairResult = $this->semanticRepairService()->repair($run, $diagnosis);
 
