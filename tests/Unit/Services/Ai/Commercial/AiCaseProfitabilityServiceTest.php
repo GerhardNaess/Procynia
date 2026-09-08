@@ -96,16 +96,24 @@ class AiCaseProfitabilityServiceTest extends TestCase
     }
 
     /**
-     * Purpose: Verify that missing included AI credits prevent revenue allocation.
+     * Purpose: Verify that a plan including no AI cases prevents revenue allocation.
      * Inputs: None.
      * Returns: None.
      * Side effects: Writes fixture rows to the test database.
+     *
+     * The scenario has to be built from a plan that genuinely includes zero AI cases, not from a
+     * customer row carrying `included_ai_credits = 0`. BillingEntitlementService::includedAiCredits()
+     * reads that column as "not yet synced" rather than "zero" — the column is NOT NULL DEFAULT 0,
+     * so it cannot distinguish an explicit zero from the schema default — and falls through to the
+     * plan catalogue. On a paid plan that fallback yields a positive allowance, which is real
+     * revenue to allocate. Free includes no AI cases at every level, so there is nothing to divide
+     * the plan value by, and revenue is honestly reported as missing.
      */
-    public function test_it_marks_revenue_missing_when_included_ai_credits_are_missing(): void
+    public function test_it_marks_revenue_missing_when_the_plan_includes_no_ai_cases(): void
     {
         Carbon::setTestNow('2026-06-15 12:00:00');
 
-        $customer = $this->createCustomer('Revenue Missing AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 0, 0);
+        $customer = $this->createCustomer('Revenue Missing AS', Customer::PLAN_FREE, Customer::BILLING_MONTHLY, 0, 0);
         $notice = $this->createSavedNotice($customer->id, 'REVENUE-MISSING-001', 'Revenue Missing Case');
         $this->createCaseUsage($customer, $notice, '2026-06-15 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT);
 
@@ -124,6 +132,33 @@ class AiCaseProfitabilityServiceTest extends TestCase
         $this->assertSame('missing', $caseRow['revenue_status']);
         $this->assertNull($caseRow['allocated_revenue_nok']);
         $this->assertNull($caseRow['average_revenue_per_case_nok']);
+        // Pins what actually drives the status: the resolved allowance really is zero here, so a
+        // future change to credit resolution cannot quietly turn this back into a priced case.
+        $this->assertSame(0, $caseRow['included_ai_credits']);
+    }
+
+    /**
+     * Purpose: Verify that a zero on the customer snapshot is read as "not synced" and falls back
+     * to the plan allowance rather than blocking revenue allocation.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_a_zero_credit_snapshot_falls_back_to_the_plan_allowance(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Zero Snapshot AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 0, 0);
+        $notice = $this->createSavedNotice($customer->id, 'ZERO-SNAPSHOT-001', 'Zero Snapshot Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-15 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame('ok', $caseRow['revenue_status']);
+        // Pro includes 3 AI cases at 990 NOK/month.
+        $this->assertSame(3, $caseRow['included_ai_credits']);
+        $this->assertEqualsWithDelta(330.0, $caseRow['allocated_revenue_nok'], 0.0001);
     }
 
     /**
