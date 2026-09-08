@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Models\Customer;
+use App\Models\EnterpriseWikiCanonicalFact;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiLintFinding;
@@ -1025,9 +1026,9 @@ class WikiClaimControllerTest extends TestCase
     // Helpers
     // =========================================================================
 
-    private function createCanonicalFact(Customer $customer, string $canonicalText): \App\Models\EnterpriseWikiCanonicalFact
+    private function createCanonicalFact(Customer $customer, string $canonicalText): EnterpriseWikiCanonicalFact
     {
-        return \App\Models\EnterpriseWikiCanonicalFact::query()->create([
+        return EnterpriseWikiCanonicalFact::query()->create([
             'customer_id' => $customer->id,
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
             'source_element_keys' => [],
@@ -1042,7 +1043,7 @@ class WikiClaimControllerTest extends TestCase
     /**
      * @return array{0: EnterpriseWikiPage, 1: EnterpriseWikiPageVersion, 2: EnterpriseWikiClaim}
      */
-    private function createBestPracticeClaim(Customer $customer, \App\Models\EnterpriseWikiCanonicalFact $fact, string $claimText): array
+    private function createBestPracticeClaim(Customer $customer, EnterpriseWikiCanonicalFact $fact, string $claimText): array
     {
         [$page, $version, $claim] = $this->createPageWithClaim($customer);
 
@@ -1121,6 +1122,13 @@ class WikiClaimControllerTest extends TestCase
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Advania er leverandør av IT-driftstjenester.',
             'position_order' => 0,
+            // These tests are about a claim that restates the document and therefore owes a
+            // citation — manual approval, source linking, and the missing-source warning around
+            // both. The column defaults to `unclassified`, which
+            // EnterpriseWikiClaim::needsSourceWarning() exempts outright (a navigation-only claim
+            // was never meant to require a source), so a fixture left on the default can never
+            // show or reopen a missing-source warning no matter what the controller does.
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,

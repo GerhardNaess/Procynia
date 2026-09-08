@@ -76,6 +76,19 @@ abstract class TestCase extends BaseTestCase
             'DB_USERNAME' => self::TEST_DATABASE_CREDENTIALS['username'],
             'DB_PASSWORD' => self::TEST_DATABASE_CREDENTIALS['password'],
             'QUEUE_CONNECTION' => 'sync',
+            // The app container exports SESSION_DRIVER=redis, SESSION_STORE=redis,
+            // SESSION_CONNECTION=default and CACHE_STORE=redis for the real application, and
+            // Laravel's env() resolves $_SERVER before $_ENV/getenv(). phpunit.xml declares the
+            // array drivers but cannot win that race even with force="true", which only reaches
+            // putenv()/$_ENV — so the whole suite silently ran HTTP tests on Redis-backed sessions
+            // against a Redis requiring a password the test environment never supplies, and every
+            // request died with "RedisException: NOAUTH Authentication required" as a 500.
+            // QUEUE_CONNECTION above was the one driver that already worked, for exactly this
+            // reason: it was listed here, where $_SERVER is written too.
+            'SESSION_DRIVER' => 'array',
+            'SESSION_STORE' => '',
+            'SESSION_CONNECTION' => '',
+            'CACHE_STORE' => 'array',
             'STRIPE_KEY' => 'pk_test_procynia',
             'STRIPE_SECRET' => 'sk_test_procynia',
             'STRIPE_WEBHOOK_SECRET' => 'whsec_test_procynia',

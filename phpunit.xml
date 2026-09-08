@@ -28,7 +28,14 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
-        <env name="CACHE_STORE" value="array"/>
+        <!--
+            The app container exports SESSION_DRIVER/SESSION_STORE/SESSION_CONNECTION/CACHE_STORE
+            as redis for the real application. force="true" only reaches putenv()/$_ENV, while
+            Laravel's env() reads $_SERVER first, so these lines alone cannot win against the
+            container. Tests\TestCase::primeTestingEnvironment() is what actually enforces them —
+            it writes $_SERVER too. Both layers are kept in agreement on purpose.
+        -->
+        <env name="CACHE_STORE" value="array" force="true"/>
         <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_HOST" value="postgres" force="true"/>
         <env name="DB_PORT" value="5432" force="true"/>
@@ -38,7 +45,9 @@
         <env name="DB_URL" value="" force="true"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
-        <env name="SESSION_DRIVER" value="array"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="SESSION_STORE" value="" force="true"/>
+        <env name="SESSION_CONNECTION" value="" force="true"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
