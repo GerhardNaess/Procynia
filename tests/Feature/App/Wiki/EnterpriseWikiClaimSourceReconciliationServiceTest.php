@@ -207,6 +207,15 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
     // Manually-approved claims can still receive a real source reference
     // =========================================================================
 
+    /**
+     * A claim someone approved manually — that is, on their own authority, with no document behind
+     * it — can still gain a real source reference later. When it does, the manual decision is
+     * deliberately withdrawn: EnterpriseWikiAppliedRunLintService::resetClaimDecisionAfterFirst
+     * SourceReference() returns the claim to pending and clears the approval fields, because the
+     * decision was made without the source basis that now exists and has to be taken again against
+     * it. The reference itself is what survives, and the claim stops being "manually approved" and
+     * starts being "source found".
+     */
     public function test_manually_approved_claim_can_later_receive_a_real_source_reference(): void
     {
         $customer = $this->createCustomer();
@@ -222,8 +231,16 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
 
         $fresh = $claim->fresh();
         $this->assertSame(EnterpriseWikiClaim::SOURCE_STATUS_FOUND, $fresh->sourceStatus());
-        $this->assertTrue($fresh->isApproved());
-        $this->assertSame('Bekreftet muntlig.', $fresh->approval_comment);
+        $this->assertSame(
+            1,
+            EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count(),
+        );
+
+        // The approval it held without a source is withdrawn for re-review, not kept.
+        $this->assertFalse($fresh->isApproved());
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $fresh->approval_status);
+        $this->assertNull($fresh->approved_at);
+        $this->assertNull($fresh->approval_comment);
     }
 
     // =========================================================================
@@ -376,6 +393,12 @@ class EnterpriseWikiClaimSourceReconciliationServiceTest extends TestCase
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => $text,
             'position_order' => 0,
+            // Reconciliation exists to find document evidence for claims that restate a document,
+            // so the fixture has to be one of those. The column defaults to `unclassified`, and
+            // EnterpriseWikiClaim::needsSourceWarning() exempts that origin outright — an
+            // unclassified (navigation-only) claim was never meant to require a citation, so a
+            // fixture left on the default can never show a missing-source warning at all.
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,

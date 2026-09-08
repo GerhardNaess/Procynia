@@ -33,6 +33,24 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
     use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
 
+    /** The block a source_based claim anchors to — what verification resolves evidence through. */
+    private const SOURCE_BLOCK_KEY = 'block-0001';
+
+    private const SOURCE_BLOCK_MARKDOWN = 'Kunden har en dokumentert hendelseshåndtering.';
+
+    /** The document element that block cites, and that verification must cite back. */
+    private const SOURCE_ELEMENT_KEY = 'paragraph-1';
+
+    /**
+     * The claim-candidate block. Deliberately unsupported_generated_content rather than
+     * best_practice: both are offered to the extraction AI, but only best_practice has a
+     * deterministic fallback that manufactures a claim when the AI returns none — which would
+     * make "the AI legitimately returned zero claims" untestable.
+     */
+    private const CANDIDATE_BLOCK_KEY = 'block-0002';
+
+    private const CANDIDATE_BLOCK_MARKDOWN = 'Prosessen dekker også avvikshåndtering.';
+
     // =========================================================================
     // Extraction: partial across pages within one run
     // =========================================================================
@@ -43,14 +61,7 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
         $run = $this->createAppliedRun($customer);
 
         [$doneRow, $doneVersion] = $this->addPage($run, 'Ferdig side');
-        EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $doneRow->enterprise_wiki_page_id,
-            'enterprise_wiki_page_version_id' => $doneVersion->id,
-            'claim_text' => 'Allerede ekstrahert påstand.',
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
-        ]);
+        $this->createAnchoredClaim($doneRow, $doneVersion, 'Allerede ekstrahert påstand.');
         $doneRow->update(['claims_extracted_at' => now()]);
 
         [$pendingRow, $pendingVersion] = $this->addPage($run, 'Uferdig side');
@@ -60,8 +71,8 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
             ->once()
             ->withArgs(fn ($title) => $title === 'Uferdig side')
             ->andReturn(['claims' => [
-                ['text' => 'Ny påstand 1', 'confidence' => 'high'],
-                ['text' => 'Ny påstand 2', 'confidence' => 'medium'],
+                ['text' => 'Ny påstand 1', 'confidence' => 'high', 'excerpt' => self::CANDIDATE_BLOCK_MARKDOWN],
+                ['text' => 'Ny påstand 2', 'confidence' => 'medium', 'excerpt' => self::CANDIDATE_BLOCK_MARKDOWN],
             ]]);
 
         $result = app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
@@ -109,13 +120,7 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
         $run = $this->createAppliedRun($customer);
         [$row, $version] = $this->addPage($run, 'Side med påstander');
 
-        $verifiedClaim = EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $row->enterprise_wiki_page_id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Allerede verifisert påstand.',
-            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        $verifiedClaim = $this->createAnchoredClaim($row, $version, 'Allerede verifisert påstand.', [
             'verified_at' => now(),
         ]);
         EnterpriseWikiSourceReference::query()->create([
@@ -127,20 +132,15 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
             'source_hash' => 'existinghash',
         ]);
 
-        $unverifiedClaim = EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $row->enterprise_wiki_page_id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Uverifisert påstand.',
+        $unverifiedClaim = $this->createAnchoredClaim($row, $version, 'Uverifisert påstand.', [
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_MEDIUM,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
         ]);
 
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
             ->withArgs(fn ($claimText) => $claimText === 'Uverifisert påstand.')
-            ->andReturn($this->verificationResult());
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: [self::SOURCE_ELEMENT_KEY]));
 
         $result = app(EnterpriseWikiVerifyPageClaimsService::class)->verify($run->fresh());
 
@@ -158,13 +158,8 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
         $run = $this->createAppliedRun($customer);
         [$row, $version] = $this->addPage($run, 'Side med uverifiserbar påstand');
 
-        $claim = EnterpriseWikiClaim::query()->create([
-            'enterprise_wiki_page_id' => $row->enterprise_wiki_page_id,
-            'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'Påstand uten dekning.',
+        $claim = $this->createAnchoredClaim($row, $version, 'Påstand uten dekning.', [
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_LOW,
-            'conflict_flag' => false,
-            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
         ]);
 
         $this->mock(WikiClaimVerificationAiClient::class)
@@ -258,13 +253,75 @@ class EnterpriseWikiClaimStepResumabilityTest extends TestCase
             'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
         ]);
 
+        $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+
+        // Both claim steps are block-driven. Extraction only offers best_practice /
+        // unsupported_generated_content blocks to the AI, and verification anchors a claim to its
+        // own content block to find the document evidence behind it. A version carrying only
+        // content_markdown therefore skips the AI call entirely in both steps — which would leave
+        // every checkpoint assertion below proving nothing.
         $version = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 1,
             'is_current' => true,
-            'content_markdown' => "# {$title}\n\nInnhold.",
+            'content_markdown' => "# {$title}\n\n".self::SOURCE_BLOCK_MARKDOWN."\n\n".self::CANDIDATE_BLOCK_MARKDOWN,
+            'content_blocks_json' => [
+                [
+                    'block_key' => self::SOURCE_BLOCK_KEY,
+                    'position' => 0,
+                    'markdown' => self::SOURCE_BLOCK_MARKDOWN,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_elements' => [[
+                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                        'source_id' => $document->id,
+                        'source_label' => $document->original_filename,
+                        'source_hash' => $document->file_hash_sha256,
+                        'document_version_hash' => $document->file_hash_sha256,
+                        'source_element_key' => self::SOURCE_ELEMENT_KEY,
+                        'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                        'source_row_key' => null,
+                        'source_excerpt' => $document->extracted_text,
+                        'page_reference' => 'Avsnitt 1',
+                    ]],
+                    'best_practice_reason' => null,
+                ],
+                [
+                    'block_key' => self::CANDIDATE_BLOCK_KEY,
+                    'position' => 1,
+                    'markdown' => self::CANDIDATE_BLOCK_MARKDOWN,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                    'source_elements' => [],
+                    'best_practice_reason' => null,
+                ],
+            ],
         ]);
 
         return [$row, $version];
+    }
+
+    /**
+     * A claim anchored to the page's source block, so verification can resolve the document
+     * evidence behind it. An unanchored claim is classified internal_error and reported as
+     * "no support" without any AI call, which would hide the checkpoint behaviour under test.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createAnchoredClaim(
+        EnterpriseWikiIngestRunPage $row,
+        EnterpriseWikiPageVersion $version,
+        string $text,
+        array $overrides = [],
+    ): EnterpriseWikiClaim {
+        return EnterpriseWikiClaim::query()->create(array_merge([
+            'enterprise_wiki_page_id' => $row->enterprise_wiki_page_id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $text,
+            'page_excerpt' => self::SOURCE_BLOCK_MARKDOWN,
+            'content_block_key' => self::SOURCE_BLOCK_KEY,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+        ], $overrides));
     }
 }
