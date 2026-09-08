@@ -23,6 +23,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use ReflectionClass;
@@ -45,6 +46,19 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
 {
     use CreatesEnterpriseWikiFixtures;
     use RefreshDatabase;
+
+    /** The block a claim anchors to when it restates the document — what verification links to. */
+    private const SOURCE_BLOCK_KEY = 'block-0001';
+
+    private const SOURCE_BLOCK_MARKDOWN = 'Kunden har en dokumentert hendelseshåndtering.';
+
+    /** The only claim-candidate block: extraction never offers source_based blocks to the AI. */
+    private const BEST_PRACTICE_BLOCK_KEY = 'block-0002';
+
+    private const BEST_PRACTICE_BLOCK_MARKDOWN = 'Procynia anbefaler en fast kontrollrutine.';
+
+    /** The document element the source block cites — what verification must cite back. */
+    private const SOURCE_ELEMENT_KEY = 'paragraph-1';
 
     // =========================================================================
     // 1: Extraction reservation blocks a second worker
@@ -173,8 +187,8 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
             ->shouldReceive('extractClaims')
             ->once()
             ->andReturn(['claims' => [
-                ['text' => 'Påstand fra B 1', 'confidence' => 'high'],
-                ['text' => 'Påstand fra B 2', 'confidence' => 'medium'],
+                ['text' => 'Påstand fra B 1', 'confidence' => 'high', 'excerpt' => self::BEST_PRACTICE_BLOCK_MARKDOWN],
+                ['text' => 'Påstand fra B 2', 'confidence' => 'medium', 'excerpt' => self::BEST_PRACTICE_BLOCK_MARKDOWN],
             ]]);
 
         $service = app(EnterpriseWikiExtractPageClaimsService::class);
@@ -192,9 +206,16 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         // Worker A, holding the now-superseded token, belatedly tries to persist its own
         // result — must be rejected, and must not create any claims.
         $persist = new ReflectionMethod(EnterpriseWikiExtractPageClaimsService::class, 'persist');
-        $lateResult = $persist->invoke($service, $row->id, $page, $version, $staleToken, [
-            'claims' => [['text' => 'Duplikat fra A', 'confidence' => 'high']],
-        ]);
+        $lateResult = $persist->invoke(
+            $service,
+            $run->id,
+            $row->id,
+            $page,
+            $version,
+            $staleToken,
+            ['claims' => [['text' => 'Duplikat fra A', 'confidence' => 'high', 'excerpt' => self::BEST_PRACTICE_BLOCK_MARKDOWN]]],
+            $this->claimCandidateBlocksFor($version),
+        );
 
         $this->assertNull($lateResult);
         $this->assertSame(2, EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->count());
@@ -220,7 +241,7 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn($this->verificationResult());
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: [self::SOURCE_ELEMENT_KEY]));
 
         $service = app(EnterpriseWikiVerifyPageClaimsService::class);
         $result = $service->verify($run->fresh());
@@ -236,10 +257,16 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
 
         $persist = new ReflectionMethod(EnterpriseWikiVerifyPageClaimsService::class, 'persist');
-        $lateOutcome = $persist->invoke($service, $claim->id, $staleToken, $document, [
-            'supported' => true,
-            'excerpt' => 'Duplikat utdrag fra A.',
-        ]);
+        $lateOutcome = $persist->invoke(
+            $service,
+            $claim->id,
+            $staleToken,
+            $document,
+            ['supported' => true, 'excerpt' => 'Duplikat utdrag fra A.'],
+            $version->fresh(),
+            $this->sourceBlockFor($version),
+            (string) $document->extracted_text,
+        );
 
         $this->assertNull($lateOutcome);
         $this->assertSame(1, EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->count());
@@ -262,7 +289,12 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         ]);
 
         $reserve = new ReflectionMethod(EnterpriseWikiExtractPageClaimsService::class, 'reserve');
-        $outcome = $reserve->invoke(app(EnterpriseWikiExtractPageClaimsService::class), $row->fresh(), 'new-attempt-token');
+        $outcome = $reserve->invoke(
+            app(EnterpriseWikiExtractPageClaimsService::class),
+            $run->id,
+            $row->fresh(),
+            'new-attempt-token',
+        );
 
         $this->assertSame('completed', $outcome);
         $this->assertSame('leftover-token', $row->fresh()->claims_claim_token);
@@ -351,12 +383,12 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $this->mock(WikiPageClaimExtractionAiClient::class)
             ->shouldReceive('extractClaims')
             ->once()
-            ->andReturn(['claims' => [['text' => 'Én påstand.', 'confidence' => 'high']]]);
+            ->andReturn(['claims' => [['text' => 'Én påstand.', 'confidence' => 'high', 'excerpt' => self::BEST_PRACTICE_BLOCK_MARKDOWN]]]);
 
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
             ->once()
-            ->andReturn($this->verificationResult());
+            ->andReturn($this->verificationResult(supportingSourceElementKeys: [self::SOURCE_ELEMENT_KEY]));
 
         $this->mockQaClaims($run, EnterpriseWikiIngestRun::QA_STATUS_PASSED);
 
@@ -370,7 +402,10 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
         $snapshotsAfterFirst = EnterpriseWikiQaSnapshot::query()->count();
         $attemptCountAfterFirst = $run->fresh()->qa_attempt_count;
 
-        $this->assertSame(1, $claimsAfterFirst);
+        // The pre-existing source_based claim plus the one this pass extracted from the
+        // best_practice block; only the source_based one has a document to cite, so exactly one
+        // source reference is written.
+        $this->assertSame(2, $claimsAfterFirst);
         $this->assertSame(1, $referencesAfterFirst);
 
         // Second pass: run is already terminal, so continuation must no-op entirely — but
@@ -492,10 +527,18 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
      * where FinalizeEnterpriseWikiPageGeneration would hand off to
      * ContinueEnterpriseWikiDocumentFlowAfterPages.
      */
+    /**
+     * A run ready for the continuation flow, carrying one already-extracted source_based claim.
+     * That claim is what gives the verification step something a document can actually support:
+     * the claim extraction step itself only ever produces best_practice / unsupported claims, and
+     * a best_practice claim is a Procynia recommendation with no document evidence behind it, so
+     * verification settles it deterministically without an AI call or a source reference.
+     */
     private function createRunAwaitingContinuation(Customer $customer): EnterpriseWikiIngestRun
     {
         $run = $this->createAppliedRun($customer);
-        $this->addPage($run, 'Artikkel');
+        [, , $version] = $this->addPage($run, 'Artikkel');
+        $this->createClaim($version);
 
         return $run;
     }
@@ -521,22 +564,67 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
             'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
         ]);
 
+        $document = EnterpriseWikiDocument::query()->findOrFail($run->source_id);
+
+        // Both claim steps are block-driven: extraction only offers best_practice /
+        // unsupported_generated_content blocks to the AI, and verification anchors a claim to its
+        // own content block to find the document evidence behind it. A version with only
+        // content_markdown therefore extracts zero claims and verifies to internal_error without
+        // ever calling AI — which would make every lease assertion below vacuously "0 == 0".
         $version = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 1,
             'is_current' => true,
-            'content_markdown' => "# {$title}\n\nInnhold.",
+            'content_markdown' => "# {$title}\n\n".self::SOURCE_BLOCK_MARKDOWN."\n\n".self::BEST_PRACTICE_BLOCK_MARKDOWN,
+            'content_blocks_json' => [
+                [
+                    'block_key' => self::SOURCE_BLOCK_KEY,
+                    'position' => 0,
+                    'markdown' => self::SOURCE_BLOCK_MARKDOWN,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                    'source_elements' => [[
+                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+                        'source_id' => $document->id,
+                        'source_label' => $document->original_filename,
+                        'source_hash' => $document->file_hash_sha256,
+                        'document_version_hash' => $document->file_hash_sha256,
+                        'source_element_key' => self::SOURCE_ELEMENT_KEY,
+                        'source_element_type' => EnterpriseWikiSourceReference::SOURCE_ELEMENT_TYPE_PARAGRAPH,
+                        'source_row_key' => null,
+                        'source_excerpt' => $document->extracted_text,
+                        'page_reference' => 'Avsnitt 1',
+                    ]],
+                    'best_practice_reason' => null,
+                ],
+                [
+                    'block_key' => self::BEST_PRACTICE_BLOCK_KEY,
+                    'position' => 1,
+                    'markdown' => self::BEST_PRACTICE_BLOCK_MARKDOWN,
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                    'source_elements' => [],
+                    'best_practice_reason' => 'Procynia har lagt til en anbefalt kontrollpraksis.',
+                ],
+            ],
         ]);
 
         return [$row, $page, $version];
     }
 
+    /**
+     * A claim anchored to its own source block. The anchor is what lets verification resolve the
+     * document evidence behind the claim; an unanchored claim is classified internal_error and
+     * reported as "no support" without any AI call, which would hide the lease behaviour under
+     * test.
+     */
     private function createClaim(EnterpriseWikiPageVersion $version): EnterpriseWikiClaim
     {
         return EnterpriseWikiClaim::query()->create([
             'enterprise_wiki_page_id' => $version->enterprise_wiki_page_id,
             'enterprise_wiki_page_version_id' => $version->id,
-            'claim_text' => 'En påstand.',
+            'claim_text' => self::SOURCE_BLOCK_MARKDOWN,
+            'page_excerpt' => self::SOURCE_BLOCK_MARKDOWN,
+            'content_block_key' => self::SOURCE_BLOCK_KEY,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
@@ -560,14 +648,41 @@ class EnterpriseWikiClaimStepLeaseTest extends TestCase
                 'stale_links_removed' => 0,
             ]);
 
-        $this->mock(EnterpriseWikiAppliedRunLintService::class)
-            ->shouldReceive('lint')
+        $lint = $this->mock(EnterpriseWikiAppliedRunLintService::class);
+        $lint->shouldReceive('lint')
             ->once()
             ->andReturn([
                 'pages_checked' => 1, 'claims_checked' => 0, 'source_refs_checked' => 0,
                 'links_checked' => 0, 'findings_created' => 0, 'findings_skipped' => 0,
                 'findings_resolved' => 0, 'errors' => 0, 'warnings' => 0, 'info' => 0,
             ]);
+
+        // Verification calls this the first time a claim gains a source reference; it is
+        // bookkeeping around the write, not part of the lease protocol under test.
+        $lint->shouldReceive('resetClaimDecisionAfterFirstSourceReference')->andReturnNull();
+    }
+
+    /**
+     * The claim-candidate blocks the extraction service itself would hand to persist(): every
+     * block whose origin makes it a Procynia assertion, never a source_based one.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function claimCandidateBlocksFor(EnterpriseWikiPageVersion $version): Collection
+    {
+        return collect((array) $version->fresh()->content_blocks_json)
+            ->filter(static fn (array $block): bool => in_array($block['content_origin'] ?? null, [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+            ], true))
+            ->values();
+    }
+
+    /** @return array<string, mixed>|null */
+    private function sourceBlockFor(EnterpriseWikiPageVersion $version): ?array
+    {
+        return collect((array) $version->fresh()->content_blocks_json)
+            ->first(static fn (array $block): bool => ($block['block_key'] ?? null) === self::SOURCE_BLOCK_KEY);
     }
 
     private function leaseSecondsFor(string $serviceClass): int
