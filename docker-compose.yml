@@ -13,6 +13,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 420
         volumes:
@@ -69,8 +81,8 @@ services:
         #
         # ${REDIS_PASSWORD:?...} makes this fail-closed: compose refuses to start rather than
         # silently bringing up an open Redis if the variable is missing or empty. The same
-        # value reaches every app/queue/scheduler container through `env_file: .env`, so
-        # Laravel authenticates with it automatically.
+        # interpolation puts the value in every app/queue/scheduler container's own environment,
+        # so Laravel authenticates with it whichever env file that process loads.
         #
         # Trade-off (deliberate): the password is passed as a redis-server argument, so it is
         # visible in the process list *inside the container*. Reading it therefore requires
@@ -116,6 +128,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 420
         volumes:
@@ -155,6 +179,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 2700
         volumes:
@@ -198,6 +234,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 2100
         volumes:
@@ -240,6 +288,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 2100
         volumes:
@@ -280,6 +340,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 2100
         volumes:
@@ -323,6 +395,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 2100
         volumes:
@@ -366,6 +450,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
             REDIS_QUEUE_RETRY_AFTER: 480
         volumes:
@@ -414,6 +510,18 @@ services:
             QUEUE_CONNECTION: redis
             REDIS_HOST: redis
             REDIS_PORT: 6379
+            # Redis requires a password (see the redis service). The PHP containers previously
+            # picked it up only because .env happens to be bind-mounted into the working
+            # directory — that is not how a real deployment works, and it is invisible to any
+            # process that loads a different env file (APP_ENV=testing loads .env.testing).
+            # Interpolated from the developer's own .env, so the value is never committed.
+            REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be set — Redis holds sessions and queues and is not allowed to run unauthenticated}"
+            # poppler-utils is installed by docker/php/Dockerfile; the container declares where the
+            # binaries are, so the paths do not depend on which env file a process happens to load.
+            PDFTOTEXT_BINARY: /usr/bin/pdftotext
+            PDFTOHTML_BINARY: /usr/bin/pdftohtml
+            PDFIMAGES_BINARY: /usr/bin/pdfimages
+            PDFINFO_BINARY: /usr/bin/pdfinfo
             TZ: Europe/Oslo
         volumes:
             - ./:/var/www/html
