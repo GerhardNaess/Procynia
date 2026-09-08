@@ -31,6 +31,7 @@ class AiUsageReportingServiceTest extends TestCase
 
         $customerA = $this->createCustomer('Kunde A', Customer::PLAN_PRO, 10);
         $customerB = $this->createCustomer('Kunde B', Customer::PLAN_ENTERPRISE, 0);
+        $this->createCustomer('Kunde C', Customer::PLAN_FREE, 0);
 
         $userA1 = $this->createUser($customerA, 'Bruker A1', 'bruker.a1@example.test');
         $userA2 = $this->createUser($customerA, 'Bruker A2', 'bruker.a2@example.test');
@@ -100,24 +101,48 @@ class AiUsageReportingServiceTest extends TestCase
         $this->assertSame(1, $this->summaryValue($report, __('procynia.ai_usage_capacity.summary.blocked_customers_30d')));
         $this->assertSame(1, $this->summaryValue($report, __('procynia.ai_usage_capacity.summary.blocked_users_30d')));
 
+        // Capacity and activity are deliberately different units. Capacity reports the commercial
+        // quota the hard stop enforces — AI CASES in the current billing period, from
+        // AiQuotaStatusService — while the period/count columns report AI OPERATIONS over rolling
+        // windows. Customer A has 10 operations in 30 days and 0 AI cases used of 10, so it is
+        // "within": ten operations do not consume ten credits.
         $customerRowA = $this->customerRow($report, 'Kunde A');
         $this->assertTrue($customerRowA['capacity']['defined']);
-        $this->assertSame('10', $customerRowA['capacity']['label']);
-        $this->assertSame(__('procynia.ai_usage_capacity.capacity.customer_source'), $customerRowA['capacity']['source_label']);
-        $this->assertSame('near', $customerRowA['capacity']['status']);
+        $this->assertSame(10, $customerRowA['capacity']['value']);
+        $this->assertSame(
+            __('procynia.ai_quota.used_of', ['used' => 0, 'allowance' => 10]),
+            $customerRowA['capacity']['label'],
+        );
+        $this->assertSame(
+            __('procynia.ai_usage_capacity.capacity.period_source', ['start' => '2026-05-01', 'end' => '2026-05-31']),
+            $customerRowA['capacity']['source_label'],
+        );
+        $this->assertSame('within', $customerRowA['capacity']['status']);
         $this->assertSame(10, $customerRowA['periods']['30d']);
         $this->assertSame(10, $customerRowA['counts']['allowed']);
         $this->assertSame(0, $customerRowA['counts']['blocked']);
         $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT, $customerRowA['top_operation']['key']);
         $this->assertSame(6, $customerRowA['top_operation']['count']);
 
+        // An entitled customer whose configured allowance is zero or null is unlimited, not
+        // undefined — AiQuotaPolicyResolver treats a missing finite allowance as unlimited access
+        // rather than as no access. Blocked operations still show in the activity counts.
         $customerRowB = $this->customerRow($report, 'Kunde B');
-        $this->assertFalse($customerRowB['capacity']['defined']);
-        $this->assertSame(__('procynia.ai_usage_capacity.capacity.not_defined'), $customerRowB['capacity']['label']);
-        $this->assertSame('undefined', $customerRowB['capacity']['status']);
+        $this->assertTrue($customerRowB['capacity']['defined']);
+        $this->assertNull($customerRowB['capacity']['value']);
+        $this->assertSame(__('procynia.ai_quota.unlimited'), $customerRowB['capacity']['label']);
+        $this->assertSame('within', $customerRowB['capacity']['status']);
         $this->assertSame(2, $customerRowB['counts']['blocked']);
         $this->assertSame(1, $customerRowB['counts']['blocked_customer']);
         $this->assertSame(1, $customerRowB['counts']['blocked_user']);
+
+        // The only remaining "no capacity" case: a plan that does not entitle AI at all.
+        $customerRowC = $this->customerRow($report, 'Kunde C');
+        $this->assertFalse($customerRowC['capacity']['defined']);
+        $this->assertNull($customerRowC['capacity']['value']);
+        $this->assertSame(__('procynia.ai_usage_capacity.capacity.not_included'), $customerRowC['capacity']['label']);
+        $this->assertSame('undefined', $customerRowC['capacity']['status']);
+        $this->assertSame(0, $customerRowC['periods']['30d']);
 
         $userRowB1 = $this->userRow($report, 'Bruker B1');
         $this->assertSame($customerB->id, $userRowB1['customer_id']);
