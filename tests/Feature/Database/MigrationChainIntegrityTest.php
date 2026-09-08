@@ -3,8 +3,10 @@
 namespace Tests\Feature\Database;
 
 use App\Support\MigrationSchemaPrecondition;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\AssertionFailedError;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -23,9 +25,11 @@ use Tests\TestCase;
  * "migrations table says everything ran" and "the schema is actually complete" cannot drift apart.
  *
  * No isolation trait: the one test that rebuilds the schema must see committed DDL, so it cannot
- * sit inside a transaction. It ends on a completed migrate:fresh, so it hands the next test a
- * fully migrated database. The remaining tests are pure source and helper checks that touch no
- * data at all.
+ * sit inside a transaction. That makes it the only class in the suite that drops and rebuilds the
+ * shared schema outside RefreshDatabase's bookkeeping, so it runs that rebuild through
+ * rebuildingTheSharedSchema() and always hands RefreshDatabaseState back as "not established" —
+ * see that method for why claiming anything else would be a lie the rest of the process pays for.
+ * The remaining tests are pure source and helper checks that touch no data at all.
  */
 class MigrationChainIntegrityTest extends TestCase
 {
@@ -65,38 +69,123 @@ class MigrationChainIntegrityTest extends TestCase
      */
     public function test_the_migration_chain_builds_a_complete_schema_and_stays_complete(): void
     {
-        $this->artisan('migrate:fresh', ['--force' => true])->assertExitCode(0);
+        $this->rebuildingTheSharedSchema(function (): void {
+            $this->artisan('migrate:fresh', ['--force' => true])->assertExitCode(0);
 
-        $this->assertCompleteSchema();
+            $this->assertCompleteSchema();
 
-        $recorded = DB::table('migrations')->pluck('migration')->sort()->values()->all();
+            $recorded = DB::table('migrations')->pluck('migration')->sort()->values()->all();
 
-        $onDisk = collect(glob(database_path('migrations/*.php')))
-            ->map(fn (string $path): string => basename($path, '.php'))
-            ->sort()
-            ->values()
-            ->all();
+            $onDisk = collect(glob(database_path('migrations/*.php')))
+                ->map(fn (string $path): string => basename($path, '.php'))
+                ->sort()
+                ->values()
+                ->all();
 
-        $this->assertSame(
-            $onDisk,
-            $recorded,
-            'The migrations table and database/migrations must describe the same set — a difference '
-            .'means either a migration silently did not run, or a recorded one no longer exists.',
-        );
+            $this->assertSame(
+                $onDisk,
+                $recorded,
+                'The migrations table and database/migrations must describe the same set — a difference '
+                .'means either a migration silently did not run, or a recorded one no longer exists.',
+            );
 
-        $this->assertSame(
-            0,
-            DB::table('migrations')->where('migration', '')->count(),
-            'A blank migration name indicates a corrupted migrations table.',
-        );
+            $this->assertSame(
+                0,
+                DB::table('migrations')->where('migration', '')->count(),
+                'A blank migration name indicates a corrupted migrations table.',
+            );
 
-        // The reported corruption appeared on a SECOND migrate:fresh inside one process, which is
-        // exactly what RefreshDatabase does when a test breaks its wrapping transaction. The
-        // schema must survive that, and the run must leave a complete database behind for whatever
-        // test comes next.
-        $this->artisan('migrate:fresh', ['--force' => true])->assertExitCode(0);
+            // The reported corruption appeared on a SECOND migrate:fresh inside one process, which
+            // is exactly what RefreshDatabase does when a test breaks its wrapping transaction. The
+            // schema must survive that, and the run must leave a complete database behind for
+            // whatever test comes next.
+            $this->artisan('migrate:fresh', ['--force' => true])->assertExitCode(0);
 
-        $this->assertCompleteSchema();
+            $this->assertCompleteSchema();
+        });
+    }
+
+    /**
+     * The lifecycle contract this class owes the rest of the PHPUnit process, proven without
+     * dropping anything: the invalidation must survive a clean return, a thrown exception, and a
+     * failed assertion alike, because a rebuild that dies half-way is exactly the case where a
+     * stale "already migrated" flag does the damage.
+     */
+    public function test_the_destructive_lifecycle_always_invalidates_refresh_database_state(): void
+    {
+        try {
+            RefreshDatabaseState::$migrated = true;
+            $this->rebuildingTheSharedSchema(fn () => null);
+
+            $this->assertFalse(
+                RefreshDatabaseState::$migrated,
+                'A completed rebuild must still hand RefreshDatabase an unestablished state.',
+            );
+
+            RefreshDatabaseState::$migrated = true;
+
+            try {
+                $this->rebuildingTheSharedSchema(function (): void {
+                    throw new RuntimeException('migrate:fresh blew up half-way through.');
+                });
+
+                $this->fail('Expected the exception to propagate.');
+            } catch (RuntimeException $exception) {
+                $this->assertSame('migrate:fresh blew up half-way through.', $exception->getMessage());
+            }
+
+            $this->assertFalse(
+                RefreshDatabaseState::$migrated,
+                'A rebuild that threw leaves an unknown schema — the flag must not survive it.',
+            );
+
+            RefreshDatabaseState::$migrated = true;
+
+            try {
+                $this->rebuildingTheSharedSchema(function (): void {
+                    $this->fail('A schema assertion inside the rebuild failed.');
+                });
+            } catch (AssertionFailedError) {
+                // Expected: assertion failures must invalidate exactly like exceptions do.
+            }
+
+            $this->assertFalse(
+                RefreshDatabaseState::$migrated,
+                'A failed schema assertion leaves an unknown schema — the flag must not survive it.',
+            );
+        } finally {
+            // Whatever happened above, leave the process in the only state this class can honestly
+            // assert. "false" is never a lie: it costs the next test one migrate:fresh.
+            RefreshDatabaseState::$migrated = false;
+        }
+    }
+
+    /**
+     * Runs a destructive schema rebuild and always hands RefreshDatabaseState back as
+     * "not established".
+     *
+     * This class deliberately uses no isolation trait, so it rebuilds the schema the whole suite
+     * shares, outside RefreshDatabase's bookkeeping. Artisan's migrate:fresh does not touch
+     * RefreshDatabaseState — nothing but RefreshDatabase itself ever sets it — so without this the
+     * flag keeps claiming "already migrated" about a database this class has just dropped and
+     * rebuilt. RefreshDatabase::refreshTestDatabase() consults only that boolean and never looks at
+     * the database, so a rebuild that failed or was interrupted would be invisible: every later
+     * RefreshDatabase test in the same process would skip its migration and fail somewhere else
+     * entirely with "relation ... does not exist", and none of them would repair it.
+     *
+     * Invalidating is the honest answer, and the only one available: this class cannot claim the
+     * shared schema is authoritative after rebuilding it, and it must never assert the opposite by
+     * setting the flag to true — that would state as fact something it has not verified. The next
+     * real RefreshDatabase test re-establishes the state properly, at the cost of one extra
+     * migrate:fresh per process. That cost is the point.
+     */
+    private function rebuildingTheSharedSchema(callable $rebuild): void
+    {
+        try {
+            $rebuild();
+        } finally {
+            RefreshDatabaseState::$migrated = false;
+        }
     }
 
     public function test_no_migration_can_silently_skip_its_body_again(): void

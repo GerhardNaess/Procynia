@@ -38,8 +38,6 @@ class BillingServiceTest extends TestCase
             DB::rollBack();
         }
 
-        DB::disconnect(DB::getDefaultConnection());
-
         parent::tearDown();
     }
 

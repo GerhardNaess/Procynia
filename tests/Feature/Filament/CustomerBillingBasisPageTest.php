@@ -39,8 +39,6 @@ class CustomerBillingBasisPageTest extends TestCase
             DB::rollBack();
         }
 
-        DB::disconnect(DB::getDefaultConnection());
-
         parent::tearDown();
     }
 

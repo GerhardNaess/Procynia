@@ -83,22 +83,52 @@ class UsesProjectPostgresConnectionTest extends TestCase
     }
 
     /**
-     * The other half of the root cause: DB::setDefaultConnection()/config('database.default')
-     * mutations were never undone, so a single test could leave every LATER test in the same
-     * process pointed at the wrong default connection. beforeApplicationDestroyed() must restore
-     * both the default connection name and the full pgsql connection config exactly.
+     * The other half of the root cause: connection mutations that were never undone, so a single
+     * test could leave every LATER test in the same process pointed at the wrong default
+     * connection. The trait now solves that by mutating nothing at all — it verifies instead of
+     * reconfiguring — so what has to be proven is that it is genuinely inert.
+     *
+     * This is also the lifecycle regression guard. The trait used to call DB::purge('pgsql'),
+     * which replaces the connection object and discards whatever transaction its owner had open.
+     * When the owner was RefreshDatabase (13 test files combine the two), its teardown hook then
+     * saw a connection that was no longer inTransaction(), reset RefreshDatabaseState::$migrated,
+     * and made the next test in the process pay for a full migrate:fresh. A caller's open
+     * transaction, connection object and PDO handle must all survive this call untouched.
      */
-    public function test_it_restores_the_previous_default_connection_after_the_application_is_destroyed(): void
+    public function test_it_leaves_a_caller_owned_connection_transaction_and_config_untouched(): void
     {
         $originalDefault = config('database.default');
         $originalPgsqlConfig = config('database.connections.pgsql');
 
-        $this->useProjectPostgresConnection();
+        $connectionBefore = DB::connection('pgsql');
+        $pdoBefore = $connectionBefore->getPdo();
 
-        $this->assertSame('pgsql', config('database.default'));
-        $this->assertSame('procynia_test', config('database.connections.pgsql.database'));
+        // Stands in for the wrapping transaction RefreshDatabase opens in setUp().
+        DB::beginTransaction();
 
-        $this->callBeforeApplicationDestroyedCallbacks();
+        try {
+            $this->useProjectPostgresConnection();
+
+            $this->assertSame(
+                $connectionBefore,
+                DB::connection('pgsql'),
+                'The trait must not purge or replace the connection object its caller is using.',
+            );
+            $this->assertSame(
+                $pdoBefore,
+                DB::connection('pgsql')->getPdo(),
+                'The trait must not reconnect: a new PDO handle means the caller lost its transaction.',
+            );
+            $this->assertTrue(
+                DB::connection('pgsql')->getPdo()->inTransaction(),
+                'A transaction opened before the trait ran must still be open after it.',
+            );
+            $this->assertSame(1, DB::connection('pgsql')->transactionLevel());
+        } finally {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+        }
 
         $this->assertSame($originalDefault, config('database.default'));
         $this->assertEquals($originalPgsqlConfig, config('database.connections.pgsql'));

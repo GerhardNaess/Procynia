@@ -35,8 +35,6 @@ class OperationalDeviationResourceTest extends TestCase
             DB::rollBack();
         }
 
-        DB::disconnect(DB::getDefaultConnection());
-
         parent::tearDown();
     }
 
