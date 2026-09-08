@@ -5,11 +5,10 @@ namespace Tests\Unit\Services;
 use App\Models\SavedNoticeAiRequirement;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
 use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Support\Str;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 class RequirementGroundingJudgeServiceTest extends TestCase
 {
@@ -197,7 +196,17 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         $this->assertSame('Relevant støtte er til stede.', $result['reasoning_summary']);
     }
 
-    public function test_it_accepts_partial_judge_payloads_that_block_generation(): void
+    /**
+     * Partial coverage does NOT block generation. docs/answering-strategy.md, scenario 2: "Procynia
+     * skal fortsatt lage et komplett og profesjonelt svarutkast" — the quality assurance marks what
+     * is documented versus professionally completed, the draft itself is still produced. Only
+     * `unsupported` blocks (AiController gates on can_generate_answer alone).
+     *
+     * The judge therefore derives can_generate_answer from the final status instead of trusting the
+     * model's own flag, which is why an inconsistent "partial + can_generate_answer: false" payload
+     * still comes back generatable.
+     */
+    public function test_partial_coverage_still_allows_answer_generation(): void
     {
         $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
@@ -231,15 +240,67 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         ]);
 
         $this->assertSame('partial', $result['status']);
-        $this->assertFalse($result['can_generate_answer']);
+        $this->assertTrue(
+            $result['can_generate_answer'],
+            'Partial coverage must still produce a draft — only unsupported blocks generation.',
+        );
         $this->assertSame('ITSM er dokumentert.', $result['directly_supported_points'][0]['requirement_point']);
         $this->assertSame('Etterspurt ITSM-støtte finnes, men ikke for alle konkrete kravpunkter.', $result['directly_supported_points'][0]['support_summary']);
+        // Off-topic background is dropped rather than presented as related evidence.
         $this->assertSame([], $result['related_but_insufficient_points']);
         $this->assertSame(['SPOC er ikke dokumentert.'], $result['unsupported_points']);
         $this->assertSame('SPOC mangler.', $result['missing_knowledge_summary']);
     }
 
-    public function test_it_normalizes_supported_payloads_without_direct_support_evidence_into_partial_status(): void
+    /**
+     * The supported -> partial downgrade that IS still in force: a payload cannot claim full
+     * documentation while also naming parts of the requirement it could not document.
+     */
+    public function test_it_downgrades_supported_payloads_that_still_name_unsupported_points(): void
+    {
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')
+            ->once()
+            ->andReturn($this->openAiResponse([
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Telemetri fra Microsoft 365.',
+                        'support_summary' => 'Innsamling fra Microsoft 365 er dokumentert.',
+                        'evidence_reference' => 'Chunk 12 · SOC > Logganalyse',
+                        'evidence_quote' => 'samler inn data fra Microsoft 365',
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => ['Telemetri fra Azure er ikke dokumentert.'],
+                'missing_knowledge_summary' => 'Azure-telemetri mangler.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Delvis dekning.',
+            ]));
+
+        $service = new RequirementGroundingJudgeService($client);
+
+        $result = $service->judge($this->requirementFixture(), collect(), [
+            'level' => 'amber',
+            'max_score' => 0.61,
+            'sources_count' => 1,
+        ]);
+
+        $this->assertSame('partial', $result['status']);
+        $this->assertTrue($result['can_generate_answer']);
+        $this->assertSame(['Telemetri fra Azure er ikke dokumentert.'], $result['unsupported_points']);
+    }
+
+    /**
+     * A directly supported point may legitimately carry no evidence_reference/evidence_quote: both
+     * the response schema (supportedPointSchema) and the prompt say so explicitly — "evidence_
+     * reference and evidence_quote may be null when the support is clear from the supplied
+     * context." Missing evidence fields are therefore not a reason to downgrade the status, and the
+     * model's own can_generate_answer flag is not a status signal either.
+     */
+    public function test_it_keeps_supported_status_when_direct_support_carries_no_evidence_fields(): void
     {
         $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
@@ -271,8 +332,8 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('partial', $result['status']);
-        $this->assertFalse($result['can_generate_answer']);
+        $this->assertSame('supported', $result['status']);
+        $this->assertTrue($result['can_generate_answer']);
         $this->assertSame([
             [
                 'requirement_point' => 'Telemetri fra Microsoft 365 og Azure.',
@@ -286,7 +347,13 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         $this->assertSame('Invalid output.', $result['missing_knowledge_summary']);
     }
 
-    public function test_it_normalizes_supported_payloads_without_directly_supported_points_into_partial_status(): void
+    /**
+     * "supported" never survives without a single directly supported point. What it becomes depends
+     * on whether anything relevant is left: off-topic related material is filtered out first, and a
+     * judgment with nothing at all left to show is unsupported, not partial — presenting "partial"
+     * with an empty evidence list would claim documentation the user cannot see.
+     */
+    public function test_a_supported_payload_with_no_direct_points_and_only_off_topic_material_becomes_unsupported(): void
     {
         $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
@@ -311,7 +378,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('partial', $result['status']);
+        $this->assertSame('unsupported', $result['status']);
         $this->assertFalse($result['can_generate_answer']);
         $this->assertSame([], $result['directly_supported_points']);
         $this->assertSame([], $result['related_but_insufficient_points']);
@@ -319,7 +386,51 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         $this->assertSame('Invalid output.', $result['missing_knowledge_summary']);
     }
 
-    public function test_it_normalizes_inconsistent_judge_payloads_into_partial_status(): void
+    /**
+     * The other side of the same boundary: when the related material actually names the
+     * requirement's own subject matter it survives the relevance filter, and the judgment lands on
+     * partial rather than unsupported.
+     */
+    public function test_a_supported_payload_with_no_direct_points_but_on_topic_related_material_becomes_partial(): void
+    {
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')
+            ->once()
+            ->andReturn($this->openAiResponse([
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => ['Logganalyse for Azure er beskrevet, men ikke selve telemetrileveransen.'],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => 'Telemetrileveransen mangler.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Delvis relatert materiale.',
+            ]));
+
+        $service = new RequirementGroundingJudgeService($client);
+
+        $result = $service->judge($this->requirementFixture(), collect(), [
+            'level' => 'amber',
+            'max_score' => 0.74,
+            'sources_count' => 1,
+        ]);
+
+        $this->assertSame('partial', $result['status']);
+        $this->assertTrue($result['can_generate_answer']);
+        $this->assertSame([], $result['directly_supported_points']);
+        $this->assertSame(
+            ['Logganalyse for Azure er beskrevet, men ikke selve telemetrileveransen.'],
+            $result['related_but_insufficient_points'],
+        );
+    }
+
+    /**
+     * Shape normalization still happens: bare strings become supported-point objects, and
+     * can_generate_answer is recomputed from the status rather than taken from the payload. The
+     * status itself stands, because a directly supported point is present.
+     */
+    public function test_it_normalizes_inconsistent_judge_payload_shapes(): void
     {
         $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
@@ -344,8 +455,8 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('partial', $result['status']);
-        $this->assertFalse($result['can_generate_answer']);
+        $this->assertSame('supported', $result['status']);
+        $this->assertTrue($result['can_generate_answer']);
         $this->assertSame([
             [
                 'requirement_point' => 'ITSM er dokumentert.',
@@ -382,7 +493,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     private function requirementFixture(): SavedNoticeAiRequirement
     {
-        $requirement = new SavedNoticeAiRequirement();
+        $requirement = new SavedNoticeAiRequirement;
         $requirement->forceFill([
             'id' => 42,
             'saved_notice_id' => 7,
