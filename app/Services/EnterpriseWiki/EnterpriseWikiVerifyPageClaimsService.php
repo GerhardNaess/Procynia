@@ -736,7 +736,16 @@ class EnterpriseWikiVerifyPageClaimsService
             'allow_best_practice_promotion' => false,
             'allow_canonical_reuse' => true,
             'allow_canonical_recording' => false,
-            'verify_unsupported_without_ai' => true,
+            // Was true when extraction could still assert a claim's origin itself: back then an
+            // unsupported_generated_content claim arriving here carried a verdict extraction had
+            // already reached, and re-proving it with a second AI call bought nothing. Since
+            // "Implement source-based Wiki claim extraction" (ba41a58) extraction may no longer
+            // assert any origin, so that value is simply where every freshly extracted claim
+            // starts, pending verification. Skipping the AI for those made a manually edited block
+            // unverifiable by construction — the claim could never earn a source reference, never
+            // be promoted to source_based, and never record a canonical fact however well the
+            // source supported it.
+            'verify_unsupported_without_ai' => false,
             'require_non_terminal_run' => false,
         ];
     }
@@ -1142,11 +1151,37 @@ class EnterpriseWikiVerifyPageClaimsService
         $block = $this->findBlockByKey($version, (string) ($claim->content_block_key ?? ''));
 
         if ($policy['evidence_scope'] === self::EVIDENCE_SCOPE_CLAIM_REFERENCES) {
-            $elementsByKey = $this->elementsByKeyForClaimSourceReferences($claim);
+            $candidateElements = $this->candidateElementsForClaimSourceReferences($claim);
+
+            // Pinning a claim to its OWN references is what stops it borrowing support from some
+            // other element in the same mixed block. A claim that has none yet cannot be pinned
+            // that way — and since ba41a58 that is every freshly extracted claim, because
+            // extraction no longer asserts source_based and therefore no longer creates a source
+            // reference. Verifying such a claim against an empty evidence set would always come
+            // back unsupported, so it could never earn the reference that would let it be pinned
+            // on a later pass. The block the claim is anchored to carries exactly the elements the
+            // extractor itself was given for this block, so it is the correct evidence for a first
+            // verification; once verification creates the claim's own reference, the narrower
+            // claim-scoped set takes over again on every subsequent pass.
+            //
+            // Deliberately not extended to a source_based claim: one with no reference is a
+            // structural defect the caller below marks as internal_error, and must not be handed
+            // block-wide evidence to look supported against.
+            if ($candidateElements === []
+                && $claim->content_origin !== EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED
+            ) {
+                return [
+                    'candidate_elements' => $this->candidateElementsForAi($block),
+                    'elements_by_key' => $this->elementsByKey($block),
+                    'block_for_safety_net' => $policy['allow_block_markdown_safety_fallback'] ? $block : null,
+                    'block_markdown_for_ai' => null,
+                    'fallback_source_text' => '',
+                ];
+            }
 
             return [
-                'candidate_elements' => $this->candidateElementsForClaimSourceReferences($claim),
-                'elements_by_key' => $elementsByKey,
+                'candidate_elements' => $candidateElements,
+                'elements_by_key' => $this->elementsByKeyForClaimSourceReferences($claim),
                 'block_for_safety_net' => $policy['allow_block_markdown_safety_fallback'] ? $block : null,
                 'block_markdown_for_ai' => null,
                 'fallback_source_text' => '',

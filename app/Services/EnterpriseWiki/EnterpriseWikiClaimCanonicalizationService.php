@@ -844,7 +844,23 @@ class EnterpriseWikiClaimCanonicalizationService
         string $verificationStatus,
         ?string $reason,
     ): ?EnterpriseWikiCanonicalFact {
-        $key = $this->identityKey($claim, $customerId, $originalContentOrigin);
+        // A canonical fact is the identity of a DECIDED fact, so a supported outcome is recorded
+        // under the origin verification just decided on — not the placeholder the claim carried on
+        // the way in. Since "Implement source-based Wiki claim extraction" (ba41a58) extraction may
+        // no longer assert source_based, so $originalContentOrigin is unsupported_generated_content
+        // for every first-time verification; identityKey() only keys source_based/best_practice, so
+        // using it verbatim would mean a supported verification never records a canonical fact at
+        // all. $originalContentOrigin stays correct for a non-supported outcome, where the point is
+        // to key the negative result to the identity the claim was checked AS.
+        $recordingOrigin = $verificationStatus === EnterpriseWikiCanonicalFact::VERIFICATION_STATUS_SUPPORTED
+            && in_array($claim->content_origin, [
+                EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+            ], true)
+                ? (string) $claim->content_origin
+                : $originalContentOrigin;
+
+        $key = $this->identityKey($claim, $customerId, $recordingOrigin);
 
         if ($key === null) {
             return null;

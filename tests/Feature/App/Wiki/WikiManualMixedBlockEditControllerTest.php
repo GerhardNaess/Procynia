@@ -354,8 +354,15 @@ class WikiManualMixedBlockEditControllerTest extends TestCase
                     'text' => $blockMarkdown,
                     'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
                     'excerpt' => $blockMarkdown,
-                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                    'source_element_keys' => [$sourceKeyByBlock[$contentBlockKey]],
+                    // Since "Implement source-based Wiki claim extraction" (ba41a58) extraction may
+                    // not assert source grounding: persistManualMixedBlockClaims() skips a
+                    // source_based claim outright, and validatedManualMixedBlockClaim() rejects
+                    // source_element_keys on any other origin. A manual edit therefore yields
+                    // generated content pending verification, and it is the verifyClaim mock below
+                    // — supported, citing this block's element — that promotes it to source_based
+                    // and gives it its source reference and canonical fact.
+                    'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                    'source_element_keys' => [],
                     'best_practice_reason' => null,
                     'conflict_note' => null,
                 ]]];

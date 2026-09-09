@@ -1876,7 +1876,21 @@ class EnterpriseWikiVerifyPageClaimsCommandTest extends TestCase
             'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         ]);
 
-        $this->mock(WikiClaimVerificationAiClient::class)->shouldNotReceive('verifyClaim');
+        // The claim is now verified for real instead of being short-circuited. Since "Implement
+        // source-based Wiki claim extraction" (ba41a58) extraction can no longer assert an origin,
+        // so unsupported_generated_content is simply where every freshly extracted claim starts,
+        // pending verification — skipping the AI for that value left a manually edited block
+        // unverifiable by construction. The outcome this test is about is unchanged: no source
+        // basis, so the claim stays unsupported_generated_content, gains no source reference, and
+        // records an unsupported canonical candidate rather than a fact.
+        $this->mock(WikiClaimVerificationAiClient::class)
+            ->shouldReceive('verifyClaim')
+            ->once()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'Påstanden er klassifisert som generert innhold uten kildegrunnlag for denne blokken.',
+                checkOverrides: ['actor' => 'no_claim', 'action' => 'no_claim', 'object' => 'no_claim'],
+            ));
         $this->mock(EnterpriseWikiAppliedRunLintService::class)
             ->shouldReceive('resetClaimDecisionAfterFirstSourceReference')
             ->never();

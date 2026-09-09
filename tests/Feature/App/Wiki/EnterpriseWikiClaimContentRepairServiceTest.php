@@ -248,8 +248,19 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
                 'text' => $newMarkdown,
                 'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
                 'excerpt' => 'Kunden bidrar til dokumentert kontroll',
-                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
-                'source_element_keys' => ['source-edited-1'],
+                // Since ba41a58 the extractor never persists a source_based claim:
+                // persistManualMixedBlockClaims() skips that origin outright, because
+                // source_based is a verification verdict, not something extraction may assert.
+                // A freshly edited block yields generated content pending verification; the
+                // verifyClaim mock below then returns a supported verdict, which is what
+                // promotes this claim to source_based and creates its canonical fact.
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+                // Must be empty: validatedManualMixedBlockClaim() rejects source_element_keys on
+                // an unsupported_generated_content claim, since unverified generated content has
+                // no source element it may cite yet. The keys the verification step works from
+                // come from the block, not from the claim — see the verifyClaim mock below, which
+                // still receives ['source-edited-1'].
+                'source_element_keys' => [],
                 'best_practice_reason' => null,
                 'conflict_note' => null,
             ]]]);
@@ -358,7 +369,10 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
             ->exists());
         $this->assertSame($canonicalFactsBefore + 1, EnterpriseWikiCanonicalFact::query()->count());
         $this->assertSame(0, $this->orphanedSourceReferencesCount());
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $fixture['run']->fresh()->status);
+        // A manual block edit never moves the run itself — both fields are unchanged from the
+        // fixture. (The run's main status is decision_only, not escalated: escalation lives in
+        // qa_status, and a terminal main status would stop QA re-evaluation entirely.)
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_DECISION_ONLY, $fixture['run']->fresh()->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $fixture['run']->fresh()->qa_status);
     }
 
@@ -394,9 +408,20 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
                 ]]];
             });
 
+        // Both extracted claims are brand new, so verification must actually run for them: since
+        // ba41a58 unsupported_generated_content is the origin every freshly extracted claim starts
+        // with, not a verdict extraction already reached. Neither is supported by the source, so
+        // they stay unsupported_generated_content and record no canonical fact — which is what
+        // this test is about; it is the copying of old claims it exists to rule out, not the AI
+        // call.
         $this->mock(WikiClaimVerificationAiClient::class)
             ->shouldReceive('verifyClaim')
-            ->never();
+            ->twice()
+            ->andReturn($this->verificationResult(
+                verdict: 'not_supported',
+                reason: 'Kilden dekker ikke denne påstanden.',
+                checkOverrides: ['actor' => 'no_claim', 'action' => 'no_claim', 'object' => 'no_claim'],
+            ));
 
         $result = $this->service()->applyManualMixedBlockEdit(
             $fixture['run']->fresh(),
@@ -790,7 +815,7 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
-            'status' => EnterpriseWikiIngestRun::STATUS_ESCALATED,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
             'qa_status' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
@@ -834,7 +859,7 @@ class EnterpriseWikiClaimContentRepairServiceTest extends TestCase
             'block_key' => $blockKey,
             'position' => 0,
             'markdown' => $markdown,
-            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
             'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
             'source_label' => $document->original_filename,
