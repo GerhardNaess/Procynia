@@ -217,10 +217,16 @@ class RedisSecurityConfigTest extends TestCase
         );
     }
 
-    public function test_every_service_that_talks_to_redis_inherits_the_credential(): void
+    public function test_every_service_that_talks_to_redis_receives_the_credential(): void
     {
-        // The credential reaches containers through `env_file: .env`, so every Redis-using service
-        // must declare it. A worker missing it would fail to connect once Redis requires auth.
+        // What matters is that the credential REACHES the container, not which mechanism carries it.
+        // It used to arrive through `env_file: .env`; since "Harden local runtime dependencies"
+        // (957b0fd) every Redis-using service declares REDIS_PASSWORD explicitly instead, using the
+        // fail-closed `${REDIS_PASSWORD:?...}` form. That is strictly stronger than the old
+        // arrangement: env_file silently yields an empty value when the key is absent from .env,
+        // whereas this interpolation makes Compose refuse to start the stack at all. So the
+        // assertion below checks delivery and fail-closed sourcing, and would still fail the moment
+        // a worker is added without a credential.
         $compose = $this->composeFile('docker-compose.yml');
         $services = [];
         $current = null;
@@ -228,7 +234,7 @@ class RedisSecurityConfigTest extends TestCase
         foreach (explode("\n", $compose) as $line) {
             if (preg_match('/^    ([a-z][a-z0-9_-]*):/', $line, $m)) {
                 $current = $m[1];
-                $services[$current] = ['redis' => false, 'env_file' => false];
+                $services[$current] = ['redis' => false, 'credential' => false, 'fail_closed' => false];
             }
 
             if ($current === null) {
@@ -239,19 +245,33 @@ class RedisSecurityConfigTest extends TestCase
                 $services[$current]['redis'] = true;
             }
 
-            if (str_contains($line, 'env_file')) {
-                $services[$current]['env_file'] = true;
+            if (preg_match('/^\s*REDIS_PASSWORD:/', $line)) {
+                $services[$current]['credential'] = true;
+
+                if (str_contains($line, '${REDIS_PASSWORD:?')) {
+                    $services[$current]['fail_closed'] = true;
+                }
             }
         }
 
-        $usingRedis = array_keys(array_filter($services, fn (array $s) => $s['redis']));
+        $usingRedis = array_keys(array_filter($services, fn (array $s): bool => $s['redis']));
 
         $this->assertNotEmpty($usingRedis);
+        $this->assertGreaterThanOrEqual(
+            9,
+            count($usingRedis),
+            'Every app, queue and scheduler container talks to Redis; a sudden drop means the parser stopped seeing services.',
+        );
 
         foreach ($usingRedis as $service) {
             $this->assertTrue(
-                $services[$service]['env_file'],
-                "Service {$service} talks to Redis but does not inherit .env, so it would get no credential.",
+                $services[$service]['credential'],
+                "Service {$service} talks to Redis but is never given REDIS_PASSWORD, so it would connect unauthenticated.",
+            );
+
+            $this->assertTrue(
+                $services[$service]['fail_closed'],
+                "Service {$service} sources REDIS_PASSWORD without the \${REDIS_PASSWORD:?...} guard, so a missing credential would start the container silently instead of stopping the stack.",
             );
         }
     }
