@@ -219,6 +219,17 @@ class EnterpriseWikiSemanticRetrievalService
                 'score' => 0,
                 'score_breakdown' => ['graph_neighbor_of_page_id' => (int) $parent['page_id']],
                 'retrieval_sources' => ['wiki_graph'],
+                // A candidate that exists only because the graph led here is a wikilink discovery,
+                // and must say so alongside the provenance below — otherwise it reaches the reader
+                // as a page the search itself picked, while carrying "discovered from" metadata that
+                // says the opposite. Downstream only ever fills this in when it is absent
+                // (RequirementWikiResearchService::tagSelectionType() uses ??=), so stating it here
+                // is what makes the classification stick.
+                //
+                // Direct-search precedence is unaffected: mergeCandidates() iterates seeds before
+                // graph candidates under the same ??=, so a page found BOTH ways keeps its seed
+                // entry whole and is still tagged direct_search at the research entry point.
+                'selection_type' => 'wikilink',
                 'navigation_intended_use' => 'supporting_context',
                 'navigation_reason' => 'One-hop Wiki neighbour of navigation seed.',
                 'discovered_from_page_id' => (int) $neighbor['discovered_from_page_id'],

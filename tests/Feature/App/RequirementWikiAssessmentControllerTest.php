@@ -11,6 +11,7 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAssessmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAssessmentService;
 use App\Services\Ai\Wiki\RequirementWikiResearchAiClient;
@@ -65,6 +66,7 @@ class RequirementWikiAssessmentControllerTest extends TestCase
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-001', 'Wiki assessment case');
         $page = $this->createPublishedWikiPage($context['customer'], 'Dokumentasjonsrutine', 'Leverandøren dokumenterer erfaring fra tilsvarende prosjekter i egen rutine.');
+        $this->mockSemanticReadingPlan([$page->id]);
 
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal dokumentere erfaring.');
@@ -221,6 +223,7 @@ class RequirementWikiAssessmentControllerTest extends TestCase
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'WIKI-ASSESS-005', 'Wiki assessment conflict case');
         $page = $this->createPublishedWikiPage($context['customer'], 'Ansvarsmodell', 'Kunden har ansvar for driften av løsningen.');
+        $this->mockSemanticReadingPlan([$page->id]);
         $document = $this->createAiDocument($savedNotice);
         $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal drifte løsningen.');
         $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
@@ -447,5 +450,41 @@ class RequirementWikiAssessmentControllerTest extends TestCase
         }
 
         return $page;
+    }
+
+    /**
+     * Stubs the semantic reading plan RequirementWikiResearchService asks for before its own
+     * research rounds begin (controller -> RequirementWikiAssessmentService ->
+     * RequirementWikiResearchService -> EnterpriseWikiSemanticRetrievalService ->
+     * EnterpriseWikiSemanticSearchPlanAiClient). Without it the retrieval layer reaches the real
+     * OpenAI transport — it is a lower layer than the Requirement* clients each test already mocks,
+     * not a replacement for any of them.
+     *
+     * Only the pages a plan would genuinely name are selected; retrieval still resolves them
+     * against the customer's own Wiki index, so a page belonging to another customer or absent
+     * from the index is dropped by the service, not by this stub. Shape mirrors
+     * EnterpriseWikiSemanticRetrievalServiceTest::plan().
+     *
+     * @param  list<int>  $pageIds
+     */
+    private function mockSemanticReadingPlan(array $pageIds): void
+    {
+        $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('planWikiReading')
+            ->andReturn([
+                'query_understanding' => [
+                    'topic' => 'operations',
+                    'intent' => 'find documented practice',
+                    'explicit_entities' => [],
+                    'explicit_services_or_systems' => [],
+                    'scope' => 'domain_or_process',
+                ],
+                'selected_pages' => array_map(fn (int $pageId): array => [
+                    'page_id' => $pageId,
+                    'intended_use' => 'primary_evidence',
+                    'reason' => 'Selected from the compact Wiki index.',
+                ], $pageIds),
+                'model' => 'stub/1.0',
+            ]));
     }
 }

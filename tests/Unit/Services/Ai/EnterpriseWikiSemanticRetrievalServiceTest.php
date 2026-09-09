@@ -127,6 +127,63 @@ class EnterpriseWikiSemanticRetrievalServiceTest extends TestCase
         $this->assertLessThanOrEqual(EnterpriseWikiSemanticRetrievalService::MAX_GRAPH_CANDIDATES, count($result['telemetry']['traversed_graph_pages']));
     }
 
+    /**
+     * Provenance must agree with itself. A candidate that exists only because the graph led here is
+     * a wikilink discovery and says so, so the reader is told where it came from; a candidate the
+     * navigation plan named itself stays direct_search even when the graph also reaches it.
+     *
+     * The precedence is structural, not a special case: mergeCandidates() iterates seeds before
+     * graph candidates under ??=, so a page found both ways keeps its seed entry whole. Everything
+     * downstream fills selection_type in only when absent
+     * (RequirementWikiResearchService::tagSelectionType()), which is what lets this stick all the
+     * way to main_pages/discovered_pages in the case view.
+     */
+    public function test_graph_only_candidates_are_wikilink_while_directly_selected_pages_stay_direct_search(): void
+    {
+        $customer = $this->createWikiCustomer();
+        $seed = $this->createPublishedWikiPage($customer, 'Release Governance', '# Release Governance'."\n\nRelease coordination.");
+        $graphOnly = $this->createPublishedWikiPage($customer, 'Deployment Practice', '# Deployment Practice'."\n\nDeployment steps.");
+        $bothWays = $this->createPublishedWikiPage($customer, 'Change Advisory', '# Change Advisory'."\n\nChange review.");
+        $this->createWikilink($customer, $seed, $graphOnly);
+        $this->createWikilink($customer, $seed, $bothWays);
+
+        // The plan names the seed and $bothWays; $graphOnly is reachable only by traversal.
+        $this->mockPlan(fn (array $index): array => $this->plan([$seed->id, $bothWays->id]));
+        $result = app(EnterpriseWikiSemanticRetrievalService::class)->retrieve('How are releases coordinated?', $customer->id, 'en');
+
+        $byPageId = [];
+        foreach ($result['candidate_pool'] as $candidate) {
+            $byPageId[(int) $candidate['page_id']] = $candidate;
+        }
+
+        // B: a page the plan selected directly. Retrieval leaves selection_type unset for these —
+        // RequirementWikiResearchService tags the whole incoming pool 'direct_search' as its
+        // default, and only an already-classified candidate escapes that. Asserting the absence is
+        // therefore asserting the contract: nothing here claims a discovery that did not happen.
+        $this->assertArrayNotHasKey('selection_type', $byPageId[$seed->id]);
+        $this->assertNull($byPageId[$seed->id]['discovered_from_page_id'] ?? null);
+
+        // A: reached only through the graph — classified and attributed as a wikilink discovery.
+        $this->assertSame('wikilink', $byPageId[$graphOnly->id]['selection_type'] ?? null);
+        $this->assertSame($seed->id, $byPageId[$graphOnly->id]['discovered_from_page_id'] ?? null);
+        $this->assertSame('Release Governance', $byPageId[$graphOnly->id]['discovered_from_title'] ?? null);
+        $this->assertSame(['wiki_graph'], $byPageId[$graphOnly->id]['retrieval_sources'] ?? null);
+
+        // C: selected directly AND reachable through the graph. The seed entry wins the merge
+        // whole, so the page carries neither the graph candidate's 'wikilink' nor its
+        // discovered_from provenance — it goes on to be tagged direct_search like any other seed.
+        // It also appears exactly once, not as two competing candidates.
+        $this->assertArrayNotHasKey('selection_type', $byPageId[$bothWays->id]);
+        $this->assertNull($byPageId[$bothWays->id]['discovered_from_page_id'] ?? null);
+        $this->assertSame(
+            1,
+            count(array_filter(
+                $result['candidate_pool'],
+                static fn (array $candidate): bool => (int) $candidate['page_id'] === $bothWays->id,
+            )),
+        );
+    }
+
     private function mockPlan(callable $responder): void
     {
         $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock

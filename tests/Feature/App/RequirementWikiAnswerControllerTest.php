@@ -9,6 +9,7 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
 use App\Models\User;
+use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
@@ -322,6 +323,7 @@ class RequirementWikiAnswerControllerTest extends TestCase
 
         $page = $this->createPublishedWikiPage($context['customer'], 'Problem Management', 'Innhold om Problem Management og rotårsaksanalyse.');
         $this->createWikiClaim($page, 'Problem Management gjennomfører rotårsaksanalyse.');
+        $this->mockSemanticReadingPlan([$page->id]);
 
         $this->mock(RequirementWikiResearchAiClient::class, fn (MockInterface $mock) => $mock
             ->shouldReceive('selectNextAction')
@@ -381,6 +383,9 @@ class RequirementWikiAnswerControllerTest extends TestCase
         $mainPage = $this->createPublishedWikiPage($context['customer'], 'Problembehandling', 'Innhold om problembehandling som lenker videre.');
         $linkedPage = $this->createPublishedWikiPage($context['customer'], 'Kontinuerlig forbedring', 'Innhold uten det opprinnelige kravordet i det hele tatt.');
         $this->createWikilink($context['customer'], $mainPage, $linkedPage);
+        // The plan names ONLY the main page. linkedPage must still arrive through wikilink
+        // traversal in research round 2 — seeding it here would make this test prove nothing.
+        $this->mockSemanticReadingPlan([$mainPage->id]);
 
         $callCount = 0;
         $this->mock(RequirementWikiResearchAiClient::class, function (MockInterface $mock) use (&$callCount, $mainPage, $linkedPage): void {
@@ -593,5 +598,40 @@ class RequirementWikiAnswerControllerTest extends TestCase
             'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
             'published_at' => now(),
         ], $overrides));
+    }
+
+    /**
+     * Stubs the semantic reading plan RequirementWikiResearchService asks for before its own
+     * research rounds begin (controller -> RequirementWikiAnswerService -> RequirementWikiResearchService
+     * -> EnterpriseWikiSemanticRetrievalService -> EnterpriseWikiSemanticSearchPlanAiClient). Without
+     * it the retrieval layer reaches the real OpenAI transport — it is a lower layer than the
+     * Requirement* clients each test already mocks, not a replacement for any of them.
+     *
+     * Only the pages a plan would genuinely name are selected. Retrieval still runs: it resolves the
+     * plan against the customer's own Wiki index, so a page id that is not published, not the
+     * customer's, or not in the index is dropped by the service rather than by this stub. Shape
+     * mirrors EnterpriseWikiSemanticRetrievalServiceTest::plan().
+     *
+     * @param  list<int>  $pageIds
+     */
+    private function mockSemanticReadingPlan(array $pageIds): void
+    {
+        $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('planWikiReading')
+            ->andReturn([
+                'query_understanding' => [
+                    'topic' => 'operations',
+                    'intent' => 'find documented practice',
+                    'explicit_entities' => [],
+                    'explicit_services_or_systems' => [],
+                    'scope' => 'domain_or_process',
+                ],
+                'selected_pages' => array_map(fn (int $pageId): array => [
+                    'page_id' => $pageId,
+                    'intended_use' => 'primary_evidence',
+                    'reason' => 'Selected from the compact Wiki index.',
+                ], $pageIds),
+                'model' => 'stub/1.0',
+            ]));
     }
 }
