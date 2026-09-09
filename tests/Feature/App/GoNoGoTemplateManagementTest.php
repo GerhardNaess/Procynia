@@ -190,9 +190,16 @@ class GoNoGoTemplateManagementTest extends TestCase
             'is_active' => true,
         ]);
 
+        // 404, not 403: scopedTemplate() resolves the template through a customer-scoped query and
+        // firstOrFail(), so a foreign id is never found and the response cannot distinguish "exists
+        // but forbidden" from "does not exist". That is deliberate tenant-hiding and the convention
+        // throughout the app — see test_customer_admin_cannot_edit_another_customers_department in
+        // CustomerDepartmentManagementTest, and the same assertNotFound in CustomerUserManagement,
+        // KnowledgeBaseSettings, CustomerNotificationCenter and XlsxRequirementImport. A 403 would
+        // confirm the row exists for someone else, which is exactly what this must not reveal.
         $this->actingAs($ctx['owner'])
             ->get("/app/go-no-go-templates/{$foreignTemplate->id}/edit")
-            ->assertForbidden();
+            ->assertNotFound();
     }
 
     public function test_system_owner_can_add_criterion_to_template(): void

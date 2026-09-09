@@ -268,7 +268,7 @@ class GoNoGoTemplateController extends Controller
 
     private function normalizeCriterionData(array $validated): array
     {
-        return [
+        $data = [
             'title'                    => Str::squish($validated['title']),
             'short_description'        => $this->normalizeText($validated['short_description'] ?? null),
             'help_what_is_assessed'    => $this->normalizeText($validated['help_what_is_assessed'] ?? null),
@@ -279,9 +279,20 @@ class GoNoGoTemplateController extends Controller
             'help_example_assessment'  => $this->normalizeText($validated['help_example_assessment'] ?? null),
             'weight'                   => (int) $validated['weight'],
             'is_score_reversed'        => (bool) ($validated['is_score_reversed'] ?? false),
-            'sort_order'               => isset($validated['sort_order']) ? (int) $validated['sort_order'] : null,
             'is_active'                => (bool) ($validated['is_active'] ?? true),
         ];
+
+        // Only carried when the request actually validated one. storeCriterion() computes the next
+        // sort_order itself and merges this array over its own defaults, so emitting the key
+        // unconditionally overwrote that computed position with null and every criterion insert
+        // failed the NOT NULL constraint. criterionRules() has no sort_order rule — only
+        // updateCriterion() adds it — so for a create the key is simply absent and the caller's
+        // value stands.
+        if (isset($validated['sort_order'])) {
+            $data['sort_order'] = (int) $validated['sort_order'];
+        }
+
+        return $data;
     }
 
     private function criterionPayload(GoNoGoAssessmentCriterion $c): array
