@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementWikiAnswer;
+use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAlignmentAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerAiClient;
 use App\Services\Ai\Wiki\RequirementWikiAnswerRevisionAiClient;
@@ -45,6 +46,15 @@ class RequirementWikiAnswerServiceTest extends TestCase
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
         config(['services.enterprise_wiki.ai_enabled' => true]);
+
+        // Only the tests that drive RequirementWikiResearchService::research() against a non-empty
+        // Wiki index reach this client — EnterpriseWikiSemanticRetrievalService::retrieve() returns
+        // early when the index is empty — hence zeroOrMoreTimes(). Without it those tests reach the
+        // real OpenAI transport. Same setup as RequirementWikiResearchServiceTest.
+        $this->mock(EnterpriseWikiSemanticSearchPlanAiClient::class, fn (MockInterface $mock) => $mock
+            ->shouldReceive('planWikiReading')
+            ->zeroOrMoreTimes()
+            ->andReturnUsing(fn (string $input, array $index): array => $this->semanticReadingPlan($index)));
     }
 
     protected function tearDown(): void
@@ -967,5 +977,35 @@ class RequirementWikiAnswerServiceTest extends TestCase
             'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED,
             'published_at' => now(),
         ]);
+    }
+
+    /**
+     * A navigation plan derived from the index the production service actually handed the client.
+     * Selecting only from that index is what keeps customer isolation a property of retrieval
+     * rather than of this stub: EnterpriseWikiSemanticRetrievalService builds the index scoped to
+     * one customer, so a page belonging to another can never be named here — which is exactly what
+     * test_research_context_buckets_claims_by_content_origin_and_isolates_customers must still be
+     * able to prove. Shape mirrors RequirementWikiResearchServiceTest::semanticReadingPlan().
+     *
+     * @param  list<array<string, mixed>>  $index
+     * @return array<string, mixed>
+     */
+    private function semanticReadingPlan(array $index): array
+    {
+        return [
+            'query_understanding' => [
+                'topic' => 'unknown',
+                'intent' => 'find documented knowledge',
+                'explicit_entities' => [],
+                'explicit_services_or_systems' => [],
+                'scope' => 'unknown',
+            ],
+            'selected_pages' => array_map(static fn (array $page): array => [
+                'page_id' => $page['page_id'],
+                'intended_use' => 'primary_evidence',
+                'reason' => 'Test navigation plan.',
+            ], $index),
+            'model' => 'stub/1.0',
+        ];
     }
 }
