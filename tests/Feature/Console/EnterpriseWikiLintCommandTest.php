@@ -342,6 +342,14 @@ class EnterpriseWikiLintCommandTest extends TestCase
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Test-påstand '.Str::random(6),
+            // Stated explicitly rather than left to the column default. Every claim in this file
+            // models one that ought to cite a source, and source_based is the only origin that can
+            // be missing one: needsSourceWarning() exempts best_practice,
+            // unsupported_generated_content, internal_error and — since "Ignore navigation-only
+            // claims in Wiki classification" (cf75be3) — unclassified, which is the column default.
+            // A claim that was never meant to cite a source cannot be missing one, so without this
+            // the lint rule correctly declines to raise claim_missing_source at all.
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'position_order' => 1,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,

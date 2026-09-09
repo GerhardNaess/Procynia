@@ -4119,16 +4119,28 @@ class WikiControllerTest extends TestCase
         $this->actingAs($user)->patch("/app/wiki/runs/{$run->id}/cancel", ['tab' => 'runs'])->assertSessionHas('error');
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->fresh()->status);
 
+        // Deletion is NOT blocked by a run that only awaits a human. Since "Allow deleting Wiki
+        // sources awaiting owner approval" (f779389) hasActiveRun() asks expectsAutomaticProgress()
+        // rather than !isTerminal(): a run parked on an owner decision has nothing left running to
+        // interrupt, so delete() simply ends it. The run is still surfaced to the reviewer through
+        // pending_approval_run_count, which is what makes the deletion an informed choice rather
+        // than a silent one.
         $blockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");
-        $this->assertTrue($blockedPreview->json('blocked'));
+        $this->assertFalse($blockedPreview->json('blocked'));
+        $this->assertSame(1, $blockedPreview->json('pending_approval_run_count'));
 
-        // ...but the dedicated deletion-unblock action still can.
+        // ...and the dedicated deletion-unblock action ends that run explicitly, which the
+        // Kjøringer-tab cancel above refused to do.
         $response = $this->actingAs($user)->patch("/app/wiki/sources/{$doc->id}/cancel-blocking-runs");
         $response->assertSessionHas('success');
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_CANCELLED, $run->fresh()->status);
+        $this->assertNotNull($run->fresh()->finished_at);
 
+        // The pending-approval run is gone, not merely still-not-blocking: asserting the count is
+        // what proves the action did the work, since `blocked` was already false before it ran.
         $unblockedPreview = $this->actingAs($user)->getJson("/app/wiki/sources/{$doc->id}/delete-preview");
         $this->assertFalse($unblockedPreview->json('blocked'));
+        $this->assertSame(0, $unblockedPreview->json('pending_approval_run_count'));
     }
 
     public function test_cancel_blocking_runs_rejects_contributor_without_ownership(): void

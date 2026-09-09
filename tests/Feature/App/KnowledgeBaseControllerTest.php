@@ -6669,11 +6669,19 @@ XML;
 
         $context = $this->customerContext('Customer Review Dates Form Payload AS');
 
+        // Relative, like the four dedicated review_state tests above. review_state is derived from
+        // the due date against today() — overdue when past, due_soon within 30 days, otherwise ok —
+        // so an absolute due date silently changes what this test asserts as the calendar moves.
+        // The original '2026-08-01' read as 'ok' when written and became 'overdue' once that date
+        // passed; 90 days out keeps it 'ok' whenever the suite runs.
+        $lastReviewedAt = now()->subDays(30)->toDateString();
+        $reviewDueAt = now()->addDays(90)->toDateString();
+
         $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('review-dates-form.docx', 'Review dates form payload test.'),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
-            'last_reviewed_at' => '2026-02-01',
-            'review_due_at' => '2026-08-01',
+            'last_reviewed_at' => $lastReviewedAt,
+            'review_due_at' => $reviewDueAt,
         ])->assertRedirect(route('app.ai.knowledge-base.index'));
 
         $document = KnowledgeItem::query()
@@ -6683,12 +6691,14 @@ XML;
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
         $editResponse->assertOk();
-        $editResponse->assertViewHas('page', function (array $page): bool {
+        // Both dates must round-trip verbatim into the edit form, and the derived state must agree
+        // with them — that is the whole payload contract this test guards.
+        $editResponse->assertViewHas('page', function (array $page) use ($lastReviewedAt, $reviewDueAt): bool {
             $item = data_get($page, 'props.knowledgeItem');
 
             return $item !== null
-                && data_get($item, 'last_reviewed_at') === '2026-02-01'
-                && data_get($item, 'review_due_at') === '2026-08-01'
+                && data_get($item, 'last_reviewed_at') === $lastReviewedAt
+                && data_get($item, 'review_due_at') === $reviewDueAt
                 && data_get($item, 'review_state') === 'ok';
         });
     }
