@@ -11,7 +11,9 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\EnterpriseWiki\EnterpriseWikiCanonicalOwnershipValidator;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionDeltaPrompt;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionPrompt;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionSplitCoordinator;
@@ -395,23 +397,36 @@ class EnterpriseWikiExistingPageFirstTest extends TestCase
         $aiClient->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
         $aiClient->shouldReceive('repairGroup')->andReturn(['operations' => [], 'notes' => null]);
 
-        $repaired = app(EnterpriseWikiMaintainerDecisionService::class)->validateAndRepairForDocument(
-            $customer->id,
-            $secondDocument,
-            'no',
-            $parallel,
-            null,
-            EnterpriseWikiPlanningContext::forDocument($customer->id, $secondDocument),
-        );
+        // Two acceptable outcomes, exactly as in
+        // test_an_undocumented_create_never_survives_the_pipeline below: the repair rewrites the
+        // create into a reuse, or — when the repair returns nothing, as it does here — the decision
+        // is refused outright. What is never acceptable is a surviving create, so both branches
+        // assert that and then that apply added no parallel page.
+        try {
+            $repaired = app(EnterpriseWikiMaintainerDecisionService::class)->validateAndRepairForDocument(
+                $customer->id,
+                $secondDocument,
+                'no',
+                $parallel,
+                null,
+                EnterpriseWikiPlanningContext::forDocument($customer->id, $secondDocument),
+            );
 
-        $this->assertSame(
-            [],
-            array_filter($repaired['concept_pages'], static fn (array $entry): bool => ($entry['action'] ?? '') === 'create'),
-            'no decision that survives validation may create a second owner for a topic the Wiki already has',
-        );
+            $this->assertSame(
+                [],
+                array_filter($repaired['concept_pages'], static fn (array $entry): bool => ($entry['action'] ?? '') === 'create'),
+                'no decision that survives validation may create a second owner for a topic the Wiki already has',
+            );
 
-        $run = $this->createDecisionOnlyRun($customer, $repaired);
-        app(EnterpriseWikiMaintainerDecisionApplyService::class)->apply($run);
+            $run = $this->createDecisionOnlyRun($customer, $repaired);
+            app(EnterpriseWikiMaintainerDecisionApplyService::class)->apply($run);
+        } catch (EnterpriseWikiMaintainerDecisionInconsistentException $e) {
+            $this->assertStringContainsString(
+                'is the same concept under a differently qualified name',
+                implode(' ', $e->issues),
+                'the refusal must name the qualified-duplicate rule, not some unrelated inconsistency',
+            );
+        }
 
         $conceptPages = EnterpriseWikiPage::query()
             ->where('customer_id', $customer->id)
@@ -479,6 +494,67 @@ class EnterpriseWikiExistingPageFirstTest extends TestCase
         );
 
         $this->assertSame([], $survivingCreates, 'an undocumented create must never reach apply');
+    }
+
+    /**
+     * The other half of the fail-closed gate: it must stop an UNREPAIRED create, not every create.
+     *
+     * Guards the post-repair re-validation specifically. That call used to omit the offered
+     * existing-page ids, which made EnterpriseWikiCanonicalOwnershipValidator return no issues at
+     * all and let an undocumented create through (see the test above). Passing them makes the
+     * re-check as strong as the first pass — so this test proves the same call still CLEARS a
+     * decision the repair genuinely fixed, rather than turning the gate into "always refuse".
+     */
+    public function test_a_repair_that_documents_the_weighed_pages_is_accepted(): void
+    {
+        $customer = $this->createCustomer();
+        $existing = $this->createConceptPage($customer, 'Driftsrutiner', 'driftsrutiner', $this->longPageBody('Drift følges opp ukentlig.'));
+        $document = $this->createDocument($customer, 'Driftsrutiner endres. Et helt nytt tema innføres også.');
+
+        $undocumented = $this->decision([
+            'concept_candidates' => [$this->candidate()],
+            'concept_pages' => [$this->conceptPageEntry('Nytt Tema')],
+        ]);
+
+        // This time the bounded repair does its job: it names the page it weighed and says why it
+        // was rejected — the exact two fields the validator asked for.
+        /** @var EnterpriseWikiMaintainerDecisionAiClient&MockInterface $aiClient */
+        $aiClient = $this->mock(EnterpriseWikiMaintainerDecisionAiClient::class);
+        $aiClient->shouldReceive('maxObjectsPerRepairCall')->andReturn(8);
+        $aiClient->shouldReceive('repairGroupFitsOneCall')->andReturn(true);
+        $aiClient->shouldReceive('repairGroup')->andReturnUsing(
+            function (mixed $planning, string $languageCode, array $decision, array $group) use ($existing): array {
+                return ['operations' => array_map(
+                    fn (string $objectId): array => [
+                        'operation' => EnterpriseWikiMaintainerDecisionDeltaPrompt::OPERATION_REPLACE,
+                        'object_id' => $objectId,
+                        'collection' => 'concept_candidates',
+                        'object' => $this->candidate([
+                            'considered_existing_page_ids' => [$existing->id],
+                            'considered_rejection_reason' => 'Siden dekker drift, ikke denne praksisen.',
+                        ]),
+                    ],
+                    array_values(array_filter(
+                        $group['object_ids'],
+                        static fn (string $id): bool => str_starts_with($id, 'concept_candidates['),
+                    )),
+                )];
+            },
+        );
+
+        $repaired = app(EnterpriseWikiMaintainerDecisionService::class)->validateAndRepairForDocument(
+            $customer->id,
+            $document,
+            'no',
+            $undocumented,
+            null,
+            EnterpriseWikiPlanningContext::forDocument($customer->id, $document),
+        );
+
+        $candidate = $repaired['concept_candidates'][0];
+        $this->assertSame('create', $candidate['decision'], 'a documented create is still a create');
+        $this->assertSame([$existing->id], $candidate['considered_existing_page_ids']);
+        $this->assertNotSame('', trim((string) $candidate['considered_rejection_reason']));
     }
 
     public function test_the_repaired_decision_reuses_the_existing_page_instead_of_creating_one(): void

@@ -232,7 +232,15 @@ class EnterpriseWikiMaintainerDecisionService
             $merge = $this->deltaMerger->merge($decision, $repairs);
             $decision = EnterpriseWikiMaintainerDecisionPrompt::parse($merge['decision']);
             $issuesBefore = $remainingIssues;
-            $remainingIssues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId);
+            // $existingPageCandidateIds must be passed here too, exactly as on the two pre-repair
+            // calls above. EnterpriseWikiCanonicalOwnershipValidator returns no issues at all when
+            // the offered set is empty — correctly, since "which of the pages you were shown did
+            // you weigh?" is unanswerable when none were shown — so omitting it made this
+            // re-validation strictly weaker than the one that found the issue in the first place.
+            // An undocumented create then read as repaired, the loop broke on an empty issue list,
+            // and the fail-closed gate below never fired: the decision was returned with the very
+            // create it was supposed to stop.
+            $remainingIssues = $this->findAllIssues($decision, $indexContext, $validFigureKeys, $customerId, $validSourceElementKeys, $context->runId, $existingPageCandidateIds);
 
             Log::info('[WIKI_MAINTAINER_DECISION] Repair delta merged.', [
                 'customer_id' => $customerId,
