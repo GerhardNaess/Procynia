@@ -346,20 +346,43 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         $this->assertNotNull($finding['url']);
         $this->assertStringContainsString('claim_id='.$claim->id, $finding['url']);
 
+        // "Tilbake til funn" must return the reviewer to the finding, not merely to the list that
+        // contains it: since "Improve Wiki finding return navigation" (f7b8b89) the back_url also
+        // carries focus_run and focus_finding, which Wiki Index reads to reopen that run's Funn
+        // panel and focus this row (WikiController::loadRunsTab() → runs_filters.focus_*, RunsTab
+        // in Index.jsx). Asserted as the exact URL so the whole contract is pinned, then the two
+        // focus parameters again by name so what they are for stays readable.
         $parsedUrlQuery = [];
         parse_str((string) parse_url($finding['url'], PHP_URL_QUERY), $parsedUrlQuery);
         $this->assertSame(
-            route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]),
+            route('app.wiki.index', [
+                'tab' => 'runs',
+                'run_src' => $document->id,
+                'focus_run' => $run->id,
+                'focus_finding' => $finding['id'],
+            ]),
             $parsedUrlQuery['back_url'] ?? null,
         );
+
+        $backUrlQuery = [];
+        parse_str((string) parse_url((string) ($parsedUrlQuery['back_url'] ?? ''), PHP_URL_QUERY), $backUrlQuery);
+        $this->assertSame((string) $run->id, $backUrlQuery['focus_run'] ?? null);
+        $this->assertSame($finding['id'], $backUrlQuery['focus_finding'] ?? null);
 
         $path = parse_url($finding['url'], PHP_URL_PATH).'?'.parse_url($finding['url'], PHP_URL_QUERY);
         $response = $this->actingAs($user)->get($path);
 
         $response->assertOk();
+        // The back_url survives the round trip into review_reference unchanged — the reviewer who
+        // followed the finding link keeps a way back to that exact finding.
         $response->assertViewHas('page', fn (array $inertia): bool => data_get($inertia, 'props.review_reference.status') === 'ready'
             && data_get($inertia, 'props.review_reference.block_key') === 'block-0002'
-            && data_get($inertia, 'props.review_reference.back_url') === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id]));
+            && data_get($inertia, 'props.review_reference.back_url') === route('app.wiki.index', [
+                'tab' => 'runs',
+                'run_src' => $document->id,
+                'focus_run' => $run->id,
+                'focus_finding' => $finding['id'],
+            ]));
     }
 
     public function test_structural_open_page_finding_sends_stable_context_and_shows_page_panel(): void
@@ -400,7 +423,7 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
         $response = $this->actingAs($user)->get($path);
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $inertia) use ($lintFinding, $document, $page): bool {
+        $response->assertViewHas('page', function (array $inertia) use ($lintFinding, $document, $page, $run, $finding): bool {
             $structureFinding = data_get($inertia, 'props.structure_finding', []);
 
             return data_get($inertia, 'props.review_reference') === null
@@ -411,7 +434,14 @@ class WikiClaimDefectReviewReferenceNavigationTest extends TestCase
                 && ($structureFinding['message'] ?? null) === 'Begrepssiden mangler en utgående lenke til en artikkel- eller sammendragsside.'
                 && ($structureFinding['page_id'] ?? null) === $page->id
                 && ($structureFinding['page_type'] ?? null) === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
-                && ($structureFinding['back_url'] ?? null) === route('app.wiki.index', ['tab' => 'runs', 'run_src' => $document->id])
+                // Same return contract as the claim-defect finding above: back to THIS finding in
+                // THIS run, not just to the Kjøringer list filtered by document.
+                && ($structureFinding['back_url'] ?? null) === route('app.wiki.index', [
+                    'tab' => 'runs',
+                    'run_src' => $document->id,
+                    'focus_run' => $run->id,
+                    'focus_finding' => $finding['id'],
+                ])
                 && ! array_key_exists('block_key', $structureFinding);
         });
     }

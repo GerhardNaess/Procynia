@@ -19,6 +19,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionApplyService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
@@ -778,22 +779,42 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
             $this->mock(EnterpriseWikiExtractPageClaimsService::class)->shouldNotReceive('extract');
         }
 
+        // Claim verification is no longer a synchronous verify($run) step in this flow. Since
+        // "Parallelize Wiki claim verification" it fans out one VerifyEnterpriseWikiClaim job per
+        // unverified claim: beginClaimVerification() asks unverifiedClaimIdsForRun() which claims
+        // still need work, reserves each one, and dispatches. verify() survives only for the CLI
+        // command and the repair services, and this flow must never call it.
+        //
+        // Returning no unverified claims is what keeps this an end-to-end test: with nothing to
+        // dispatch, the flow calls continueAfterClaimVerification() inline, so the fan-in half
+        // (lint -> semantic repair -> cross-page -> QA -> complete) still runs in this same call.
+        $verifyPageClaimsMock = $this->mock(EnterpriseWikiVerifyPageClaimsService::class);
+        $verifyPageClaimsMock->shouldNotReceive('verify');
+
         if ($shouldExpect('verify')) {
-            $this->mock(EnterpriseWikiVerifyPageClaimsService::class)
-                ->shouldReceive('verify')
-                ->once()
+            $verifyPageClaimsMock
+                ->shouldReceive('unverifiedClaimIdsForRun')
+                // Twice on a clean pass: once to decide what to dispatch, once as the fan-in
+                // check for anything still pending. Once when this step itself throws.
+                ->times($shouldFail('verify') ? 1 : 2)
                 ->ordered('enterprise-wiki-continue-flow')
                 ->andReturnUsing(function (EnterpriseWikiIngestRun $run) use (&$callOrder, $shouldFail) {
-                    $callOrder[] = 'verify';
+                    if (! in_array('verify', $callOrder, true)) {
+                        $callOrder[] = 'verify';
+                    }
 
                     if ($shouldFail('verify')) {
                         throw new RuntimeException('verify failed');
                     }
 
-                    return ['pages' => 4, 'claims' => 4, 'references' => 4, 'skipped' => 0, 'no_support' => 0];
+                    return [];
                 });
+
+            $verifyPageClaimsMock
+                ->shouldReceive('hasActiveClaimLeaseForRun')
+                ->andReturn(false);
         } else {
-            $this->mock(EnterpriseWikiVerifyPageClaimsService::class)->shouldNotReceive('verify');
+            $verifyPageClaimsMock->shouldNotReceive('unverifiedClaimIdsForRun');
         }
 
         if ($shouldExpect('lint')) {
@@ -817,6 +838,18 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
         } else {
             $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldNotReceive('lint');
         }
+
+        // Runs between lint and QA in the fan-in half. Not part of the ordered contract this test
+        // pins, but performLinkSemanticRepair() does not swallow failures, so leaving it live
+        // would put a real AI-backed repair pass inside this flow test.
+        //
+        // The cross-page consistency check runs there too and is deliberately NOT mocked: its
+        // performCrossPageConsistencyCheck() wrapper catches and logs, so the real service is
+        // harmless here — and EnterpriseWikiCrossPageConsistencyService is also reached through
+        // EnterpriseWikiCrossPageReconciliationService, so mocking it breaks that second caller.
+        $this->mock(EnterpriseWikiLinkSemanticRepairService::class)
+            ->shouldReceive('repairForRun')
+            ->andReturn(['pages_reviewed' => 4, 'applied' => 0, 'skipped' => 4, 'failed' => 0]);
 
         if ($shouldExpect('qa')) {
             $this->mock(EnterpriseWikiPostIngestQaService::class)

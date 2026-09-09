@@ -926,6 +926,13 @@ class WikiSourceControllerTest extends TestCase
             'enterprise_wiki_page_id' => $page->id,
             'enterprise_wiki_page_version_id' => $version->id,
             'claim_text' => 'Påstanden er dokumentert.',
+            // Stated explicitly rather than left to the column default. This claim carries a real
+            // source reference and was approved "med kilde", so source_based is what it actually
+            // is — and it is the only origin that can lose a source basis. The default is
+            // 'unclassified', which needsSourceWarning() deliberately exempts since "Ignore
+            // navigation-only claims in Wiki classification" (cf75be3): a claim that was never
+            // meant to cite a source cannot be missing one.
+            'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
             'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_APPROVED,

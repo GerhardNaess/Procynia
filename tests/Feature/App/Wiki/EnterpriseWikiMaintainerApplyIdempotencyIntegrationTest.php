@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Data\Ai\AiCallContext;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
@@ -16,6 +17,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 /**
@@ -56,7 +58,21 @@ class EnterpriseWikiMaintainerApplyIdempotencyIntegrationTest extends TestCase
         // Run B: a fresh run for the same document. The maintainer decision AI is mocked to
         // return the exact same decision — still proposing "create" for both source pages,
         // exactly as it would if regenerated without knowledge of run A's partial success.
-        $this->mock(EnterpriseWikiMaintainerDecisionService::class)
+        $maintainerDecisionService = $this->mock(EnterpriseWikiMaintainerDecisionService::class);
+
+        // Single-shot decision path. The fixture document is ~50 characters, far below the
+        // capacity planner's split threshold, so the real service returns null here and
+        // performMaintainerDecision() falls through to runForDocument(). Stubbed explicitly
+        // rather than left open: returning batches instead would send run B down the parallel
+        // maintainer-batch path, which defers the decision to queued jobs and never reaches the
+        // apply step whose idempotency this test exists to prove.
+        $maintainerDecisionService
+            ->shouldReceive('preparePersistedCandidateBatchesForDocument')
+            ->once()
+            ->with($customer->id, $document->id, 'no', Mockery::type(AiCallContext::class))
+            ->andReturn(null);
+
+        $maintainerDecisionService
             ->shouldReceive('runForDocument')
             ->once()
             ->andReturn($decision);
@@ -89,7 +105,17 @@ class EnterpriseWikiMaintainerApplyIdempotencyIntegrationTest extends TestCase
         $existingSummary = EnterpriseWikiPage::query()->where('customer_id', $customer->id)->where('page_type', EnterpriseWikiPage::PAGE_TYPE_SUMMARY)->firstOrFail();
         $runA->update(['status' => EnterpriseWikiIngestRun::STATUS_FAILED, 'finished_at' => now()]);
 
-        $this->mock(EnterpriseWikiMaintainerDecisionService::class)
+        $maintainerDecisionService = $this->mock(EnterpriseWikiMaintainerDecisionService::class);
+
+        // Single-shot decision path, as above: null keeps run B on the in-process decision
+        // route so it reaches applied-page dispatch rather than the maintainer-batch queue.
+        $maintainerDecisionService
+            ->shouldReceive('preparePersistedCandidateBatchesForDocument')
+            ->once()
+            ->with($customer->id, $document->id, 'no', Mockery::type(AiCallContext::class))
+            ->andReturn(null);
+
+        $maintainerDecisionService
             ->shouldReceive('runForDocument')
             ->once()
             ->andReturn($decision);

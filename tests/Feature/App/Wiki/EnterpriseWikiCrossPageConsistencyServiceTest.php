@@ -146,9 +146,39 @@ class EnterpriseWikiCrossPageConsistencyServiceTest extends TestCase
         $result = app(EnterpriseWikiCrossPageReconciliationService::class)->reconcileForRun($run);
 
         $this->assertSame(1, $result['pages_patched']);
-        $markdown = $pages['untargeted']->fresh()->currentVersion->content_markdown;
-        $this->assertStringContainsString('P1‑capacity does not exceed 150 units before approving.', $markdown);
-        $this->assertStringNotContainsString('120 units', $markdown);
+
+        // A sub-block replace is persisted as provenance atoms, not as one rewritten paragraph:
+        // the untouched text before and after keeps the document that authored it, and only the new
+        // substance carries the patch document. AGENTS.md states the trade-off directly — "dette kan
+        // gjøre ett opprinnelig avsnitt til flere visuelle avsnitt. Korrekt provenance prioriteres
+        // over å bevare opprinnelig avsnittsgruppering" — and
+        // EnterpriseWikiAtomicBlockProvenanceTest::test_a_sub_block_replace_splits_into_three_
+        // provenance_atoms covers the mechanism. Introduced by "fix(wiki): enforce atomic block
+        // provenance" (204d3f9), three days after this test was written against the older
+        // single-paragraph behaviour.
+        $version = $pages['untargeted']->fresh()->currentVersion;
+        $blocks = collect((array) $version->content_blocks_json)
+            ->reject(fn (array $block): bool => ($block['content_origin'] ?? null) === 'structural')
+            ->values();
+
+        $this->assertCount(3, $blocks, 'one bounded token replacement yields exactly three provenance atoms');
+
+        // The surrounding prose is preserved MECHANICALLY — byte for byte, never retyped by a model.
+        // The non-breaking hyphen (U+2011) in "P1‑capacity" is part of that guarantee: it survives
+        // discovery, classification, anchor extraction and the split without being normalised away.
+        $this->assertSame('Confirm P1‑capacity does not exceed', $blocks[0]['markdown']);
+        $this->assertSame('units before approving.', $blocks[2]['markdown']);
+        $this->assertStringContainsString("\u{2011}", $blocks[0]['markdown']);
+
+        // Only the number changed, and only it belongs to the patch document.
+        $this->assertSame('150', $blocks[1]['markdown']);
+        $this->assertNotNull($blocks[1]['source_id'] ?? null, 'the new substance is owned by the patch document');
+        $this->assertNull($blocks[0]['source_id'] ?? null, 'a carried fragment never inherits the patch document');
+        $this->assertNull($blocks[2]['source_id'] ?? null, 'a carried fragment never inherits the patch document');
+
+        $markdown = $version->content_markdown;
+        $this->assertStringContainsString('150', $markdown);
+        $this->assertStringNotContainsString('120', $markdown);
     }
 
     public function test_ambiguous_paraphrased_value_fails_closed_and_is_not_patched(): void

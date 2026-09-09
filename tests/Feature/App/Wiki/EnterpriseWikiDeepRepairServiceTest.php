@@ -579,12 +579,21 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         ]);
 
         // Gives any claim the default extractClaims mock produces (excerpt "Excerpt A") a
-        // resolvable, source-based block anchor — without this, EnterpriseWikiExtractPageClaimsService
-        // cannot match the excerpt to any block (content_origin=internal_error) and
-        // EnterpriseWikiVerifyPageClaimsService's own anchor check against content_markdown
-        // would independently fail the same way, since it checks content_markdown directly, not
-        // content_blocks_json. See EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(),
-        // which now correctly blocks qa_status=passed for either.
+        // resolvable block anchor, in both content_blocks_json and content_markdown —
+        // EnterpriseWikiVerifyPageClaimsService checks content_markdown directly, not the blocks.
+        // See EnterpriseWikiPostIngestQaService::findClaimIntegrityDefects(), which blocks
+        // qa_status=passed if either anchor is missing.
+        //
+        // The block must be a claim candidate for deep repair's claims component to have anything
+        // to repair. Since "Implement source-based Wiki claim extraction" (ba41a58) that means
+        // best_practice or unsupported_generated_content: a source_based block yields zero claims
+        // by design, and a page built purely from such blocks correctly has none — lint treats
+        // that as a legitimate terminal state, not a defect. unsupported_generated_content rather
+        // than best_practice because these are plain assertions, not recommendations (a
+        // best_practice block would need a best_practice_reason and would drift back here anyway
+        // via isEligibleForBestPractice()), and because it is the origin whose whole lifecycle is
+        // the one under test: generated content that verification then confirms against the
+        // source and promotes to source_based, creating the source reference as it does.
         $blockMarkdown = 'Excerpt A appears in this block.';
         $defaultMarkdown = "# {$title}\n\n{$blockMarkdown}";
 
@@ -597,7 +606,7 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
                 'block_key' => 'block-0001',
                 'position' => 0,
                 'markdown' => $blockMarkdown,
-                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
                 'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
                 'source_id' => $run->source_id,
                 'source_label' => 'source.pdf',

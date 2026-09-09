@@ -12,12 +12,14 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiPageVersionDocumentOwnerApproval;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
 use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
@@ -50,7 +52,14 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
         Queue::fake();
 
         $customer = $this->createCustomer();
+        $documentOwner = $this->createUser($customer);
         $document = $this->createDocument($customer);
+        // A real source is uploaded with a document owner. Since "Add Enterprise Wiki document
+        // owner approval flow" (8d903da) every generated page version carries an approval
+        // requirement for the owner of the document it draws on, and the run cannot complete while
+        // one is outstanding — so the owner has to exist before the flow runs for this test to
+        // reach completion the way production does.
+        $document->update(['owner_user_id' => $documentOwner->id]);
         $run = app(EnterpriseWikiDocumentFlowService::class)->prepareRunForDocument($customer->id, $document->id)['run'];
 
         $decision = [
@@ -234,7 +243,34 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
                 ->exists(),
         );
 
-        // --- 52: claims/verification/lint/QA ran and the run completed ---
+        // --- 52: claims/verification/lint/QA ran, and the run is now held at the document-owner
+        // approval gate rather than completing on its own. QA has already passed; what is
+        // outstanding is a human decision, one approval row per generated page version.
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+
+        $approvalService = app(EnterpriseWikiDocumentOwnerApprovalService::class);
+        $gate = $approvalService->evaluateRunCompletionGate($run);
+        $this->assertFalse($gate['ready']);
+        $this->assertNotSame([], $gate['pending']);
+        $this->assertSame([], $gate['missing_owner'], 'the owner is set, so nothing may be pending for lack of one');
+
+        // --- 53: the owner approves, exactly as WikiDocumentOwnerApprovalController does it, and
+        // only then does the run complete. Driven through the production service and the real
+        // finalize step — never by writing the status directly — so the gate itself is exercised.
+        $pendingApprovals = EnterpriseWikiPageVersionDocumentOwnerApproval::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('approval_status', EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_PENDING)
+            ->get();
+        $this->assertNotCount(0, $pendingApprovals);
+
+        foreach ($pendingApprovals as $approval) {
+            $approvalService->decide($approval, $documentOwner, EnterpriseWikiPageVersionDocumentOwnerApproval::APPROVAL_STATUS_APPROVED);
+        }
+
+        app(EnterpriseWikiDocumentFlowService::class)->finalizeFromExistingQaResult($run->fresh());
+
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);

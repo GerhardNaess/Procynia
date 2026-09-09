@@ -36,6 +36,22 @@ class EnterpriseWikiLinkLintAndSemanticRepairTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // EnterpriseWikiLinkSemanticRepairService checks WikiLinkSemanticQaAiClient::isAvailable()
+        // before it reads a page's content, and skips the whole attempt with reason
+        // 'ai_unavailable' when the flag is off. ENTERPRISE_WIKI_AI_ENABLED lives in .env, which
+        // APP_ENV=testing never loads (.env.testing is loaded instead and has never declared it),
+        // so every semantic-repair test in this file skipped before it reached its own mocks —
+        // the deterministic lint tests above pass either way because lint makes no AI call.
+        // Every sibling that exercises a Wiki AI path enables the flag the same way; see
+        // EnterpriseWikiSemanticQaServiceTest, EnterpriseWikiDeepRepairServiceTest and
+        // EnterpriseWikiWikilinkEndToEndIntegrationTest.
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+    }
+
     // =========================================================================
     // Deterministic lint codes
     // =========================================================================

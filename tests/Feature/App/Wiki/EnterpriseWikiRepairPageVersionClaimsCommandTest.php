@@ -179,7 +179,13 @@ class EnterpriseWikiRepairPageVersionClaimsCommandTest extends TestCase
     public function test_qa_finding_is_resolved_after_repair(): void
     {
         $customer = $this->createCustomer();
-        [$run, $page, , $version2] = $this->createSupersededPage($customer);
+        // CODE_PAGE_WITHOUT_CLAIMS is raised only when the current version has at least one
+        // best_practice block: a page built purely from source_based/structural content correctly
+        // has zero claims and must not be reported as a defect.
+        [$run, $page, , $version2] = $this->createSupersededPage(
+            $customer,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE,
+        );
 
         app(EnterpriseWikiAppliedRunLintService::class)->lint($run->fresh());
 
@@ -301,7 +307,13 @@ class EnterpriseWikiRepairPageVersionClaimsCommandTest extends TestCase
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id' => $document->id,
-            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            // Must be a status that expects automatic progress. Since "Stop Wiki claim resync at
+            // owner approval" (66cd251) the repair service skips runs where
+            // isAwaitingHumanAction() is true — decision_only and awaiting_document_owner_approval
+            // — because a run parked on a human decision has no technical job behind it to resync
+            // for. verification_linking is the stage this repair actually targets, and is what the
+            // maintained sibling EnterpriseWikiPageVersionClaimRepairServiceTest drives too.
+            'status' => EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
         ]);
@@ -315,8 +327,10 @@ class EnterpriseWikiRepairPageVersionClaimsCommandTest extends TestCase
      *
      * @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiPage, 2: EnterpriseWikiPageVersion, 3: EnterpriseWikiPageVersion}
      */
-    private function createSupersededPage(Customer $customer): array
-    {
+    private function createSupersededPage(
+        Customer $customer,
+        string $blockOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+    ): array {
         $document = $this->createDocument($customer);
         $run = $this->createRunApplied($customer, $document);
         $page = EnterpriseWikiPage::query()->create([
@@ -353,11 +367,33 @@ class EnterpriseWikiRepairPageVersionClaimsCommandTest extends TestCase
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
         ]);
 
+        // Since "Implement source-based Wiki claim extraction" (ba41a58) extraction is driven by
+        // content_blocks_json, not by content_markdown: claimCandidateBlocks() only offers blocks
+        // whose own content_origin is best_practice or unsupported_generated_content to the AI, and
+        // persist() rejects a source_based anchor a second time after the response. A version with
+        // no blocks therefore has no claim candidates at all, so the resync this command triggers
+        // could never produce a claim. The block below carries the excerpt the mocked
+        // extractClaims() returns, so findUniqueBlockForExcerpt() anchors the claim to it.
+        // Default origin is unsupported_generated_content: the fake claim text is a plain
+        // assertion, not a recommendation. Tests that need lint's CODE_PAGE_WITHOUT_CLAIMS ask for
+        // a best_practice block instead — that finding is raised only for best_practice blocks,
+        // and persist() also creates a deterministic fallback claim for one, which is exactly what
+        // test_page_without_extractable_facts_is_left_as_correctly_empty must NOT get.
         $version2 = EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $page->id,
             'version_number' => 2,
             'is_current' => true,
             'content_markdown' => "# Test Page\n\nRevised content. Supporting excerpt alpha.",
+            'content_blocks_json' => [[
+                'block_key' => 'block-0001',
+                'position' => 0,
+                'markdown' => 'Revised content. Supporting excerpt alpha.',
+                'content_origin' => $blockOrigin,
+                'source_elements' => [],
+                'best_practice_reason' => $blockOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                    ? 'General recommendation not tied to a specific source element.'
+                    : null,
+            ]],
             'generated_by_model' => 'deterministic/link-semantic-repair',
         ]);
 

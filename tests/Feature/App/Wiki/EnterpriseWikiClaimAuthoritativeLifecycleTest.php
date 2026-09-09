@@ -58,7 +58,12 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
         $document = $this->createDocument($customer);
         $run = $this->createAppliedRun($customer, $document);
         $blockMarkdown = 'Illustrasjonen viser hvordan Kunde og Leverandør samhandler gjennom Incident-prosessen.';
-        [$page, $version] = $this->createPageWithSourceBasedBlock($customer, $run, $blockMarkdown);
+        [$page, $version] = $this->createPageWithSourceBasedBlock(
+            $customer,
+            $run,
+            $blockMarkdown,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        );
 
         $recommendationText = 'Regelmessig gjennomgang av eskaleringsrutiner reduserer risiko for forsinket håndtering.';
 
@@ -73,13 +78,29 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
 
         $claim = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->firstOrFail();
 
-        // --- Step 1: provisional, inherited from the source_based block ---
-        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED, $claim->content_origin);
+        // --- Step 1: provisional, inherited from the block ---
+        // Since ba41a58 extraction never yields source_based: a source_based block produces no
+        // claim at all, and the only origins a claim can be born with are the two the block itself
+        // can carry. source_based is now exclusively a verification verdict.
+        $this->assertSame(EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT, $claim->content_origin);
         $this->assertNull($claim->verified_at, 'Extraction must never mark a claim as authoritatively decided.');
-        $extractionReferenceId = EnterpriseWikiSourceReference::query()
-            ->where('enterprise_wiki_claim_id', $claim->id)
-            ->value('id');
-        $this->assertNotNull($extractionReferenceId, 'A source_based-inherited claim gets a source reference at extraction time.');
+
+        // The reference this test needs is the one repair's structural rule would later read as
+        // "this claim is source_based". Extraction no longer creates references at all (the
+        // branch that did is reachable only for a source_based claim, which can no longer exist),
+        // so it is seeded here as what it now is: provenance left behind by an earlier pass. This
+        // test is about what happens to an already-decided claim afterwards, not about extraction.
+        $extractionReferenceId = EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'paragraph-0',
+            'source_element_type' => 'paragraph',
+            'source_label' => $document->original_filename,
+            'excerpt' => $blockMarkdown,
+            'source_hash' => (string) $document->file_hash_sha256,
+            'page_reference' => 'Løpende tekst',
+        ])->id;
 
         // --- Step 2: verification's own AI call says not_supported; rescued to best_practice ---
         $this->mock(WikiClaimVerificationAiClient::class)
@@ -204,7 +225,12 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
         $document = $this->createDocument($customer);
         $run = $this->createAppliedRun($customer, $document);
         $blockMarkdown = 'Servicedesk Alfa er tilgjengelig mandag til fredag fra klokken 08.00 til 16.00.';
-        [$page, $version] = $this->createPageWithSourceBasedBlock($customer, $run, $blockMarkdown);
+        [$page, $version] = $this->createPageWithSourceBasedBlock(
+            $customer,
+            $run,
+            $blockMarkdown,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        );
 
         $this->mock(WikiPageClaimExtractionAiClient::class)
             ->shouldReceive('extractClaims')
@@ -269,7 +295,12 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
         // text, so verify()'s deterministic verbatim-match fast path never fires and the mocked
         // AI client below is the one actually exercised.
         $blockMarkdown = 'Figuren illustrerer samhandlingen mellom Kunde og Leverandør i Incident-prosessen.';
-        [$page, $version] = $this->createPageWithSourceBasedBlock($customer, $run, $blockMarkdown);
+        [$page, $version] = $this->createPageWithSourceBasedBlock(
+            $customer,
+            $run,
+            $blockMarkdown,
+            EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
+        );
 
         $this->mock(WikiPageClaimExtractionAiClient::class)
             ->shouldReceive('extractClaims')
@@ -280,7 +311,20 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
 
         app(EnterpriseWikiExtractPageClaimsService::class)->extract($run->fresh());
         $claim = EnterpriseWikiClaim::query()->where('enterprise_wiki_page_version_id', $version->id)->firstOrFail();
-        // The stale reference extraction created for the (pre-verification) source_based origin.
+        // The stale reference whose mere existence repair's weaker structural rule would read as
+        // "source_based". Seeded rather than extracted: since ba41a58 extraction creates no
+        // references, so a leftover one is by definition residue from an earlier verification.
+        EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_element_key' => 'paragraph-0',
+            'source_element_type' => 'paragraph',
+            'source_label' => $document->original_filename,
+            'excerpt' => $blockMarkdown,
+            'source_hash' => (string) $document->file_hash_sha256,
+            'page_reference' => 'Løpende tekst',
+        ]);
         $this->assertTrue(EnterpriseWikiSourceReference::query()->where('enterprise_wiki_claim_id', $claim->id)->exists());
 
         $this->mock(WikiClaimVerificationAiClient::class)
@@ -435,8 +479,24 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
     /**
      * @return array{0: EnterpriseWikiPage, 1: EnterpriseWikiPageVersion}
      */
-    private function createPageWithSourceBasedBlock(Customer $customer, EnterpriseWikiIngestRun $run, string $blockMarkdown): array
-    {
+    /**
+     * @param  string  $blockOrigin  The block's own content_origin. Since "Implement source-based
+     *                               Wiki claim extraction" (ba41a58) this decides whether the block
+     *                               can produce a claim at all: claimCandidateBlocks() offers only
+     *                               best_practice and unsupported_generated_content blocks to the
+     *                               AI, and persist() rejects a source_based anchor a second time
+     *                               after the response, so a source_based block yields zero claims
+     *                               by design. It stays the default because
+     *                               reevaluateClaimForRun() conversely requires one
+     *                               ('not_a_source_based_block'); tests that need extraction to
+     *                               actually produce a claim pass unsupported_generated_content.
+     */
+    private function createPageWithSourceBasedBlock(
+        Customer $customer,
+        EnterpriseWikiIngestRun $run,
+        string $blockMarkdown,
+        string $blockOrigin = EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+    ): array {
         $page = EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'slug' => 'page-'.Str::lower(Str::random(8)),
@@ -462,7 +522,7 @@ class EnterpriseWikiClaimAuthoritativeLifecycleTest extends TestCase
                 'block_key' => 'block-0001',
                 'position' => 0,
                 'markdown' => $blockMarkdown,
-                'content_origin' => EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED,
+                'content_origin' => $blockOrigin,
                 'source_type' => 'enterprise_wiki_document',
                 'source_id' => $run->source_id,
                 'source_label' => 'source.pdf',

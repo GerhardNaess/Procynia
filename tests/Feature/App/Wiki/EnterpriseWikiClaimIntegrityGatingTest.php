@@ -16,6 +16,7 @@ use App\Models\Nationality;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageVersionWriter;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiRunFindingsService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -231,14 +232,17 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         // A signal on a superseded (non-current) version must not count as active.
         $this->createClaim($article, $oldVersion, EnterpriseWikiClaim::CONTENT_ORIGIN_INTERNAL_ERROR);
 
-        $newVersion = EnterpriseWikiPageVersion::query()->create([
-            'enterprise_wiki_page_id' => $article->id,
-            'version_number' => 2,
-            'is_current' => true,
+        // Written through the production writer rather than a raw create(): it demotes the
+        // current version inside the same locked transaction before inserting the new one, and
+        // assigns the next version_number itself. Inserting is_current=true directly and demoting
+        // afterwards violates the partial unique index ewpv_page_single_current_unique, which
+        // exists precisely so a page can never have two current versions — the same correction
+        // EnterpriseWikiLineageTest already carries.
+        $newVersion = app(EnterpriseWikiPageVersionWriter::class)->writeNewCurrentVersion($article, [
             'content_markdown' => "# Article\n\nRevised.",
             'generated_by_model' => 'gpt-5',
         ]);
-        $oldVersion->update(['is_current' => false]);
+        $oldVersion->refresh();
 
         $claim = $this->createClaim($article, $newVersion, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
         $this->createSourceReference($claim, $document);
@@ -373,17 +377,48 @@ class EnterpriseWikiClaimIntegrityGatingTest extends TestCase
         $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
         $this->createSourceReference($goodClaim, $document);
         $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT);
+        // The run stays on its non-terminal main status (STATUS_QA, from the fixture). Escalated is
+        // a TERMINAL main status, and reconcileRunDocumentOwnerApprovalState() returns immediately
+        // for a terminal run — every write in it is independently nonTerminal()-guarded as well, so
+        // an owner sync can never resurrect one. Moving a run out of escalated is a separate,
+        // explicit step (wiki:recover-document-flow), as the deep-repair and claim-content-repair
+        // services both document. What this test is actually about is the other half: qa_status =
+        // repair_required must no longer withhold completion.
+        $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
+
+        app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document);
+
+        // The good claim's approval requirement is auto-created but still pending an explicit
+        // owner decision, so the run reaches "awaiting approval" rather than completing outright.
+        $run->refresh();
+        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+    }
+
+    /**
+     * The deliberate counterpart to the test above, and the reason its run is not escalated: a run
+     * whose main status is already terminal is never revived by an owner-reassignment sync, however
+     * satisfiable its approval requirements have become. Recovery is an explicit operator step
+     * (wiki:recover-document-flow), never a side effect of reassigning a document owner — the same
+     * boundary test_owner_reassignment_sync_does_not_complete_a_technically_failed_run relies on.
+     */
+    public function test_owner_reassignment_sync_never_revives_a_terminally_escalated_run(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer);
+        $document = $this->createDocument($customer, $owner);
+        $page = $this->createPendingPage($customer, 'terminally-escalated-page');
+        $version = $this->createCurrentVersion($page);
+        $goodClaim = $this->createClaim($page, $version, EnterpriseWikiClaim::CONTENT_ORIGIN_SOURCE_BASED);
+        $this->createSourceReference($goodClaim, $document);
         $run = $this->createRunAtQaStatus($customer, $page, $version, $document->id, EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED);
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_ESCALATED, 'finished_at' => now()]);
 
         app(EnterpriseWikiDocumentFlowService::class)->syncDocumentOwnerApprovals($document);
 
-        // The good claim's approval requirement is auto-created but still pending an explicit
-        // owner decision, so the run reaches "awaiting approval" rather than completing outright
-        // — the point of this test is that it is no longer stuck at "escalated".
         $run->refresh();
-        $this->assertNotSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
-        $this->assertSame(EnterpriseWikiIngestRun::STATUS_AWAITING_DOCUMENT_OWNER_APPROVAL, $run->status);
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_ESCALATED, $run->status);
+        $this->assertNotNull($run->finished_at);
     }
 
     public function test_owner_reassignment_sync_does_not_complete_a_technically_failed_run(): void

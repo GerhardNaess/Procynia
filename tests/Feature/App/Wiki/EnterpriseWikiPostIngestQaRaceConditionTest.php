@@ -19,6 +19,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiBuildPageLinksService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiVerifyPageClaimsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -307,7 +308,7 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
         // evaluate() (read-only prediction) and a second runForRun() (a no-op against a real
         // service, since qa_status is already the terminal 'passed'), so both must be stubbed
         // on the same mock instance alongside the original throwing expectation.
-        $this->configureUpstreamMocks();
+        $this->configureUpstreamMocks(lintCalls: 2);
         $this->mock(EnterpriseWikiPostIngestQaService::class, function ($mock) use ($run): void {
             $mock->shouldReceive('runForRun')
                 ->once()
@@ -758,7 +759,13 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
             });
     }
 
-    private function configureUpstreamMocks(): void
+    /**
+     * @param  int  $lintCalls  One per continuation pass. A test that also drives
+     *                          `wiki:recover-document-flow` gets a second call, because
+     *                          executeRevalidateAndFinalize() deliberately re-lints so the
+     *                          recovery verdict is judged against the current page state.
+     */
+    private function configureUpstreamMocks(int $lintCalls = 1): void
     {
         $this->mock(EnterpriseWikiBuildPageLinksService::class)
             ->shouldReceive('materializeWikilinksForRun')
@@ -774,14 +781,30 @@ class EnterpriseWikiPostIngestQaRaceConditionTest extends TestCase
             ->once()
             ->andReturn(['pages' => 1, 'claims' => 0, 'skipped' => 0]);
 
-        $this->mock(EnterpriseWikiVerifyPageClaimsService::class)
-            ->shouldReceive('verify')
-            ->once()
-            ->andReturn(['pages' => 1, 'claims' => 0, 'references' => 0, 'skipped' => 0, 'no_support' => 0]);
+        // Claim verification fans out one job per unverified claim since "Parallelize Wiki claim
+        // verification" — the synchronous verify($run) step this flow used to call is gone, and
+        // shouldNotReceive('verify') is what keeps that from creeping back.
+        //
+        // Returning no unverified claims means there is nothing to dispatch, so the flow runs
+        // continueAfterClaimVerification() inline and these tests still exercise the whole
+        // continuation through to QA. Call counts are deliberately left open here: how many times
+        // the flow re-checks for pending claims is exactly what varies between the racing,
+        // retrying and recovering scenarios in this file. The exact counts that carry the race
+        // semantics are the ones on runForRun(), set per test.
+        $verifyPageClaimsMock = $this->mock(EnterpriseWikiVerifyPageClaimsService::class);
+        $verifyPageClaimsMock->shouldNotReceive('verify');
+        $verifyPageClaimsMock->shouldReceive('unverifiedClaimIdsForRun')->andReturn([]);
+        $verifyPageClaimsMock->shouldReceive('hasActiveClaimLeaseForRun')->andReturn(false);
+
+        // performLinkSemanticRepair() runs between lint and QA and does not swallow failures, so
+        // it needs a stub or the fan-in half reaches the real AI-backed repair pass.
+        $this->mock(EnterpriseWikiLinkSemanticRepairService::class)
+            ->shouldReceive('repairForRun')
+            ->andReturn(['pages_reviewed' => 1, 'applied' => 0, 'skipped' => 1, 'failed' => 0]);
 
         $this->mock(EnterpriseWikiAppliedRunLintService::class)
             ->shouldReceive('lint')
-            ->once()
+            ->times($lintCalls)
             ->andReturn([
                 'pages_checked' => 1, 'claims_checked' => 0, 'source_refs_checked' => 0,
                 'links_checked' => 0, 'findings_created' => 0, 'findings_skipped' => 0,

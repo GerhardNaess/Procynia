@@ -442,16 +442,40 @@ class EnterpriseWikiOrphanConceptLinkServiceTest extends TestCase
         $article = $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Artikkel');
         $version = $this->currentVersion($concept);
 
-        Artisan::call('wiki:lint-applied-run', ['--run-id' => $run->id]);
-        $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+        // Seeded rather than produced by lint. Since "strengthen authoritative retrieval and
+        // maintenance" (ade14cc) the applied-run lint no longer emits orphan_concept_page at all —
+        // graph connectivity is observed, not turned into link-coverage findings, and
+        // EnterpriseWikiLinkLintAndSemanticRepairTest::
+        // test_graph_connectivity_is_observed_without_creating_legacy_link_coverage_findings
+        // asserts exactly that for this code. Open rows nevertheless still exist (recorded before
+        // that change), the code is still a valid enum value, and this service exists to clear
+        // them — which is what this test covers.
+        $finding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Concept page has no outgoing link to an article or summary page.',
             'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
         ]);
 
         app(EnterpriseWikiOrphanConceptLinkService::class)->linkConceptToTarget($concept, $article->id, $version->id, $user);
 
+        // The link is real, not just a finding status change: the maintainer's action produced an
+        // actual outgoing canonical wikilink row from the concept page to the article.
+        $this->assertDatabaseHas('enterprise_wiki_page_links', [
+            'customer_id' => $customer->id,
+            'from_page_id' => $concept->id,
+            'to_page_id' => $article->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+        ]);
+
+        // ...and the item is gone from the maintainer's quality list, which is the user-facing
+        // promise of the feature.
         $this->assertDatabaseHas('enterprise_wiki_lint_findings', [
+            'id' => $finding->id,
             'enterprise_wiki_page_id' => $concept->id,
             'code' => EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE,
             'status' => EnterpriseWikiLintFinding::STATUS_RESOLVED,

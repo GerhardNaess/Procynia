@@ -184,6 +184,17 @@ class EnterpriseWikiBestPracticeSectionFindingsTest extends TestCase
             'position' => $position,
             'markdown' => $markdown,
             'content_origin' => $contentOrigin,
+            // Required since "Fix Wiki best practice claim extraction" (c98bda5): a block counts as
+            // best practice only when it also carries a non-empty best_practice_reason. Without it
+            // hasRenderableBestPracticeMetadata() treats the block as a hard section boundary, so a
+            // heading block is discarded and its paragraph starts a headingless section — which
+            // falls back to the claim's own text as the display title. The same rule is enforced
+            // in the frontend (wikiBestPracticeSectionLogic.js) and at extraction, where
+            // claimCandidateBlocks() throws for a best_practice block with no reason — so a block
+            // shaped like the old fixture cannot occur in real data at all.
+            'best_practice_reason' => $contentOrigin === EnterpriseWikiClaim::CONTENT_ORIGIN_BEST_PRACTICE
+                ? 'Procynia-generert beste praksis.'
+                : null,
         ];
     }
 
