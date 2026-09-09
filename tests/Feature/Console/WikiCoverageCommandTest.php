@@ -48,7 +48,28 @@ class WikiCoverageCommandTest extends TestCase
             ->expectsOutputToContain('Kildedekning')
             ->expectsOutputToContain('Sidekvalitet')
             ->expectsOutputToContain('Claim-dekning')
+            ->expectsOutputToContain('Lenkegraf')
             ->expectsOutputToContain('Lint og struktur');
+    }
+
+    /**
+     * Orphan detection moved off the lint findings and onto the link graph in "strengthen
+     * authoritative retrieval and maintenance" (ade14cc): computeLint() stopped returning
+     * orphan_pages and computeGraphQuality() started deriving isolated_pages structurally. The
+     * command kept reading the removed key and crashed with "Undefined array key" for every
+     * customer, while never printing the graph section the service already returned.
+     *
+     * Both halves are asserted here: the replacement metric is reported, and the legacy wording
+     * stays gone so a future change cannot quietly reinstate a findings-based orphan count.
+     */
+    public function test_isolated_pages_replace_the_removed_orphan_lint_metric(): void
+    {
+        $customer = $this->createCustomer();
+
+        $this->artisan('wiki:coverage', ['--customer' => (string) $customer->id])
+            ->assertSuccessful()
+            ->expectsOutputToContain('Isolerte sider')
+            ->doesntExpectOutputToContain('Foreldreløse sider');
     }
 
     public function test_reports_gap_for_document_without_applied_run(): void

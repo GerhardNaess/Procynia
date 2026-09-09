@@ -41,6 +41,8 @@ class EnterpriseWikiCoverage extends Command
         $this->newLine();
         $this->printClaimCoverage($result['claim_coverage']);
         $this->newLine();
+        $this->printGraphQuality($result['graph_quality']);
+        $this->newLine();
         $this->printLint($result['lint']);
 
         return self::SUCCESS;
@@ -116,6 +118,34 @@ class EnterpriseWikiCoverage extends Command
         $this->components->twoColumnDetail('Åpne feil', $errorLabel);
         $this->components->twoColumnDetail('Åpne advarsler', $warningLabel);
         $this->components->twoColumnDetail('Info-funn', (string) $lint['open_info']);
-        $this->components->twoColumnDetail('Foreldreløse sider', (string) $lint['orphan_pages']);
+    }
+
+    /**
+     * Graph connectivity, including the isolated-page count that replaced the old
+     * lint['orphan_pages'] figure.
+     *
+     * "Strengthen authoritative retrieval and maintenance" (ade14cc) moved orphan detection off the
+     * lint findings and onto the link graph in the same commit: computeLint() stopped returning
+     * orphan_pages, and computeGraphQuality() started deriving isolated_pages structurally from
+     * enterprise_wiki_page_links. Connectivity is observed, not raised as a finding — see
+     * EnterpriseWikiLinkLintAndSemanticRepairTest::
+     * test_graph_connectivity_is_observed_without_creating_legacy_link_coverage_findings.
+     *
+     * This command was never updated for either half, so it both crashed on the removed key and
+     * silently discarded the graph_quality section the service had been returning all along.
+     *
+     * @param  array<string, int>  $gq
+     */
+    private function printGraphQuality(array $gq): void
+    {
+        $isolatedLabel = $gq['isolated_pages'] > 0 ? "<fg=yellow>{$gq['isolated_pages']}</>" : '0';
+
+        $this->components->twoColumnDetail('<fg=cyan;options=bold>Lenkegraf</>');
+        $this->components->twoColumnDetail('Kanoniske lenker', (string) $gq['canonical_edges']);
+        $this->components->twoColumnDetail('Sider med utgående lenker', (string) $gq['pages_with_outgoing_links']);
+        $this->components->twoColumnDetail('Sider uten utgående lenker', (string) $gq['pages_without_outgoing_links']);
+        $this->components->twoColumnDetail('Sider med innkommende lenker', (string) $gq['pages_with_incoming_links']);
+        $this->components->twoColumnDetail('Sider uten innkommende lenker', (string) $gq['pages_without_incoming_links']);
+        $this->components->twoColumnDetail('Isolerte sider', $isolatedLabel);
     }
 }
