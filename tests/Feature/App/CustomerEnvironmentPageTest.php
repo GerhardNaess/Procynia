@@ -77,11 +77,21 @@ class CustomerEnvironmentPageTest extends TestCase
         });
     }
 
-    public function test_contributor_cannot_access_customer_environment_page(): void
+    /**
+     * The page is gated on canManageCustomerUsers(), and since "Add configurable role permissions
+     * and bid status improvements" (52f8b32) create_users defaults to
+     * ['system_owner', 'bid_manager', 'contributor'] — so a contributor reaches it. What a
+     * contributor still cannot do is manage departments: that is a separate permission
+     * (create_departments, ['system_owner']), asserted here so the read access above cannot be
+     * mistaken for full environment administration.
+     */
+    public function test_contributor_can_access_customer_environment_page_without_department_management(): void
     {
         $context = $this->customerUserContext();
 
-        $this->actingAs($context['user'])->get('/app/customer-environment')->assertForbidden();
+        $this->actingAs($context['user'])->get('/app/customer-environment')->assertOk();
+
+        $this->actingAs($context['user'])->get('/app/departments/create')->assertForbidden();
     }
 
     public function test_customer_environment_navigation_respects_customer_management_role(): void
@@ -101,9 +111,14 @@ class CustomerEnvironmentPageTest extends TestCase
             ->assertViewHas('page', fn ($page): bool => (bool) data_get($page, 'props.auth.user.can_manage_customer_users')
                 && ! data_get($page, 'props.auth.user.can_manage_customer_departments'));
 
+        // A contributor has create_users by default, so the nav flag is true — and it agrees with
+        // the backend gate, which is the property that matters: page access and nav visibility read
+        // the same capability rather than drifting apart. Department management stays false, the
+        // same split the bid manager above shows.
         $this->actingAs($contributor['user'])
             ->get('/app/dashboard')
-            ->assertViewHas('page', fn ($page): bool => ! data_get($page, 'props.auth.user.can_manage_customer_users'));
+            ->assertViewHas('page', fn ($page): bool => (bool) data_get($page, 'props.auth.user.can_manage_customer_users')
+                && ! data_get($page, 'props.auth.user.can_manage_customer_departments'));
     }
 
     public function test_department_scoped_bid_manager_only_sees_scoped_environment_data(): void

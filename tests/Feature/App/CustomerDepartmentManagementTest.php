@@ -56,11 +56,25 @@ class CustomerDepartmentManagementTest extends TestCase
         $this->actingAs($context['admin'])->get("/app/departments/{$department->id}/edit")->assertOk();
     }
 
-    public function test_customer_user_cannot_access_departments_index(): void
+    /**
+     * Reading the department list and changing it are two different permissions.
+     *
+     * Since "Add configurable role permissions and bid status improvements" (52f8b32) the index is
+     * gated on canManageCustomerUsers(), whose create_users permission defaults to
+     * ['system_owner', 'bid_manager', 'contributor'] — so a contributor legitimately sees the list.
+     * Every write route additionally requires canCreateCustomerDepartments(), whose
+     * create_departments permission defaults to ['system_owner'] alone; that restriction is proven
+     * by test_customer_user_cannot_manage_department_routes below, which still expects 403 for
+     * create/store/edit/update. This test therefore asserts read access, not a missing denial.
+     */
+    public function test_customer_user_can_read_but_not_change_the_departments_index(): void
     {
         $context = $this->customerUserContext();
 
-        $this->actingAs($context['user'])->get('/app/departments')->assertForbidden();
+        $this->actingAs($context['user'])->get('/app/departments')->assertOk();
+
+        // The read above must not imply any write capability.
+        $this->actingAs($context['user'])->get('/app/departments/create')->assertForbidden();
     }
 
     public function test_customer_user_cannot_manage_department_routes(): void
