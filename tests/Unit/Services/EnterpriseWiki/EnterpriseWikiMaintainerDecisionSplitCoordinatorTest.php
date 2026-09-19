@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Exceptions\EnterpriseWikiMaintainerDecisionBatchFailedException;
 use App\Services\EnterpriseWiki\EnterpriseWikiCanonicalOwnershipValidator;
+use App\Services\EnterpriseWiki\EnterpriseWikiConceptIdentityMatcher;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentSectionMap;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionConsistencyValidator;
@@ -456,9 +457,13 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         ];
     }
 
-    private function mention(string $name): array
+    /** @param array<string, mixed> $overrides */
+    private function mention(string $name, array $overrides = []): array
     {
-        return ['name' => $name, 'concept_type' => 'process', 'mentioned_context' => 'section 2'];
+        return array_merge(
+            ['name' => $name, 'concept_type' => 'process', 'mentioned_context' => 'section 2'],
+            $overrides,
+        );
     }
 
     private function batch(array $candidates, array $pages): array
@@ -548,5 +553,207 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinatorTest extends TestCase
         $this->expectException(EnterpriseWikiMaintainerDecisionBatchFailedException::class);
 
         $this->coordinator()->decide($this->planning('text', [], [], []), 'no');
+    }
+
+    // =========================================================================
+    // Run 24 — identity consolidation BEFORE batching.
+    //
+    // Phase 1 emitted "Detection & Threat Hunting" (index 5) and "Threat hunting" (index 8).
+    // EnterpriseWikiConceptIdentityMatcher::sameIdentity() calls those one concept, but
+    // preparePersistedCandidateBatches() used to array_slice() the raw list, so a batch size of 6
+    // put them in batch 0 and batch 1. Neither batch could see the other, each decided "create",
+    // and the merger — applying that same identity rule to the two page titles — aborted the whole
+    // decision. These tests pin the rule down at the only place that can still prevent it.
+    // =========================================================================
+
+    public function test_run_24_pair_is_one_identity_and_consolidates_to_a_single_candidate(): void
+    {
+        // The premise, stated as an assertion rather than assumed: this really is the project's own
+        // identity rule firing, not a new heuristic introduced here.
+        $this->assertTrue(EnterpriseWikiConceptIdentityMatcher::sameIdentity('Detection & Threat Hunting', 'Threat hunting'));
+
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('Detection & Threat Hunting', ['concept_type' => 'kapabilitet', 'mentioned_context' => 'IRT-roller og deteksjonsutvikling', 'section_keys' => ['sec-3']]),
+            $this->mention('Threat hunting', ['concept_type' => 'praksis/metodikk', 'mentioned_context' => 'deteksjonsutvikling og IRT-støtte', 'section_keys' => ['sec-7']]),
+        ]);
+
+        $this->assertCount(1, $consolidated);
+        // First occurrence is canonical — the same rule the merger already uses when it dedupes
+        // identity-matched candidates, so the two stages cannot disagree about the phrasing.
+        $this->assertSame('Detection & Threat Hunting', $consolidated[0]['name']);
+
+        // EVIDENCE FROM BOTH MENTIONS SURVIVES. section_keys is the load-bearing one: it decides
+        // which sections phase 2 is shown in full text, so the surviving candidate must be routed
+        // to every section either mention pointed at.
+        $this->assertSame(['sec-3', 'sec-7'], $consolidated[0]['section_keys']);
+        $this->assertSame('IRT-roller og deteksjonsutvikling; deteksjonsutvikling og IRT-støtte', $consolidated[0]['mentioned_context']);
+        $this->assertSame('kapabilitet; praksis/metodikk', $consolidated[0]['concept_type']);
+    }
+
+    public function test_run_24_near_duplicates_cannot_be_placed_in_different_batches(): void
+    {
+        // The worst case for partitioning: one candidate per batch. Before consolidation this is
+        // precisely what produced two independent "threat hunting" pages.
+        $this->forceSingleCandidatePerBatch();
+
+        $capturedPayloads = [];
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->andReturnUsing(function (array $payload) use (&$capturedPayloads): array {
+                $capturedPayloads[] = $payload;
+
+                if (count($capturedPayloads) <= 2) {
+                    return $this->phaseOneResponses([
+                        $this->mention('Detection & Threat Hunting', ['section_keys' => ['sec-3']]),
+                        $this->mention('Threat hunting', ['section_keys' => ['sec-7']]),
+                    ])[count($capturedPayloads) - 1];
+                }
+
+                $userText = (string) data_get($payload, 'input.1.content.0.text', '');
+                preg_match_all('/"name":\s*"([^"]+)"/', explode('CANDIDATES TO DECIDE IN THIS BATCH', $userText)[1] ?? '', $matches);
+                $names = $matches[1];
+
+                return $this->completedResponse($this->batch(
+                    array_map(fn (string $name): array => $this->candidate($name, 'create'), $names),
+                    array_map(fn (string $name): array => $this->page($name), $names),
+                ));
+            });
+
+        $decision = $this->coordinator()->decide($this->planning('Deteksjonsutvikling og threat hunting i SOC. ', [], [], []), 'no');
+        $parsed = EnterpriseWikiMaintainerDecisionPrompt::parse($decision);
+
+        // Two phase-1 calls plus exactly ONE batch call. With max_candidates_per_batch = 1, a
+        // second batch would mean the pair had been split — the run 24 failure mode.
+        $this->assertCount(3, $capturedPayloads);
+        $this->assertCount(1, $parsed['concept_candidates']);
+        $this->assertSame('Detection & Threat Hunting', $parsed['concept_candidates'][0]['name']);
+        $this->assertCount(1, $parsed['concept_pages']);
+    }
+
+    public function test_batch_sizing_is_computed_after_consolidation(): void
+    {
+        // Four mentions, two of which are one concept => three candidates => two batches, not four.
+        config(['ai_capacity.operations.enterprise_wiki_maintainer_decision.batch.max_candidates_per_batch' => 2]);
+
+        $prepared = $this->prepareBatchesFor([
+            $this->mention('Detection & Threat Hunting'),
+            $this->mention('Incident Management'),
+            $this->mention('Threat hunting'),
+            $this->mention('Problem Management'),
+        ]);
+
+        $this->assertCount(3, $prepared['global_plan']['concept_candidate_mentions']);
+        $this->assertCount(2, $prepared['batches']);
+        // Every consolidated candidate is batched exactly once — consolidation removes duplicates,
+        // never candidates.
+        $this->assertSame(3, array_sum(array_map(fn (array $batch): int => count($batch['mentions']), $prepared['batches'])));
+    }
+
+    public function test_exact_duplicate_mentions_are_consolidated(): void
+    {
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('Incident Management', ['section_keys' => ['sec-1']]),
+            $this->mention('Incident Management', ['section_keys' => ['sec-4']]),
+        ]);
+
+        $this->assertCount(1, $consolidated);
+        $this->assertSame(['sec-1', 'sec-4'], $consolidated[0]['section_keys']);
+        // Identical free text is not repeated back to the model as "section 2; section 2".
+        $this->assertSame('section 2', $consolidated[0]['mentioned_context']);
+    }
+
+    public function test_subset_rule_near_duplicates_are_consolidated(): void
+    {
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('ITIL Incident Management'),
+            $this->mention('Incident Management'),
+        ]);
+
+        $this->assertCount(1, $consolidated);
+        $this->assertSame('ITIL Incident Management', $consolidated[0]['name']);
+    }
+
+    public function test_distinct_concepts_are_never_consolidated(): void
+    {
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('Incident Management', ['section_keys' => ['sec-1']]),
+            $this->mention('Problem Management', ['section_keys' => ['sec-2']]),
+            $this->mention('Change Management', ['section_keys' => ['sec-3']]),
+        ]);
+
+        $this->assertCount(3, $consolidated);
+        $this->assertSame(
+            ['Incident Management', 'Problem Management', 'Change Management'],
+            array_column($consolidated, 'name'),
+        );
+        $this->assertSame(['sec-1'], $consolidated[0]['section_keys']);
+    }
+
+    /**
+     * The single-token rule in EnterpriseWikiConceptIdentityMatcher exists so a subset match
+     * against a lone generic word cannot swallow half the wiki. Consolidation must inherit that
+     * rule exactly — widening identity semantics here would silently merge unrelated candidates
+     * before any batch ever sees them, which is a far worse failure than the one being fixed.
+     */
+    public function test_single_token_rule_is_not_widened_by_consolidation(): void
+    {
+        $this->assertFalse(EnterpriseWikiConceptIdentityMatcher::sameIdentity('Management', 'Change Management'));
+
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('Management'),
+            $this->mention('Change Management'),
+            $this->mention('SIEM'),
+            $this->mention('SIEM'),
+        ]);
+
+        // "Management" stays separate from "Change Management"; only the exact SIEM repeat folds.
+        $this->assertSame(['Management', 'Change Management', 'SIEM'], array_column($consolidated, 'name'));
+    }
+
+    public function test_consolidation_preserves_phase_one_order_and_is_idempotent(): void
+    {
+        $mentions = [
+            $this->mention('Incident Management'),
+            $this->mention('Detection & Threat Hunting'),
+            $this->mention('Problem Management'),
+            $this->mention('Threat hunting'),
+        ];
+
+        $once = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity($mentions);
+
+        // The survivor keeps the FIRST occurrence's position, so the candidate ordering phase 1
+        // produced is never reshuffled.
+        $this->assertSame(
+            ['Incident Management', 'Detection & Threat Hunting', 'Problem Management'],
+            array_column($once, 'name'),
+        );
+
+        $this->assertSame($once, EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity($once));
+    }
+
+    public function test_mentions_without_section_keys_are_consolidated_without_inventing_any(): void
+    {
+        $consolidated = EnterpriseWikiMaintainerDecisionSplitCoordinator::consolidateMentionsByIdentity([
+            $this->mention('Detection & Threat Hunting'),
+            $this->mention('Threat hunting'),
+        ]);
+
+        $this->assertCount(1, $consolidated);
+        // "Not routable" must stay "not routable" — sectionKeysForMentions() answers an empty list
+        // with the complete catalog, so fabricating a key here would SHRINK the batch's context.
+        $this->assertSame([], $consolidated[0]['section_keys']);
+    }
+
+    /** @param list<array<string, mixed>> $mentions */
+    private function prepareBatchesFor(array $mentions): array
+    {
+        $this->mockSequentialResponses($this->phaseOneResponses($mentions));
+
+        return $this->coordinator()->preparePersistedCandidateBatches(
+            $this->planning('Deteksjonsutvikling og threat hunting i SOC. ', [], [], []),
+            'no',
+        );
     }
 }

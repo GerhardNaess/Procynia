@@ -154,7 +154,12 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         $globalPlan = EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(
             $this->decideGlobalPlan($planning, $this->languageName($languageCode), $context),
         );
-        $mentions = $globalPlan['concept_candidate_mentions'];
+        // BEFORE sizing and BEFORE array_slice(): two mentions the project's own identity rule
+        // already calls one concept must never be able to land in different batches, where neither
+        // can see the other's decision. Writing the result back onto the plan keeps the persisted
+        // input_payload, the log line below and the batches describing the same candidate list.
+        $mentions = self::consolidateMentionsByIdentity($globalPlan['concept_candidate_mentions']);
+        $globalPlan['concept_candidate_mentions'] = $mentions;
         $sizes = $this->capacityPlanner->planBatchCount(self::CAPACITY_OPERATION_TYPE, self::MODEL, count($mentions));
         $offset = 0;
         $batches = [];
@@ -171,6 +176,120 @@ class EnterpriseWikiMaintainerDecisionSplitCoordinator
         }
 
         return ['global_plan' => $globalPlan, 'batches' => $batches];
+    }
+
+    /**
+     * Collapse mentions that EnterpriseWikiConceptIdentityMatcher already considers ONE concept, so
+     * a single concept can never be handed to two batches that cannot see each other's decisions.
+     *
+     * Run 24 failed in exactly that gap. Phase 1 emitted "Detection & Threat Hunting" (index 5) and
+     * "Threat hunting" (index 8); sameIdentity() calls those one concept; a batch size of 6 put them
+     * in batch 0 and batch 1; each batch independently decided "create" and invented its own page
+     * and slug. The collision was caught only afterwards, by EnterpriseWikiMaintainerDecisionMerger
+     * applying that SAME identity rule to the two resulting page titles and aborting the whole
+     * decision. The knowledge needed to prevent it was already in the codebase — it was just used
+     * one phase too late. This is that rule, applied at the only place that can still act on it:
+     * before batch sizes are computed and before array_slice() partitions the list.
+     *
+     * NOTHING IS DISCARDED EXCEPT A REDUNDANT NAME. The surviving mention keeps the declared
+     * four-field shape — candidateBatchUserPrompt() json_encode()s mentions verbatim into the batch
+     * prompt, and that prompt states an entry has ONLY those fields — and every field that carries
+     * information is combined rather than overwritten:
+     *
+     *  - name: the FIRST occurrence, in phase 1's own ordering. This is deliberately the same
+     *    "first seen wins" rule EnterpriseWikiMaintainerDecisionMerger already applies when it
+     *    dedupes identity-matched candidates, so the two stages agree on which phrasing is
+     *    canonical instead of each picking its own.
+     *  - concept_type and mentioned_context: every DISTINCT value, in first-seen order, joined with
+     *    "; ". Both are free prompt text — neither is read programmatically anywhere in the app — so
+     *    the model is shown both readings rather than one chosen arbitrarily.
+     *  - section_keys: the UNION. This is the load-bearing field: sectionKeysForMentions() turns it
+     *    into the sections phase 2 is shown in FULL TEXT. Merging can therefore only ever widen the
+     *    surviving candidate's evidence window, never narrow it — the consolidated candidate sees
+     *    every section either mention pointed at.
+     *
+     * Entries are guaranteed to be arrays: the only caller parses through
+     * EnterpriseWikiMaintainerDecisionPrompt::parseGlobalPlan(), which throws when a mention is not
+     * an object.
+     *
+     * @param  list<array<string, mixed>>  $mentions
+     * @return list<array<string, mixed>>
+     */
+    public static function consolidateMentionsByIdentity(array $mentions): array
+    {
+        /** @var list<array<string, mixed>> $canonical */
+        $canonical = [];
+
+        foreach ($mentions as $mention) {
+            $name = trim((string) ($mention['name'] ?? ''));
+            $matchIndex = null;
+
+            // An unnamed mention has no identity to match on, so it is always kept as its own
+            // entry — consolidation must never be the thing that removes a candidate.
+            if ($name !== '') {
+                foreach ($canonical as $index => $kept) {
+                    if (EnterpriseWikiConceptIdentityMatcher::sameIdentity($name, trim((string) ($kept['name'] ?? '')))) {
+                        $matchIndex = $index;
+
+                        break;
+                    }
+                }
+            }
+
+            if ($matchIndex === null) {
+                $canonical[] = $mention;
+
+                continue;
+            }
+
+            $canonical[$matchIndex] = self::mergeMentionIntoCanonical($canonical[$matchIndex], $mention);
+        }
+
+        return $canonical;
+    }
+
+    /**
+     * Fold $incoming into the canonical mention it matched. Position in the list is the canonical
+     * entry's, so consolidation never reorders the candidates phase 1 produced.
+     *
+     * @param  array<string, mixed>  $canonical
+     * @param  array<string, mixed>  $incoming
+     * @return array<string, mixed>
+     */
+    private static function mergeMentionIntoCanonical(array $canonical, array $incoming): array
+    {
+        foreach (['concept_type', 'mentioned_context'] as $field) {
+            $canonical[$field] = self::joinDistinctText(
+                (string) ($canonical[$field] ?? ''),
+                (string) ($incoming[$field] ?? ''),
+            );
+        }
+
+        $canonical['section_keys'] = array_values(array_unique(array_merge(
+            EnterpriseWikiMaintainerDecisionPrompt::mentionSectionKeys($canonical),
+            EnterpriseWikiMaintainerDecisionPrompt::mentionSectionKeys($incoming),
+        )));
+
+        return $canonical;
+    }
+
+    /**
+     * Both values, first-seen order, "; "-joined — minus empties and exact repeats, so two mentions
+     * that happened to phrase a field identically do not produce "section 2; section 2".
+     */
+    private static function joinDistinctText(string $first, string $second): string
+    {
+        $parts = [];
+
+        foreach ([$first, $second] as $value) {
+            $value = trim($value);
+
+            if ($value !== '' && ! in_array($value, $parts, true)) {
+                $parts[] = $value;
+            }
+        }
+
+        return implode('; ', $parts);
     }
 
     /** @return array<string, mixed> */

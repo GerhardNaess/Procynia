@@ -81,9 +81,10 @@ class EnterpriseWikiMaintainerDecisionMerger
                     }
 
                     throw EnterpriseWikiMaintainerDecisionMergeConflictException::conflictingPageSlug(
-                        $title,
+                        $existing['title'],
                         $existing['proposed_slug'],
                         $existing['batch'],
+                        $title,
                         $slug,
                         $batchIndex,
                     );

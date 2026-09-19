@@ -183,6 +183,33 @@ class EnterpriseWikiMaintainerDecisionMergerTest extends TestCase
         }
     }
 
+    /**
+     * The two colliding titles are matched by EnterpriseWikiConceptIdentityMatcher, so they are
+     * routinely DIFFERENT strings. Run 24 reported 'Page "Threat hunting" was proposed with slug
+     * "deteksjonsutvikling-threat-hunting" in batch 0' — but batch 0 had proposed no such page; the
+     * message reused the second proposal's title for both sides, and the real first title had to be
+     * dug out of the persisted batch payloads. Both proposals must be reported in full.
+     */
+    public function test_page_slug_conflict_message_reports_both_titles_and_slugs(): void
+    {
+        try {
+            $this->merger()->merge($this->globalPlan(), [
+                $this->batch([], [$this->page('Deteksjonsutvikling og threat hunting', 'deteksjonsutvikling-threat-hunting')]),
+                $this->batch([], [$this->page('Threat hunting', 'threat-hunting')]),
+            ]);
+            $this->fail('Expected EnterpriseWikiMaintainerDecisionMergeConflictException.');
+        } catch (EnterpriseWikiMaintainerDecisionMergeConflictException $e) {
+            $message = $e->getMessage();
+
+            $this->assertStringContainsString('Deteksjonsutvikling og threat hunting', $message);
+            $this->assertStringContainsString('deteksjonsutvikling-threat-hunting', $message);
+            $this->assertStringContainsString('Threat hunting', $message);
+            $this->assertStringContainsString('threat-hunting', $message);
+            $this->assertStringContainsString('batch 0', $message);
+            $this->assertStringContainsString('batch 1', $message);
+        }
+    }
+
     // 30. A candidate marked reference_only with no owning page is passed through as-is — the
     // merger never fills in or hides a missing owning_page_title; that is the consistency
     // validator's job, running after this merge.
