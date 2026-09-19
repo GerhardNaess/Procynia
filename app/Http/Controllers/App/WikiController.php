@@ -1685,6 +1685,16 @@ class WikiController extends Controller
         $rawReviewClaimId = $request->query('claim_id');
         $rawBackUrl = $request->query('back_url');
         $backUrl = is_string($rawBackUrl) ? $this->normalizeReviewBackUrl($rawBackUrl) : null;
+
+        // Where this page was opened from, resolved SERVER-SIDE from the URL rather than from
+        // browser history. That is what makes the back link survive a reload, a new tab, an
+        // Inertia visit that rewrote history, or a link someone pasted to a colleague: the origin
+        // travels in the address, so every render of this URL resolves the same destination.
+        // Null for a page opened straight from the Wiki list — the plain "Tilbake til Wiki".
+        $graphReturnUrl = is_string($rawBackUrl) ? $this->normalizeGraphReturnUrl($rawBackUrl) : null;
+        $navigationOrigin = $graphReturnUrl !== null
+            ? ['context' => 'graph', 'back_url' => $graphReturnUrl]
+            : null;
         $reviewReference = ($rawReviewClaimId !== null && $rawReviewClaimId !== '' && is_numeric($rawReviewClaimId))
             ? $this->buildReviewReference((int) $rawReviewClaimId, $page, $currentVersion, $canApproveWikiClaims, $backUrl)
             : null;
@@ -1756,6 +1766,7 @@ class WikiController extends Controller
             ] : null,
             'review_reference' => $reviewReference,
             'structure_finding' => $structureFinding,
+            'navigation_origin' => $navigationOrigin,
             'claims' => $claims,
             'claim_summary' => $claimSummary,
             'lint_findings' => $lintFindings,

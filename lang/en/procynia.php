@@ -3721,6 +3721,7 @@ return [
         'empty_title' => 'No wiki pages yet',
         'empty_description' => 'Wiki pages are automatically generated from approved knowledge documents.',
         'back' => 'Back to Wiki',
+        'back_to_graph' => 'Back to graph view',
         'version' => 'Version',
         'claims_heading' => 'Claims',
         'no_claims' => 'No claims for this page.',

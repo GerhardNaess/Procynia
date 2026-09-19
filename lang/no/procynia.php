@@ -3721,6 +3721,7 @@ return [
         'empty_title' => 'Ingen wiki-sider ennå',
         'empty_description' => 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.',
         'back' => 'Tilbake til Wiki',
+        'back_to_graph' => 'Tilbake til Grafvisning',
         'version' => 'Versjon',
         'claims_heading' => 'Påstander',
         'no_claims' => 'Ingen påstander for denne siden.',

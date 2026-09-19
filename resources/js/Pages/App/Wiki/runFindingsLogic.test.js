@@ -805,4 +805,68 @@ describe('resolveWikiBackLink — the label follows the return context, not the 
 
         assert.equal(link.href, findingUrl);
     });
+
+    // ── the graph as an origin ────────────────────────────────────────────────
+    //
+    // An article opened from Grafvisning used to offer "Tilbake til Wiki" and drop the user into
+    // the flat page list, losing the place they were exploring. The origin now travels in the
+    // article's own URL and is revalidated server-side, so the label survives a reload, a new tab
+    // and any Inertia navigation in between — none of which history.back() can promise.
+
+    const graphOrigin = { context: 'graph', back_url: '/app/wiki/graph?run_id=24' };
+
+    test('an article opened from the graph returns to the graph', () => {
+        const link = resolveWikiBackLink(null, null, graphOrigin);
+
+        assert.equal(link.context, 'graph');
+        assert.equal(link.href, '/app/wiki/graph?run_id=24');
+    });
+
+    test('the graph scope survives into the href', () => {
+        const { href } = resolveWikiBackLink(null, null, { context: 'graph', back_url: '/app/wiki/graph?page_id=77' });
+
+        assert.equal(new URLSearchParams(href.split('?')[1]).get('page_id'), '77');
+    });
+
+    test('graph navigation stays visually subordinate, unlike a finding return', () => {
+        // It is ordinary navigation, not the middle of a review workflow, so it keeps the discreet
+        // secondary link style rather than becoming a primary button.
+        assert.equal(resolveWikiBackLink(null, null, graphOrigin).isFindingReturn, false);
+    });
+
+    test('a finding being reviewed outranks the graph origin', () => {
+        // Both can be true at once. The reviewer is mid-workflow on that finding, and losing the
+        // way back to it is the more expensive of the two.
+        const link = resolveWikiBackLink({ back_url: findingUrl }, null, graphOrigin);
+
+        assert.equal(link.context, 'finding');
+        assert.equal(link.href, findingUrl);
+    });
+
+    test('an unknown or malformed origin falls back to the plain Wiki link', () => {
+        const unusable = [
+            null,
+            undefined,
+            {},
+            { context: 'dashboard', back_url: '/app/dashboard' },
+            { context: 'graph', back_url: '' },
+            { context: 'graph', back_url: '   ' },
+            { context: 'graph', back_url: null },
+            { context: 'graph' },
+        ];
+
+        for (const origin of unusable) {
+            const link = resolveWikiBackLink(null, null, origin);
+
+            assert.equal(link.context, 'wiki', `unexpected context for ${JSON.stringify(origin)}`);
+            assert.equal(link.href, '/app/wiki');
+            assert.equal(link.isFindingReturn, false);
+        }
+    });
+
+    test('the three contexts are exactly the three the page can be opened from', () => {
+        assert.equal(resolveWikiBackLink({ back_url: findingUrl }, null).context, 'finding');
+        assert.equal(resolveWikiBackLink(null, null, graphOrigin).context, 'graph');
+        assert.equal(resolveWikiBackLink(null, null).context, 'wiki');
+    });
 });

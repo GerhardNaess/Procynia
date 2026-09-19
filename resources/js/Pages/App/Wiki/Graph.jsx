@@ -7,6 +7,7 @@ import forceAtlas2 from 'graphology-layout-forceatlas2';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
 import { truncateLabelToWidth } from './graphLabelLogic';
+import { articleHrefFromGraph } from './wikiGraphNavigation';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -315,7 +316,7 @@ function FilterPanel({
     );
 }
 
-function NodePanel({ node, tw, onClose }) {
+function NodePanel({ node, tw, onClose, graphScope }) {
     if (!node) return null;
     const statusColor = STATUS_RING[node.nodeStatus] ?? STATUS_RING.ok;
     const typeLabel = {
@@ -374,8 +375,11 @@ function NodePanel({ node, tw, onClose }) {
                 ))}
             </dl>
 
+            {/* The article is opened WITH its origin: ?back_url= lets Show.jsx render
+                "Tilbake til Grafvisning" on every render of that URL, reload and new tab
+                included, instead of guessing from browser history. */}
             <a
-                href={node.url}
+                href={articleHrefFromGraph(node.url, graphScope)}
                 className={`flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${PRIMARY_COLOURS}`}
             >
                 {tw.graph_node_open_page ?? 'Åpne side'}
@@ -415,6 +419,13 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     });
     const [showOrphans, setShowOrphans] = useState(true);
     const [openFilterDropdown, setOpenFilterDropdown] = useState(null); // 'documents' | 'owners' | null
+
+    // The part of this view's state that IS representable in a URL, and therefore the part a
+    // return link can restore. Deliberately the same two props WikiGraphController reads.
+    const graphScope = useMemo(
+        () => ({ runId: initialRunId, pageId: initialPageId }),
+        [initialRunId, initialPageId],
+    );
 
     const scope = initialPageId
         ? { type: 'page', pageId: initialPageId }
@@ -904,7 +915,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                     {/* Right sidebar */}
                     {selectedNode && (
                         <div className="w-56 shrink-0">
-                            <NodePanel node={selectedNode} tw={tw} onClose={() => setSelectedNode(null)} />
+                            <NodePanel node={selectedNode} tw={tw} onClose={() => setSelectedNode(null)} graphScope={graphScope} />
                         </div>
                     )}
                 </div>

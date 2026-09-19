@@ -84,22 +84,44 @@ export function focusedFindingLocalFilter(finding, currentFilter) {
 /**
  * The back link at the top of a Wiki page: where it goes and what it is called.
  *
- * Driven by the return context the page was actually opened with, never by the page's type. A page
- * reached from one specific finding carries that finding's return URL on its review_reference /
- * structure_finding (validated server-side by PreservesWikiReviewReturnUrl::normalizeReviewBackUrl(),
- * so it is always this app's own Wiki index) — and that context now survives every approve/reject/
- * edit action on the page, which is what this helper exists to reflect. With no such context the
- * link stays exactly what it always was: the plain Wiki page list.
+ * Driven by the return context the page was actually opened with, never by the page's type. There
+ * are three, in this order of precedence:
  *
- * @returns {{href: string, isFindingReturn: boolean}}
+ *  1. 'finding' — reached from one specific finding, which carries that finding's return URL on its
+ *     review_reference / structure_finding. Highest priority because it is the middle of an active
+ *     review workflow: the reviewer is handling that finding and must get back to it, and the
+ *     context survives every approve/reject/edit action on the page.
+ *  2. 'graph'   — opened from the graph view, which sends its own return URL along.
+ *  3. 'wiki'    — no context at all: the plain Wiki page list, exactly as before.
+ *
+ * Every URL here is validated SERVER-SIDE (PreservesWikiReviewReturnUrl) before it ever reaches
+ * this function, so it is always one of this app's own destinations — this helper decides the
+ * label and the precedence, never whether a URL is safe to render.
+ *
+ * @returns {{href: string, isFindingReturn: boolean, context: 'finding'|'graph'|'wiki'}}
  */
-export function resolveWikiBackLink(reviewReference, structureFinding) {
+export function resolveWikiBackLink(reviewReference, structureFinding, navigationOrigin = null) {
     const findingUrl = reviewReference?.back_url ?? structureFinding?.back_url ?? null;
-    const href = typeof findingUrl === 'string' ? findingUrl.trim() : '';
+    const findingHref = typeof findingUrl === 'string' ? findingUrl.trim() : '';
 
-    return href !== ''
-        ? { href, isFindingReturn: true }
-        : { href: '/app/wiki', isFindingReturn: false };
+    if (findingHref !== '') {
+        return { href: findingHref, isFindingReturn: true, context: 'finding' };
+    }
+
+    // An origin the server did not recognise never reaches us as a context — normalizeGraphReturnUrl()
+    // degrades it to null — but a blank or non-string back_url is still guarded here, so an unknown
+    // origin can only ever fall through to the plain Wiki link rather than render an empty href.
+    const originHref = navigationOrigin?.context === 'graph' && typeof navigationOrigin.back_url === 'string'
+        ? navigationOrigin.back_url.trim()
+        : '';
+
+    if (originHref !== '') {
+        // Ordinary navigation, not a workflow return: it keeps the discreet secondary style that
+        // "Tilbake til Wiki" has always used, which is why isFindingReturn stays false.
+        return { href: originHref, isFindingReturn: false, context: 'graph' };
+    }
+
+    return { href: '/app/wiki', isFindingReturn: false, context: 'wiki' };
 }
 
 export const RUN_TIMELINE_STEPS = [

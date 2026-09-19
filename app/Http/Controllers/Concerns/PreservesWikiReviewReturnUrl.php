@@ -18,10 +18,14 @@ use Illuminate\Http\Request;
  * legal return URL is — WikiController (which reads it off the incoming request) and
  * WikiClaimController (which forwards it through its redirects) can never drift apart.
  *
- * The validation is deliberately a whitelist, not a sanitizer: only this app's own Wiki index with
- * tab=runs is ever accepted, so a caller-supplied back_url can never turn a redirect into an open
- * redirect to another host. Anything else degrades to null, which is exactly the pre-existing
- * "no finding context" behavior.
+ * The same back_url parameter also carries the OTHER origin a Wiki page can be opened from — the
+ * graph view — validated separately by normalizeGraphReturnUrl(). One parameter meaning "where this
+ * page was opened from", one whitelist per destination.
+ *
+ * The validation is deliberately a whitelist, not a sanitizer: each normalizer accepts exactly one
+ * of this app's own paths and nothing else, so a caller-supplied back_url can never turn a redirect
+ * or a rendered link into an open redirect to another host. Anything else degrades to null, which
+ * is exactly the pre-existing "no return context" behavior.
  */
 trait PreservesWikiReviewReturnUrl
 {
@@ -53,6 +57,54 @@ trait PreservesWikiReviewReturnUrl
         parse_str($parsed['query'] ?? '', $query);
 
         return (($query['tab'] ?? null) === 'runs') ? $backUrl : null;
+    }
+
+    /**
+     * The same back_url parameter, validated for the OTHER place a Wiki page is opened from: the
+     * graph view. One parameter, one concept — "where this page was opened from" — with a separate
+     * whitelist per destination, so neither validator can be widened by accident. A graph URL fails
+     * normalizeReviewBackUrl() on its path and a finding URL fails this one, which is what keeps
+     * the two contexts mutually exclusive without either needing to know about the other.
+     *
+     * The query is REBUILT rather than passed through: the graph's only URL-representable state is
+     * its scope (run_id / page_id, read by WikiGraphController), so anything else a caller appends
+     * is dropped instead of being carried back into a rendered link.
+     */
+    protected function normalizeGraphReturnUrl(string $backUrl): ?string
+    {
+        $backUrl = trim($backUrl);
+
+        if ($backUrl === '') {
+            return null;
+        }
+
+        $parsed = parse_url($backUrl);
+
+        if (! is_array($parsed) || ($parsed['path'] ?? null) !== '/app/wiki/graph') {
+            return null;
+        }
+
+        // Same host rule as normalizeReviewBackUrl(): parse_url() reports the path of
+        // "https://evil.example.com/app/wiki/graph" as "/app/wiki/graph" just like a relative URL.
+        $host = $parsed['host'] ?? null;
+
+        if ($host !== null && $host !== parse_url((string) config('app.url'), PHP_URL_HOST) && $host !== request()->getHost()) {
+            return null;
+        }
+
+        parse_str($parsed['query'] ?? '', $query);
+
+        $scope = [];
+
+        foreach (['run_id', 'page_id'] as $key) {
+            $value = $query[$key] ?? null;
+
+            if (is_string($value) && $value !== '' && ctype_digit($value)) {
+                $scope[$key] = $value;
+            }
+        }
+
+        return $scope === [] ? '/app/wiki/graph' : '/app/wiki/graph?'.http_build_query($scope);
     }
 
     /**

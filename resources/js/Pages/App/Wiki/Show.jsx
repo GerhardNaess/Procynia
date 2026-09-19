@@ -337,6 +337,17 @@ const WIKI_SECONDARY_BACK_LINK_CLASS =
     'inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-slate-950';
 
 /**
+ * One label per return context resolveWikiBackLink() can report, so the link never says "Tilbake
+ * til Wiki" while pointing somewhere else. Keyed by context rather than chained conditionals: a
+ * fourth origin adds an entry here and nothing else in this file changes.
+ */
+const WIKI_BACK_LINK_LABELS = {
+    finding: (tw) => tw.review_reference_back_to_findings ?? 'Tilbake til funn',
+    graph: (tw) => tw.back_to_graph ?? 'Tilbake til Grafvisning',
+    wiki: (tw) => tw.back ?? 'Tilbake til Wiki',
+};
+
+/**
  * ReactMarkdown's `a` component override for the article body: EnterpriseWikiWikilinkRenderer
  * rewrites canonical [[slug|anchor]] wikilinks into standard `/app/wiki/{slug}` markdown links
  * server-side, so this only needs to route those internally via Inertia instead of a full page
@@ -793,6 +804,7 @@ export default function WikiShow({
     current_version,
     review_reference: reviewReference = null,
     structure_finding: structureFinding = null,
+    navigation_origin: navigationOrigin = null,
     claims,
     claim_summary: claimSummary = null,
     can_handle_wiki_claims: canHandleWikiClaims = false,
@@ -834,7 +846,7 @@ export default function WikiShow({
     // Top-of-page back link: label and destination both follow the actual return context, so
     // "Tilbake til funn" survives every action taken on the page rather than degrading to the
     // generic Wiki link the moment a claim is approved.
-    const topBackLink = resolveWikiBackLink(reviewReference, structureFinding);
+    const topBackLink = resolveWikiBackLink(reviewReference, structureFinding, navigationOrigin);
     const hasFocusedReview = targetBlockKey !== null;
     const focusedReviewClaims = hasFocusedReview
         ? claims.filter((claim) => String(claim.id) === String(targetClaimId))
@@ -2356,8 +2368,8 @@ export default function WikiShow({
         <CustomerAppLayout title={page.title} showPageTitle={false}>
             <div className="space-y-8">
 
-                {/* Back link — the finding this page was opened from when there is one,
-                    otherwise the plain Wiki page list. */}
+                {/* Back link — the context this page was actually opened from: the finding being
+                    reviewed, the graph view, or otherwise the plain Wiki page list. */}
                 <Link
                     href={topBackLink.href}
                     className={topBackLink.isFindingReturn
@@ -2367,9 +2379,7 @@ export default function WikiShow({
                     <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
                     </svg>
-                    {topBackLink.isFindingReturn
-                        ? (tw.review_reference_back_to_findings ?? 'Tilbake til funn')
-                        : (tw.back ?? 'Tilbake til Wiki')}
+                    {WIKI_BACK_LINK_LABELS[topBackLink.context](tw)}
                 </Link>
 
                 {/* Page header */}
