@@ -804,6 +804,7 @@ export default function WikiShow({
     lint_summary: lintSummary = null,
     can_edit_wiki_claims: canEditWikiClaims = false,
     manual_block_edit: manualBlockEdit = null,
+    working_version_edit: workingVersionEdit = null,
     outgoing_links: outgoingLinks = [],
     incoming_links: incomingLinks = [],
     related_articles: relatedArticles = [],
@@ -857,6 +858,11 @@ export default function WikiShow({
     const [wikiBlockEditDrafts, setWikiBlockEditDrafts] = useState({});
     const [wikiBlockSaveProcessingKey, setWikiBlockSaveProcessingKey] = useState(null);
     const [wikiBlockEditError, setWikiBlockEditError] = useState(null);
+    // Ordinary article editing, separate from the claim-review block editor above: one mode for
+    // the whole article, entered from the Rediger action next to the working version.
+    const [isEditingArticle, setIsEditingArticle] = useState(false);
+    const [articleDrafts, setArticleDrafts] = useState({});
+    const [isSavingArticle, setIsSavingArticle] = useState(false);
     const [documentOwnerApprovalComments, setDocumentOwnerApprovalComments] = useState({});
     const [documentOwnerApprovalProcessing, setDocumentOwnerApprovalProcessing] = useState(null);
     const claimAccessNotice = canHandleWikiClaims
@@ -2200,6 +2206,94 @@ export default function WikiShow({
             .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         : [];
 
+    // Mirrors EnterpriseWikiWorkingVersionBlockEditPolicy exactly — keep the two in step.
+    //
+    //   source_based / best_practice / unsupported_generated_content  editable
+    //   structural / unclassified / internal_error / mixed / anything else  read-only
+    //
+    // Structured blocks (a real table or image) keep their content in table_data/image_data with
+    // Markdown only as a fallback, so editing the fallback would desync the two. Blocks derived
+    // from markdown belong to versions that never had stored blocks — their keys do not exist
+    // server-side. The server enforces all of this independently; this only decides what the
+    // editor offers.
+    const EDITABLE_BLOCK_ORIGINS = ['source_based', 'best_practice', 'unsupported_generated_content', 'human_authored'];
+    const isEditableArticleBlock = (block) => Boolean(block)
+        && !block.is_derived_from_markdown
+        && !block.block_type
+        && !block.table_data
+        && !block.image_data
+        && EDITABLE_BLOCK_ORIGINS.includes(block.content_origin)
+        && typeof block.block_key === 'string'
+        && block.block_key !== '';
+    const editableArticleBlocks = contentBlocks.filter(isEditableArticleBlock);
+    const canEditArticle = Boolean(workingVersionEdit?.can_edit) && editableArticleBlocks.length > 0;
+
+    const startArticleEditing = () => {
+        const drafts = {};
+        editableArticleBlocks.forEach((block) => {
+            drafts[block.block_key] = getWikiBlockRawMarkdown(block);
+        });
+        setArticleDrafts(drafts);
+        setIsEditingArticle(true);
+    };
+
+    // Cancel writes nothing and creates nothing — it only drops the local drafts.
+    const cancelArticleEditing = () => {
+        setArticleDrafts({});
+        setIsEditingArticle(false);
+    };
+
+    // A rejected save keeps the user in edit mode with their text intact (Inertia preserves state
+    // on a validation response), so the reason has to be shown here — the claim-review editor's own
+    // error line lives inside a branch this mode never renders.
+    const articleEditError = errors.blocks
+        ?? Object.entries(errors).find(([key]) => key.startsWith('blocks.'))?.[1]
+        ?? errors.expected_page_version_id
+        ?? null;
+
+    const changedArticleBlocks = () => editableArticleBlocks
+        .filter((block) => (articleDrafts[block.block_key] ?? getWikiBlockRawMarkdown(block)) !== getWikiBlockRawMarkdown(block))
+        .map((block) => ({ block_key: block.block_key, markdown: articleDrafts[block.block_key] }));
+
+    const saveArticleEditing = () => {
+        if (isSavingArticle || !workingVersionEdit?.update_url) return;
+
+        const blocks = changedArticleBlocks();
+
+        // Nothing changed: no request, no version, no AI work.
+        if (blocks.length === 0) {
+            cancelArticleEditing();
+            return;
+        }
+
+        setIsSavingArticle(true);
+        router.patch(
+            workingVersionEdit.update_url,
+            {
+                expected_page_version_id: workingVersionEdit.expected_page_version_id,
+                blocks,
+            },
+            {
+                preserveScroll: true,
+                // A refused save must never behave like Avbryt.
+                //
+                // Inertia calls onSuccess for any non-error response, and this endpoint answers a
+                // refusal with a 302 carrying flash.error — verification could not document the new
+                // text, the version moved under the user, AI was unavailable. Exiting edit mode
+                // there would silently throw the user's writing away and put the old server text
+                // back on screen. So edit mode is only left when the save actually landed; on a
+                // refusal the drafts stay exactly as typed and the user can adjust and retry.
+                // Validation errors (422) never reach onSuccess at all, so they keep the text too.
+                onSuccess: (page) => {
+                    if (! page?.props?.flash?.error) {
+                        cancelArticleEditing();
+                    }
+                },
+                onFinish: () => setIsSavingArticle(false),
+            },
+        );
+    };
+
     // The visual "Beste praksis" section that owns the focused review target, if any. When the
     // target block is part of a multi-block section, the review panel must render AFTER the whole
     // section (below) rather than from inside renderBlock() — placing it inside split the section's
@@ -2330,6 +2424,10 @@ export default function WikiShow({
                     tw={tw}
                     isSystemOwner={isSystemOwner}
                     currentUserId={auth.user?.id ?? null}
+                    workingVersionEdit={workingVersionEdit}
+                    canEditArticle={canEditArticle}
+                    isEditingArticle={isEditingArticle}
+                    onEditArticle={startArticleEditing}
                 />
 
                 {(reviewReference || hasStructureFinding) && (
@@ -2415,6 +2513,31 @@ export default function WikiShow({
                                     // background belong to the whole faglig seksjon and are drawn once, around the
                                     // section (see below), so no individual paragraph is highlighted on its own.
                                     const renderBlock = (block) => {
+                                        // Article editing mode: every editable paragraph becomes a
+                                        // plain text area, in place and in reading order, so the
+                                        // page still reads as one article. Tables, images and
+                                        // derived blocks keep their normal read-only rendering.
+                                        if (isEditingArticle && isEditableArticleBlock(block)) {
+                                            return (
+                                                <div key={block.block_key} className="space-y-1">
+                                                    <label className="sr-only" htmlFor={`wiki-article-edit-${block.block_key}`}>
+                                                        {tw.article_edit_block_label ?? 'Rediger avsnitt'}
+                                                    </label>
+                                                    <textarea
+                                                        id={`wiki-article-edit-${block.block_key}`}
+                                                        value={articleDrafts[block.block_key] ?? getWikiBlockRawMarkdown(block)}
+                                                        onChange={(event) => setArticleDrafts((prev) => ({
+                                                            ...prev,
+                                                            [block.block_key]: event.target.value,
+                                                        }))}
+                                                        disabled={isSavingArticle}
+                                                        rows={Math.min(14, Math.max(3, (articleDrafts[block.block_key] ?? '').split('\n').length + 1))}
+                                                        className="w-full rounded-xl border border-sky-300 bg-white px-3 py-2 text-base leading-7 text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:bg-slate-50"
+                                                    />
+                                                </div>
+                                            );
+                                        }
+
                                         const isTargetBlock = targetBlockKey !== null && block.block_key === targetBlockKey;
                                         const currentBlockMarkdown = getWikiBlockMarkdown(block);
                                         const currentBlockRawMarkdown = getWikiBlockRawMarkdown(block);
@@ -2582,6 +2705,35 @@ export default function WikiShow({
                                     });
                                 })()}
                             </div>
+
+                            {isEditingArticle && articleEditError && (
+                                <p className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-base text-rose-700">
+                                    {articleEditError}
+                                </p>
+                            )}
+
+                            {isEditingArticle && (
+                                <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={cancelArticleEditing}
+                                        disabled={isSavingArticle}
+                                        className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {tw.article_edit_cancel ?? 'Avbryt'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={saveArticleEditing}
+                                        disabled={isSavingArticle}
+                                        className="inline-flex min-h-9 items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isSavingArticle
+                                            ? (tw.article_edit_saving ?? 'Lagrer...')
+                                            : (tw.article_edit_save ?? 'Lagre')}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <p className="text-sm text-slate-400">

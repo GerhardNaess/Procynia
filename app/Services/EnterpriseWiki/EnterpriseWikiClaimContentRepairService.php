@@ -98,6 +98,206 @@ class EnterpriseWikiClaimContentRepairService
     ): array {
         [$submittedMarkdownByBlockKey, $actor] = $this->normalizeManualMixedBlockEdits($contentBlockKey, $markdownOrActor, $actor);
 
+        return $this->applyBlockEdits(
+            $run,
+            $page,
+            $expectedCurrentVersion,
+            $reviewClaim,
+            $submittedMarkdownByBlockKey,
+            $actor,
+            static fn (User $editor): bool => $editor->canApproveWikiClaims(),
+            // Claim repair exists to fix ONE mixed-provenance block's text against its source. That
+            // restriction is this flow's own invariant and stays exactly as it was.
+            static function (array $block, string $blockKey): void {
+                if ((string) ($block['content_origin'] ?? '') !== 'mixed') {
+                    throw new \InvalidArgumentException("Content block [{$blockKey}] is not a mixed-provenance block.");
+                }
+            },
+        );
+    }
+
+    /**
+     * Ordinary manual editing of a page's working version.
+     *
+     * THE USER IS AUTHORITATIVE HERE. An authorized page owner rewriting their own working version
+     * is stating what the page should say; neither an AI nor the original source document gets a
+     * veto over their wording. So this path runs no claim extraction, no verification and no
+     * source re-grounding, needs no ingest run and no source document, and works with AI switched
+     * off entirely. canSubmitEnterpriseWikiPage() is the whole gate — that authorization is
+     * precisely what establishes who may take responsibility for manual text.
+     *
+     * (An earlier version of this method required the edited text to be re-verifiable against the
+     * source before it could be saved. That was the wrong premise: it let the document veto the
+     * page owner, and refused perfectly legitimate copy-edits whose wording simply differed from
+     * the source. The verification machinery still exists and still runs — for claim repair, which
+     * is a different job: there, Procynia is judging claims against sources, and being strict is
+     * the point.)
+     *
+     * HONESTY INSTEAD OF REFUSAL. What the old text's provenance can no longer do is vouch for a
+     * sentence a person has rewritten, so an edited block is recorded as
+     * CONTENT_ORIGIN_HUMAN_AUTHORED and its document provenance is dropped rather than carried
+     * forward as if it still applied. Claims verified against the OLD wording are likewise not
+     * copied onto the new version for blocks that changed. The previous version keeps everything
+     * it had — it is the audit trail.
+     *
+     * @param  array<string, string>|list<array<string, mixed>>  $edits
+     * @return array{
+     *     page_version_id: int,
+     *     previous_page_version_id: int,
+     *     changed_content_block_keys: list<string>,
+     *     copied_claim_ids: list<int>,
+     *     dropped_claim_ids: list<int>
+     * }
+     */
+    public function applyWorkingVersionBlockEdits(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        array $edits,
+        User $actor,
+    ): array {
+        [$submittedMarkdownByBlockKey] = $this->normalizeManualMixedBlockEdits($edits, $actor, null);
+
+        if (! $actor->canSubmitEnterpriseWikiPage($page)) {
+            throw new \InvalidArgumentException('User cannot edit this Wiki page.');
+        }
+
+        return DB::transaction(function () use ($page, $expectedCurrentVersion, $submittedMarkdownByBlockKey, $actor): array {
+            $current = EnterpriseWikiPageVersion::query()
+                ->whereKey($expectedCurrentVersion->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($current === null
+                || (int) $current->enterprise_wiki_page_id !== (int) $page->id
+                || ! $current->is_current
+                || $current->is_staged
+            ) {
+                throw new \RuntimeException("Expected page version [{$expectedCurrentVersion->id}] is no longer current.");
+            }
+
+            $prepared = $this->manualMixedBlockEditedContent(
+                $current,
+                $submittedMarkdownByBlockKey,
+                static function (array $block, string $blockKey): void {
+                    EnterpriseWikiWorkingVersionBlockEditPolicy::assertEditable($block, $blockKey);
+                },
+            );
+
+            $changedBlockKeys = array_keys($prepared['changed_blocks']);
+            $blocks = array_map(
+                fn (array $block): array => in_array(trim((string) ($block['block_key'] ?? '')), $changedBlockKeys, true)
+                    ? $this->humanAuthoredBlock($block)
+                    : $block,
+                $prepared['blocks'],
+            );
+
+            // Through the writer, so the page lock, the version numbering, the single-current
+            // constraint, best-practice carry-forward and the block/provenance guards all apply —
+            // there is no staged phase to keep it out of them any more.
+            $newVersion = $this->versionWriter->writeNewCurrentVersion($page->id, [
+                'content_markdown' => $this->markdownFromBlocks($blocks),
+                'content_blocks_json' => $blocks,
+                'best_practice_review_json' => $current->best_practice_review_json,
+                'generated_by_model' => null,
+                'generation_prompt_hash' => null,
+                'created_by_user_id' => $actor->id,
+            ]);
+
+            // Claims are copied forward ONLY for blocks the user left alone. A claim verified
+            // against the old wording says nothing about the new one, so for a changed block it is
+            // simply not carried over — the previous version still holds it as history.
+            $copiedClaimIds = $this->copyClaimsForUnchangedBlocks(
+                $current,
+                $newVersion,
+                $changedBlockKeys,
+                array_keys($this->blocksByStableKey($current)),
+            );
+
+            $droppedClaimIds = EnterpriseWikiClaim::query()
+                ->where('enterprise_wiki_page_version_id', $current->id)
+                ->whereIn('content_block_key', $changedBlockKeys)
+                ->pluck('id')
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->all();
+
+            // Keep any run pivot pointing at the page's live version, where one exists. A page
+            // never produced by a run edits perfectly well without this.
+            EnterpriseWikiIngestRunPage::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('generated_page_version_id', $current->id)
+                ->update(['generated_page_version_id' => $newVersion->id]);
+
+            Log::info('[PROCYNIA][WIKI_WORKING_VERSION_EDIT] Manual edit saved.', [
+                'page_id' => (int) $page->id,
+                'previous_page_version_id' => (int) $current->id,
+                'page_version_id' => (int) $newVersion->id,
+                'version_number' => (int) $newVersion->version_number,
+                'changed_blocks' => count($changedBlockKeys),
+                'copied_claims' => count($copiedClaimIds),
+                'dropped_claims' => count($droppedClaimIds),
+                'edited_by_user_id' => (int) $actor->id,
+            ]);
+
+            return [
+                'page_version_id' => (int) $newVersion->id,
+                'previous_page_version_id' => (int) $current->id,
+                'changed_content_block_keys' => array_values($changedBlockKeys),
+                'copied_claim_ids' => $copiedClaimIds,
+                'dropped_claim_ids' => $droppedClaimIds,
+            ];
+        });
+    }
+
+    /**
+     * Record an edited block as human-authored and strip the document provenance the old wording
+     * carried. The block keeps its key, position and any structural metadata; what it loses is the
+     * claim that a specific source element documents this text — because it no longer does.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>
+     */
+    private function humanAuthoredBlock(array $block): array
+    {
+        $block['content_origin'] = EnterpriseWikiClaim::CONTENT_ORIGIN_HUMAN_AUTHORED;
+        $block['source_elements'] = [];
+        $block['best_practice_reason'] = null;
+
+        foreach ([
+            'source_type', 'source_id', 'source_label', 'source_hash', 'document_version_hash',
+            'source_element_key', 'source_element_type', 'source_row_key', 'source_excerpt', 'page_reference',
+        ] as $field) {
+            $block[$field] = null;
+        }
+
+        return $block;
+    }
+
+    /**
+     * The one implementation both manual edit paths run through.
+     *
+     * @param  array<string, string>  $submittedMarkdownByBlockKey
+     * @param  \Closure(User): bool  $authorize
+     * @return array{
+     *     page_version_id: int,
+     *     previous_page_version_id: int,
+     *     changed_content_block_keys: list<string>,
+     *     copied_claim_ids: list<int>,
+     *     new_claim_ids: list<int>,
+     *     extracted_claims: int,
+     *     verified_claims: int,
+     *     canonical_fact_ids: list<int>
+     * }
+     */
+    private function applyBlockEdits(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $expectedCurrentVersion,
+        ?EnterpriseWikiClaim $reviewClaim,
+        array $submittedMarkdownByBlockKey,
+        User $actor,
+        \Closure $authorize,
+        \Closure $assertEditable,
+    ): array {
         $this->assertManualMixedBlockEditScope(
             $run,
             $page,
@@ -105,6 +305,7 @@ class EnterpriseWikiClaimContentRepairService
             $reviewClaim,
             array_keys($submittedMarkdownByBlockKey),
             $actor,
+            $authorize,
         );
 
         $stagedVersion = null;
@@ -116,12 +317,18 @@ class EnterpriseWikiClaimContentRepairService
                 $expectedCurrentVersion,
                 $submittedMarkdownByBlockKey,
                 $actor,
+                $assertEditable,
             );
             $stagedVersion = $staged['version'];
-            $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
 
-            if (! array_key_exists($reviewClaimBlockKey, $staged['changed_blocks'])) {
-                throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] must belong to a changed content block.");
+            // Claim-repair only: the finding being repaired must actually have been touched.
+            // Ordinary working-version editing has no such claim, and any changed block is valid.
+            if ($reviewClaim !== null) {
+                $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
+
+                if (! array_key_exists($reviewClaimBlockKey, $staged['changed_blocks'])) {
+                    throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] must belong to a changed content block.");
+                }
             }
 
             $newClaimIds = [];
@@ -138,7 +345,6 @@ class EnterpriseWikiClaimContentRepairService
 
                 $blockClaimIds = $extraction['claim_ids'];
                 $extractedClaims += $extraction['claims'];
-                array_push($newClaimIds, ...$blockClaimIds);
 
                 $verification = $this->verifyPageClaimsService->verifyClaimsForManualMixedBlock(
                     $run->fresh() ?? $run,
@@ -148,6 +354,8 @@ class EnterpriseWikiClaimContentRepairService
                     $blockKey,
                     $blockClaimIds,
                 );
+
+                array_push($newClaimIds, ...$blockClaimIds);
 
                 if ($verification['busy'] > 0) {
                     throw new \RuntimeException("Manual Wiki block edit could not verify all claims for content block [{$blockKey}].");
@@ -286,9 +494,10 @@ class EnterpriseWikiClaimContentRepairService
         EnterpriseWikiIngestRun $run,
         EnterpriseWikiPage $page,
         EnterpriseWikiPageVersion $expectedCurrentVersion,
-        EnterpriseWikiClaim $reviewClaim,
+        ?EnterpriseWikiClaim $reviewClaim,
         array $submittedBlockKeys,
         User $actor,
+        \Closure $authorize,
     ): void {
         if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
             throw new \InvalidArgumentException("Run [{$run->id}] is not applied.");
@@ -317,11 +526,15 @@ class EnterpriseWikiClaimContentRepairService
                 ->where('customer_id', $run->customer_id)
                 ->exists();
 
+        // Defence in depth: the controller has already authorized this, but the service refuses
+        // independently. Which permission that is differs per entry point — claim repair requires a
+        // claim approver, ordinary working-version editing requires the page owner — so the caller
+        // supplies the predicate rather than this method hardcoding one.
         if (! $actorExists
             || (int) ($actor->customer_id ?? 0) !== (int) $run->customer_id
-            || ! $actor->canApproveWikiClaims()
+            || ! $authorize($actor)
         ) {
-            throw new \InvalidArgumentException('User cannot manually edit this Wiki claim.');
+            throw new \InvalidArgumentException('User cannot manually edit this Wiki content.');
         }
 
         $current = EnterpriseWikiPageVersion::query()->find($expectedCurrentVersion->id);
@@ -347,14 +560,16 @@ class EnterpriseWikiClaimContentRepairService
             throw new \InvalidArgumentException("Run [{$run->id}] page [{$page->id}] does not point to expected current page version [{$current->id}].");
         }
 
-        $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
+        if ($reviewClaim !== null) {
+            $reviewClaimBlockKey = trim((string) ($reviewClaim->content_block_key ?? ''));
 
-        if ((int) $reviewClaim->enterprise_wiki_page_id !== (int) $page->id
-            || (int) $reviewClaim->enterprise_wiki_page_version_id !== (int) $current->id
-            || $reviewClaimBlockKey === ''
-            || ! in_array($reviewClaimBlockKey, $submittedBlockKeys, true)
-        ) {
-            throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] does not belong to one of the submitted current page blocks.");
+            if ((int) $reviewClaim->enterprise_wiki_page_id !== (int) $page->id
+                || (int) $reviewClaim->enterprise_wiki_page_version_id !== (int) $current->id
+                || $reviewClaimBlockKey === ''
+                || ! in_array($reviewClaimBlockKey, $submittedBlockKeys, true)
+            ) {
+                throw new \InvalidArgumentException("Review claim [{$reviewClaim->id}] does not belong to one of the submitted current page blocks.");
+            }
         }
 
         $blocksByKey = $this->blocksByStableKey($current);
@@ -380,8 +595,9 @@ class EnterpriseWikiClaimContentRepairService
         EnterpriseWikiPageVersion $expectedCurrentVersion,
         array $submittedMarkdownByBlockKey,
         User $actor,
+        \Closure $assertEditable,
     ): array {
-        return DB::transaction(function () use ($run, $page, $expectedCurrentVersion, $submittedMarkdownByBlockKey, $actor): array {
+        return DB::transaction(function () use ($run, $page, $expectedCurrentVersion, $submittedMarkdownByBlockKey, $actor, $assertEditable): array {
             $lockedPage = EnterpriseWikiPage::query()
                 ->whereKey($page->id)
                 ->lockForUpdate()
@@ -414,7 +630,7 @@ class EnterpriseWikiClaimContentRepairService
                 throw new \RuntimeException("Run [{$run->id}] page [{$lockedPage->id}] no longer points to expected current page version [{$current->id}].");
             }
 
-            $prepared = $this->manualMixedBlockEditedContent($current, $submittedMarkdownByBlockKey);
+            $prepared = $this->manualMixedBlockEditedContent($current, $submittedMarkdownByBlockKey, $assertEditable);
 
             $stagedVersion = EnterpriseWikiPageVersion::query()->create([
                 'enterprise_wiki_page_id' => $lockedPage->id,
@@ -423,6 +639,12 @@ class EnterpriseWikiClaimContentRepairService
                 'is_staged' => true,
                 'content_markdown' => $this->markdownFromBlocks($prepared['blocks']),
                 'content_blocks_json' => $prepared['blocks'],
+                // Same rule as EnterpriseWikiPageVersionWriter::carryForwardBestPracticeReview(),
+                // restated because this path creates and promotes its version directly instead of
+                // going through that writer. Without it a manual edit silently drops the page's
+                // recorded best-practice assessment — exactly what
+                // assertBestPracticeReviewSurvived() exists to make impossible.
+                'best_practice_review_json' => $current->best_practice_review_json,
                 'generated_by_model' => null,
                 'generation_prompt_hash' => null,
                 'created_by_user_id' => $actor->id,
@@ -448,7 +670,7 @@ class EnterpriseWikiClaimContentRepairService
      *     changed_blocks: array<string, array<string, mixed>>
      * }
      */
-    private function manualMixedBlockEditedContent(EnterpriseWikiPageVersion $current, array $submittedMarkdownByBlockKey): array
+    private function manualMixedBlockEditedContent(EnterpriseWikiPageVersion $current, array $submittedMarkdownByBlockKey, \Closure $assertEditable): array
     {
         $blocksByKey = $this->blocksByStableKey($current);
         $unknownKeys = array_values(array_diff(array_keys($submittedMarkdownByBlockKey), array_keys($blocksByKey)));
@@ -477,9 +699,10 @@ class EnterpriseWikiClaimContentRepairService
                 continue;
             }
 
-            if ((string) ($block['content_origin'] ?? '') !== 'mixed') {
-                throw new \InvalidArgumentException("Content block [{$blockKey}] is not a mixed-provenance block.");
-            }
+            // Which blocks an edit may touch is the caller's rule, not a property of editing:
+            // claim repair only ever repairs a mixed-provenance block, while ordinary editing may
+            // touch any block whose Markdown is the whole of its content.
+            $assertEditable($block, $blockKey);
 
             $block['markdown'] = $nextMarkdown;
             $blocks[$index] = $block;

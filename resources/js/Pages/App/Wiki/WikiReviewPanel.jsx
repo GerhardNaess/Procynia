@@ -68,7 +68,34 @@ const REQUIREMENT_STATUS = {
     rejected: { label: 'Endringer kreves', cls: 'bg-rose-100 text-rose-700' },
 };
 
-export default function WikiReviewPanel({ page, currentVersion, reviewAssignment, tw = {}, isSystemOwner = false, currentUserId = null }) {
+/**
+ * Why manual editing is unavailable, in words the page owner can act on. `not_authorized` returns
+ * null on purpose: someone who may not edit should simply not see the action, while someone who
+ * may edit but currently cannot deserves to know why rather than find the button missing.
+ */
+function articleEditUnavailableText(reason, tw) {
+    // Deliberately no AI-related reason: manual editing does not use AI, so whether it is enabled
+    // has nothing to say about whether the page owner may write.
+    if (reason === 'no_editable_version') {
+        return tw.article_edit_unavailable_no_version
+            ?? 'Denne versjonen kan ikke redigeres manuelt.';
+    }
+
+    return null;
+}
+
+export default function WikiReviewPanel({
+    page,
+    currentVersion,
+    reviewAssignment,
+    tw = {},
+    isSystemOwner = false,
+    currentUserId = null,
+    workingVersionEdit = null,
+    canEditArticle = false,
+    isEditingArticle = false,
+    onEditArticle = null,
+}) {
     const [processing, setProcessing] = useState(null);
     const [isSubmitOpen, setIsSubmitOpen] = useState(false);
     const [reviewerId, setReviewerId] = useState('');
@@ -94,7 +121,13 @@ export default function WikiReviewPanel({ page, currentVersion, reviewAssignment
     const canSubmit = reviewAssignment.can_submit && page.status === 'draft';
     const canReopen = reviewAssignment.can_submit && isReturned;
     const blocker = blockerMessage(reviewAssignment.final_approval_blocker, gate, tw);
-    const showsAnything = canSubmit || canReopen || isInReview || isReturned || requirements.length > 0;
+    // The Rediger action lives here, next to the working version it edits — so the panel must also
+    // render when editing is the only thing on offer.
+    const editUnavailableText = articleEditUnavailableText(workingVersionEdit?.unavailable_reason, tw);
+    const showsArticleEdit = Boolean(onEditArticle)
+        && workingVersionEdit?.unavailable_reason !== 'not_authorized'
+        && (canEditArticle || editUnavailableText !== null);
+    const showsAnything = canSubmit || canReopen || isInReview || isReturned || requirements.length > 0 || showsArticleEdit;
 
     if (! showsAnything) {
         return null;
@@ -160,7 +193,23 @@ export default function WikiReviewPanel({ page, currentVersion, reviewAssignment
                         <span className="font-semibold text-slate-900">v{currentVersion.version_number}</span>
                     </span>
                 )}
+
+                {showsArticleEdit && !isEditingArticle && (
+                    <button
+                        type="button"
+                        onClick={onEditArticle}
+                        disabled={!canEditArticle}
+                        title={canEditArticle ? undefined : (editUnavailableText ?? undefined)}
+                        className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        {tw.article_edit_button ?? 'Rediger'}
+                    </button>
+                )}
             </div>
+
+            {showsArticleEdit && !canEditArticle && editUnavailableText !== null && (
+                <p className="text-sm text-slate-500">{editUnavailableText}</p>
+            )}
 
             {reviewAssignment.published_version_id && currentVersion
                 && reviewAssignment.published_version_id !== currentVersion.id && (

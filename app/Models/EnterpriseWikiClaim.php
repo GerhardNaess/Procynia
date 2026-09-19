@@ -31,6 +31,24 @@ class EnterpriseWikiClaim extends Model
 
     public const CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT = 'unsupported_generated_content';
 
+    /**
+     * Content an authorized human wrote or rewrote by hand.
+     *
+     * A block-level origin, like `structural`: it says who the text came FROM, not what an AI
+     * concluded about it. None of the other values can say this honestly. `source_based` asserts
+     * the document backs the wording, which stops being true the moment a person rewrites it;
+     * `unsupported_generated_content` says a MODEL produced something not yet proven; `unclassified`
+     * is the column default meaning "nothing decided". Reusing any of them would have made the
+     * stored provenance lie about the text's author.
+     *
+     * A page owner editing their own working version is authoritative for what it says — that is
+     * what canSubmitEnterpriseWikiPage() authorizes. So this origin carries no document provenance
+     * and is not a claim-extraction candidate: there is no source to verify it against, and the
+     * old document's source_elements must never be presented as evidence for a sentence a person
+     * has since rewritten.
+     */
+    public const CONTENT_ORIGIN_HUMAN_AUTHORED = 'human_authored';
+
     public const CONTENT_ORIGIN_INTERNAL_ERROR = 'internal_error';
 
     public const CONTENT_ORIGINS = [
@@ -40,6 +58,7 @@ class EnterpriseWikiClaim extends Model
         self::CONTENT_ORIGIN_STRUCTURAL,
         self::CONTENT_ORIGIN_UNSUPPORTED_GENERATED_CONTENT,
         self::CONTENT_ORIGIN_INTERNAL_ERROR,
+        self::CONTENT_ORIGIN_HUMAN_AUTHORED,
     ];
 
     public const CONFIDENCE_HIGH = 'high';

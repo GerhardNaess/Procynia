@@ -45,6 +45,23 @@ class WikiController extends Controller
     use PreservesWikiReviewReturnUrl;
     use RedirectsToWikiIndexTab;
 
+    /**
+     * How many changed blocks one manual save may carry.
+     *
+     * This is a real constraint, not the arbitrary 25 the claim-repair endpoint happens to use.
+     * Saving runs claim extraction and verification synchronously, one AI call per extracted claim,
+     * inside the HTTP request — and nginx sets no `fastcgi_read_timeout`, so the request dies at
+     * nginx's 60-second default while PHP (max_execution_time = 0) and PHP-FPM (no
+     * request_terminate_timeout) keep running it. A save that exceeds the budget therefore shows
+     * the user a 504 for work that may still land, which is the one outcome worth designing
+     * against. Ten changed blocks keeps a normal edit comfortably inside that window; real pages
+     * currently hold 4-16 blocks in total, and an ordinary edit touches one to three.
+     *
+     * Raise this only together with an explicit nginx `fastcgi_read_timeout`, or after moving
+     * verification off the request.
+     */
+    private const MAX_WORKING_VERSION_BLOCKS_PER_SAVE = 10;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
@@ -1752,6 +1769,7 @@ class WikiController extends Controller
             'can_handle_wiki_claims' => $canHandleWikiClaims,
             'can_edit_wiki_claims' => (bool) $canApproveWikiClaims,
             'manual_block_edit' => $manualBlockEdit,
+            'working_version_edit' => $this->workingVersionEditContext($page, $currentVersion, $customerId, $user),
             'source_documents' => $sourceDocuments,
             'document_owner_approvals' => $documentOwnerApprovals,
             'document_owner_approval_summary' => $documentOwnerApprovalSummary,
@@ -1892,6 +1910,210 @@ class WikiController extends Controller
     }
 
     /**
+     * Ordinary manual editing of a page's working version.
+     *
+     * Deliberately NOT routed through the claim-repair endpoint above, even though both end up in
+     * the same service: that route is addressed by a claim and authorized as claim approval, which
+     * is the wrong contract for "the page owner is fixing a typo". This one is addressed by the
+     * page, takes no claim id and no run id from the client, and is authorized with
+     * canSubmitEnterpriseWikiPage() — the same permission that already decides who may hand the
+     * page over for review.
+     *
+     * The run is resolved server-side from the current version's own applied run page. Claim
+     * verification needs a source document to verify the edited text against, so a run is
+     * structurally required; letting the client name it would let a caller pick which document
+     * their new text gets verified against.
+     */
+    public function updateWorkingVersion(Request $request, string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        abort_unless(
+            $user instanceof User
+                && $user->is_active
+                && $user->canAccessCustomerFrontend()
+                && $user->canSubmitEnterpriseWikiPage($page),
+            403,
+        );
+
+        $validated = $request->validate([
+            'expected_page_version_id' => ['required', 'integer'],
+            // `present` rather than `required`: an empty list is a legitimate no-op (the client
+            // found nothing changed), answered below without touching the database.
+            'blocks' => ['present', 'array', 'max:'.self::MAX_WORKING_VERSION_BLOCKS_PER_SAVE],
+            'blocks.*' => ['required', 'array'],
+            'blocks.*.block_key' => ['required', 'string', 'max:255', 'distinct'],
+            'blocks.*.markdown' => ['required', 'string', 'max:20000'],
+        ], [
+            'expected_page_version_id.required' => 'Sideversjon mangler. Last inn siden på nytt og prøv igjen.',
+            'blocks.max' => 'Du kan lagre inntil '.self::MAX_WORKING_VERSION_BLOCKS_PER_SAVE.' endrede avsnitt om gangen, og du har endret flere. Sett noen avsnitt tilbake til opprinnelig tekst og lagre, så kan du gjøre resten etterpå.',
+            'blocks.*.markdown.required' => 'Et avsnitt kan ikke være tomt.',
+            'blocks.*.block_key.distinct' => 'Samme avsnitt kan bare sendes én gang.',
+        ]);
+
+        $submittedBlocks = (array) $validated['blocks'];
+
+        if ($submittedBlocks === []) {
+            return redirect()
+                ->route('app.wiki.show', ['slug' => $page->slug])
+                ->with('success', 'Ingen endringer å lagre.');
+        }
+
+        $currentVersion = $page->currentVersion()->first();
+
+        if (! $currentVersion instanceof EnterpriseWikiPageVersion
+            || (int) $currentVersion->id !== (int) $validated['expected_page_version_id']
+        ) {
+            return $this->workingVersionEditConflictRedirect($page);
+        }
+
+        $normalizedBlocks = $this->validatedManualMixedBlockEditBlocks($submittedBlocks, $currentVersion);
+
+        try {
+            $this->claimContentRepairService->applyWorkingVersionBlockEdits(
+                $page,
+                $currentVersion,
+                $normalizedBlocks,
+                $user,
+            );
+        } catch (\InvalidArgumentException $e) {
+            if ($this->isManualMixedBlockEditConflict($e)) {
+                return $this->workingVersionEditConflictRedirect($page);
+            }
+
+            throw ValidationException::withMessages([
+                'blocks' => $this->manualMixedBlockEditValidationMessage($e),
+            ]);
+        } catch (\Throwable $e) {
+            if ($this->isManualMixedBlockEditConflict($e)) {
+                return $this->workingVersionEditConflictRedirect($page);
+            }
+
+            // The whole save is one transaction, so the page still has its previous current
+            // version and nothing was half-written.
+            Log::warning('[PROCYNIA][WIKI_WORKING_VERSION_EDIT] Failed to save manual Wiki edit.', [
+                'page_id' => $page->id,
+                'page_version_id' => $currentVersion->id,
+                'blocks' => count($normalizedBlocks),
+                'error' => $e->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('app.wiki.show', ['slug' => $page->slug])
+                ->with('error', $this->workingVersionEditFailureMessage($e));
+        }
+
+        return redirect()
+            ->route('app.wiki.show', ['slug' => $page->slug])
+            ->with('success', 'Endringene er lagret i en ny arbeidsversjon.');
+    }
+
+    /**
+     * Manual saving has no "the source disagrees" outcome any more — the page owner is
+     * authoritative for their own text. What remains is a genuine technical fault, and the user's
+     * writing is still in the editor, so the message says so and invites a retry.
+     */
+    private function workingVersionEditFailureMessage(\Throwable $exception): string
+    {
+        return 'Endringen kunne ikke lagres akkurat nå. Teksten din er beholdt i editoren, og du kan prøve å lagre på nytt.';
+    }
+
+    private function workingVersionEditConflictRedirect(EnterpriseWikiPage $page): RedirectResponse
+    {
+        return redirect()
+            ->route('app.wiki.show', ['slug' => $page->slug])
+            ->with('error', 'Siden er endret av noen andre mens du redigerte. Endringene dine ble ikke lagret. Last inn siden på nytt og gjør endringene igjen.');
+    }
+
+    /**
+     * The applied document run that produced $currentVersion, or null when there is none.
+     *
+     * Shared by the claim-repair context and the working-version editing context so the two cannot
+     * drift apart about which run owns a version — but they stay separate user-facing contexts.
+     */
+    private function appliedRunForCurrentVersion(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $currentVersion,
+        int $customerId,
+    ): ?EnterpriseWikiIngestRun {
+        $runPage = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('generated_page_version_id', $currentVersion->id)
+            ->whereHas('run', fn ($query) => $query
+                ->where('customer_id', $customerId)
+                ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('maintainer_decision_status', EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED)
+            )
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $runPage instanceof EnterpriseWikiIngestRunPage) {
+            return null;
+        }
+
+        return EnterpriseWikiIngestRun::query()
+            ->whereKey((int) $runPage->enterprise_wiki_ingest_run_id)
+            ->first();
+    }
+
+    /**
+     * What the page view needs to offer (or explain the absence of) manual editing.
+     *
+     * `unavailable_reason` is deliberately populated even when editing is impossible: a Rediger
+     * action that silently disappears is harder to understand than one that is visibly disabled
+     * with a reason, and the server still refuses the request either way.
+     *
+     * @return array{
+     *     can_edit: bool,
+     *     update_url: ?string,
+     *     expected_page_version_id: ?int,
+     *     max_blocks_per_save: int,
+     *     unavailable_reason: ?string
+     * }
+     */
+    private function workingVersionEditContext(
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $currentVersion,
+        int $customerId,
+        ?User $user,
+    ): array {
+        $context = [
+            'can_edit' => false,
+            'update_url' => null,
+            'expected_page_version_id' => $currentVersion?->id !== null ? (int) $currentVersion->id : null,
+            'max_blocks_per_save' => self::MAX_WORKING_VERSION_BLOCKS_PER_SAVE,
+            'unavailable_reason' => null,
+        ];
+
+        if (! $user instanceof User || ! $user->canSubmitEnterpriseWikiPage($page)) {
+            $context['unavailable_reason'] = 'not_authorized';
+
+            return $context;
+        }
+
+        // A version is editable because it exists and the user owns the page — not because an
+        // ingest run produced it and not because AI happens to be switched on. Manual editing needs
+        // neither.
+        if (! $currentVersion instanceof EnterpriseWikiPageVersion) {
+            $context['unavailable_reason'] = 'no_editable_version';
+
+            return $context;
+        }
+
+        $context['can_edit'] = true;
+        $context['update_url'] = route('app.wiki.working-version.update', ['slug' => $page->slug], false);
+
+        return $context;
+    }
+
+    /**
      * @return array{run_id: int, update_url_template: string}|null
      */
     private function manualMixedBlockEditContext(
@@ -2001,6 +2223,14 @@ class WikiController extends Controller
 
         if (str_contains($message, 'not a mixed-provenance block')) {
             return 'Bare mixed Wiki-blokker kan redigeres i denne flyten.';
+        }
+
+        if (str_contains($message, 'carries structured data')) {
+            return 'Tabeller og bilder kan ikke redigeres som tekst.';
+        }
+
+        if (str_contains($message, 'is not editable as working-version text')) {
+            return 'Denne delen av artikkelen kan ikke redigeres.';
         }
 
         if (str_contains($message, 'did not change any content block')) {
