@@ -8,6 +8,14 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
 import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
+import {
+    buildRelationIndex,
+    buildRelationPanel,
+    describeRelationHover,
+    highlightedEdgeIds,
+    highlightedNodeIds,
+    relationPairKey,
+} from './wikiGraphRelations';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -32,6 +40,21 @@ const STATUS_RING = {
 };
 
 const DEFAULT_EDGE_COLOR = '#cbd5e1';
+const ACTIVE_EDGE_COLOR = '#7c3aed';
+const DIMMED_EDGE_COLOR = '#f1f5f9';
+const DIMMED_NODE_COLOR = '#e2e8f0';
+
+/**
+ * HIT AREA. Sigma picks edges from a WebGL picking buffer rendered from the SAME geometry as the
+ * visible line, so there is no invisible hit area to widen independently without writing a custom
+ * edge program. What is available is the geometry itself: a slightly thicker line, and a floor on
+ * that thickness so edges stay hittable when zoomed out (sigma's own default floor is 1.7px).
+ * BASE_EDGE_SIZE is therefore a deliberate compromise — wide enough to hover comfortably, still
+ * thin and light enough that the graph reads the same. Highlighted edges get real width.
+ */
+const BASE_EDGE_SIZE = 2.4;
+const MIN_EDGE_THICKNESS = 2.4;
+const ACTIVE_EDGE_SIZE = 5;
 const SELECTED_NODE_BORDER = '#1e293b';
 
 // Node labels must meet the WCAG-oriented 16px floor set for this app — anything below
@@ -391,6 +414,125 @@ function NodePanel({ node, tw, onClose, graphScope }) {
     );
 }
 
+/**
+ * TEXT SIZE IN THE RELATION UI. Everything a user reads in the tooltip and the relation panel is at
+ * least 16px (text-base). That includes the field labels: a label is read as often as the value
+ * under it, so it is never set smaller than the body text — the two are told apart by weight, case
+ * and colour instead. The relation headline is the one step up (text-lg), which is what carries the
+ * hierarchy now that nothing below it is shrunken. text-xs, text-sm and arbitrary text-[Npx] values
+ * all fall under the floor and belong nowhere in these two components; a test enforces it.
+ */
+
+/**
+ * The hover tooltip: the node pair, and why they are connected. Two lines, both at the panel's
+ * text size — a tooltip is read, not glanced at.
+ */
+function EdgeTooltip({ hover, position }) {
+    if (!hover) {
+        return null;
+    }
+
+    return (
+        <div
+            className="pointer-events-none absolute z-20 max-w-sm -translate-y-full rounded-lg bg-slate-900/95 px-3 py-2 text-base leading-snug text-white shadow-lg"
+            style={{ left: Math.max(8, position.x + 12), top: Math.max(24, position.y - 8) }}
+            role="tooltip"
+        >
+            <p className="font-semibold">{hover.headline}</p>
+            <p className="mt-1 text-slate-300">{hover.detail}</p>
+        </div>
+    );
+}
+
+/**
+ * The relation detail panel — the same right-hand slot NodePanel uses, because the graph already
+ * answers "tell me more about what I clicked" that way and a modal would be a second pattern.
+ *
+ * It answers one question: why are these two pages connected. The link type, the anchor words and
+ * how the row was established used to have fields of their own here; they were true, accurate and
+ * beside the point, and a panel of technical fields buried the one sentence the user came for.
+ *
+ * Everything shown is quoted from the source page's own recorded link intent, or — when no page
+ * recorded a reason — is the plain statement that one links to the other. Nothing is composed.
+ */
+function RelationPanel({ panel, tw, onClose, graphScope }) {
+    if (!panel) {
+        return null;
+    }
+
+    const { reasons, sources } = panel;
+    const multiple = reasons.length > 1;
+
+    return (
+        <div className="flex h-full flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-3 flex items-start justify-between gap-2">
+                <p className="text-base font-semibold uppercase tracking-wide text-slate-500">
+                    {tw.graph_relation_heading ?? 'Relasjon'}
+                </p>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="-mr-1 -mt-1 rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label={tw.close ?? 'Lukk'}
+                >
+                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                    </svg>
+                </button>
+            </div>
+
+            <p className="text-lg font-semibold leading-snug text-slate-950">{panel.headline}</p>
+
+            <p className="mt-4 text-base font-semibold text-slate-700">
+                {tw.graph_relation_why ?? 'Hvorfor er de koblet?'}
+            </p>
+
+            {/* One reason reads as a sentence; several read as a list. Each keeps whatever context
+                the page recorded with it, so an excerpt always sits under the reason it belongs to. */}
+            <div className={multiple ? 'mt-1.5 space-y-3' : 'mt-1.5'}>
+                {reasons.map((reason) => (
+                    <div key={`${reason.sourceSlug}-${reason.text}`}>
+                        <p className="text-base leading-snug text-slate-800">
+                            {multiple && <span className="text-slate-400">— </span>}
+                            {reason.text}
+                        </p>
+
+                        {reason.context && (
+                            <>
+                                <p className="mt-2 text-base font-semibold text-slate-700">
+                                    {tw.graph_relation_context ?? 'Kontekst'}
+                                </p>
+                                <p className="mt-0.5 text-base italic leading-snug text-slate-500">
+                                    «{reason.context}»
+                                </p>
+                            </>
+                        )}
+                    </div>
+                ))}
+            </div>
+
+            {/* Where the reason came from. One per page, so a reciprocal pair offers both and every
+                other case offers one; the title is named when there is a choice to make. */}
+            <div className="mt-4 space-y-2">
+                {sources.map((source) => (
+                    <a
+                        key={source.slug}
+                        href={articleHrefFromGraph(`/app/wiki/${source.slug}`, graphScope)}
+                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        {sources.length > 1
+                            ? (tw.graph_relation_open_named_page ?? 'Åpne :title').replace(':title', source.title)
+                            : (tw.graph_relation_open_source_page ?? 'Åpne kildesiden')}
+                        <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 0 0 1.06 0l7.22-7.22v5.69a.75.75 0 0 0 1.5 0v-7.5a.75.75 0 0 0-.75-.75h-7.5a.75.75 0 0 0 0 1.5h5.69l-7.22 7.22a.75.75 0 0 0 0 1.06Z" clipRule="evenodd" />
+                        </svg>
+                    </a>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function WikiGraph({ initialRunId = null, initialPageId = null }) {
@@ -407,6 +549,18 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
     const [loading,      setLoading]      = useState(true);
     const [error,        setError]        = useState(null);
     const [selectedNode, setSelectedNode] = useState(null);
+
+    // Node selection and relation selection are two different questions the graph can answer, and
+    // exactly one is open at a time. Sigma routes a click to a node, an edge or the stage — never
+    // more than one — so keeping them apart is a matter of each handler clearing the other.
+    const [selectedPairKey, setSelectedPairKey] = useState(null);
+    const [hoveredEdge, setHoveredEdge] = useState(null);
+    const [hoveredPairKey, setHoveredPairKey] = useState(null);
+    const [pointer, setPointer] = useState({ x: 0, y: 0 });
+
+    // Highlight state is read by Sigma's reducers on every frame, so it lives in a ref: putting it
+    // in the reducer's closure would freeze it at the values present when Sigma was constructed.
+    const highlightRef = useRef({ active: false, nodes: new Set(), edges: new Set() });
 
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => new Set());
@@ -426,6 +580,25 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         () => ({ runId: initialRunId, pageId: initialPageId }),
         [initialRunId, initialPageId],
     );
+
+    // Everything the relation UI needs, derived once from the payload already in memory — hovering
+    // an edge must never cost a request.
+    const nodesById = useMemo(() => {
+        const map = {};
+        (graphData?.nodes ?? []).forEach((node) => { map[node.id] = node; });
+        return map;
+    }, [graphData]);
+
+    const relationIndex = useMemo(() => buildRelationIndex(graphData?.edges ?? []), [graphData]);
+
+    // Sigma's event handlers are created once per graphData and would otherwise close over a stale
+    // index; these refs keep them reading the current one.
+    const relationIndexRef = useRef(relationIndex);
+    relationIndexRef.current = relationIndex;
+    const nodesByIdRef = useRef(nodesById);
+    nodesByIdRef.current = nodesById;
+    const twRef = useRef(tw);
+    twRef.current = tw;
 
     const scope = initialPageId
         ? { type: 'page', pageId: initialPageId }
@@ -514,7 +687,7 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return;
             try {
                 graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
-                    size:     1.5,
+                    size:     BASE_EDGE_SIZE,
                     color:    DEFAULT_EDGE_COLOR,
                     label:    edge.link_type,
                 });
@@ -559,18 +732,85 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             labelGridCellSize:  150,
             minCameraRatio:     0.04,
             maxCameraRatio:     12,
-            nodeReducer: (node, data) =>
-                displayedNodes.current.has(node) ? data : { ...data, hidden: true },
-            edgeReducer: (edge, data) =>
-                displayedEdges.current.has(edge) ? data : { ...data, hidden: true },
+            // Edges become interactive targets. Without this, sigma emits no edge events at all.
+            enableEdgeEvents:   true,
+            minEdgeThickness:   MIN_EDGE_THICKNESS,
+            nodeReducer: (node, data) => {
+                if (! displayedNodes.current.has(node)) {
+                    return { ...data, hidden: true };
+                }
+
+                const highlight = highlightRef.current;
+
+                if (! highlight.active) {
+                    return data;
+                }
+
+                // The two pages the relation is between stay fully legible; everything else fades
+                // back so the line being examined is the only thing competing for attention.
+                return highlight.nodes.has(node)
+                    ? { ...data, highlighted: true, zIndex: 1 }
+                    : { ...data, color: DIMMED_NODE_COLOR, label: '' };
+            },
+            edgeReducer: (edge, data) => {
+                if (! displayedEdges.current.has(edge)) {
+                    return { ...data, hidden: true };
+                }
+
+                const highlight = highlightRef.current;
+
+                if (! highlight.active) {
+                    return data;
+                }
+
+                return highlight.edges.has(edge)
+                    ? { ...data, color: ACTIVE_EDGE_COLOR, size: ACTIVE_EDGE_SIZE, zIndex: 1 }
+                    : { ...data, color: DIMMED_EDGE_COLOR };
+            },
         });
 
         sigmaRef.current = renderer;
 
+        // Sigma resolves a click to a node, an edge or the stage — in that order, never two — so
+        // these three handlers are mutually exclusive by construction. Each still clears the other
+        // selection, so the right-hand slot always shows the thing that was last clicked.
         renderer.on('clickNode', ({ node }) => {
+            setSelectedPairKey(null);
+            setHoveredPairKey(null);
+            setHoveredEdge(null);
             setSelectedNode({ id: node, ...graph.getNodeAttributes(node) });
         });
-        renderer.on('clickStage', () => setSelectedNode(null));
+
+        renderer.on('clickEdge', ({ edge }) => {
+            setSelectedNode(null);
+            setSelectedPairKey(relationPairKey(graph.source(edge), graph.target(edge)));
+        });
+
+        renderer.on('clickStage', () => {
+            setSelectedNode(null);
+            setSelectedPairKey(null);
+        });
+
+        renderer.on('enterEdge', ({ edge, event }) => {
+            setPointer({ x: event.x, y: event.y });
+
+            // The tooltip describes the RELATION between the two pages, not the single row that
+            // happened to be picked: Sigma draws a reciprocal pair as one line, so hovering either
+            // half must give the same answer.
+            const pairKey = relationPairKey(graph.source(edge), graph.target(edge));
+
+            setHoveredPairKey(pairKey);
+            setHoveredEdge(describeRelationHover(pairKey, relationIndexRef.current, nodesByIdRef.current, twRef.current));
+        });
+
+        renderer.on('leaveEdge', () => {
+            setHoveredPairKey(null);
+            setHoveredEdge(null);
+        });
+
+        // Tooltip position follows the pointer. moveBody fires while the mouse moves over the
+        // canvas; it carries viewport coordinates, which is exactly the overlay's coordinate space.
+        renderer.on('moveBody', ({ event }) => setPointer({ x: event.x, y: event.y }));
 
         return () => {
             renderer.kill();
@@ -732,7 +972,40 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         if (selectedNode && !displayedNodes.current.has(selectedNode.id)) {
             setSelectedNode(null);
         }
+
+        // A relation whose edges were all filtered out is no longer on screen to be selected.
+        if (selectedPairKey) {
+            const stillVisible = [...highlightedEdgeIds(selectedPairKey, relationIndex)]
+                .some((edgeId) => displayedEdges.current.has(edgeId));
+
+            if (! stillVisible) {
+                setSelectedPairKey(null);
+                setHoveredPairKey(null);
+                setHoveredEdge(null);
+            }
+        }
     }, [displayed]);
+
+    // The relation being examined — hover is transient, a click holds. Both feed the same reducers,
+    // so a hovered line and a selected line look the same; only the panel distinguishes them.
+    const activePairKey = hoveredPairKey ?? selectedPairKey;
+
+    useEffect(() => {
+        highlightRef.current = activePairKey === null
+            ? { active: false, nodes: new Set(), edges: new Set() }
+            : {
+                active: true,
+                nodes: highlightedNodeIds(activePairKey, relationIndex),
+                edges: highlightedEdgeIds(activePairKey, relationIndex),
+            };
+
+        sigmaRef.current?.refresh();
+    }, [activePairKey, relationIndex]);
+
+    const relationPanel = useMemo(
+        () => (selectedPairKey === null ? null : buildRelationPanel(selectedPairKey, relationIndex, nodesById, tw)),
+        [selectedPairKey, relationIndex, nodesById, tw],
+    );
 
     const fitView = () => sigmaRef.current?.getCamera().animatedReset();
 
@@ -902,6 +1175,10 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                             style={{ visibility: (!loading && !error && graphData && graphData.nodes.length > 0) ? 'visible' : 'hidden' }}
                         />
 
+                        {/* Relation tooltip — positioned inside the canvas wrapper, which is the
+                            coordinate space sigma reports pointer positions in. */}
+                        <EdgeTooltip hover={hoveredEdge} position={pointer} />
+
                         {/* Scope badge overlay */}
                         {!loading && !error && graphData && graphData.nodes.length > 0 && (
                             <div className="pointer-events-none absolute bottom-3 right-3">
@@ -912,10 +1189,21 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
                         )}
                     </div>
 
-                    {/* Right sidebar */}
+                    {/* Right sidebar — one slot, one answer: the node that was clicked, or the
+                        relation that was clicked. Never both, because a click can only be one. */}
                     {selectedNode && (
                         <div className="w-56 shrink-0">
                             <NodePanel node={selectedNode} tw={tw} onClose={() => setSelectedNode(null)} graphScope={graphScope} />
+                        </div>
+                    )}
+                    {! selectedNode && relationPanel && (
+                        <div className="w-56 shrink-0">
+                            <RelationPanel
+                                panel={relationPanel}
+                                tw={tw}
+                                onClose={() => setSelectedPairKey(null)}
+                                graphScope={graphScope}
+                            />
                         </div>
                     )}
                 </div>

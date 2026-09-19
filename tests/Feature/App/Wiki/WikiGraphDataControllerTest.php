@@ -277,6 +277,228 @@ class WikiGraphDataControllerTest extends TestCase
     }
 
     // =========================================================================
+    // What an edge says about the relation
+    //
+    // Grafvisning explains a line from this payload alone — no follow-up request on hover, and
+    // nothing generated in the browser. What the domain knows about a wikilink is the two
+    // endpoints, the direction, how the row was established, and the anchor the author actually
+    // wrote. These tests pin that surface down in both directions: present when it exists, null
+    // when it does not.
+    // =========================================================================
+
+    public function test_edge_carries_the_anchor_text_the_author_wrote(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $a = $this->createPage($customer, 'article', 'A');
+        $b = $this->createPage($customer, 'concept', 'B');
+        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $link->update(['metadata' => ['anchor_text' => 'Masterdata for SOC']]);
+
+        $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
+
+        $response->assertOk();
+        $edge = collect($response->json('edges'))->firstWhere('link_id', $link->id);
+        $this->assertSame('Masterdata for SOC', $edge['anchor_text']);
+        $this->assertSame(EnterpriseWikiPageLink::SOURCE_DETERMINISTIC, $edge['origin']);
+    }
+
+    /**
+     * Rows written before the anchor was recorded, and rows whose anchor is blank, must come back
+     * as null rather than as an empty string — the UI hides the field, and "" would render a
+     * labelled but empty line.
+     */
+    public function test_edge_reports_a_missing_anchor_as_null(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $a = $this->createPage($customer, 'article', 'A');
+        $b = $this->createPage($customer, 'concept', 'B');
+        $noMetadata = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $c = $this->createPage($customer, 'entity', 'C');
+        $blank = $this->createPageLink($customer, $a, $c, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $blank->update(['metadata' => ['anchor_text' => '   ']]);
+
+        $edges = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'));
+
+        $this->assertNull($edges->firstWhere('link_id', $noMetadata->id)['anchor_text']);
+        $this->assertNull($edges->firstWhere('link_id', $blank->id)['anchor_text']);
+    }
+
+    /**
+     * The grounding a wikilink already carries and the graph never showed. The AI's page-content
+     * contract requires a `reason` on every link intent, the materializer keeps the intent verbatim
+     * on its block, and the block service persists link_intents in content_blocks_json — so "why is
+     * this link here" has been recorded all along, one layer below the link row.
+     */
+    public function test_edge_carries_the_link_intent_recorded_on_the_source_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $soc = $this->createPage($customer, 'concept', 'Security Operations Center (SOC)');
+        $hunting = $this->createPage($customer, 'concept', 'Threat Hunting');
+        $link = $this->createPageLink($customer, $soc, $hunting, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $this->setCurrentVersionBlocks($soc, [[
+            'block_key' => 'block-0009',
+            'markdown' => 'Proaktiv [[threat-hunting|Threat Hunting]] beskriver praksis og formål utover hendelsesdrevet overvåking.',
+            'link_intents' => [[
+                'intent_id' => 'i1',
+                'target_page_id' => $hunting->id,
+                'anchor_text' => 'Threat Hunting',
+                'reason' => 'Tilleggspraksis som utfyller SOC-overvåking.',
+            ]],
+        ]]);
+
+        $edge = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'))
+            ->firstWhere('link_id', $link->id);
+
+        $this->assertCount(1, $edge['intents']);
+        $this->assertSame('Tilleggspraksis som utfyller SOC-overvåking.', $edge['intents'][0]['reason']);
+        $this->assertSame('Threat Hunting', $edge['intents'][0]['anchor_text']);
+
+        // The context is prose, not markup: the reader is shown the sentence, not how it is stored.
+        $this->assertStringNotContainsString('[[', $edge['intents'][0]['context']);
+        $this->assertStringContainsString('Proaktiv Threat Hunting beskriver praksis', $edge['intents'][0]['context']);
+    }
+
+    /**
+     * A block can be several sentences with the link in the last of them. Showing the opening words
+     * would then present text that has nothing to do with the relation — worse than showing
+     * nothing, because it reads as if it explains the link.
+     */
+    public function test_link_context_is_taken_from_around_the_link_not_the_start_of_the_block(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $from = $this->createPage($customer, 'article', 'Kilde');
+        $to = $this->createPage($customer, 'concept', 'Mål');
+        $link = $this->createPageLink($customer, $from, $to, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $filler = str_repeat('Innledende tekst som ikke handler om relasjonen. ', 12);
+
+        $this->setCurrentVersionBlocks($from, [[
+            'block_key' => 'block-0001',
+            'markdown' => $filler.'Til slutt beskriver [[maal|Målsiden]] det vi faktisk er ute etter.',
+            'link_intents' => [[
+                'intent_id' => 'i1',
+                'target_page_id' => $to->id,
+                'anchor_text' => 'Målsiden',
+                'reason' => 'Peker til siden som eier temaet.',
+            ]],
+        ]]);
+
+        $context = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'))
+            ->firstWhere('link_id', $link->id)['intents'][0]['context'];
+
+        $this->assertStringContainsString('Målsiden', $context);
+        $this->assertStringStartsWith('…', $context);
+        $this->assertLessThanOrEqual(230, mb_strlen($context));
+    }
+
+    /**
+     * A page may link the same target from more than one block, but the link table holds one row
+     * per ordered pair — so the row alone cannot represent them. All of them travel on the edge.
+     */
+    public function test_several_intents_to_the_same_target_are_all_returned(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $from = $this->createPage($customer, 'article', 'ISO/IEC 27002');
+        $to = $this->createPage($customer, 'entity', 'Nasjonal sikkerhetsmyndighet (NSM)');
+        $link = $this->createPageLink($customer, $from, $to, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $this->setCurrentVersionBlocks($from, [
+            [
+                'block_key' => 'block-0001',
+                'markdown' => 'Standarden nevner [[nsm|NSM]] som komplementær referanse.',
+                'link_intents' => [['intent_id' => 'a', 'target_page_id' => $to->id, 'anchor_text' => 'NSM', 'reason' => 'Komplementær referanse.']],
+            ],
+            [
+                'block_key' => 'block-0004',
+                'markdown' => 'I SOC-arbeidet brukes [[nsm|NSM]] sammen med standarden.',
+                'link_intents' => [['intent_id' => 'b', 'target_page_id' => $to->id, 'anchor_text' => 'NSM', 'reason' => 'Anvendes sammen med ISO/IEC 27002.']],
+            ],
+        ]);
+
+        $edge = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'))
+            ->firstWhere('link_id', $link->id);
+
+        $this->assertSame(
+            ['Komplementær referanse.', 'Anvendes sammen med ISO/IEC 27002.'],
+            array_column($edge['intents'], 'reason'),
+        );
+    }
+
+    /** A link with no recorded intent gets an empty list, never a fabricated one. */
+    public function test_an_edge_without_link_intents_carries_an_empty_list(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $from = $this->createPage($customer, 'article', 'A');
+        $to = $this->createPage($customer, 'concept', 'B');
+        $link = $this->createPageLink($customer, $from, $to, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $this->setCurrentVersionBlocks($from, [[
+            'block_key' => 'block-0001',
+            'markdown' => 'Tekst uten registrerte lenkeintensjoner.',
+            'link_intents' => [],
+        ]]);
+
+        $edge = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'))
+            ->firstWhere('link_id', $link->id);
+
+        $this->assertSame([], $edge['intents']);
+    }
+
+    /** An intent recorded without a reason yields no reason — the field is not filled in. */
+    public function test_an_intent_without_a_reason_reports_null(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $from = $this->createPage($customer, 'article', 'A');
+        $to = $this->createPage($customer, 'concept', 'B');
+        $link = $this->createPageLink($customer, $from, $to, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $this->setCurrentVersionBlocks($from, [[
+            'block_key' => 'block-0001',
+            'markdown' => 'Se [[b|B]] for detaljer.',
+            'link_intents' => [['intent_id' => 'a', 'target_page_id' => $to->id, 'anchor_text' => 'B', 'reason' => '   ']],
+        ]]);
+
+        $edge = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'))
+            ->firstWhere('link_id', $link->id);
+
+        $this->assertNull($edge['intents'][0]['reason']);
+        $this->assertSame('B', $edge['intents'][0]['anchor_text']);
+    }
+
+    /**
+     * Two pages that link to each other are two rows, and both must reach the client: the graph
+     * draws them as one line, and the detail panel is what tells the user it stands for a mutual
+     * cross-reference rather than a one-way citation.
+     */
+    public function test_both_directions_between_the_same_pages_are_returned(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer);
+        $a = $this->createPage($customer, 'article', 'A');
+        $b = $this->createPage($customer, 'concept', 'B');
+        $forward = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $reverse = $this->createPageLink($customer, $b, $a, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+        $edges = collect($this->actingAs($user)->getJson('/app/wiki/graph-data')->json('edges'));
+
+        $this->assertEqualsCanonicalizing(
+            [$forward->id, $reverse->id],
+            $edges->pluck('link_id')->all(),
+        );
+        $this->assertSame("page-{$a->id}", $edges->firstWhere('link_id', $forward->id)['source']);
+        $this->assertSame("page-{$b->id}", $edges->firstWhere('link_id', $reverse->id)['source']);
+    }
+
+    // =========================================================================
     // Summary
     // =========================================================================
 
@@ -1087,6 +1309,38 @@ class WikiGraphDataControllerTest extends TestCase
             'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'customer_id' => $customer->id,
             'is_active' => true,
+        ]);
+    }
+
+    /**
+     * Give a page a current version whose blocks carry the given link intents. Writing the blocks
+     * directly keeps the test about what the GRAPH does with them; the pipeline that produces them
+     * is covered where it lives.
+     *
+     * @param  list<array<string, mixed>>  $blocks
+     */
+    private function setCurrentVersionBlocks(EnterpriseWikiPage $page, array $blocks): void
+    {
+        $attributes = [
+            'content_blocks_json' => $blocks,
+            'content_markdown' => implode("\n\n", array_column($blocks, 'markdown')),
+        ];
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->first();
+
+        if ($version instanceof EnterpriseWikiPageVersion) {
+            $version->update($attributes);
+
+            return;
+        }
+
+        EnterpriseWikiPageVersion::query()->create($attributes + [
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => true,
         ]);
     }
 

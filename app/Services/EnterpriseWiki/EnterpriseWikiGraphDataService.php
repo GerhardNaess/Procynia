@@ -217,6 +217,14 @@ class EnterpriseWikiGraphDataService
             ->where('is_current', true)
             ->pluck('id', 'enterprise_wiki_page_id');
 
+        // The grounding for every edge, read once for the whole graph. A link row records THAT page
+        // A links to page B; the link_intent behind it records what the source page's own content
+        // says the link is for. That has been persisted per block since the intent contract
+        // (EnterpriseWikiLinkIntentMaterializer) and was simply never carried into the graph.
+        $linkIntentsByPair = $this->linkIntentsForSourcePages(
+            $links->pluck('from_page_id')->unique()->values()->all(),
+        );
+
         ['by_page' => $documentIdsByPageId, 'documents' => $documentsPayload, 'owners' => $ownersPayload] =
             $this->documentProvenanceForPages($pageIds, $customerId);
 
@@ -256,16 +264,36 @@ class EnterpriseWikiGraphDataService
 
         // --- Edges ---
 
-        $edges = $links->map(fn (EnterpriseWikiPageLink $link): array => [
-            'id' => "link-{$link->id}",
-            'link_id' => $link->id,
-            'source' => "page-{$link->from_page_id}",
-            'target' => "page-{$link->to_page_id}",
-            'from_page_id' => $link->from_page_id,
-            'to_page_id' => $link->to_page_id,
-            'link_type' => $link->link_type,
-            'confidence' => $link->confidence,
-        ])->values()->all();
+        // An edge carries what the domain actually knows about the relation, and nothing more.
+        // For link_type=wikilink that is: the source page's text contains [[anchor_text]] resolving
+        // to the target page. anchor_text is the author's own wording and is therefore the only
+        // honest answer to "why are these two connected" — there is no relation reason, claim or
+        // excerpt behind a wikilink to show, and inventing one in the UI would misrepresent the
+        // graph. It is null on rows written before the anchor was recorded, and the UI hides the
+        // field rather than filling it in.
+        $edges = $links->map(function (EnterpriseWikiPageLink $link) use ($linkIntentsByPair): array {
+            $anchorText = $link->metadata['anchor_text'] ?? null;
+            $anchorText = is_string($anchorText) ? trim($anchorText) : null;
+
+            return [
+                'id' => "link-{$link->id}",
+                'link_id' => $link->id,
+                'source' => "page-{$link->from_page_id}",
+                'target' => "page-{$link->to_page_id}",
+                'from_page_id' => $link->from_page_id,
+                'to_page_id' => $link->to_page_id,
+                'link_type' => $link->link_type,
+                'confidence' => $link->confidence,
+                // How the row was established (deterministic parse vs. maintainer decision) —
+                // provenance the reviewer can act on, unlike an internal id.
+                'origin' => $link->source,
+                'anchor_text' => ($anchorText === null || $anchorText === '') ? null : $anchorText,
+                // What the source page's own content says this link is for, and the sentence it
+                // sits in. One entry per intent: a page may legitimately link the same target from
+                // more than one block, and the link row records only one of them.
+                'intents' => $linkIntentsByPair["{$link->from_page_id}:{$link->to_page_id}"] ?? [],
+            ];
+        })->values()->all();
 
         // --- Summary ---
 
@@ -304,6 +332,139 @@ class EnterpriseWikiGraphDataService
                 'page_id' => $scopePageId,
             ],
         ];
+    }
+
+    /**
+     * Maximum characters of surrounding prose shown as an edge's context. Long enough for the
+     * sentence the link sits in, short enough that a graph payload does not turn into page content.
+     */
+    private const LINK_CONTEXT_MAX_CHARS = 220;
+
+    /**
+     * The link intents recorded on each source page's CURRENT version, keyed "fromPageId:toPageId".
+     *
+     * WHY THIS IS NOT A NEW RELATION MODEL. Every entry here was already written and persisted:
+     * WikiPageContentAiClient requires a `reason` on each link intent, the materializer keeps the
+     * intent verbatim on the block it belongs to, and EnterpriseWikiPageContentBlockService stores
+     * link_intents in content_blocks_json. The graph simply never read it, so a line could say no
+     * more than "these two pages are linked". Nothing is inferred, classified or generated here —
+     * an intent with no reason yields no reason.
+     *
+     * One query for the whole graph, and the payload is bounded: only the anchor, the reason and a
+     * trimmed excerpt of the block the link sits in leave this method, never the block itself.
+     *
+     * @param  list<int>  $sourcePageIds
+     * @return array<string, list<array{anchor_text: ?string, reason: ?string, context: ?string}>>
+     */
+    private function linkIntentsForSourcePages(array $sourcePageIds): array
+    {
+        if ($sourcePageIds === []) {
+            return [];
+        }
+
+        $byPair = [];
+
+        $versions = EnterpriseWikiPageVersion::query()
+            ->whereIn('enterprise_wiki_page_id', $sourcePageIds)
+            ->where('is_current', true)
+            ->get(['enterprise_wiki_page_id', 'content_blocks_json']);
+
+        foreach ($versions as $version) {
+            $fromPageId = (int) $version->enterprise_wiki_page_id;
+
+            foreach ((array) ($version->content_blocks_json ?? []) as $block) {
+                if (! is_array($block)) {
+                    continue;
+                }
+
+                $plain = $this->plainTextForContext((string) ($block['markdown'] ?? ''));
+
+                foreach ((array) ($block['link_intents'] ?? []) as $intent) {
+                    if (! is_array($intent) || ! is_int($intent['target_page_id'] ?? null)) {
+                        continue;
+                    }
+
+                    $anchor = trim((string) ($intent['anchor_text'] ?? ''));
+                    $reason = trim((string) ($intent['reason'] ?? ''));
+
+                    $byPair["{$fromPageId}:{$intent['target_page_id']}"][] = [
+                        'anchor_text' => $anchor === '' ? null : $anchor,
+                        'reason' => $reason === '' ? null : $reason,
+                        'context' => $this->linkContextExcerpt($plain, $anchor),
+                    ];
+                }
+            }
+        }
+
+        return $byPair;
+    }
+
+    /**
+     * A block's markdown as plain prose: [[slug|anchor]] becomes the anchor words and headings lose
+     * their hashes. Wiki syntax is an implementation detail of how the page is stored and has no
+     * business in a tooltip or a side panel.
+     */
+    private function plainTextForContext(string $markdown): string
+    {
+        $plain = preg_replace_callback(
+            '/\[\[([^\[\]]*)\]\]/u',
+            static function (array $match): string {
+                $parts = explode('|', $match[1]);
+
+                return trim(end($parts));
+            },
+            $markdown,
+        ) ?? $markdown;
+
+        return trim(preg_replace('/\s+/u', ' ', preg_replace('/^#+\s*/mu', '', $plain)) ?? '');
+    }
+
+    /**
+     * The prose AROUND the link, not merely the start of the block it happens to live in.
+     *
+     * A block is often several sentences and the anchor can sit in the last of them, so taking the
+     * opening words would show text that has nothing to do with this relation — worse than showing
+     * nothing, because it reads as if it explains the link. The window is therefore centred on the
+     * anchor's own occurrence, and an ellipsis marks each side that was cut so a partial sentence
+     * is never mistaken for the whole one.
+     */
+    private function linkContextExcerpt(string $plain, string $anchorText): ?string
+    {
+        if ($plain === '') {
+            return null;
+        }
+
+        if (mb_strlen($plain) <= self::LINK_CONTEXT_MAX_CHARS) {
+            return $plain;
+        }
+
+        // An anchor that is not found falls back to the block's opening prose, which is still the
+        // most representative sentence available.
+        $anchorAt = $anchorText === '' ? false : mb_strpos($plain, $anchorText);
+        $start = 0;
+
+        if ($anchorAt !== false) {
+            $slack = (int) ((self::LINK_CONTEXT_MAX_CHARS - mb_strlen($anchorText)) / 2);
+            $start = max(0, $anchorAt - max(0, $slack));
+        }
+
+        $excerpt = mb_substr($plain, $start, self::LINK_CONTEXT_MAX_CHARS);
+        $cutAtEnd = $start + self::LINK_CONTEXT_MAX_CHARS < mb_strlen($plain);
+
+        if ($start > 0) {
+            // Start at a word boundary so the excerpt never opens mid-word.
+            $firstSpace = mb_strpos($excerpt, ' ');
+            $excerpt = $firstSpace === false ? $excerpt : mb_substr($excerpt, $firstSpace + 1);
+        }
+
+        if ($cutAtEnd) {
+            $lastSpace = mb_strrpos($excerpt, ' ');
+            $excerpt = $lastSpace === false ? $excerpt : mb_substr($excerpt, 0, $lastSpace);
+        }
+
+        $excerpt = trim($excerpt, ' ,;:');
+
+        return ($start > 0 ? '…' : '').$excerpt.($cutAtEnd ? '…' : '');
     }
 
     /**
