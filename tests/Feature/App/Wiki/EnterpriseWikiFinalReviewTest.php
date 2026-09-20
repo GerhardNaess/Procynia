@@ -336,9 +336,47 @@ class EnterpriseWikiFinalReviewTest extends TestCase
         $this->assertNotNull($version->reviewer_user_id);
     }
 
-    public function test_a_pending_page_without_an_assignment_cannot_be_decided_by_anyone(): void
+    /**
+     * A version with no assignment is not only legacy data: the page owner saving a new working
+     * version while the page is out for review produces exactly this shape. Approving it would
+     * publish something the reviewer never saw, so approval stays closed.
+     */
+    public function test_a_pending_page_without_an_assignment_cannot_be_approved_by_anyone(): void
     {
-        // Legacy shape only: pending_review reached without going through submit().
+        $case = $this->unassignedPendingPage();
+
+        foreach ([$case['reviewer'], $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER)] as $actor) {
+            $this->actingAs($actor)
+                ->patch("/app/wiki/{$case['page']->slug}/approve")
+                ->assertStatus(409);
+        }
+
+        $page = $case['page']->fresh();
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
+        $this->assertNull($page->published_version_id, 'nothing was published on the way past the guard');
+    }
+
+    /**
+     * But it can always be sent back. Refusing that too used to leave the page unable to be
+     * approved, rejected or resubmitted — stuck in pending_review with no action left. Rejecting
+     * publishes nothing; it hands the page to its owner, who can submit the new version properly.
+     */
+    public function test_a_pending_page_without_an_assignment_can_still_be_sent_back(): void
+    {
+        $case = $this->unassignedPendingPage();
+
+        $this->actingAs($case['reviewer'])
+            ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
+            ->assertRedirect();
+
+        $page = $case['page']->fresh();
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->status);
+        $this->assertNull($page->published_version_id, 'sending back still publishes nothing');
+    }
+
+    /** @return array<string, mixed> */
+    private function unassignedPendingPage(): array
+    {
         $case = $this->readyForFinalReview();
         $case['version']->forceFill([
             'submitted_by_user_id' => null,
@@ -346,19 +384,7 @@ class EnterpriseWikiFinalReviewTest extends TestCase
             'reviewer_user_id' => null,
         ])->save();
 
-        foreach ([$case['reviewer'], $this->user($case['customer'], User::BID_ROLE_SYSTEM_OWNER)] as $actor) {
-            $this->actingAs($actor)
-                ->patch("/app/wiki/{$case['page']->slug}/approve")
-                ->assertStatus(409);
-
-            $this->actingAs($actor)
-                ->patch("/app/wiki/{$case['page']->slug}/reject", ['reason' => 'Kildegrunnlaget stemmer ikke med innholdet.'])
-                ->assertStatus(409);
-        }
-
-        $page = $case['page']->fresh();
-        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->status);
-        $this->assertNull($page->published_version_id, 'nothing was published on the way past the guard');
+        return $case;
     }
 
     public function test_the_payload_reports_a_missing_assignment_as_the_blocker(): void

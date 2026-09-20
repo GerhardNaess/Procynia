@@ -2707,7 +2707,7 @@ class WikiController extends Controller
             ->first() ?? abort(404);
 
         $this->assertPendingReview($page);
-        $this->assertMayReviewCurrentVersion($user, $page);
+        $this->assertMayActOnCurrentVersion($user, $page);
 
         // No return without a reason: the page owner has to know what to fix.
         $reason = $this->validatedReturnReason($request);
@@ -2719,7 +2719,7 @@ class WikiController extends Controller
                 ->first();
 
             $this->assertPendingReview($locked);
-            $this->assertMayReviewCurrentVersion($user, $locked);
+            $this->assertMayActOnCurrentVersion($user, $locked);
 
             $version = $locked->currentVersion()->first();
 
@@ -2994,23 +2994,48 @@ class WikiController extends Controller
      */
     private function assertMayReviewCurrentVersion(User $user, EnterpriseWikiPage $page): void
     {
+        $version = $this->assertMayActOnCurrentVersion($user, $page);
+
+        // APPROVAL ONLY. A version with no submission is one nobody handed over: either legacy data
+        // from before ingest stopped submitting pages itself, or — far more commonly — a version the
+        // page owner saved while the page was already out for review. Publishing it would publish
+        // content the reviewer never saw, so approval refuses it.
+        //
+        // Rejection deliberately does NOT go through here. Sending a page back publishes nothing and
+        // returns it to its owner, and refusing that too would leave the page with no way out at
+        // all: it could not be approved, not be rejected, and not be resubmitted, because submit()
+        // only accepts a page that is not already in review.
+        if ($version->reviewer_user_id === null
+            || $version->submitted_by_user_id === null
+            || $version->submitted_at === null) {
+            abort(409, 'Arbeidsversjonen er endret etter at siden ble sendt til gjennomgang, og kan ikke godkjennes som den er. Send siden tilbake, så kan den sendes til gjennomgang på nytt.');
+        }
+    }
+
+    /**
+     * The part of the review check that applies to ANY review decision: there has to be a version,
+     * and this user has to be the one whose turn it is.
+     *
+     * Whether that version is publishable is a separate question, asked only where it matters —
+     * see assertMayReviewCurrentVersion().
+     */
+    private function assertMayActOnCurrentVersion(User $user, EnterpriseWikiPage $page): EnterpriseWikiPageVersion
+    {
         $version = $page->currentVersion()->first();
 
         if ($version === null) {
             abort(422, 'Siden har ingen arbeidsversjon å vurdere.');
         }
 
-        // Legacy data only: a page that reached pending_review before ingest was changed to stop
-        // doing so. It has no submitter and no reviewer, and no honest way to invent either, so it
-        // is reported rather than waved through.
-        if ($version->reviewer_user_id === null
-            || $version->submitted_by_user_id === null
-            || $version->submitted_at === null) {
-            abort(409, 'Denne versjonen mangler en gyldig innsending og kan ikke behandles. Gjenåpne siden og send den til gjennomgang på nytt.');
-        }
+        // An unsubmitted version names no reviewer, so "whose turn is it" has no answer from the
+        // version itself. The capability plus the page's own ownership is what remains, and a
+        // System Owner always qualifies.
+        $assigned = $version->reviewer_user_id !== null
+            ? $user->canReviewEnterpriseWikiVersion($version, $page)
+            : $user->canApproveWikiPages();
 
-        if ($user->canReviewEnterpriseWikiVersion($version, $page)) {
-            return;
+        if ($assigned) {
+            return $version;
         }
 
         abort(403, $version->submitted_by_user_id !== null && (int) $version->submitted_by_user_id === (int) $user->id
