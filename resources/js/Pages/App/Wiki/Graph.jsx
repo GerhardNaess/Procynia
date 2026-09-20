@@ -8,6 +8,7 @@ import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import MultiSelectFilterDropdown from '../../../Components/App/MultiSelectFilterDropdown';
 import { truncateLabelToWidth } from './graphLabelLogic';
 import { articleHrefFromGraph } from './wikiGraphNavigation';
+import { computeFitToViewport } from './wikiGraphFitView';
 import {
     buildRelationIndex,
     buildRelationPanel,
@@ -52,6 +53,10 @@ const DIMMED_NODE_COLOR = '#e2e8f0';
  * BASE_EDGE_SIZE is therefore a deliberate compromise — wide enough to hover comfortably, still
  * thin and light enough that the graph reads the same. Highlighted edges get real width.
  */
+/** Sigma's camera bounds, shared so a computed fit can never ask for more zoom than it allows. */
+const MIN_CAMERA_RATIO = 0.04;
+const MAX_CAMERA_RATIO = 12;
+
 const BASE_EDGE_SIZE = 2.4;
 const MIN_EDGE_THICKNESS = 2.4;
 const ACTIVE_EDGE_SIZE = 5;
@@ -730,8 +735,8 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
             // Larger labels need more breathing room in the label-declutering grid, or the
             // (now wider) text from neighboring nodes competes for the same cells and overlaps.
             labelGridCellSize:  150,
-            minCameraRatio:     0.04,
-            maxCameraRatio:     12,
+            minCameraRatio:     MIN_CAMERA_RATIO,
+            maxCameraRatio:     MAX_CAMERA_RATIO,
             // Edges become interactive targets. Without this, sigma emits no edge events at all.
             enableEdgeEvents:   true,
             minEdgeThickness:   MIN_EDGE_THICKNESS,
@@ -1007,7 +1012,56 @@ export default function WikiGraph({ initialRunId = null, initialPageId = null })
         [selectedPairKey, relationIndex, nodesById, tw],
     );
 
-    const fitView = () => sigmaRef.current?.getCamera().animatedReset();
+    /**
+     * Bring the whole visible graph into view.
+     *
+     * Reads each displayed node's CURRENT pixel position, asks computeFitToViewport() where the
+     * centre and zoom should be, and converts that pixel centre back into the camera's own
+     * coordinate space. Nodes the filters have hidden are left out, so filtering down to a corner
+     * of the graph zooms to that corner rather than to the whole wiki.
+     */
+    const fitView = () => {
+        const renderer = sigmaRef.current;
+        const graph = graphRef.current;
+
+        if (!renderer || !graph) {
+            return;
+        }
+
+        const points = [];
+
+        displayedNodes.current.forEach((node) => {
+            const position = graph.hasNode(node) ? renderer.getNodeDisplayData(node) : null;
+
+            if (position) {
+                points.push(renderer.framedGraphToViewport({ x: position.x, y: position.y }));
+            }
+        });
+
+        const camera = renderer.getCamera();
+        const { width, height } = renderer.getDimensions();
+        const fit = computeFitToViewport({
+            points,
+            width,
+            height,
+            ratio: camera.getState().ratio,
+            minRatio: MIN_CAMERA_RATIO,
+            maxRatio: MAX_CAMERA_RATIO,
+        });
+
+        if (fit === null) {
+            return;
+        }
+
+        // Which point in the camera's space should end up at the middle of the screen. Read at the
+        // current camera, which is exactly where the pixel measurements were taken.
+        const target = renderer.viewportToFramedGraph(fit.center);
+
+        camera.animate(
+            { x: target.x, y: target.y, ratio: fit.ratio, angle: camera.getState().angle },
+            { duration: 400 },
+        );
+    };
 
     const resetFilters = () => {
         setSearchQuery('');
