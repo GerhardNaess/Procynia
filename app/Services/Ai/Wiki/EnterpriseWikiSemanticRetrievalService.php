@@ -35,14 +35,22 @@ class EnterpriseWikiSemanticRetrievalService
     /**
      * Retrieval reads published Wiki knowledge only. There is deliberately no status or approval
      * parameter: a caller cannot widen the result into draft or unreviewed content, because
-     * enterprise_wiki_pages.published_version_id is the whole eligibility rule.
+     * Which versions are eligible is the CALLER's decision, passed through to
+     * RequirementWikiCatalogBuilder: tender drafting grounds only in published versions, "Spør
+     * Wiki" in whatever the page currently says. Nothing here widens which pages may be read — that
+     * stays the customer id and the caller's own visible statuses.
      *
      * @return array{catalog: list<array<string, mixed>>, navigation_plan: array<string, mixed>, candidate_pool: list<array<string, mixed>>, telemetry: array<string, mixed>}
      */
-    public function retrieve(string $input, int $customerId, string $languageCode): array
-    {
+    public function retrieve(
+        string $input,
+        int $customerId,
+        string $languageCode,
+        string $grounding = RequirementWikiCatalogBuilder::GROUNDING_PUBLISHED_ONLY,
+        ?array $visibleStatuses = null,
+    ): array {
         $input = trim($input);
-        $catalog = $this->catalogBuilder->build($customerId);
+        $catalog = $this->catalogBuilder->build($customerId, $grounding, $visibleStatuses);
         [$wikiIndex, $indexOmittedCount] = $this->buildWikiIndex($catalog, $customerId);
 
         if ($wikiIndex === []) {

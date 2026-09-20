@@ -4,6 +4,7 @@ namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
 
 /**
@@ -13,14 +14,25 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
  *
  * A page is in the catalog only when it:
  * - belongs to the given customer_id,
- * - names a published version (enterprise_wiki_pages.published_version_id),
+ * - has a version this caller may ground in (see GROUNDING_* below),
  * - that version exists and actually belongs to this page, and
  * - its content_markdown is non-empty.
  *
- * Deliberately NOT gated on page.status. Status describes what is happening to the WORKING version:
- * a page can be pending_review or rejected while a previously approved version is still published,
- * and that approved knowledge must keep answering questions. Only archived and superseded pages —
- * which are retired outright, not merely being revised — are excluded.
+ * TWO GROUNDING MODES, because two surfaces want different things and the difference is a product
+ * rule rather than a tuning knob:
+ *
+ * - GROUNDING_PUBLISHED_ONLY (the default) is for drafting a tender answer. What goes into a bid
+ *   must be knowledge someone approved; an unreviewed working version has not earned that.
+ * - GROUNDING_CURRENT_KNOWLEDGE is for "Spør Wiki", where a person is asking their own Wiki what it
+ *   says. Answering "there is no information" about a page they can open and read is not caution,
+ *   it is a wrong answer — and on a customer whose 35 pages are all still drafts it made the
+ *   feature answer nothing at all.
+ *
+ * Deliberately NOT gated on page.status beyond the caller's own visible statuses. Status describes
+ * what is happening to the WORKING version: a page can be pending_review or rejected while a
+ * previously approved version is still published, and that approved knowledge must keep answering
+ * questions. Only archived and superseded pages — which are retired outright, not merely being
+ * revised — are excluded.
  *
  * Nor is it gated on document-owner approvals. That gate is what allows a version to be published;
  * once publication has happened the decision stands, and pending sign-offs on a NEW working version
@@ -35,6 +47,12 @@ use App\Services\EnterpriseWiki\EnterpriseWikiDocumentOwnerApprovalService;
  */
 class RequirementWikiCatalogBuilder
 {
+    /** Only versions a reviewer approved and published may ground the answer. */
+    public const GROUNDING_PUBLISHED_ONLY = 'published_only';
+
+    /** The newest version the page actually has — the knowledge the user can open and read today. */
+    public const GROUNDING_CURRENT_KNOWLEDGE = 'current_knowledge';
+
     /** Excerpt length is deliberately short — just enough for a human/AI to judge topical relevance. */
     private const EXCERPT_MAX_CHARS = 220;
 
@@ -51,26 +69,45 @@ class RequirementWikiCatalogBuilder
      *           excerpt, outgoing_link_count, backlink_count}.
      * Side effects: None (read-only).
      *
-     * Takes no status or approval parameters: publication is the only question, which makes the
-     * old "widen the statuses and see what comes back" mistake impossible to express.
+     * The customer id is the isolation boundary and is never taken from a request; $visibleStatuses
+     * is the asking user's own readable set, so widening which VERSIONS may be read can never
+     * widen which PAGES may be read.
+     *
+     * @param  list<string>|null  $visibleStatuses  Null means every non-retired status.
      */
-    public function build(int $customerId): array
-    {
-        $pages = EnterpriseWikiPage::query()
+    public function build(
+        int $customerId,
+        string $grounding = self::GROUNDING_PUBLISHED_ONLY,
+        ?array $visibleStatuses = null,
+    ): array {
+        $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
-            ->whereNotNull('published_version_id')
             ->whereNotIn('status', [EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED])
-            ->with('publishedVersion')
-            ->get()
-            ->filter(function (EnterpriseWikiPage $page): bool {
-                $published = $page->publishedVersion;
+            ->with(['publishedVersion', 'currentVersion']);
 
-                // Fail closed. A pointer to a missing version, or to a version belonging to another
-                // page, is corruption — and falling back to the working version would answer with
-                // content nobody approved. Better to drop the page from the catalog.
-                return $published !== null
-                    && (int) $published->enterprise_wiki_page_id === (int) $page->id
-                    && trim((string) $published->content_markdown) !== '';
+        if ($visibleStatuses !== null) {
+            // An empty set is "this user may read nothing", which must stay empty rather than
+            // degrade into "no filter".
+            $query->whereIn('status', $visibleStatuses);
+        }
+
+        if ($grounding === self::GROUNDING_PUBLISHED_ONLY) {
+            $query->whereNotNull('published_version_id');
+        }
+
+        $versionsByPageId = [];
+
+        $pages = $query->get()
+            ->filter(function (EnterpriseWikiPage $page) use ($grounding, &$versionsByPageId): bool {
+                $version = $this->answerableVersion($page, $grounding);
+
+                if ($version === null) {
+                    return false;
+                }
+
+                $versionsByPageId[$page->id] = $version;
+
+                return true;
             })
             ->values();
 
@@ -83,8 +120,9 @@ class RequirementWikiCatalogBuilder
         $backlinkCounts = $this->linkCountsByPageId($customerId, 'to_page_id', $pageIds);
 
         return $pages
-            ->map(function (EnterpriseWikiPage $page) use ($outgoingCounts, $backlinkCounts): array {
-                $contentMarkdown = (string) $page->publishedVersion->content_markdown;
+            ->map(function (EnterpriseWikiPage $page) use ($outgoingCounts, $backlinkCounts, $versionsByPageId): array {
+                $version = $versionsByPageId[$page->id];
+                $contentMarkdown = (string) $version->content_markdown;
 
                 return [
                     'page_id' => $page->id,
@@ -97,7 +135,7 @@ class RequirementWikiCatalogBuilder
                     // caption and citation but never the image itself. Carried alongside the text
                     // so a page that is actually read can offer its own figures to the answer.
                     'figures' => $this->figureCatalog->fromContentBlocks(
-                        (array) ($page->publishedVersion->content_blocks_json ?? []),
+                        (array) ($version->content_blocks_json ?? []),
                     ),
                     'headings' => $this->extractHeadings($contentMarkdown),
                     'excerpt' => $this->extractExcerpt($contentMarkdown),
@@ -107,6 +145,45 @@ class RequirementWikiCatalogBuilder
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * The version this page may be answered from, or null when it has none.
+     *
+     * NEVER AN OLD PUBLISHED VERSION OVER A NEWER CURRENT ONE. Under GROUNDING_CURRENT_KNOWLEDGE
+     * the two candidates are compared by version_number rather than assuming the current one wins:
+     * "current" and "newest" are the same thing everywhere the writer maintains them, and comparing
+     * says so explicitly instead of relying on it.
+     *
+     * Fail closed either way. A pointer to a missing version, or to a version belonging to another
+     * page, is corruption, and a version with no text cannot answer anything — such a page is
+     * dropped from the catalog rather than silently answered from something else.
+     */
+    private function answerableVersion(EnterpriseWikiPage $page, string $grounding): ?EnterpriseWikiPageVersion
+    {
+        $candidates = [$page->publishedVersion];
+
+        if ($grounding === self::GROUNDING_CURRENT_KNOWLEDGE) {
+            $candidates[] = $page->currentVersion;
+        }
+
+        $usable = array_filter(
+            $candidates,
+            static fn (?EnterpriseWikiPageVersion $version): bool => $version !== null
+                && (int) $version->enterprise_wiki_page_id === (int) $page->id
+                && trim((string) $version->content_markdown) !== '',
+        );
+
+        if ($usable === []) {
+            return null;
+        }
+
+        usort(
+            $usable,
+            static fn (EnterpriseWikiPageVersion $left, EnterpriseWikiPageVersion $right): int => (int) $right->version_number <=> (int) $left->version_number,
+        );
+
+        return $usable[0];
     }
 
     /**

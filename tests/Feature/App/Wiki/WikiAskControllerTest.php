@@ -9,11 +9,11 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Ai\Commercial\AiRuntimeControlService;
 use App\Services\Ai\Wiki\EnterpriseWikiSemanticSearchPlanAiClient;
 use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
-use App\Services\Ai\Commercial\AiRuntimeControlService;
 use App\Services\EnterpriseWiki\EnterpriseWikiQuestionAnswerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
@@ -1109,9 +1109,13 @@ class WikiAskControllerTest extends TestCase
 
         $catalog = app(RequirementWikiCatalogBuilder::class)->build(
             $customer->id,
+            RequirementWikiCatalogBuilder::GROUNDING_CURRENT_KNOWLEDGE,
             [EnterpriseWikiPage::STATUS_ARCHIVED, EnterpriseWikiPage::STATUS_SUPERSEDED],
         );
 
+        // Retired is retired: archived and superseded are excluded before the caller's own statuses
+        // are consulted, so asking for them cannot bring them back — not even in the mode that
+        // reads working versions.
         $this->assertSame([], $catalog, 'stale statuses must be intersected away regardless of the caller');
     }
 

@@ -6,14 +6,19 @@ use App\Data\Ai\AiCallContext;
 use App\Models\EnterpriseWikiPage;
 use App\Services\Ai\AiUsageMeter;
 use App\Services\Ai\Wiki\EnterpriseWikiSemanticRetrievalService;
+use App\Services\Ai\Wiki\RequirementWikiCatalogBuilder;
 use App\Services\Ai\Wiki\RequirementWikiPageReader;
 use App\Services\Ai\Wiki\RequirementWikiTermNormalizer;
 use App\Services\Ai\Wiki\WikiQuestionAnswerAiClient;
 use Illuminate\Support\Facades\Log;
 
 /**
- * "Spør Wiki" — bounded retrieval over one customer's CURRENT Enterprise Wiki, then one grounded
- * answer.
+ * "Spør Wiki" — bounded retrieval over one customer's current Enterprise Wiki knowledge, then one
+ * grounded answer.
+ *
+ * "Current" is meant literally: the newest version each readable page actually has, published or
+ * not. Tender answer drafting keeps the stricter rule and grounds only in published versions —
+ * see RequirementWikiCatalogBuilder's grounding modes.
  *
  * Read-only by construction: it creates no page version, no claim, no link, no finding and no run.
  * Nothing in this class writes to the Wiki at all.
@@ -69,11 +74,19 @@ class EnterpriseWikiQuestionAnswerService
         $question = trim($question);
         $queryTokens = RequirementWikiTermNormalizer::tokenize($question);
 
-        // $visibleStatuses still gates whether the user may ASK at all, but no longer what may be
-        // answered from: Spør Wiki grounds only in published versions. A reviewer who may read a
-        // draft page still gets no answers out of it — reading unreviewed content is one thing,
-        // having the AI present it as documented fact is another.
-        $semanticRetrieval = $this->semanticRetrieval->retrieve($question, $customerId, $languageCode);
+        // Spør Wiki answers from what the Wiki CURRENTLY says, not only from what has been
+        // published. A person asking their own Wiki about a page they can open and read is not
+        // helped by "there is no information" — and on a customer whose pages are all still drafts
+        // that answer was the only one the feature could ever give. $visibleStatuses stays the
+        // access boundary: it decides which pages may be read, and widening which VERSION of a
+        // readable page is used cannot widen that.
+        $semanticRetrieval = $this->semanticRetrieval->retrieve(
+            $question,
+            $customerId,
+            $languageCode,
+            RequirementWikiCatalogBuilder::GROUNDING_CURRENT_KNOWLEDGE,
+            $visibleStatuses,
+        );
         $catalog = $semanticRetrieval['catalog'];
         $ranked = $semanticRetrieval['candidate_pool'];
         $candidateCountIn = count($ranked);

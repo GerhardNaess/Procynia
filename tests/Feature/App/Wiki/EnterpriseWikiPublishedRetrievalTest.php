@@ -191,16 +191,36 @@ class EnterpriseWikiPublishedRetrievalTest extends TestCase
         $this->assertSame([], $this->catalogPageIds($customer));
     }
 
-    // O. the builder can no longer be asked for anything but published content
-    public function test_the_catalog_builder_takes_no_status_or_approval_parameters(): void
+    /**
+     * O. Reading working versions is opt-in, and tender drafting never opts in.
+     *
+     * "Spør Wiki" answers from whatever a readable page currently says, because telling a user
+     * their own page does not exist is a wrong answer. Drafting a tender answer is the opposite
+     * case: what goes into a bid must be knowledge someone approved. The distinction lives in the
+     * DEFAULT — a caller that says nothing gets published content only — so the wider mode can
+     * never be reached by omission.
+     */
+    public function test_grounding_in_working_versions_must_be_asked_for_explicitly(): void
     {
         $build = new \ReflectionMethod(RequirementWikiCatalogBuilder::class, 'build');
+        $grounding = $build->getParameters()[1] ?? null;
 
+        $this->assertNotNull($grounding);
+        $this->assertSame('grounding', $grounding->getName());
         $this->assertSame(
-            ['customerId'],
-            array_map(static fn (\ReflectionParameter $p): string => $p->getName(), $build->getParameters()),
-            'widening retrieval into draft content must not be expressible',
+            RequirementWikiCatalogBuilder::GROUNDING_PUBLISHED_ONLY,
+            $grounding->getDefaultValue(),
+            'a caller that asks for nothing must get published content only',
         );
+    }
+
+    /** The default really behaves that way, not just declares it. */
+    public function test_the_default_still_hides_an_unpublished_page(): void
+    {
+        [$customer, $page] = $this->pageWithWorkingVersionOnly();
+
+        $this->assertSame([], app(RequirementWikiCatalogBuilder::class)->build($customer->id));
+        $this->assertNotNull($page->currentVersion()->first());
     }
 
     // =========================================================================
